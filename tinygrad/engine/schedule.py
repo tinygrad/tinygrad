@@ -28,6 +28,20 @@ class ScheduleItem:
 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
+def unbind(ctx:Dict[Variable, int], bind:UOp):
+  var, val = bind.unbind()
+  ctx[var] = val
+  return var
+def unbind_st(ctx:Dict[Variable, int], view:UOp):
+  try: new_st, var_vals = unwrap(view.st).simplify().unbind()
+  except AssertionError: return None # fine if the st doesn't have var_vals
+  ctx.update(var_vals)
+  return None if new_st == unwrap(view.st) else view.replace(arg=new_st)
+add_var_vals = PatternMatcher([
+  (UPat(Ops.BIND, name="bind"), unbind),
+  (UPat(Ops.VIEW, name="view"), unbind_st),
+])
+
 def _bufferize(ctx:Dict[UOp, UOp], x:UOp):
   if x in ctx or x.op is Ops.VIEW and len(x.src) == 1: return None
   buf_uop = x.buf_uop if x.op is Ops.VIEW else UOp.new_buffer(x.device, x.size, x.dtype)
@@ -50,7 +64,7 @@ def add_buf(ctx:List[UOp], b:UOp):
 to_ast = view_left+PatternMatcher([
   # ** buffer op rules
   # const is just const
-  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat.cvar("x"))), lambda st,x: UOp(Ops.VALID, dtypes.bool, (st.st.to_uop(),)).where(x, 0)),
+  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat({Ops.CONST, Ops.BIND}, name="x"))), lambda st,x: UOp(Ops.VALID, dtypes.bool, (st.st.to_uop(),)).where(x, 0)),
   # buffer view is load
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEFINE_GLOBAL, name="ptr"),)), lambda st,ptr: UOp.load(ptr, st.st.to_uop(), dtype=ptr.dtype.base)),
   # buffer+op view is store
@@ -79,12 +93,13 @@ def schedule_uop(out:UOp, dest:UOp) -> ScheduleItem:
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  sink = graph_rewrite(UOp.sink(*outs), remove_movement_ops+merge_views)
+  var_vals: Dict[Variable, int] = {}
+  sink = graph_rewrite(UOp.sink(*outs), remove_movement_ops+merge_views+add_var_vals, var_vals)
   realizes: Dict[UOp, UOp] = {}
   graph_rewrite(sink, realize, realizes)
   schedule = [schedule_uop(u, b) for b,u in realizes.items()]
   for tensor_uop, buf_uop in zip(outs, reversed(list(realizes))): tensor_uop.become(buf_uop.view(ShapeTracker.from_shape(tensor_uop.shape)))
-  return schedule, {}
+  return schedule, var_vals
 
 def create_schedule(outs:List[UOp]) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
