@@ -172,6 +172,9 @@ class ClangRenderer(CStyleLanguage):
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
+  # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
+  extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) + \
+    CStyleLanguage.extra_matcher
 
   if AMX: tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, upcast_size=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
                                      swizzle=(None, ((0,),(5,6,7,8,1,2,3,4)), None)) for dt, sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]

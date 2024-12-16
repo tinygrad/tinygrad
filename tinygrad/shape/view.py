@@ -43,7 +43,7 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   -> Optional[Tuple[Tuple[sint, sint], ...]]:
   """Returns the new mask if reshape is possible, and None if not possible."""
   if _mask is None: return tuple((0, s) for s in new_shape)
-  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in _mask): return None
+  if any(not all_int(m) for m in _mask): return None
   if any(m[1] - m[0] < 1 for m in _mask): return ((0, 0),) * len(new_shape)  # zero mask
 
   new_mask: List[Tuple[int, int]] = []
@@ -332,9 +332,9 @@ class View:
         acc = acc * new_dim
         if not resolve(acc < real_size): new_stride = 0
       if resolve(acc != merged_size): return None
+    new_strides = (0,) * (len(new_shape) - len(r_strides)) + tuple(r_strides[::-1])
 
     if (new_mask:=_reshape_mask(self.mask, self.shape, new_shape)) is not None:
-      new_strides = (0,) * (len(new_shape) - len(r_strides)) + tuple(r_strides[::-1])
       extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - \
                      (sum(m[0] * s for m,s in zip(new_mask, new_strides)))
       return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
