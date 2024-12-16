@@ -16,10 +16,10 @@ class BLAKE3:
       for j, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
         mx, my = data[j * 2], data[j * 2 + 1]
         for m in (mx, my):
-          states[a] = (states[a] + states[b] + m)
-          states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
-          states[c] = states[c] + states[d]
-          states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
+          states[a] = (states[a] + states[b] + m).cast(dtypes.uint32)
+          states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8).cast(dtypes.uint32)
+          states[c] = (states[c] + states[d]).cast(dtypes.uint32)
+          states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7).cast(dtypes.uint32)
       if i < 6: data = data[self.PERMUTATIONS]
     return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
