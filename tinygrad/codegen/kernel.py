@@ -594,6 +594,7 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           wd, tcd, tcd_reduce, tcd_upcast = self.global_dims, self.first_upcast, len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
+          def get_upcast_axes(buf): return tuple((tcd+tcd_reduce+tcd_upcast - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
             offset = (tcd - (wd + len(wd_pattern)))
             permaxis = list(range(wd)) \
@@ -615,8 +616,6 @@ class Kernel:
 
           tc_reduce_axes = tuple(ax for ax, _ in tc.get_reduce_axes(self.first_upcast))
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-            def get_upcast_axes(buf): return tuple((tcd+tcd_reduce+tcd_upcast - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
-
             tc_upcast_axes= (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.upcast_size[2]), src=(
