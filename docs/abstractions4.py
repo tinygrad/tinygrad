@@ -11,11 +11,33 @@ print("\n**** gradient ****")
 da = c.sum().gradient(a)[0]
 print(da.lazydata)
 
-print("\n**** schedule ****")
+#print("\n**** schedule ****")
 # in the schedule, we have two COPY and one kernel
-for si in c.schedule(): print(si)
+#for si in c.schedule(): print(si)
 
-c.realize()
+from examples.beautiful_mnist import Model
+m = Model()
+from tinygrad.nn.state import get_parameters
+for p in get_parameters(m): p.realize()
+c = m(Tensor.rand(1, 1, 28, 28))
+
+from tinygrad.engine.schedule import remove_movement_ops
+from tinygrad.ops import merge_views
+from tinygrad.ops import graph_rewrite, PatternMatcher, UOp, track_rewrites, UPat, Ops
+
+view_before_const = PatternMatcher([
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="b"), UPat(Ops.CONST, name="c")), name="v"),
+    lambda b,c,v: UOp(Ops.CONST, c.dtype, (UOp(Ops.VIEW, v.dtype, (UOp(Ops.DEVICE, arg=b.arg[1]),), v.arg),), c.arg)),
+])
+
+@track_rewrites(named=True)
+def test_rewrite(x): graph_rewrite(UOp.sink(x), PatternMatcher([]))
+g = graph_rewrite(c.lazydata, remove_movement_ops+merge_views)
+#g = graph_rewrite(g, view_before_const)
+test_rewrite(g)
+
+
+#c.realize()
 exit(0)
 
 # open questions:
@@ -60,6 +82,7 @@ d = c*2
 c.realize()
 # d has a UOp graph keeping a and b alive, but not if the c UOp is mutable
 # Q: is this case uncommon enough that we can ignore it?
+# alternatively, we could do rewrites of all the in-scope Tensors to add the new buffers
 
 # 4. How do we represent a CONST Tensor? Currently it uses a fake BUFFER
 #      UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
@@ -70,5 +93,3 @@ c.realize()
 # 0. As input, you have a List of UOps
 # 1. The realized UOps have to become buffers. We can either make the buffer the base or the UOp itself. Probably the base.
 # 2. Many other Tensors and intermediates may become linked to Buffers. During any rewrites, you have to track this.
-
-
