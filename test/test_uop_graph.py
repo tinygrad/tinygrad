@@ -717,25 +717,25 @@ class TestIndexingOverflow(unittest.TestCase):
   renderer = Device[Device.DEFAULT].renderer
   def render_src(self, indexed_ast: UOp):
     uops = linearize_uop(full_graph_rewrite(indexed_ast.sink(), self.renderer))
-    self.renderer.render("test", uops)
+    return self.renderer.render("test", uops)
+  def find_op(self, ast: UOp, op: Ops):
+    if ast.op == op: return ast
+    for u in ast.src:
+      if (found:= self.find_op(u, op)) is not None: return found
 
   def e(self, shape, dtype):
     st = ShapeTracker.from_shape(shape).to_uop()
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
-    indexed = rewrite_shapetracker_with_index(store, Device[Device.DEFAULT].renderer)
+    indexed = rewrite_shapetracker_with_index(store, self.renderer)
     self.render_src(indexed)
     assert indexed.src[0].src[1].dtype is dtype
   def r(self, shape, dtype):
     st1 = ShapeTracker.from_shape(shape).to_uop()
     load = UOp(Ops.LOAD, dtypes.float, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st1))
     reduced = UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(load,))
-    indexed = rewrite_shapetracker_with_index(reduced, Device[Device.DEFAULT].renderer)
+    indexed = rewrite_shapetracker_with_index(reduced, self.renderer)
     self.render_src(indexed)
-    def find_index_op(ast: UOp):
-      if ast.op is Ops.INDEX: return ast
-      for u in ast.src:
-        if (found:= find_index_op(u)) is not None: return found
-    index_op = find_index_op(indexed)
+    index_op = self.find_op(indexed, Ops.INDEX)
     assert index_op.src[1].dtype == dtype
 
   def assert_dtype(self, shape, dtype):
@@ -750,6 +750,16 @@ class TestIndexingOverflow(unittest.TestCase):
     self.assert_dtype((UOp.variable("dim1", 10, 2 ** 12 - 1), UOp.variable("dim2", 10, 2 ** 12 - 1), 2 ** 7), dtypes.int)
   def test_symbolic_overflow(self):
     self.assert_dtype((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7 + 1), dtypes.long)
+
+  def test_overflow_masked(self):
+    shape = (2 ** 12, 2 ** 12, 2 ** 7 + 1,)
+    mask = ((0, 2 ** 12), (2, 2 ** 12 - 1), (0, 2 ** 7 + 1))
+    st = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
+    indexed = rewrite_shapetracker_with_index(store, Device[Device.DEFAULT].renderer)
+    self.render_src(indexed)
+    assert all(u.dtype is dtypes.long for u in self.find_op(indexed, Ops.CMPLT).src)
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
