@@ -98,7 +98,6 @@
         window.clearInterval(timer);
         window.removeEventListener('message', onMessageHandler);
 
-        // Send trace data as array buffer
         iframe.contentWindow.postMessage({
           perfetto: {
             buffer: arrayBuffer,
@@ -106,34 +105,11 @@
             url: location.href,
           }
         }, ORIGIN);
-
-        // Hide nav bar and loading screen after trace loads
-        setTimeout(() => {
-          iframe.contentWindow.postMessage({
-            perfetto: {
-              command: 'runScript',
-              script: `
-                const nav = document.querySelector('nav[show-sidebar]');
-                if (nav) {
-                  nav.removeAttribute('show-sidebar');
-                }
-              `
-            }
-          }, ORIGIN);
-          
-          // Hide loading screen with fade effect
-          loadingScreen.style.transition = 'opacity 0.5s';
-          loadingScreen.style.opacity = '0';
-          setTimeout(() => {
-            loadingScreen.style.display = 'none';
-          }, 500);
-        }, 1000);
       };
 
       window.addEventListener('message', onMessageHandler);
     }
 
-    // Start loading as soon as page loads
     window.onload = fetchFromApi;
   </script>
 </body>
