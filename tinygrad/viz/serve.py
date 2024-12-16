@@ -70,7 +70,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
-      if x.op is Ops.BUFFER and x.arg[0] == -1: label += f"\nDEVICE{idx} {x.arg[1]}"
+      if x.op is Ops.BUFFER and x.arg[0] == -1: label += f"\nBUFFER{idx} {x.arg[1]}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
