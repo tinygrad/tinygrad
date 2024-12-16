@@ -358,7 +358,7 @@ class AMDRenderer(CStyleLanguage):
   shared_max = 65536
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=32, upcast_size=(16,16,8), dtype_in=dti, dtype_out=dto,
-    swizzle=(((11,2,3,4,0),(1,9,10,8,7,6,5)), ((9,10,0,1,2),(3,4,11,8,7,6,5)), ((9,10,0,1,11),(5,6,7,8,4,3,2))))
+    swizzle=(((9,10,11,4,3),(0,1,2,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8)), ((0,1,2,3,9),(5,6,7,8,10,11,4))))
     for dti, dto in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
 
   # language options
