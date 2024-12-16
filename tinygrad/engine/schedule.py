@@ -32,6 +32,7 @@ def _bufferize(ctx:Dict[UOp, UOp], x:UOp):
   if x in ctx or x.op is Ops.VIEW and len(x.src) == 1: return None
   buf_uop = x.buf_uop if x.op is Ops.VIEW else UOp.new_buffer(x.device, x.size, x.dtype)
   ctx[buf_uop] = x
+  buf_uop.buffer.ref(1)
   return buf_uop.view(unwrap(x.st))
 realize = PatternMatcher([
   (UPat(Ops.SINK, name="sink"),
