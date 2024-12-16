@@ -72,7 +72,7 @@ class TestKernelSpeed(unittest.TestCase):
         x = self._get_tensor(BS, CIN, H, W)
         if i >= 3:
           GlobalCounters.time_sum_s = 0
-          with Context(DEBUG=max(DEBUG, 2)): _c = f(conv, x)
+          with Context(DEBUG=max(DEBUG.value, 2)): _c = f(conv, x)
           tms.append(GlobalCounters.time_sum_s)
         else:
           _c = f(conv, x)
