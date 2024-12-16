@@ -742,7 +742,7 @@ class TestIndexingOverflow(unittest.TestCase):
     self.e(shape, dtype)
     self.r(shape, dtype)
 
-  def test_int32(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int)
+  def test_int32(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int) # total 2**31: Use three dims so it doesn't exceed block limit
   def test_overflow(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long)
 
   def test_symbolic_int32(self):
