@@ -76,7 +76,7 @@ class ShapeTracker:
   def to_indexed_uops(self, _idxs:Optional[List[UOp]|Tuple[UOp, ...]]=None) -> Tuple[UOp, UOp]:
     idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
     def upcast(u: UOp): return UOp(u.op, dtypes.int64, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
-    if idx.vmax > dtypes.max(dtypes.int32): idx = upcast(idx), valid = upcast(valid)
+    if idx.vmax > dtypes.max(dtypes.int32): idx = upcast(idx)
     return idx, valid
 
   def real_size(self) -> int:
