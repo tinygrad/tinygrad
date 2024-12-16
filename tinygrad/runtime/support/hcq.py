@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Type, Union, TypeVar, Generic, Any
 import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array, pickle, os, sys, pathlib, dataclasses
-from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv, round_up, temp
+from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up, temp
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
 from tinygrad.ops import sym_infer, sint, Variable
@@ -326,7 +326,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
 
-    self.prof_events:List[HCQProfileEvent] = []
+    self.prof_events:List[ProfileEvent] = []
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
 
     from tinygrad.runtime.graph.hcq import HCQGraph
