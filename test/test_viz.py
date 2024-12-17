@@ -114,7 +114,6 @@ class TestViz(unittest.TestCase):
     self.assertIs(ret[0], a.sqrt().sin()) # only rewrite
 
   # NOTE: calling graph_rewrite when the function isn't decorated with track_rewrites should not VIZ
-  @unittest.expectedFailure
   def test_rewrite_without_context(self):
     def untracked_graph_rewrite(sink): return graph_rewrite(sink, symbolic)
     @track_rewrites(named=True)
