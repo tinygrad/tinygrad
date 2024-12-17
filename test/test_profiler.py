@@ -20,45 +20,11 @@ def helper_collect_profile(*devs):
       for dev in devs: dev._at_profile_finalize()
       for x in Compiled.profile_events: profile_list.append(x)
 
-def helper_profile_filter_node(profile, **kwargs):
-  assert len(profile) > 0, "Empty profile"
-  assert 'traceEvents' in profile, "traceEvents should present"
-  return [x for x in profile['traceEvents'] if all(x.get(k, None) == v for k,v in kwargs.items())]
-
-def helper_profile_parse_pids(profile):
-  pids, tids = {}, {}
-  procs = helper_profile_filter_node(profile, name='process_name')
-  for proc in procs: pids[proc['pid']] = proc['args']['name']
-  threads = helper_profile_filter_node(profile, name='thread_name')
-  for th in threads: tids[th['tid']] = th['args']['name']
-  return pids, tids
-
-def helper_profile_parse_deps(profile):
-  deps = []
-  for s in helper_profile_filter_node(profile, ph="s"):
-    f = helper_profile_filter_node(profile, ph="f", id=s['id'])[0]
-
-    starts, ends = [], []
-    for x in helper_profile_filter_node(profile, ph="X"):
-      if s['pid'] == x['pid'] and s['tid'] == x['tid'] and x['ts'] <= s['ts'] <= x['ts'] + x['dur']: starts.append(x)
-      if f['pid'] == x['pid'] and f['tid'] == x['tid'] and x['ts'] <= f['ts'] <= x['ts'] + x['dur']: ends.append(x)
-
-    assert len(starts) == 1 and len(ends) == 1, "more than one start and end possible, valid?"
-    deps.append((s, f, starts[0], ends[0]))
-  return deps
-
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
   dev_events = [x for x in profile if getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent)]
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
-
-def helper_validate_node(node, duration_s=10, ts_age_s=30, profile=None, pid_name=None, tid_name=None):
-  pids, tids = helper_profile_parse_pids(profile)
-  assert abs(node['ts'] - time.perf_counter_ns() / 1e3) < ts_age_s * 1e6, "timestimp is not in 30s range"
-  assert 0 < node['dur'] < duration_s * 1e6, "duration is not in 10s range"
-  assert pid_name is None or pids[node['pid']] == pid_name
-  assert tid_name is None or tids[node['tid']] == tid_name
 
 @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestProfiler(unittest.TestCase):

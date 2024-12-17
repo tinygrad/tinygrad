@@ -87,6 +87,7 @@
       display: flex;
       align-items: center;
       padding: 0 6px;
+      font-weight: bold;
     }
     .btn {
       height: 32px;
@@ -95,6 +96,7 @@
       color: #f0f0f5;
       border-radius: 8px;
       cursor: pointer;
+      transition-duration: .5s;
     }
     .btn:hover {
       background-color: #2a2b36;
@@ -102,16 +104,12 @@
       color: #ffffff;
       transform: translateY(-1px);
     }
-
-    iframe .pf-track {
-      background-color: red;
-    }
   </style>
 </head>
 <body>
   <header></header>
   <div class="floating-container">
-    <a class="btn nav-btn" href="/">VIZ</a>
+    <a class="btn nav-btn" href="/">UOps</a>
   </div>
 
   <div id="loading_screen">
@@ -127,11 +125,6 @@
     const iframe = document.getElementById('perfetto_frame');
     const loadingScreen = document.getElementById('loading_screen');
 
-    const tracks = iframe.querySelectorAll('.topbar');
-    tracks.forEach(track => {
-        track.style.backgroundColor = 'red';
-    });
-    
     async function fetchFromApi() {
       try {
         const response = await fetch(API_ENDPOINT);
