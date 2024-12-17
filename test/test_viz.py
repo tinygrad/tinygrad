@@ -1,7 +1,8 @@
 from typing import Dict, List, Optional
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites
+from tinygrad.helpers import Context
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
@@ -112,6 +113,16 @@ class TestViz(unittest.TestCase):
     ret = helper_test_viz(uop, pm, ctx={a.sin():a.sqrt(), n1.sin():n1.sqrt()}, bottom_up=False)
     self.assertEqual(len(ret), 1)
     self.assertIs(ret[0], a.sqrt().sin()) # only rewrite
+
+  def test_rewrite_without_context(self):
+    add = UOp.const(dtypes.int, 2) + UOp.const(dtypes.int, 1)
+    def untracked_graph_rewrite(sink): return graph_rewrite(sink, symbolic)
+    @track_rewrites(named=True)
+    def tracked_graph_rewrite(sink): return graph_rewrite(sink, symbolic)
+    untracked_graph_rewrite(add)
+    self.assertEqual(len(contexts), 0)
+    tracked_graph_rewrite(add)
+    self.assertEqual(len(contexts), 1)
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
