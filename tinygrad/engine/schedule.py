@@ -382,7 +382,7 @@ ops_folding = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda x:x if x.is_unrealized_const() else None),
   # no double COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
-  # no COPY to same device, except clone (arg is True)
+  # no COPY to same device, except clone (second arg is True)
   (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
    lambda base,b,copyin,copy: copyin if copyin.device == copy.device and copy.arg[1] is not True else None),
   # support for using a contiguous permuted view instead of the parent view if one exists
