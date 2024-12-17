@@ -309,7 +309,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = sig_en.timestamp - sig_st.timestamp
+    et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
     assert 0.1 <= et <= (7000 if CI else 100)
@@ -331,7 +331,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = sig_en.timestamp - sig_st.timestamp
+    et = float(sig_en.timestamp - sig_st.timestamp)
     et_ms = et / 1e3
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
@@ -358,7 +358,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = sig_en.timestamp - sig_st.timestamp
+    et = float(sig_en.timestamp - sig_st.timestamp)
     et_ms = et / 1e3
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3

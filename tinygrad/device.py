@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Dict, Tuple, Any, Iterator, List
+from typing import Optional, Dict, Tuple, Any, Iterator, List, Set
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
@@ -13,7 +13,7 @@ from tinygrad.ops import UOp, buffers
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-    self._opened_devices = set()
+    self._opened_devices:Set[str] = set()
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
@@ -49,16 +49,17 @@ Device = _Device()
 class ProfileEvent: pass
 
 @dataclass(frozen=True)
-class ProfileDeviceEvent(ProfileEvent): device:str; comp_tdiff:decimal.Decimal=0; copy_tdiff:decimal.Decimal=0 # noqa: E702
+class ProfileDeviceEvent(ProfileEvent):
+  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:int; en:int; is_copy:bool # noqa: E702
+class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[int] # noqa: E702
+class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[decimal.Decimal] # noqa: E702
 
 # **************** Buffer + Allocators ****************
 
