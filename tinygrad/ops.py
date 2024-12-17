@@ -278,22 +278,33 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
+    from tinygrad.shape.shapetracker import ShapeTracker
+
+    # VIEW just returns the shapetracker. is this right? what if there's shapetrackers before it?
     if self.op is Ops.VIEW: return self.arg
+
+    # the BUFFER is a flat view of the size, the CONST is () (TODO: remove the -1 hack)
+    if self.op is Ops.BUFFER: return ShapeTracker.from_shape((self.arg[-1],)) if self.arg[0] != -1 else ShapeTracker.from_shape(())
+    if self.op is Ops.CONST: return ShapeTracker.from_shape(())
+
+    # movement ops are applied to the parent
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+
     # buffer ops can have a non contiguous shapetracker
     if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
     if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
+
     # all other ops have a contiguous shapetracker
-    from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return unwrap(self.st).size
 
   # *** uop evaluation ***
 
