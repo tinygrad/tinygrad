@@ -1,6 +1,6 @@
 import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
-from tinygrad.helpers import round_up, PROFILE, memsize_to_str
+from tinygrad.helpers import round_up, PROFILE
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
