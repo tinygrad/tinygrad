@@ -166,8 +166,6 @@ class View:
     if vm1.contiguous and vm1.shape == vm2.shape: return vm2
     if vm1.contiguous and vm1.size() == vm2.size() and (ret := vm2.reshape(vm1.shape)) is not None: return ret
     if vm1.mask:
-      for b,e in vm1.mask:
-        if not resolve(b < e): return View.create(vm1.shape, (0,) * len(vm1.shape), 0, ((0,0),) * len(vm1.shape))
       if (merged := vm2 + vm1.shrink(vm1.mask)) is None: return None
       return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
     if not all_int(vm1.shape): return None
