@@ -27,6 +27,8 @@ jobs:
         python-version: 3.12
     - name: Install docs dependencies (no cache)
       run: pip install -e '.[docs]'
+    - name: Install capstone for CLANG disassembly
+      run: pip install capstone
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
