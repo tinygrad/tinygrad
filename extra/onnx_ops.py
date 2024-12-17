@@ -324,12 +324,12 @@ def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
 def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Optional[str]=None):
   assert updates.shape == indices.shape[:-1] + x.shape[indices.shape[-1]:]
   x = x.contiguous()
-  for i, u in zip(indices.split(1, 0), updates.split(1, 0)):
-    i = tuple(i_.squeeze(-1) for i_ in i.squeeze(0).split(1, -1))
+  for idx, u in zip(indices.split(1, 0), updates.split(1, 0)):
+    idx = tuple(i.squeeze(-1) for i in idx.squeeze(0).split(1, -1))
     u = u.squeeze(0)
-    if reduction is None: x[i] = u
-    if reduction == "add": x[i] += u
-    if reduction == "mul": x[i] *= u
+    if reduction is None: x[idx] = u
+    if reduction == "add": x[idx] += u
+    if reduction == "mul": x[idx] *= u
   return x
 
 def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
