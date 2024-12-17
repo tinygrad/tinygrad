@@ -342,7 +342,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
     if self._device is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
-    return UOp.const(self.dtype, b) # if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
+    return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -430,12 +430,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from LazyBuffer ***
 
-  # TODO: remove this method
   @staticmethod
   def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
-
   @staticmethod
   def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
