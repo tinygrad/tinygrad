@@ -290,7 +290,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
