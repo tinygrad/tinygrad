@@ -146,6 +146,9 @@ class Ops(FastEnum):
   # consts last!
   VCONST = auto(); CONST = auto() # noqa: E702
 
+  # device
+  DEVICE = auto()
+
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY,
@@ -290,7 +293,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[2] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -435,7 +438,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     if op is Ops.CONST:
       # NOTE: we embed device on CONST with a fake BUFFER uop
-      fake = UOp(Ops.BUFFER, dtype.ptr(), (), (-1, device, 1))
+      fake = UOp(Ops.BUFFER, dtype.ptr(), (UOp(Ops.DEVICE, arg=device),), (-1, 1))
       # NOTE: BIND stays BIND, UOp.const unbinds here
       const_uop = arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))
       return UOp(Ops.VIEW, dtype, (fake, const_uop), ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
@@ -501,12 +504,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType) -> UOp: return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), device, size))
+  def new_buffer(device:str, size:int, dtype:DType) -> UOp:
+    return UOp(Ops.BUFFER, dtype.ptr(), (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
   def _device(self) -> Optional[str]:
-    if self.op is Ops.BUFFER: return self.arg[1]
+    if self.op is Ops.DEVICE: return self.arg
     # TODO: why does this fail?
     #if self.op is Ops.COPY: return self.arg[0]
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
