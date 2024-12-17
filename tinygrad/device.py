@@ -66,10 +66,10 @@ class ProfileResult: st:Optional[int]=None; en:Optional[int]=None # noqa: E702
 
 @contextlib.contextmanager
 def cpu_profile(name, device="CPU", is_copy=False, display=False) -> Generator[ProfileResult, None, None]:
-  res = ProfileResult(st=time.perf_counter_ns())
-  yield res
-  res.en = time.perf_counter_ns()
-  if PROFILE and display: Compiled.profile_events += [ProfileRangeEvent(device, name, res.st*1e-3, res.en*1e-3, is_copy=is_copy)]
+  yield (res:=ProfileResult(st:=time.perf_counter_ns()))
+  res.en = en = time.perf_counter_ns()
+  if PROFILE and display:
+    Compiled.profile_events += [ProfileRangeEvent(device, name, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=is_copy)]
 
 # **************** Buffer + Allocators ****************
 

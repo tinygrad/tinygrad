@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, pathlib, struct, ctypes, tempfile, functools
+import os, pathlib, struct, ctypes, tempfile, functools, decimal
 from typing import List, Any, Union, Tuple, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
@@ -204,7 +204,7 @@ class MetalDevice(Compiled):
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
-      if PROFILE:
-        self.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), cmdbuf_st_time(cbuf)*1e6, cmdbuf_en_time(cbuf)*1e6, is_copy=False)]
+      st, en = decimal.Decimal(cmdbuf_st_time(cbuf) * 1e6), decimal.Decimal(cmdbuf_en_time(cbuf) * 1e6)
+      if PROFILE: self.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
