@@ -842,9 +842,9 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
-  sink: UOp                                                                                         # the sink passed into the rewrite
+  sink: bytes                                                                                       # sanpshot of the sink passed into the rewrite
   bottom_up: bool
-  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # all matches of sparents
+  matches: List[Tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
@@ -878,10 +878,11 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp): rewrite_stack[-1][1][-1].matches.append((uop, ret, p, et))
+          if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp):
+            rewrite_stack[-1][1][-1].matches.append((pickle.dumps(uop), pickle.dumps(ret), p, et))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0: rewrite_stack[-1][1][-1].matches.append((uop, ret, None, 0))
+    if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0: rewrite_stack[-1][1][-1].matches.append((pickle.dumps(uop), None, None, 0))
     return None
 
 if TRACK_MATCH_STATS:
@@ -892,7 +893,7 @@ if TRACK_MATCH_STATS:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
         print(f"rewrote {len(contexts)} graphs and matched {sum(len(r.matches) for _,x in contexts for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump(contexts, f)
+        pickle.dump(contexts, f)
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
       os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py"), temp("rewrites.pkl")])
@@ -926,9 +927,10 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
-    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
-  return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
+  with Context(PICKLE_BUFFERS=0):
+    if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
+      rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink), bottom_up))
+    return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 
