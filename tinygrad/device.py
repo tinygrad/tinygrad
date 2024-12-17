@@ -50,7 +50,7 @@ class ProfileEvent: pass
 
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
-  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:Optional[decimal.Decimal]=None # noqa: E702
+  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
@@ -269,4 +269,4 @@ if PROFILE:
     with open(temp("profile.pkl"), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
     from tinygrad.ops import launch_viz
-    launch_viz(profile=temp("profile.pkl"))
+    launch_viz("PROFILE", temp("profile.pkl"))

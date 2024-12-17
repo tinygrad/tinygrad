@@ -891,7 +891,7 @@ if TRACK_MATCH_STATS:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump((tracked_keys, tracked_ctxs), f)
-    launch_viz(viz=temp("rewrites.pkl"))
+    launch_viz("VIZ", temp("rewrites.pkl"))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -900,9 +900,9 @@ if TRACK_MATCH_STATS:
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
 
-def launch_viz(viz:Optional[str]=None, profile:Optional[str]=None):
-  os.environ["VIZ" if viz is not None else "PROFILE"] = "0"
-  os.environ["VIZ_DATA" if viz is not None else "PROFILE_DATA"] = viz if viz is not None else profile
+def launch_viz(env_str:str, data:str):
+  os.environ[env_str] = "0"
+  os.environ[f"{env_str}_DATA"] = data
   if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
     args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []

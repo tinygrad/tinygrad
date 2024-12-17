@@ -101,7 +101,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
   return g
 
 # Profiler API
-devices:Dict[str, Tuple[decimal.Decimal, Optional[decimal.Decimal], int]] = {}
+devices:Dict[str, Tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
 def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
 def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):

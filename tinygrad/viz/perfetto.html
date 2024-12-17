@@ -113,7 +113,7 @@
   </div>
 
   <div id="loading_screen">
-    <div class="loader"></div>
+    <div class="loader" id="spinner"></div>
     <div id="loading_text">Loading trace data...</div>
   </div>
   
@@ -140,7 +140,8 @@
         
         openTrace(arrayBuffer);
       } catch (error) {
-        document.getElementById('loading_text').innerHTML = 'Error loading trace data.<br>Please ensure the API server is running and refresh to try again.';
+        document.getElementById('spinner').remove();
+        document.getElementById('loading_text').innerHTML = 'Error loading trace data.<br>Please ensure PROFILE=1 is set and the VIZ server is running.';
         console.error('Error loading trace:', error);
       }
     }
