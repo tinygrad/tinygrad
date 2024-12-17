@@ -10,15 +10,15 @@ MOCKGPU = getenv("MOCKGPU")
 
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
-  Compiled.profile_events = []
+  for dev in devs: dev.synchronize()
+  Compiled.profile_events = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
 
   profile_list = []
   with Context(PROFILE=1):
-    try: yield profile_list
-    finally:
-      for dev in devs: dev.synchronize()
-      for dev in devs: dev._at_profile_finalize()
-      for x in Compiled.profile_events: profile_list.append(x)
+    yield profile_list
+    for dev in devs: dev.synchronize()
+    for dev in devs: dev._at_profile_finalize()
+    for x in Compiled.profile_events: profile_list.append(x)
 
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
@@ -26,7 +26,7 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
+@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled) or Device.DEFAULT in {"METAL"}, "HCQ device required to run")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -38,9 +38,6 @@ class TestProfiler(unittest.TestCase):
 
     TestProfiler.runner = get_runner(TestProfiler.d0.device, si.ast)
     TestProfiler.b.lazydata.buffer.allocate()
-
-    TestProfiler.kernargs_ba_ptr = TestProfiler.runner._prg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
-    TestProfiler.kernargs_ab_ptr = TestProfiler.runner._prg.fill_kernargs([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
 
   def test_profile_kernel_run(self):
     runner_name = TestProfiler.runner._prg.name
@@ -71,12 +68,12 @@ class TestProfiler(unittest.TestCase):
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
       TestProfiler.runner([buf1, TestProfiler.a.lazydata.buffer], var_vals={})
-      buf1.as_buffer()
+      buf1.copyout(memoryview(bytearray(buf1.nbytes)))
 
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     evs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
 
-    assert len(evs) == 3, "two kernel runs are expected"
+    assert len(evs) == 3, "3 kernel runs are expected"
     assert evs[0].is_copy, "kernel should be copy"
     assert evs[1].name == runner_name, "kernel name is not correct"
     assert not evs[1].is_copy, "kernel should not be copy"
@@ -102,7 +99,7 @@ class TestProfiler(unittest.TestCase):
       assert len(evs) == 1, "one kernel runs are expected"
       assert evs[0].is_copy, "kernel should be copy"
 
-  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
+  @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
 
@@ -124,7 +121,7 @@ class TestProfiler(unittest.TestCase):
     assert len(graph_evs) == 1, "one graph event is expected"
     assert len(graph_evs[0].ents) == 2, "two entities are expected"
 
-  @unittest.skipIf(CI, "skip CI")
+  @unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")
   def test_dev_jitter_matrix(self):
     dev_cnt = 6
     devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]

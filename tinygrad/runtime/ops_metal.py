@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, pathlib, struct, ctypes, tempfile, functools, decimal
+import os, pathlib, struct, ctypes, tempfile, functools, decimal, time
 from typing import List, Any, Union, Tuple, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
@@ -140,10 +140,10 @@ class MetalProgram:
     msg(encoder, "endEncoding")
     msg(command_buffer, "setLabel:", to_ns_str(self.name))
     msg(command_buffer, "commit")
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
       return cmdbuf_en_time(command_buffer) - cmdbuf_st_time(command_buffer)
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
@@ -175,13 +175,13 @@ class MetalAllocator(LRUAllocator):
       src_dev.timeline_value += 1
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
+  def _cp_mv(self, dst, src, prof_desc):
+    with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(cast(int, msg(src.buf, "contents", restype=objc_id).value), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview):
-    with cpu_profile("CPU -> METAL", self.dev.device, is_copy=True): self._as_buffer(dest)[:] = src
-  def _copyout(self, dest:memoryview, src:MetalBuffer):
-    with cpu_profile("METAL -> CPU", self.dev.device, is_copy=True): dest[:] = self._as_buffer(src)
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "CPU -> METAL")
+  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> CPU")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
@@ -190,7 +190,6 @@ class MetalDevice(Compiled):
     self.mtl_queue = msg(self.sysdevice, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
     self.mtl_buffers_in_flight: List[Any] = []
-    self.mv_in_metal: List[memoryview] = []
     self.timeline_signal = msg(self.sysdevice, "newSharedEvent", restype=objc_instance)
     self.timeline_value = 0
 
@@ -203,7 +202,6 @@ class MetalDevice(Compiled):
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
-      st, en = decimal.Decimal(cmdbuf_st_time(cbuf) * 1e6), decimal.Decimal(cmdbuf_en_time(cbuf) * 1e6)
-      if PROFILE: self.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
-    self.mv_in_metal.clear()
+      st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
+      if PROFILE: Compiled.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
     self.mtl_buffers_in_flight.clear()

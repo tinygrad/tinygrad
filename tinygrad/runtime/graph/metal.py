@@ -94,8 +94,8 @@ class MetalGraph(GraphRunner):
     msg(command_buffer, "commit")
     self.command_buffer = command_buffer
 
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
       return cmdbuf_en_time(command_buffer) - cmdbuf_st_time(command_buffer)
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
     return None
