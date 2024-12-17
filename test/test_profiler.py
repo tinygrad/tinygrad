@@ -1,4 +1,4 @@
-import unittest, struct, contextlib, statistics
+import unittest, struct, contextlib, statistics, time
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileRangeEvent, ProfileDeviceEvent, ProfileGraphEvent
