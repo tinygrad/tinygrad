@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Callable, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -18,7 +18,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB"
 
 @dataclass
 class GraphRewriteMetadata:
-  """Specifies metadata about a single call to graph_rewrite"""
+  """Overview of a tracked rewrite to viz the sidebar"""
   loc: Tuple[str, int]
   """File_path, Lineno"""
   code_line: str
@@ -42,7 +42,8 @@ class GraphRewriteDetails(GraphRewriteMetadata):
 
 # ** API functions
 
-def pcall(fxn, *args, **kwargs):
+# NOTE: if any extra rendering in VIZ fails, we don't crash
+def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
@@ -75,11 +76,10 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   replaces[base] = ret
   return ret
 @functools.lru_cache(None)
-def _prg(k:Optional[Kernel]) -> Optional[str]:
-  try: return k.to_program().src if isinstance(k, Kernel) else None
-  except Exception: return None
+def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[], kernel_code=pcall(_prg, k))
+  g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
+                          kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
   replaces: Dict[UOp, UOp] = {}
   sink = g.graphs[0]
   for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
