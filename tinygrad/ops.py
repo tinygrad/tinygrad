@@ -843,7 +843,6 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
   sink: bytes                                                                                       # sanpshot of the sink passed into the rewrite
-  bottom_up: bool
   matches: List[Tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
@@ -928,9 +927,9 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
+  if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and not bottom_up: # TODO: make viz work with bottom_up=True
     with Context(PICKLE_BUFFERS=0):
-      rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink), bottom_up))
+      rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
