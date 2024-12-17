@@ -156,7 +156,7 @@ class CStyleLanguage(Renderer):
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
       if u.op is Ops.INDEX and u.src[1].dtype in self.invalid_dtype:
-          raise RuntimeError("Index was upcasted to int64 but not supported on this device, is your tensor too large?")
+        raise RuntimeError("Index was upcasted to int64 but not supported on this device")
     del self.r
 
     # NOTE: this relies on bufs dict preserving order

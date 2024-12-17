@@ -77,7 +77,8 @@ class ShapeTracker:
     idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
     def overflow(u): return any((u.vmax > dtypes.max(dtypes.int32), u.vmin < dtypes.min(dtypes.int32), *(overflow(_u) for _u in u.src)))
     def upcast(u: UOp): return UOp(u.op, dtypes.int64 if u.dtype is not dtypes.bool else u.dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
-    if overflow(idx) or overflow(valid): idx, valid = upcast(idx), upcast(valid)
+    # Overflow occurs on the index number, but mask need to be upcasted as well so comparison works
+    if overflow(idx): idx, valid = upcast(idx), upcast(valid)
     return idx, valid
 
   def real_size(self) -> int:
