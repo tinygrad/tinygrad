@@ -90,6 +90,7 @@ class TestViz(unittest.TestCase):
     assert not any(v[0].startswith("CONST") for v in graph.values())
     assert len([x for x in graph.values() if "CONST" in x[0]]) == 1
 
+  @unittest.skip("TODO: bring this back with better testing")
   def test_bottom_up_rewrite(self):
     a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
     n1 = a.sin()

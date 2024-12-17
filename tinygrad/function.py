@@ -41,7 +41,7 @@ class Sin(Function):
 
 class Relu(Function):
   def forward(self, x:UOp) -> UOp:
-    self.ret = x.maximum(0)
+    self.ret = (x>0).where(x, 0)
     return self.ret
 
   def backward(self, grad_output:UOp) -> UOp: return (self.ret>0).cast(grad_output.dtype) * grad_output
@@ -79,7 +79,8 @@ class Sigmoid(Function):
     return (self.ret * (1 - self.ret)) * grad_output
 
 class Sign(Function):
-  def forward(self, x:UOp) -> UOp: return x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
+  # NOTE: the x*0 is to match torch behavior without function.py
+  def forward(self, x:UOp) -> UOp: return x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0)) + x*0
   # backward always return 0 to match torch
   def backward(self, grad_output:UOp) -> UOp: return grad_output.const_like(0)
 
