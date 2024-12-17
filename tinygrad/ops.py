@@ -439,7 +439,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if op is Ops.CONST:
       # NOTE: BIND stays BIND, UOp.const unbinds here
       const_uop = arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))
-      return UOp(Ops.VIEW, dtype, (UOp(Ops.DEVICE, arg=device), const_uop), ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+      const_uop = const_uop.replace(src=(UOp(Ops.DEVICE, arg=device),))
+      return UOp(Ops.VIEW, dtype, (const_uop,), ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
