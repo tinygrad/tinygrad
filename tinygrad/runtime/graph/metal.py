@@ -7,7 +7,7 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.ops import Variable
 from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, to_struct, objc_instance,\
-  MTLResourceOptions, cmdbuf_start_time, cmdbuf_end_time, objc_id
+  MTLResourceOptions, cmdbuf_start_time, cmdbuf_end_time, objc_id, to_ns_str
 
 class MTLIndirectCommandType:
   MTLIndirectCommandTypeConcurrentDispatch = (1 << 5)
@@ -90,6 +90,7 @@ class MetalGraph(GraphRunner):
 
     msg(encoder, "executeCommandsInBuffer:withRange:", self.icb, self.range)
     msg(encoder, "endEncoding")
+    msg(command_buffer, "setLabel:", to_ns_str("graph"))
     msg(command_buffer, "commit")
     self.command_buffer = command_buffer
 

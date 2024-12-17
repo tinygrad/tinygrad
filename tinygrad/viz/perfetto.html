@@ -95,6 +95,12 @@
 
       const onMessageHandler = (evt) => {
         if (evt.data !== 'PONG') return;
+        loadingScreen.style.transition = 'opacity 0.5s';
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => {
+          loadingScreen.style.display = 'none';
+        }, 500);
+
         window.clearInterval(timer);
         window.removeEventListener('message', onMessageHandler);
 
