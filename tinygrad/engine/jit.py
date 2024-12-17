@@ -2,7 +2,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
-from tinygrad.device import Buffer, Compiled, Device
+from tinygrad.device import Buffer, Compiled, Device, cpu_profile
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, ssimplify, Variable, sint, sym_infer
 from tinygrad.shape.shapetracker import ShapeTracker

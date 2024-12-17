@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import cpu_time_execution, getenv, cpu_objdump
+from tinygrad.device import Compiled, Compiler, MallocAllocator, ProfileDeviceEvent, cpu_profile
+from tinygrad.helpers import getenv, cpu_objdump
 from tinygrad.renderer.llvmir import LLVMRenderer
 import llvmlite.binding as llvm
 
@@ -27,7 +27,7 @@ class LLVMCompiler(Compiler):
 
 class LLVMProgram:
   def __init__(self, dev:LLVMDevice, name:str, lib:bytes):
-    self.name, self.lib = name, lib
+    self.dev, self.name, self.lib = dev, name, lib
     dev.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = dev.engine.get_function_address(name)
     assert self.fxn != 0, "LLVM failed to get function address"
@@ -35,7 +35,8 @@ class LLVMProgram:
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, 'cfunc'):
       self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
-    return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
+    with cpu_profile(self.dev.device, self.name, is_copy=False) as cpu_time_execution: self.cfunc(*bufs, *vals)
+    return cpu_time_execution.en - cpu_time_execution.st
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
@@ -49,3 +50,5 @@ class LLVMDevice(Compiled):
     backing_mod.triple = llvm.get_process_triple()
     self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
     super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self, getenv("LLVMOPT")), functools.partial(LLVMProgram, self))
+
+    self.profile_events += [ProfileDeviceEvent(device)]

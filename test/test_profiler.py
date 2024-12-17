@@ -2,38 +2,25 @@ import unittest, struct, contextlib, tempfile, pathlib, json, time, atexit, rand
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferSpec
-from tinygrad.runtime.support.hcq import ProfileLogger, HCQCompiled
+from tinygrad.runtime.support.hcq import HCQCompiled, ProfileRangeEvent, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
 
 MOCKGPU = getenv("MOCKGPU")
 
 @contextlib.contextmanager
-def helper_collect_profile(*devs, random_setup_delay=False):
-  ProfileLogger.mjson, ProfileLogger.actors = [], {}
+def helper_collect_profile(*devs):
+  for dev in devs: dev.prof_events = []
 
-  if random_setup_delay:
-    devs = list(devs)
-    for dev in devs: dev.synchronize()
-    random.shuffle(devs)
-    for dev in devs:
-      dev._prof_setup()
-      time.sleep(random.randint(1, 1000) / 1000)
-  else:
-    for dev in devs: dev._prof_setup()
-
-  profile_dict = {}
-  _, tmp = tempfile.mkstemp()
-  with Context(PROFILE=1, PROFILEPATH=tmp):
-    try: yield profile_dict
+  profile_list = []
+  with Context(PROFILE=1):
+    try: yield profile_list
     finally:
+      for dev in devs: dev.synchronize()
+      for dev in devs: dev._sync_gpu_to_cpu()
       for dev in devs:
-        dev.synchronize()
-        dev._prof_finalize()
-        atexit.unregister(dev._prof_finalize)
-
-  for k,v in json.loads(pathlib.Path(tmp).read_text()).items(): profile_dict[k] = v
-  pathlib.Path(tmp).unlink()
+        for ev in dev.prof_events:
+          profile_list.append(ev)
 
 def helper_profile_filter_node(profile, **kwargs):
   assert len(profile) > 0, "Empty profile"
@@ -61,6 +48,12 @@ def helper_profile_parse_deps(profile):
     assert len(starts) == 1 and len(ends) == 1, "more than one start and end possible, valid?"
     deps.append((s, f, starts[0], ends[0]))
   return deps
+
+def helper_profile_filter_device(profile, device:str):
+  assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
+  dev_events = [x for x in profile if getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent)]
+  assert len(dev_events) == 1, "only one device registration event is expected"
+  return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
 def helper_validate_node(node, duration_s=10, ts_age_s=30, profile=None, pid_name=None, tid_name=None):
   pids, tids = helper_profile_parse_pids(profile)
@@ -90,8 +83,11 @@ class TestProfiler(unittest.TestCase):
     with helper_collect_profile(TestProfiler.d0) as profile:
       TestProfiler.runner([TestProfiler.b.lazydata.buffer, TestProfiler.a.lazydata.buffer], var_vals={})
 
-    kernel_node = helper_profile_filter_node(profile, name=runner_name)[0]
-    helper_validate_node(kernel_node, profile=profile, pid_name=Device.DEFAULT, tid_name="COMPUTE")
+    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
+    assert len(kernel_runs) == 1, "one kernel run is expected"
+    assert kernel_runs[0].name == runner_name, "kernel name is not correct"
+    assert kernel_runs[0].is_copy == False, "kernel should not be copy"
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -99,8 +95,10 @@ class TestProfiler(unittest.TestCase):
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
-    copyin_node = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")[0]
-    helper_validate_node(copyin_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
+    assert len(kernel_runs) == 1, "one kernel run is expected"
+    assert kernel_runs[0].is_copy == True, "kernel should not be copy"
 
   def test_profile_multiops(self):
     runner_name = TestProfiler.runner._prg.name
@@ -111,19 +109,19 @@ class TestProfiler(unittest.TestCase):
       TestProfiler.runner([buf1, TestProfiler.a.lazydata.buffer], var_vals={})
       buf1.as_buffer()
 
-    copyin_node = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")[0]
-    helper_validate_node(copyin_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    evs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
 
-    kernel_node = helper_profile_filter_node(profile, name=runner_name)[0]
-    helper_validate_node(kernel_node, profile=profile, pid_name=Device.DEFAULT, tid_name="COMPUTE")
+    assert len(evs) == 3, "two kernel runs are expected"
+    assert evs[0].is_copy == True, "kernel should be copy"
+    assert evs[1].name == runner_name, "kernel name is not correct"
+    assert evs[1].is_copy == False, "kernel should not be copy"
+    assert evs[2].is_copy == True, "kernel should be copy"
 
-    copyout_node = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> CPU")[0]
-    helper_validate_node(copyout_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+    for i in range(1, 3):
+      assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
-    assert copyin_node['ts'] + copyin_node['dur'] < kernel_node['ts'], "timestamp not aranged"
-    assert kernel_node['ts'] + kernel_node['dur'] < copyout_node['ts'], "timestamp not aranged"
-
-  def test_profile_multidev_copyin(self):
+  def test_profile_multidev(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -132,25 +130,16 @@ class TestProfiler(unittest.TestCase):
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
       buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
-    copyin_node_1 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}")[0]
-    helper_validate_node(copyin_node_1, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
+    profile0, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    profile1, _ = helper_profile_filter_device(profile, d1.device)
 
-    copyin_node_2 = helper_profile_filter_node(profile, name=f"CPU -> {Device.DEFAULT}:1")[0]
-    helper_validate_node(copyin_node_2, profile=profile, pid_name=f"{Device.DEFAULT}:1", tid_name="DMA")
-
-  def test_profile_multidev_transfer(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
-    a = Tensor.randn(1 << 20, device=Device.DEFAULT).realize()
-    with helper_collect_profile(TestProfiler.d0, d1) as profile:
-      y = a.to(f"{Device.DEFAULT}:1")
-      y.realize()
-
-    transfer_node_1 = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> {Device.DEFAULT}:1")[0]
-    helper_validate_node(transfer_node_1, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
-    assert 80 < transfer_node_1['dur'] < (20000 if CI else 1400), f"Duration is not in the range: {transfer_node_1['dur']}"
+    for p in [profile0, profile1]:
+      evs = [x for x in p if isinstance(x, ProfileRangeEvent)]
+      assert len(evs) == 1, "one kernel runs are expected"
+      assert evs[0].is_copy == True, "kernel should be copy"
 
   @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
-  def test_profile_deps(self):
+  def test_profile_graph(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
 
     def f(a):
@@ -163,59 +152,37 @@ class TestProfiler(unittest.TestCase):
       for _ in range(3): jf(a)
       del jf
 
-    deps = helper_profile_parse_deps(profile)
-    assert len(deps) == 1, "one dep is expected, one launch"
+    graph_evs = [x for x in profile if isinstance(x, ProfileGraphEvent)]
 
-    _, _, l, r = deps[0]
-    assert l['name'].find("->") == -1, "should be kernel"
-    assert r['name'] == f"{Device.DEFAULT} -> {Device.DEFAULT}:1", "should be copy"
+    _, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    _, _ = helper_profile_filter_device(profile, d1.device)
 
-  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
-  def test_profile_copy_args(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
-
-    def f(a):
-      x = (a + 1).realize()
-      return x, x.to(d1.device).realize()
-
-    a = Tensor.randn(10, 10, device=TestProfiler.d0.device).realize()
-    with helper_collect_profile(TestProfiler.d0, d1) as profile:
-      jf = TinyJit(f)
-      for _ in range(3):
-        TestProfiler.d0.raw_prof_records, TestProfiler.d0.sig_prof_records = [], [] # reset to collect only graph logs
-        d1.raw_prof_records, d1.sig_prof_records = [], []
-        jf(a)
-      del jf
-
-    node = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> {Device.DEFAULT}:1")[-1]
-    assert node['args']['Size'] == "400.00 B"
-    assert abs(float(node['args']['GB/S']) - ((10 * 10 * 4) / 1e3) / (node['dur'])) < 0.01
+    assert len(graph_evs) == 1, "one graph event is expected"
+    assert len(graph_evs[0].ents) == 2, "two entities are expected"
 
   @unittest.skipIf(CI, "skip CI")
-  def test_profile_sync(self):
-    mv = memoryview(bytearray(struct.pack("ff", 0, 1)))
-    expected_diff = 100000 # sleep in us
+  def test_dev_jitter_matrix(self):
+    for dev in HCQCompiled.devices: dev.synchronize()
+    for dev in HCQCompiled.devices: dev._sync_gpu_to_cpu()
 
-    devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(6)]
-    bufs = [Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated() for i in range(6)]
+    def _sync_d2d(d1:HCQCompiled, d2:HCQCompiled):
+      d1.hw_compute_queue_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
+                             .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
+      d2.hw_compute_queue_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
+                             .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
+      d1.timeline_value += 2
+      d2.timeline_value += 2
+      d1.timeline_signal.wait(d1.timeline_value - 1)
+      d2.timeline_signal.wait(d2.timeline_value - 1)
+      return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
 
-    # enqueue ops on different queues to check the timer sync
-    cpu_time = []
-    with helper_collect_profile(*devs, random_setup_delay=True) as profile:
-      for i in range(6):
-        x = time.perf_counter_ns()
-        time.sleep(expected_diff / 1e6)
-        bufs[i].copyin(mv)
-        cpu_time.append(((time.perf_counter_ns() - x) / 1000) - expected_diff)
-
-    nodes = [helper_profile_filter_node(profile, name=f"CPU -> {Device.canonicalize(f'{Device.DEFAULT}:{i}')}")[-1] for i in range(6)]
-    avg_diff = []
-    for i in range(1, 6):
-      diff = nodes[i]['ts'] - nodes[i-1]['ts'] - cpu_time[i]
-      avg_diff.append(diff - expected_diff)
-      assert expected_diff * 0.998 < diff < expected_diff * 1.002, "more that 0.2% diff"
-
-    print(f"total avg delay is {sum(avg_diff) / len(avg_diff)} us")
+    # then test it by timing the GPU to GPU times
+    jitter_matrix = [[float('nan')] * len(HCQCompiled.devices) for _ in range(len(HCQCompiled.devices))]
+    pairs = [(p1, p2) for p1 in enumerate(HCQCompiled.devices) for p2 in enumerate(HCQCompiled.devices) if p1 != p2]
+    for (i1, d1), (i2, d2) in pairs:
+      cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
+      jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
+      assert jitter_matrix[i1][i2] < 0.1, "jitter should be less than 0.1ms"
 
 if __name__ == "__main__":
   unittest.main()

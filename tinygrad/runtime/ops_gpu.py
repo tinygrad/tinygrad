@@ -60,9 +60,6 @@ class CLProgram:
     return None
 
 class CLAllocator(LRUAllocator):
-  def __init__(self, dev:CLDevice):
-    self.dev = dev
-    super().__init__()
   def _alloc(self, size:int, options:BufferSpec) -> Tuple[ctypes._CData, BufferSpec]:
     if options.image is not None:
       return (checked(cl.clCreateImage2D(self.dev.context, cl.CL_MEM_READ_WRITE,
