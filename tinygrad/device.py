@@ -1,8 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Dict, Tuple, Any, Iterator, List, Set
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle, decimal
+from typing import Optional, Dict, Tuple, Any, Iterator, List, Set, Generator
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
@@ -60,6 +60,16 @@ class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:boo
 
 @dataclass(frozen=True)
 class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[decimal.Decimal] # noqa: E702
+
+@dataclass
+class ProfileResult: st:Optional[int]=None; en:Optional[int]=None # noqa: E702
+
+@contextlib.contextmanager
+def cpu_profile(name, device="CPU", is_copy=False, display=True) -> Generator[ProfileResult, None, None]:
+  yield (res:=ProfileResult(st:=time.perf_counter_ns()))
+  res.en = en = time.perf_counter_ns()
+  if PROFILE and display:
+    Compiled.profile_events += [ProfileRangeEvent(device, name, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=is_copy)]
 
 # **************** Buffer + Allocators ****************
 
@@ -221,7 +231,7 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 class Compiled:
-  profile_events:List[ProfileEvent] = []
+  profile_events:List[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
