@@ -83,10 +83,12 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   replaces: Dict[UOp, UOp] = {}
   sink = g.graphs[0]
   for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
-    u0, u1 = pickle.loads(u0_b), None if u1_b is None else pickle.loads(u1_b)
-    replaces[u0] = u0 if u1 is None else u1
+    u0 = pickle.loads(u0_b)
     # if the match didn't result in a rewrite we move forward
-    if u1 is None: continue
+    if u1_b is None:
+      replaces[u0] = u0
+      continue
+    replaces[u0] = u1 = pickle.loads(u1_b)
     # first, rewrite this UOp with the current rewrite + all the matches in replaces
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check
