@@ -742,8 +742,8 @@ class TestTensorMetadata(unittest.TestCase):
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
     self.assertEqual(out.lazydata.metadata.name, "__mul__")
-    self.assertEqual(out.lazydata.srcs[0].metadata.name, "relu")
-    self.assertEqual(out.lazydata.srcs[1].metadata.name, "sigmoid")
+    self.assertEqual(out.lazydata.src[0].metadata.name, "relu")
+    self.assertEqual(out.lazydata.src[1].metadata.name, "sigmoid")
     si = create_schedule([out.lazydata])[-1]
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
