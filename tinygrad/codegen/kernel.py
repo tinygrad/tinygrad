@@ -594,8 +594,8 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          wd, tcd, tcd_reduce, tcd_upcast = self.global_dims, self.first_upcast, len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
-          def get_upcast_axes(buf): return tuple((tcd+tcd_reduce+tcd_upcast - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
+          wd, tcd, tcd_reduce_len, tcd_upcast_len = self.global_dims, self.first_upcast, len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
+          def get_upcast_axes(buf): return tuple((tcd+tcd_reduce_len+tcd_upcast_len - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
           def get_tc_swizzle_st(shape, wd_pattern, tcd_pattern):
             offset = (tcd - (wd + len(wd_pattern)))
             permaxis = list(range(wd)) \
