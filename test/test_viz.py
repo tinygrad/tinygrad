@@ -3,7 +3,7 @@ import unittest, decimal, json
 from tinygrad.dtype import dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
 
 @track_rewrites(named=True)

@@ -1,9 +1,8 @@
-import unittest, struct, contextlib, tempfile, pathlib, json, time, atexit, random
+import unittest, struct, contextlib, statistics
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileRangeEvent, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
-from tinygrad.device import ProfileRangeEvent, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
 
@@ -17,7 +16,6 @@ def helper_collect_profile(*devs):
   with Context(PROFILE=1):
     try: yield profile_list
     finally:
-      print(devs)
       for dev in devs: dev.synchronize()
       for dev in devs: dev._at_profile_finalize()
       for x in Compiled.profile_events: profile_list.append(x)
@@ -87,7 +85,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert kernel_runs[0].name == runner_name, "kernel name is not correct"
-    assert kernel_runs[0].is_copy == False, "kernel should not be copy"
+    assert not kernel_runs[0].is_copy, "kernel should not be copy"
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -98,7 +96,7 @@ class TestProfiler(unittest.TestCase):
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
-    assert kernel_runs[0].is_copy == True, "kernel should not be copy"
+    assert kernel_runs[0].is_copy, "kernel should not be copy"
 
   def test_profile_multiops(self):
     runner_name = TestProfiler.runner._prg.name
@@ -113,10 +111,10 @@ class TestProfiler(unittest.TestCase):
     evs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
 
     assert len(evs) == 3, "two kernel runs are expected"
-    assert evs[0].is_copy == True, "kernel should be copy"
+    assert evs[0].is_copy, "kernel should be copy"
     assert evs[1].name == runner_name, "kernel name is not correct"
-    assert evs[1].is_copy == False, "kernel should not be copy"
-    assert evs[2].is_copy == True, "kernel should be copy"
+    assert not evs[1].is_copy, "kernel should not be copy"
+    assert evs[2].is_copy, "kernel should be copy"
 
     for i in range(1, 3):
       assert evs[i].st > evs[i-1].en, "timestamp not aranged"
@@ -136,7 +134,7 @@ class TestProfiler(unittest.TestCase):
     for p in [profile0, profile1]:
       evs = [x for x in p if isinstance(x, ProfileRangeEvent)]
       assert len(evs) == 1, "one kernel runs are expected"
-      assert evs[0].is_copy == True, "kernel should be copy"
+      assert evs[0].is_copy, "kernel should be copy"
 
   @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
   def test_profile_graph(self):
