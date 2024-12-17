@@ -50,7 +50,7 @@ class ProfileEvent: pass
 
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
-  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
+  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:Optional[decimal.Decimal]=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702

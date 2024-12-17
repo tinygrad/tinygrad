@@ -101,11 +101,11 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
   return g
 
 # Profiler API
-devices:Dict[str, Tuple[decimal.Decimal, decimal.Decimal, int]] = {}
+devices:Dict[str, Tuple[decimal.Decimal, Optional[decimal.Decimal], int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
 def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
 def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
-  devices[ev.device] = (ev.comp_tdiff, ev.copy_tdiff, len(devices))
+  devices[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff, len(devices))
   return [{"name": "process_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "args": {"name": ev.device}},
           {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 0, "args": {"name": "COMPUTE"}},
           {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 1, "args": {"name": "COPY"}}]
