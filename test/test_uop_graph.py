@@ -712,7 +712,7 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
-
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU does not support int64 upcasted indexing")
 class TestIndexingOverflow(unittest.TestCase):
   renderer = Device[Device.DEFAULT].renderer
   def render_src(self, indexed_ast: UOp):
@@ -722,9 +722,7 @@ class TestIndexingOverflow(unittest.TestCase):
     if ast.op == op: return ast
     for u in ast.src:
       if (found:= self.find_op(u, op)) is not None: return found
-
   def e(self, st):
-    # st = ShapeTracker.from_shape(shape).to_uop()
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
     return indexed
@@ -737,12 +735,12 @@ class TestIndexingOverflow(unittest.TestCase):
   def assert_dtype(self, shape, dtype, offset=0):
     st = ShapeTracker((View.create(shape=shape, offset=offset),))
     elementwise_ast = self.e(st)
+    self.render_src(elementwise_ast)
     assert elementwise_ast.src[0].src[1].dtype is dtype
-
     reduced_ast = self.r(st)
     index_op = self.find_op(reduced_ast, Ops.INDEX)
-    assert index_op.src[1].dtype == dtype
     self.render_src(reduced_ast)
+    assert index_op.src[1].dtype == dtype
 
   # total 2**31: Use three dims so it doesn't exceed block limit
   # Symbolic has to subtract by 1 because var is inclusive
@@ -750,6 +748,7 @@ class TestIndexingOverflow(unittest.TestCase):
     dim1, dim2, dim3 = 2 ** 12, 2 ** 12, 2 ** 7
     self.assert_dtype((dim1, dim2, dim3), dtypes.int)
     self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int)
+
   def test_overflow(self):
     dim1, dim2, dim3 = 2**12, 2**12, 2**7+1
     self.assert_dtype((dim1, dim2, dim3), dtypes.long)
@@ -780,13 +779,23 @@ class TestIndexingOverflow(unittest.TestCase):
     st = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
     indexed = rewrite_shapetracker_with_index(store, Device[Device.DEFAULT].renderer)
-    self.render_src(indexed)
     assert all(u.dtype is dtypes.long for u in self.find_op(indexed, Ops.CMPLT).src)
+    self.render_src(indexed)
 
-  @unittest.skipUnless(Device.DEFAULT=="WEBGPU", "WEBGPU does not supported int64")
-  def test_int64_unsupported(self):
-    with self.assertRaises(AssertionError):
-      self.test_overflow()
+@unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu")
+class TestIndexingOverflowWEBGPU(unittest.TestCase):
+  renderer = Device[Device.DEFAULT].renderer
+  def render(self, shape):
+    st = ShapeTracker((View.create(shape=shape, offset=0),))
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
+    indexed_ast = rewrite_shapetracker_with_index(store, self.renderer)
+    uops = linearize_uop(full_graph_rewrite(indexed_ast.sink(), self.renderer))
+    return self.renderer.render("test", uops)
+
+  def test_success(self): self.render((2**12, 2**12, 2**7))
+  def test_failure(self):
+    with self.assertRaises(RuntimeError): self.render((2**12, 2**12, 2**7+1))
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
