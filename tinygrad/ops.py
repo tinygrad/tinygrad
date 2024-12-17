@@ -283,9 +283,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # VIEW just returns the shapetracker. is this right? what if there's shapetrackers before it?
     if self.op is Ops.VIEW: return self.arg
 
-    # the BUFFER is a flat view of the size, the CONST is () (TODO: remove the -1 hack)
+    # the BUFFER is a flat view of the size, the CONST is () (TODO: remove the -1 BUFFER hack)
     if self.op is Ops.BUFFER: return ShapeTracker.from_shape((self.arg[-1],)) if self.arg[0] != -1 else ShapeTracker.from_shape(())
-    if self.op is Ops.CONST: return ShapeTracker.from_shape(())
+    #if self.op is Ops.CONST: return ShapeTracker.from_shape(())
 
     # movement ops are applied to the parent
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -300,11 +300,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return unwrap(self.st).size
+  def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -464,6 +463,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
+    assert self.op is not Ops.BUFFER, "trying to COPY directly from BUFFER"
     return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
@@ -492,9 +492,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement: return self.src[0].base
     return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
+    if self.st is None or self.op in {Ops.BUFFER, Ops.CONST}:
+      return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-    # instant folding rules
+    # instant folding rules. TODO: remove these from here
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret

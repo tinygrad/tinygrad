@@ -50,6 +50,7 @@ class ScheduleContext:
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
+  if buf.op is Ops.BUFFER: return buf
   # shapeless op is passthrough
   # realized is passthrough
   if buf.st is None or buf.base.is_realized: return buf
@@ -424,7 +425,7 @@ def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None:
   if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.realizes.update([(b, to_store)])
 
 def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
-  if src.st is None: return None
+  if src.st is None or src.op is Ops.BUFFER: return None
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):

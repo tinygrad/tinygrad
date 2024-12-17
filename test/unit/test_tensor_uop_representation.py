@@ -7,7 +7,8 @@ def is_pattern(ten:Tensor, pat:UPat): assert pat.match(ten.lazydata, {})
 
 class TestTensorUopRepresentation(unittest.TestCase):
   def test_realized(self):
-    a = Tensor([1.,2,3]).realize()
+    a = Tensor([1.,2,3])
+    a.realize()
     print(a.lazydata)
     is_pattern(a, realized_pattern)
 
