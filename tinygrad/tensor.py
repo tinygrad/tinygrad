@@ -929,7 +929,8 @@ class Tensor(SimpleMathTrait):
       for t, g in zip(t0._ctx.parents, grads):
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-          assert t.lazydata in toposort_uop, "grad uop must have a path from self"
+          assert t.lazydata in toposort_uop or (isinstance(t.lazydata, MultiLazyBuffer) and all(x in toposort_uop for x in t.lazydata.lbs)), \
+            "grad uop must have a path from self"
           t.grad = g if t.grad is None else (t.grad + g)
       if not retain_graph: del t0._ctx
     return self
