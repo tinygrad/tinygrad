@@ -75,8 +75,9 @@ class ShapeTracker:
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
   def to_indexed_uops(self, _idxs:Optional[List[UOp]|Tuple[UOp, ...]]=None) -> Tuple[UOp, UOp]:
     idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
+    def overflow(u): return any((u.vmax > dtypes.max(dtypes.int32), u.vmin < dtypes.min(dtypes.int32), *(overflow(_u) for _u in u.src)))
     def upcast(u: UOp): return UOp(u.op, dtypes.int64 if u.dtype is not dtypes.bool else u.dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
-    if idx.vmax > dtypes.max(dtypes.int32): idx, valid = upcast(idx), upcast(valid)
+    if overflow(idx) or overflow(valid): idx, valid = upcast(idx), upcast(valid)
     return idx, valid
 
   def real_size(self) -> int:

@@ -723,33 +723,56 @@ class TestIndexingOverflow(unittest.TestCase):
     for u in ast.src:
       if (found:= self.find_op(u, op)) is not None: return found
 
-  def e(self, shape, dtype):
-    st = ShapeTracker.from_shape(shape).to_uop()
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
+  def e(self, st):
+    # st = ShapeTracker.from_shape(shape).to_uop()
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
-    self.render_src(indexed)
-    assert indexed.src[0].src[1].dtype is dtype
-  def r(self, shape, dtype):
-    st1 = ShapeTracker.from_shape(shape).to_uop()
-    load = UOp(Ops.LOAD, dtypes.float, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st1))
+    return indexed
+  def r(self, st):
+    load = UOp(Ops.LOAD, dtypes.float, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st.to_uop()))
     reduced = UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(load,))
     indexed = rewrite_shapetracker_with_index(reduced, self.renderer)
-    self.render_src(indexed)
-    index_op = self.find_op(indexed, Ops.INDEX)
+    return indexed
+
+  def assert_dtype(self, shape, dtype, offset=0):
+    st = ShapeTracker((View.create(shape=shape, offset=offset),))
+    elementwise_ast = self.e(st)
+    assert elementwise_ast.src[0].src[1].dtype is dtype
+
+    reduced_ast = self.r(st)
+    index_op = self.find_op(reduced_ast, Ops.INDEX)
     assert index_op.src[1].dtype == dtype
+    self.render_src(reduced_ast)
 
-  def assert_dtype(self, shape, dtype):
-    self.e(shape, dtype)
-    self.r(shape, dtype)
+  # total 2**31: Use three dims so it doesn't exceed block limit
+  # Symbolic has to subtract by 1 because var is inclusive
+  def test_int32(self):
+    dim1, dim2, dim3 = 2 ** 12, 2 ** 12, 2 ** 7
+    self.assert_dtype((dim1, dim2, dim3), dtypes.int)
+    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int)
+  def test_overflow(self):
+    dim1, dim2, dim3 = 2**12, 2**12, 2**7+1
+    self.assert_dtype((dim1, dim2, dim3), dtypes.long)
+    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.long)
 
-  def test_int32(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int) # total 2**31: Use three dims so it doesn't exceed block limit
-  def test_overflow(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long)
+  # Negative index will be handled separately by mask (`valid`), but still need to check negative overflow
+  def test_int32_neg_lower_bound(self):
+    dim1, dim2, offset = 2, 3, -2**31
+    self.assert_dtype((dim1, dim2), dtypes.int, offset=offset)
+    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1)), dtypes.int, offset=offset)
 
-  def test_symbolic_int32(self):
-    # subtract 1 because Var is inclusive
-    self.assert_dtype((UOp.variable("dim1", 10, 2 ** 12 - 1), UOp.variable("dim2", 10, 2 ** 12 - 1), 2 ** 7), dtypes.int)
-  def test_symbolic_overflow(self):
-    self.assert_dtype((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7 + 1), dtypes.long)
+  def test_overflow_neg_lower_bound(self):
+    dim1, dim2, offset = 2, 3, -2**31-1
+    self.assert_dtype((2, 3), dtypes.long, offset=-2**31-1)
+    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), 2 ** 7), dtypes.long, offset=offset)
+
+  # The offset will bring final value within int32, but the calculation has to be done on int64
+  # ((gidx0+((gidx1*129)+(gidx2*528384)))+-1073741824) where gidx.max = 128, gidx1.max = 4095, gidx2.max = 4095.
+  # Intermediate sum is 2147487743, bigger than 2**31 (2147483647)
+  def test_overflow_neg_offset_upper_bound(self):
+    dim1, dim2, dim3 = 2**12, 2**12, 2**7+1
+    self.assert_dtype((dim1, dim2, dim3), dtypes.long, offset=-2**30)
+    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.long, offset=-2**30)
 
   def test_overflow_masked(self):
     shape = (2 ** 12, 2 ** 12, 2 ** 7 + 1,)
@@ -760,6 +783,10 @@ class TestIndexingOverflow(unittest.TestCase):
     self.render_src(indexed)
     assert all(u.dtype is dtypes.long for u in self.find_op(indexed, Ops.CMPLT).src)
 
+  @unittest.skipUnless(Device.DEFAULT=="WEBGPU", "WEBGPU does not supported int64")
+  def test_int64_unsupported(self):
+    with self.assertRaises(AssertionError):
+      self.test_overflow()
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
