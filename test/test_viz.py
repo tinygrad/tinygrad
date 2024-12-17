@@ -1,7 +1,8 @@
 from typing import Dict, List, Optional
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, contexts, track_rewrites
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites
+from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
 @track_rewrites(named=True)
@@ -10,14 +11,15 @@ def rewrite(sink:UOp, pm:PatternMatcher, **kwargs): return graph_rewrite(sink, p
 def helper_test_viz(sink:UOp, pm:PatternMatcher, **kwargs) -> List[UOp]:
   rewrite(sink, pm, **kwargs)
   assert len(contexts) == 1
-  assert len(contexts[0][1]) == 1
-  k = get_metadata(contexts)[0][0]
+  assert len(contexts[0]) == 1
+  k = get_metadata(keys, contexts)[0][0]
   g = get_details(*k)
   return g.graphs[1:]
 
 class TestViz(unittest.TestCase):
   def setUp(self):
     contexts.clear()
+    keys.clear()
     self.tms = TRACK_MATCH_STATS.value
     TRACK_MATCH_STATS.value = 2
   def tearDown(self): TRACK_MATCH_STATS.value = self.tms
@@ -63,7 +65,7 @@ class TestViz(unittest.TestCase):
     ld = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
     do_rewrite(ld*1)
     do_rewrite(ld*2)
-    ret = get_metadata(contexts)
+    ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 2)
     key, _, m = ret[0][0]
     self.assertEqual(key, "do_rewrite_1")
@@ -80,7 +82,7 @@ class TestViz(unittest.TestCase):
       raise Exception("test")
     ld = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
     with self.assertRaises(Exception): do_rewrite(ld*1)
-    ret = get_metadata(contexts)
+    ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
 
   def test_fold_const(self):
