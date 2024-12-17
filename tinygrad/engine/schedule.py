@@ -96,31 +96,18 @@ def reduceop_view_right(r:UOp, v:UOp, src:UOp) -> UOp:
   output_shape = swizzle_st.reduce(r.axis_arg)
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
 
-
-def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-  if not (swizzles := [x for x in root.src if x.base is not x]): return None
-  assert all_same([(x.shape, prod(x.src[0].shape)) for x in swizzles]), f"swizzles must have the same size {swizzles}"
-  new_st, new_input_st = unwrap(swizzles[0].st), unwrap(swizzles[0].src[0].st)
-  if new_st.shape == new_input_st.shape: new_input_st = new_st
-  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
-  # update the ASSIGN offset to match the new shape
-  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
-  return ret if ret.op is Ops.STORE else ret.view(new_st)
-
 def elementwise_view_right(root:UOp) -> Optional[UOp]:
   if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
   assert all(x.base.st is not None for x in swizzles), f"found shapeless VIEW src in {root}"
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # push the swizzle from src to root
   output_swizzle = swizzles[0]
-  new_st = unwrap(output_swizzle.st) if output_swizzle.shape == output_swizzle.base.shape else ShapeTracker.from_shape(output_swizzle.shape)
-  new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
-  # if output_swizzle.shape == output_swizzle.base.shape: new_input_st = output_swizzle.st
+  new_st, new_input_st = ShapeTracker.from_shape(output_swizzle.shape), ShapeTracker.from_shape(output_swizzle.base.shape)
+  if new_st.shape == new_input_st.shape: new_st = new_input_st = unwrap(output_swizzle.st)
   ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # update the ASSIGN offset to match the new shape
   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
   return ret if ret.op is Ops.STORE else ret.view(new_st)
-
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
