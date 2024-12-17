@@ -23,7 +23,7 @@ class GraphRewriteMetadata:
   """File_path, Lineno"""
   code_line: str
   """The Python line calling graph_rewrite"""
-  kernel_name: Optional[str]
+  kernel_name: str
   """The kernel calling graph_rewrite"""
   upats: List[Tuple[Tuple[str, int], str, float]]
   """List of all the applied UPats"""
@@ -47,14 +47,13 @@ def pcall(fxn, *args, **kwargs):
   except Exception as e: return f"ERROR: {e}"
 
 def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
-  kernels: Dict[Optional[str], List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
+  kernels: Dict[str, List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
   for k,ctxs in contexts:
-    name = to_function_name(k.name) if isinstance(k, Kernel) else k
+    name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
       if ctx.sink.op is Ops.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
-      if name not in kernels: kernels[name] = []
-      kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
+      kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
