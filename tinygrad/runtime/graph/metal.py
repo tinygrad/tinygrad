@@ -90,7 +90,7 @@ class MetalGraph(GraphRunner):
 
     msg(encoder, "executeCommandsInBuffer:withRange:", self.icb, self.range)
     msg(encoder, "endEncoding")
-    msg(command_buffer, "setLabel:", to_ns_str("graph"))
+    msg(command_buffer, "setLabel:", to_ns_str(f"batched {len(self.jit_cache)}"))
     msg(command_buffer, "commit")
     self.command_buffer = command_buffer
 
