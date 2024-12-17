@@ -64,7 +64,11 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
     dtype = buf.dtype.base
   # meta ops and assign already have a target buffer, otherwise we create a new one
   buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, Ops.VIEW} else UOp.new_buffer(buf.device, buf.size, dtype)
-  if buf.op is Ops.VIEW: op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
+  if buf.op is Ops.VIEW:
+    if len(buf.src) == 1:
+      assert buf.src[0].op is Ops.CONST
+      return buf
+    op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
   else: op = buf.replace(dtype=dtype.base, src=tuple(to_uop(x, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this op
   ctx.tensor_uops[buf_uop] = [buf]
@@ -424,7 +428,7 @@ def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None:
   if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.realizes.update([(b, to_store)])
 
 def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
-  if src.st is None: return None
+  if src.st is None or src.op is Ops.BUFFER: return None
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):

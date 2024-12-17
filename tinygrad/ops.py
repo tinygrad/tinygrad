@@ -278,22 +278,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    # VIEW just returns the shapetracker. is this right? what if there's shapetrackers before it?
     if self.op is Ops.VIEW: return self.arg
-
-    # the BUFFER is a flat view of the size, the CONST is ()
-    if self.op is Ops.BUFFER: return ShapeTracker.from_shape((self.arg[-1],))
-    if self.op is Ops.CONST: return ShapeTracker.from_shape(())
-
-    # movement ops are applied to the parent
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
-
     # buffer ops can have a non contiguous shapetracker
     if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
     if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     # all other ops have a contiguous shapetracker
+    from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
@@ -302,7 +294,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return unwrap(self.st).size
+  def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -489,7 +481,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op not in {Ops.BUFFER, Ops.CONST} else self
   def view(self, new_st:ShapeTracker) -> UOp:
     if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
@@ -526,7 +518,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
-    if self.op is Ops.BUFFER: return self
+    if self.op in {Ops.BUFFER, Ops.CONST}: return self
     assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
     return self.src[0].buf_uop
   def buf_uop_view(self) -> UOp: return self.buf_uop.view(unwrap(self.st))
