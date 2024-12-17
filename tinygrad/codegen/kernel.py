@@ -594,7 +594,8 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          wd, tcd, tcd_reduce_len, tcd_upcast_len = self.global_dims, self.first_upcast, len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
+          wd, tcd = self.global_dims, self.first_upcast
+          tcd_reduce_len, tcd_upcast_len = len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
           def get_upcast_axes(buf): return tuple((tcd+tcd_reduce_len+tcd_upcast_len - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
           def get_tc_swizzle_st(shape, wd_pattern, tcd_pattern):
             offset = (tcd - (wd + len(wd_pattern)))
@@ -615,7 +616,7 @@ class Kernel:
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
-          tc_reduce_axes = tuple(ax for ax, _ in tc.get_reduce_axes(self.first_upcast))
+          tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
             tc_upcast_axes= (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)

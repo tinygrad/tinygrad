@@ -14,7 +14,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dtype_out: DType # dtype for C and D
   swizzle: Tuple[Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]], ...] = (None, None, None) # swizzle patterns to fix shapetrackers
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
-  def get_reduce_axes(self, offset = 0): return [(i + offset, 2) for i in range(int(math.log2(self.dims[2])))]
+  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self):
     tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
     return tcd_axes[int(math.log2(self.threads)):]
