@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, pathlib, struct, ctypes, tempfile, functools, decimal, time
+import os, pathlib, struct, ctypes, tempfile, functools, decimal
 from typing import List, Any, Union, Tuple, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
