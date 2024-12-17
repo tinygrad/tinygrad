@@ -83,7 +83,6 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   replaces: Dict[UOp, UOp] = {}
   sink = g.graphs[0]
   for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
-    if ctx.bottom_up: replaces = {} # if it's bottom_up it's single pass
     u0, u1 = pickle.loads(u0_b), None if u1_b is None else pickle.loads(u1_b)
     replaces[u0] = u0 if u1 is None else u1
     # if the match didn't result in a rewrite we move forward
