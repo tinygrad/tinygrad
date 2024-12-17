@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Callable, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -18,12 +18,12 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB"
 
 @dataclass
 class GraphRewriteMetadata:
-  """Specifies metadata about a single call to graph_rewrite"""
+  """Overview of a tracked rewrite to viz the sidebar"""
   loc: Tuple[str, int]
   """File_path, Lineno"""
   code_line: str
   """The Python line calling graph_rewrite"""
-  kernel_name: Optional[str]
+  kernel_name: str
   """The kernel calling graph_rewrite"""
   upats: List[Tuple[Tuple[str, int], str, float]]
   """List of all the applied UPats"""
@@ -42,19 +42,19 @@ class GraphRewriteDetails(GraphRewriteMetadata):
 
 # ** API functions
 
-def pcall(fxn, *args, **kwargs):
+# NOTE: if any extra rendering in VIZ fails, we don't crash
+def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
 def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
-  kernels: Dict[Optional[str], List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
+  kernels: Dict[str, List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
   for k,ctxs in contexts:
-    name = to_function_name(k.name) if isinstance(k, Kernel) else k
+    name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
-      if ctx.sink.op is Ops.CONST: continue
+      if pickle.loads(ctx.sink).op is Ops.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
-      if name not in kernels: kernels[name] = []
-      kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
+      kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
@@ -76,18 +76,19 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   replaces[base] = ret
   return ret
 @functools.lru_cache(None)
-def _prg(k:Optional[Kernel]) -> Optional[str]:
-  try: return k.to_program().src if isinstance(k, Kernel) else None
-  except Exception: return None
+def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=pcall(_prg, k))
+  g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
+                          kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
   replaces: Dict[UOp, UOp] = {}
-  sink = ctx.sink
-  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
-    if ctx.bottom_up: replaces = {} # if it's bottom_up it's single pass
-    replaces[u0] = u0 if u1 is None else u1
+  sink = g.graphs[0]
+  for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
+    u0 = pickle.loads(u0_b)
     # if the match didn't result in a rewrite we move forward
-    if u1 is None: continue
+    if u1_b is None:
+      replaces[u0] = u0
+      continue
+    replaces[u0] = u1 = pickle.loads(u1_b)
     # first, rewrite this UOp with the current rewrite + all the matches in replaces
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check

@@ -91,10 +91,11 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   return apply_swizzle(src.view(new_input_st)).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
-def push_swizzle_down_through_reduce(r:UOp, v:UOp, src:UOp) -> UOp:
+def reduceop_view_right(r:UOp, v:UOp, src:UOp) -> UOp:
   if not (swizzle_st:=unwrap(v.st)).contiguous or v.size != src.size: raise AssertionError(f"can't push {v} down through {src}")
   output_shape = swizzle_st.reduce(r.axis_arg)
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
+
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   if not (swizzles := [x for x in root.src if x.base is not x]): return None
@@ -106,14 +107,30 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
   return ret if ret.op is Ops.STORE else ret.view(new_st)
 
+def elementwise_view_right(root:UOp) -> Optional[UOp]:
+  if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
+  assert all(x.base.st is not None for x in swizzles), f"found shapeless VIEW src in {root}"
+  assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
+  # push the swizzle from src to root
+  output_swizzle = swizzles[0]
+  new_st = unwrap(output_swizzle.st) if output_swizzle.shape == output_swizzle.base.shape else ShapeTracker.from_shape(output_swizzle.shape)
+  new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
+  # if output_swizzle.shape == output_swizzle.base.shape: new_input_st = output_swizzle.st
+  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
+  # update the ASSIGN offset to match the new shape
+  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
+  return ret if ret.op is Ops.STORE else ret.view(new_st)
+
+
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
   assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.src[0].toposort), "can't merge more than two reduceops at a time"
   return first_reduce.src[0].r(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg)
 
+# ALU(src.view()) -> ALU(src).view()
 # push VIEW(s) down to STORE, through an elementwise op
 view_right_elementwise = merge_views+PatternMatcher([
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), elementwise_view_right),
 ])
 
 # push VIEW to stores
@@ -121,10 +138,11 @@ view_right = view_right_elementwise+PatternMatcher([
   # ASSIGN with offset swizzles STORE
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
    lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)).view(a.arg))),
-  # non contiguous VIEW on a reduce creates a new VIEW
+  # REDUCE(src.view(contiguous=False)) -> REDUCE(src.view(contiguous=True)).view()
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
-  # push a VIEW down to STORE, through a reduce (ONLY reshapes)
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), push_swizzle_down_through_reduce),
+  # REDUCE(src.view()) -> REDUCE(src).view()
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), reduceop_view_right),
+  # double reduce op collapses to a single reduce op
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
@@ -384,7 +402,7 @@ ops_folding = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
   # no COPY to same device, except clone (arg is True)
   (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
-   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg is not True else None),
+   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg[1] is not True else None),
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),

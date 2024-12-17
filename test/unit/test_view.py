@@ -73,5 +73,57 @@ class TestMergeDims(unittest.TestCase):
     # print(f"{ShapeTracker.from_shape((2, 1, 1)).pad(((0, 0), (0, 1), (0, 1))).views[-1]}")
     self.assertEqual(merge_dims((2, 2, 2), (1, 0, 0), ((0, 2), (0, 2), (0, 1))), ((2, 1, 2), (4, 0, 4)))
 
+class TestMergeViews(unittest.TestCase):
+  def test_with_mask_0(self):
+    # from test/test_ops.py::TestOps::test_pad_reflect_mode
+    v0 = View(shape=(1, 1, 5, 8), strides=(0, 0, 5, 1), offset=-3, mask=((0, 1), (0, 1), (0, 5), (3, 8)), contiguous=False)
+    v1 = View(shape=(1, 1, 2, 2), strides=(0, 0, 8, 1), offset=3, mask=None, contiguous=False)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(1, 1, 2, 2), strides=(0, 0, 5, 1), offset=0, mask=None, contiguous=False))
+
+  def test_with_mask_1(self):
+    # from test/test_ops.py::TestOps::test_pad_reflect_mode
+    v0 = View(shape=(3, 3, 5, 3), strides=(27, 9, 3, 1), offset=-6, mask=((0, 3), (0, 3), (2, 4), (1, 3)), contiguous=False)
+    v1 = View(shape=(3, 3, 2, 2), strides=(45, 15, 3, 1), offset=7, mask=None, contiguous=False)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(3, 3, 2, 2), strides=(27, 9, 3, 1), offset=1, mask=None, contiguous=False))
+
+  def test_with_mask_2(self):
+    # from test/test_ops.py::TestOps::test_pad_reflect_mode
+    v0 = View(shape=(3, 3, 5, 3), strides=(27, 9, -3, 1), offset=6, mask=((0, 3), (0, 3), (0, 2), (0, 2)), contiguous=False)
+    v1 = View(shape=(3, 3, 2, 2), strides=(45, 15, -3, 1), offset=3, mask=None, contiguous=False)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(3, 3, 2, 2), strides=(27, 9, 3, 1), offset=3, mask=None, contiguous=False))
+
+  def test_with_mask_3(self):
+    # from test/test_ops.py::TestOps::test_pad_reflect_mode
+    # has a mask in the final view
+    v0 = View(shape=(3, 3, 4, 4), strides=(27, 9, 3, 1), offset=-5, mask=((0, 3), (0, 3), (2, 4), (0, 2)), contiguous=False)
+    v1 = View(shape=(3, 3, 4, 2), strides=(48, 16, 4, 1), offset=0, mask=None, contiguous=False)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(3, 3, 4, 2), strides=(27, 9, 3, 1), offset=-5, mask=((0, 3), (0, 3), (2, 4), (0, 2)), contiguous=False))
+
+  def test_with_mask_4(self):
+    # from test/test_ops.py::TestOps::test_pad_reflect_mode
+    # has a mask in the final view
+    v0 = View(shape=(3, 3, 5, 3), strides=(27, 9, -3, 1), offset=6, mask=((0, 3), (0, 3), (0, 2), (1, 3)), contiguous=False)
+    v1 = View(shape=(3, 3, 3, 3), strides=(45, 15, 3, 1), offset=6, mask=None, contiguous=False)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(3, 3, 3, 3), strides=(0, 0, 0, 0), offset=0, mask=((0, 0), (0, 0), (0, 0), (0, 0)), contiguous=False))
+
+  def test_with_mask_5(self):
+    # from test/test_ops.py::TestOps::test_pad_reflect_mode
+    # has a mask in the final view
+    v0 = View(shape=(1, 1, 6, 5), strides=(0, 0, 5, 1), offset=-5, mask=((0, 1), (0, 1), (1, 6), (0, 5)), contiguous=False)
+    v1 = View(shape=(1, 1, 6, 3), strides=(0, 0, 5, -1), offset=3, mask=None, contiguous=False)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(1, 1, 6, 3), strides=(0, 0, 5, -1), offset=-2, mask=((0, 1), (0, 1), (1, 6), (0, 3)), contiguous=False))
+
 if __name__ == '__main__':
   unittest.main()
