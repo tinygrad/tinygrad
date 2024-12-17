@@ -299,13 +299,13 @@ class Kernel:
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
         if tensor_core_opts[0] is None: continue
-        # tensor core -- unroll the reduce dim, upcast input and local the correct thread pattern
         self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
         # attempt to pad the tensor axes that require it
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
+        # tensor core -- unroll the reduce dim, upcast input and local the thread pattern
         for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
         for dim, amt in tc.get_upcast_axes(): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False)
         for dim, amt in tc.get_local_axes(): self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
