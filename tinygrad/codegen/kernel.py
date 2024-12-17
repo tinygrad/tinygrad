@@ -596,22 +596,22 @@ class Kernel:
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           wd, tcd, tcd_reduce, tcd_upcast = self.global_dims, self.first_upcast, len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
           def get_upcast_axes(buf): return tuple((tcd+tcd_reduce+tcd_upcast - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
-          def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
+          def get_tc_swizzle_st(shape, wd_pattern, tcd_pattern):
             offset = (tcd - (wd + len(wd_pattern)))
             permaxis = list(range(wd)) \
               + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) \
-              + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(st.shape)))
-            return ShapeTracker.from_shape(st.shape).permute(tuple(permaxis))
+              + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(shape)))
+            return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-            if swizzle: srcs[i] = apply_swizzle(src.view(fix_st(src.st_arg if src.op is Ops.LOAD else src.src[0].st_arg, *swizzle)))
+            if swizzle: srcs[i] = apply_swizzle(src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle)))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in. ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
-              if swizzle: store_st = fix_st(store_st, *swizzle)
+              if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
@@ -629,7 +629,7 @@ class Kernel:
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
-          return ret.view(fix_st(unwrap(ret.st), *tc.swizzle[2])) if self.use_tensor_cores == 1 and tc.swizzle[2] else ret
+          return ret.view(get_tc_swizzle_st(unwrap(ret.st).shape, *tc.swizzle[2])) if self.use_tensor_cores == 1 and tc.swizzle[2] else ret
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
