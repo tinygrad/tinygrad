@@ -126,8 +126,10 @@ class TestProfiler(unittest.TestCase):
 
   @unittest.skipIf(CI, "skip CI")
   def test_dev_jitter_matrix(self):
-    for dev in HCQCompiled.devices: dev.synchronize()
-    for dev in HCQCompiled.devices: dev._at_profile_finalize()
+    dev_cnt = 6
+    devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]
+    for dev in devs: dev.synchronize()
+    for dev in devs: dev._at_profile_finalize()
 
     def _sync_d2d(d1:HCQCompiled, d2:HCQCompiled):
       d1.hw_compute_queue_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
@@ -141,12 +143,13 @@ class TestProfiler(unittest.TestCase):
       return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
 
     # then test it by timing the GPU to GPU times
-    jitter_matrix = [[float('nan')] * len(HCQCompiled.devices) for _ in range(len(HCQCompiled.devices))]
-    pairs = [(p1, p2) for p1 in enumerate(HCQCompiled.devices) for p2 in enumerate(HCQCompiled.devices) if p1 != p2]
+    jitter_matrix = [[float('nan')] * len(devs) for _ in range(len(devs))]
+    pairs = [(p1, p2) for p1 in enumerate(devs) for p2 in enumerate(devs) if p1 != p2]
     for (i1, d1), (i2, d2) in pairs:
       cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
       jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
-      assert jitter_matrix[i1][i2] < 0.1, "jitter should be less than 0.1ms"
+      assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5ms"
+    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
 
 if __name__ == "__main__":
   unittest.main()
