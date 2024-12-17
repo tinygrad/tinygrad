@@ -2,8 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Dict, Tuple, Any, Iterator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re
-from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle
+from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, buffers
@@ -13,6 +13,7 @@ from tinygrad.ops import UOp, buffers
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+    self._opened_devices = set()
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
@@ -26,6 +27,7 @@ class _Device:
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) \
            if (cname.lower() == x.lower() + "device")][0](ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
+    self._opened_devices.add(ix)
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
@@ -41,6 +43,22 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
+
+# **************** Profile ****************
+
+class ProfileEvent: pass
+
+@dataclass(frozen=True)
+class ProfileDeviceEvent(ProfileEvent): device:str; comp_tdiff:decimal.Decimal=0; copy_tdiff:decimal.Decimal=0 # noqa: E702
+
+@dataclass(frozen=True)
+class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:int; en:int; is_copy:bool # noqa: E702
+
+@dataclass(frozen=True)
+class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
+
+@dataclass(frozen=True)
+class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[int] # noqa: E702
 
 # **************** Buffer + Allocators ****************
 
@@ -202,6 +220,8 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 class Compiled:
+  profile_events:List[ProfileEvent] = []
+
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
     self.renderer = renderer or Renderer()
@@ -210,6 +230,11 @@ class Compiled:
     Synchronize all pending operations on the device.
 
     This method ensures that all previously queued operations on the device have been completed before proceeding.
+    """
+    # override this in your device implementation
+  def _at_profile_finalize(self):
+    """
+    Called at the end of profiling to allow the device to finalize any profiling.
     """
     # override this in your device implementation
 
@@ -232,3 +257,15 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
+
+if PROFILE:
+  @atexit.register
+  def finlize_profile():
+    devs = [Device[d] for d in Device._opened_devices]
+    for dev in devs: dev.synchronize()
+    for dev in devs: dev._at_profile_finalize()
+
+    with open(temp("profile.pkl"), "wb") as f: pickle.dump(Compiled.profile_events, f)
+
+    from tinygrad.ops import launch_viz
+    launch_viz(profile=temp("profile.pkl"))

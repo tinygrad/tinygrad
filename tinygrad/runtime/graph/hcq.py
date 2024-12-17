@@ -2,7 +2,7 @@ import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
-from tinygrad.device import Buffer, BufferSpec, Compiled, Device
+from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
@@ -51,8 +51,11 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value: int = 0
     self.kickoff_var = UOp.variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
+    # When profiling allocate 2 signals for each jit item to measure speed. The jth jit item have signals at 2*j and 2*j+1.
+    # TODO: This logic might allocate a few extra signals...
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(jit_cache) * 2)] if PROFILE else []
-    self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
+    self.prog_graph_deps: List[List[int]] = []
+    self.prof_graph_entries: List[ProfileGraphEntry] = []
 
     last_j: Dict[HWQueue, Optional[int]] = collections.defaultdict(lambda: None)
     queue_access: Dict[HWQueue, Dict[HWQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
@@ -102,17 +105,19 @@ class HCQGraph(MultiGraphRunner):
 
       # Collect profile information if profiling is enabled.
       if PROFILE:
+        # When execution are chained, we can reuse the end timestamp from the previous command as the start timestamp for the current command.
+        sig_st = prev_ji * 2 + 1 if len(opt_deps) == 0 and (prev_ji:=last_j[enqueue_queue]) is not None else j * 2
+
+        # Description based on the command.
         prof_ji_desc = ji.prg._prg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
 
-        sig_st, sig_en = (j * 2, True), (j * 2 + 1, True)
-        if len(opt_deps) == 0 and (prev_ji:=last_j[enqueue_queue]) is not None: sig_st = (prev_ji * 2 + 1, False)
-
-        if is_exec_prg: prof_args = None
-        else: prof_args = {"Size": memsize_to_str(ji.bufs[0].nbytes), "GB/S": lambda dur, b=ji.bufs[0].nbytes: f"{b/1e3/dur:.2f}"} # type: ignore
-
-        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps], prof_args))
+        self.prof_graph_entries.append(ProfileGraphEntry(enqueue_dev.device, prof_ji_desc, sig_st, j * 2 + 1, is_copy=not is_exec_prg))
+        self.prog_graph_deps.append([d - 1 for _, d in rdeps])
 
       last_j[enqueue_queue] = j
+
+    # Check which signals are used in the profile graph.
+    self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(self.prof_signals))]
 
     # Build hardware queues.
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
@@ -132,7 +137,7 @@ class HCQGraph(MultiGraphRunner):
       for sig, val in sync_signals + deps: enqueue_queue.wait(sig, val)
 
       # Encode waits and start profile timestamp (if needed).
-      if PROFILE and self.prof_records[j][0][1]: enqueue_queue.timestamp(self.prof_signals[self.prof_records[j][0][0]])
+      if PROFILE and self.prof_signal_is_used[j * 2]: enqueue_queue.timestamp(self.prof_signals[j * 2])
 
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
@@ -145,7 +150,7 @@ class HCQGraph(MultiGraphRunner):
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
 
       # Encode finish profile timestamp (if needed).
-      if PROFILE and self.prof_records[j][1][1]: enqueue_queue.timestamp(self.prof_signals[self.prof_records[j][1][0]])
+      if PROFILE and self.prof_signal_is_used[j * 2 + 1]: enqueue_queue.timestamp(self.prof_signals[j * 2 + 1])
 
       if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
@@ -189,14 +194,8 @@ class HCQGraph(MultiGraphRunner):
     return None
 
   def collect_timestamps(self):
-    timestamps = [s.timestamp for s in self.prof_signals]
-
-    for (st,_), (en,_), dev, desc, is_cp, deps, args in self.prof_records:
-      dev.raw_prof_records += [(timestamps[st], timestamps[en], desc, is_cp, args)]
-
-      for x in deps:
-        (b_st,_), (b_en,_), b_dev, _, b_is_cp, _, _ = self.prof_records[x]
-        dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
+    # NOTE: Append to any device is fine...
+    self.devices[0].profile_events += [ProfileGraphEvent(self.prof_graph_entries, self.prog_graph_deps, [s.timestamp for s in self.prof_signals])]
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])

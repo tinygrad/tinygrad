@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -48,7 +49,7 @@ def pcall(fxn, *args, **kwargs):
 
 def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
   kernels: Dict[Optional[str], List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
-  for k,ctxs in contexts:
+  for k,ctxs in tqdm(contexts, desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else k
     for ctx in ctxs:
       if ctx.sink.op is Ops.CONST: continue
@@ -98,6 +99,35 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
     g.graphs.append(sink:=new_sink)
   return g
 
+# Profiler API
+devices = {}
+def prep_ts(device:str, ts:int, is_copy): return int(ts + devices[device][is_copy])
+def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
+def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
+  devices[ev.device] = (ev.comp_tdiff, ev.copy_tdiff, len(devices))
+  return [{"name": "process_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "args": {"name": ev.device}},
+          {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 0, "args": {"name": "COMPUTE"}},
+          {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 1, "args": {"name": "COPY"}}]
+def range_ev_to_perfetto_json(ev:ProfileRangeEvent):
+  return [{"name": ev.name, "ph": "X", "ts": prep_ts(ev.device, ev.st, ev.is_copy), "dur": int(ev.en-ev.st), **dev_to_pid(ev.device, ev.is_copy)}]
+def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
+  ret = []
+  for i,e in enumerate(ev.ents):
+    st, en = ev.sigs[e.st_id], ev.sigs[e.en_id]
+    ret += [{"name": e.name, "ph": "X", "ts": prep_ts(e.device, st, e.is_copy), "dur": int(en-st), **dev_to_pid(e.device, e.is_copy)}]
+    for dep in ev.deps[i]:
+      d = ev.ents[dep]
+      ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
+      ret += [{"ph": "f", **dev_to_pid(e.device, e.is_copy), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st, e.is_copy), "bp": "e"}]
+  return ret
+def to_perfetto(profile:List[ProfileEvent]):
+  # Start json with devices.
+  prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
+  for ev in tqdm(profile, desc="preparing profile"):
+    if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
+    elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
+  return json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
+
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
@@ -106,6 +136,8 @@ class Handler(BaseHTTPRequestHandler):
 
     if (url:=urlparse(self.path)).path == "/":
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
+    elif (url:=urlparse(self.path)).path == "/profiler":
+      with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
     elif self.path.startswith("/assets/") and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
@@ -119,6 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
+    elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
     else: status_code = 404
 
     # send response
@@ -138,7 +171,16 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
+def load_pickle(path:str):
+  if path is None or not os.path.exists(path): return None
+  with open(path, "rb") as f: return pickle.load(f)
+
 if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--kernels', type=str, help='Path to kernels', default=None)
+  parser.add_argument('--profile', type=str, help='Path profile', default=None)
+  args = parser.parse_args()
+
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
       raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
@@ -146,19 +188,23 @@ if __name__ == "__main__":
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   st = time.perf_counter()
   print("*** viz is starting")
-  with open(sys.argv[1], "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
-  print("*** unpickled saved rewrites")
-  kernels = get_metadata(contexts)
+
+  contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
+
+  kernels = get_metadata(contexts) if contexts is not None else []
   if getenv("FUZZ_VIZ"):
     ret = [get_details(*args) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
-  print("*** loaded kernels")
+
+  perfetto_profile = to_perfetto(profile) if profile is not None else None
+  # print({"traceEvents": [[{"name": "process_name", "ph": "M", "pid": 0, "args": {"name": "NV"}}, {"name": "thread_name", "ph": "M", "pid": 0, "tid": 0, "args": {"name": "COMPUTE"}}, {"name": "thread_name", "ph": "M", "pid": 0, "tid": 1, "args": {"name": "COPY"}}], {"name": "CPU -> NV", "ph": "X", "ts": 504360797118, "dur": 92, "pid": 0, "tid": 1}, {"name": "CPU -> NV", "ph": "X", "ts": 504360797526, "dur": 43, "pid": 0, "tid": 1}, {"name": "E_3", "ph": "X", "ts": 504360821639, "dur": 1, "pid": 0, "tid": 0}, {"name": "NV -> CPU", "ph": "X", "ts": 504360822917, "dur": 47, "pid": 0, "tid": 1}]})
+
   server = HTTPServer(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
-  if getenv("BROWSER", 0): webbrowser.open(f"{HOST}:{PORT}")
+  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}{'/profiler' if contexts is None else ''}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")

@@ -300,8 +300,6 @@ class TestHCQ(unittest.TestCase):
 
   # Test profile api
   def test_speed_exec_time(self):
-    TestHCQ.d0._prof_setup()
-
     sig_st, sig_en = TestHCQ.d0.signal_t(), TestHCQ.d0.signal_t()
     TestHCQ.d0.hw_compute_queue_t().timestamp(sig_st) \
                                    .exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
@@ -311,15 +309,13 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
+    et = sig_en.timestamp - sig_st.timestamp
 
     print(f"exec kernel time: {et:.2f} us")
     assert 0.1 <= et <= (7000 if CI else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
-
-    TestHCQ.d0._prof_setup()
 
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
     SZ = 200_000_000
@@ -335,7 +331,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
+    et = sig_en.timestamp - sig_st.timestamp
     et_ms = et / 1e3
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
@@ -347,8 +343,6 @@ class TestHCQ(unittest.TestCase):
 
     try: _ = Device[f"{Device.DEFAULT}:1"]
     except Exception: self.skipTest("no multidevice, test skipped")
-
-    TestHCQ.d0._prof_setup()
 
     SZ = 200_000_000
     b = Buffer(f"{Device.DEFAULT}:1", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
@@ -364,7 +358,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
+    et = sig_en.timestamp - sig_st.timestamp
     et_ms = et / 1e3
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
