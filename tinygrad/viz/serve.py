@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
-from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
+from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
@@ -47,9 +47,9 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
-def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
-  kernels: Dict[str, List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
-  for k,ctxs in contexts:
+def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> List[List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
+  kernels: Dict[str, List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
+  for k,ctxs in zip(keys, contexts):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
       if pickle.loads(ctx.sink).op is Ops.CONST: continue
@@ -77,7 +77,7 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   return ret
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
-def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
+def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
                           kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
   replaces: Dict[UOp, UOp] = {}
@@ -147,9 +147,9 @@ if __name__ == "__main__":
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   st = time.perf_counter()
   print("*** viz is starting")
-  with open(sys.argv[1], "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
+  with open(sys.argv[1], "rb") as f: contexts: Tuple[List[Any], List[List[TrackedGraphRewrite]]] = pickle.load(f)
   print("*** unpickled saved rewrites")
-  kernels = get_metadata(contexts)
+  kernels = get_metadata(*contexts)
   if getenv("FUZZ_VIZ"):
     ret = [get_details(*args) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
