@@ -322,6 +322,7 @@ def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
   indices = tuple(Tensor.arange(sh, device=x.device) for sh in x.shape[:batch_dims]) + tuple(i.squeeze(-1) for i in indices.split(1, -1))
   return x[indices]
 def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Optional[str]=None):
+  assert updates.shape == indices.shape[:-1] + x.shape[indices.shape[-1]:]
   x = x.contiguous()
   for i, u in zip(indices.split(1, 0), updates.split(1, 0)):
     i = tuple(i_.squeeze(-1) for i_ in i.squeeze(0).split(1, -1))
