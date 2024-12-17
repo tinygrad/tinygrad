@@ -103,6 +103,7 @@ def elementwise_view_right(root:UOp) -> Optional[UOp]:
   # push the swizzle from src to root
   output_swizzle = swizzles[0]
   new_st, new_input_st = ShapeTracker.from_shape(output_swizzle.shape), ShapeTracker.from_shape(output_swizzle.base.shape)
+  # push the permute from src to root if the shape is the same
   if new_st.shape == new_input_st.shape: new_st = new_input_st = unwrap(output_swizzle.st)
   ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # update the ASSIGN offset to match the new shape
