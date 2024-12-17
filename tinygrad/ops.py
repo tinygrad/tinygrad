@@ -841,24 +841,19 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedRewriteContext:
+  key: Any
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
-  sink: UOp                                                                                         # the sink passed into the rewrite
-  bottom_up: bool
-  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # all matches of sparents
-
-rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-_rewrite_cnt: Dict[str, int] = {}
+  sink: UOp                                                                                         # input sink to graph_rewrite
+  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat]]] = field(default_factory=list)            # (before, after, upat) of every match call
+tracked_calls:List[str] = []  # this tracks all the tracked function calls
+tracked_rewrites:List[List[TrackedRewriteContext]] = []  # this tracks all the graph_rewrite calls made in tracked function calls
 def track_rewrites(named=False):
   def _decorator(func):
     def __wrapper(self, *args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if named: _rewrite_cnt[func.__name__] = _rewrite_cnt.setdefault(func.__name__, 0)+1
-        rewrite_stack.append((f"{(n:=func.__name__)}_{_rewrite_cnt[n]}" if named else self, []))
-      try: ret = func(self, *args, **kwargs)
-      finally: # NOTE: save everything in the stack
-        if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
-      return ret
+        tracked_calls.append(func.__name__ if named else self)
+        tracked_rewrites.append([])
+      return func(self, *args, **kwargs)
     return __wrapper
   return _decorator
 
@@ -878,10 +873,10 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp): rewrite_stack[-1][1][-1].matches.append((uop, ret, p, et))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp): tracked_rewrites[-1][-1].matches.append((uop, ret, p))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0: rewrite_stack[-1][1][-1].matches.append((uop, ret, None, 0))
+    if TRACK_MATCH_STATS >= 2: tracked_rewrites[-1][-1].matches.append((uop, None, None))
     return None
 
 if TRACK_MATCH_STATS:
@@ -891,8 +886,8 @@ if TRACK_MATCH_STATS:
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
-        print(f"rewrote {len(contexts)} graphs and matched {sum(len(r.matches) for _,x in contexts for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump(contexts, f)
+        print(f"rewrote {len(tracked_rewrites)} graphs and matched {sum(len(r.matches) for x in tracked_rewrites for r in x)} times, saved to {fn}")
+        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_calls, tracked_rewrites), f)
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
       os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py"), temp("rewrites.pkl")])
@@ -926,8 +921,8 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
-    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
+  if TRACK_MATCH_STATS >= 2 and len(tracked_rewrites) != 0:
+    tracked_rewrites[-1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
