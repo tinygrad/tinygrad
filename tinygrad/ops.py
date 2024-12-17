@@ -507,8 +507,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str]:
     if self.op is Ops.BUFFER: return self.arg[1]
-    # TODO: why does this fail?
-    #if self.op is Ops.COPY: return self.arg[0]
+    # TODO: delete this, move everything to Ops.DEVICE (8282)
+    if self.op is Ops.COPY: return self.arg[0]
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
