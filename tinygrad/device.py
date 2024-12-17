@@ -62,7 +62,7 @@ class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:boo
 class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[decimal.Decimal] # noqa: E702
 
 @dataclass
-class ProfileResult: st:Optional[int]=None; en:Optional[int]=None; # noqa: E702
+class ProfileResult: st:Optional[int]=None; en:Optional[int]=None # noqa: E702
 
 @contextlib.contextmanager
 def cpu_profile(name, device="CPU", is_copy=False, display=False) -> Generator[ProfileResult, None, None]:
