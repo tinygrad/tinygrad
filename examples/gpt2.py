@@ -4,9 +4,10 @@ from typing import Optional, Union
 import tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable, dtypes
 from tinygrad.ops import UOp
-from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
+from tinygrad.helpers import DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
+from tinygrad.device import cpu_profile
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -182,16 +183,21 @@ class GPT2:
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-        if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-          tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-        else:
-          tokens = Tensor([x[start_pos:] for x in toks])
-        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).tolist()
+
+      with cpu_profile("model loop") as model_loop_timing:
+        with cpu_profile("model enqueue"):
+          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
+            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
+          else:
+            tokens = Tensor([x[start_pos:] for x in toks])
+          tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
+        tok = tok.tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
+      if timing: print(f"ran model in: {(model_loop_timing.en - model_loop_timing.st) * 1e-6:.2f} ms"
+                      +(f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")
+                      +(f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB")
+                      +(f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else ""))
     return [self.tokenizer.decode(x) for x in toks]
 
 # **** main code ****
