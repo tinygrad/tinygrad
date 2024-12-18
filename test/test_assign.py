@@ -171,8 +171,8 @@ class TestAssign(unittest.TestCase):
   # NOTE: this is similar to the resnet failure
   #@unittest.expectedFailure
   def test_double_assign_alt(self):
-    a = Tensor.ones(4).contiguous().realize()
-    b = Tensor([1, 2, 3, 4]).realize().lazydata
+    a = Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
+    b = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize().lazydata
     a1 = a.lazydata.assign(b)
     a2 = a.lazydata.assign(b)
     sched = create_schedule([a1, a2])

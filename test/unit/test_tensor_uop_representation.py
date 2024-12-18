@@ -3,6 +3,7 @@ from tinygrad import Tensor
 from tinygrad.ops import UPat, Ops
 
 realized_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
+const_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.CONST)))
 def is_pattern(ten:Tensor, pat:UPat): assert pat.match(ten.lazydata, {})
 
 class TestTensorUopRepresentation(unittest.TestCase):
@@ -17,6 +18,11 @@ class TestTensorUopRepresentation(unittest.TestCase):
     c = a+b
     print(c.lazydata)
     is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+
+  def test_const_pattern(self):
+    a = Tensor(1)
+    print(a.lazydata)
+    is_pattern(a, const_pattern)
 
   def test_consts_do_not_realize(self):
     a = Tensor(1)
@@ -37,7 +43,7 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # UOp(Ops.EXPAND, dtypes.float, arg=(10, 10), src=(
   #   UOp(Ops.RESHAPE, dtypes.float, arg=(1, 1), src=(
   #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(-1, 'METAL', 1), src=()),
+  #       UOp(Ops.BUFFER, dtypes.float, arg=(-1, 'METAL', 1), src=()),
   #       UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),)),)),))
   # expected:
   # UOp(Ops.EXPAND, dtypes.float, arg=(10, 10), src=(
@@ -55,14 +61,14 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # currently, COPY has an extra BUFFER on the output
   # current:
   # UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #   UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(2, 'TEST', 3), src=()),
+  #   UOp(Ops.BUFFER, dtypes.float, arg=(2, 'TEST', 3), src=()),
   #   UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(1, 'METAL', 3), src=()),)),)),))
+  #       UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),)),)),))
   # expected:
   # UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #   UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #     UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(1, 'METAL', 3), src=()),))
+  #     UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),))
   @unittest.expectedFailure
   def test_copyin(self):
     a = Tensor([1.,2,3]).realize()

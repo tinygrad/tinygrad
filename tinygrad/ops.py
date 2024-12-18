@@ -438,7 +438,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     if op is Ops.CONST:
       # NOTE: we embed device on CONST with a fake BUFFER uop
-      fake = UOp(Ops.BUFFER, dtype.ptr(), (UOp(Ops.DEVICE, arg=device),), (-1, 1))
+      fake = UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (-1, 1))
       # NOTE: BIND stays BIND, UOp.const unbinds here
       const_uop = arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))
       return UOp(Ops.VIEW, dtype, (fake, const_uop), ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
@@ -505,7 +505,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   buffer_num = itertools.count(0)
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType) -> UOp:
-    return UOp(Ops.BUFFER, dtype.ptr(), (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
+    return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
@@ -878,11 +878,11 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp):
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0:
             with Context(PICKLE_BUFFERS=0): tracked_ctxs[-1][-1].matches.append((pickle.dumps(uop), pickle.dumps(ret), p, et))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2:
+    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
       with Context(PICKLE_BUFFERS=0): tracked_ctxs[-1][-1].matches.append((pickle.dumps(uop), None, None, 0))
     return None
 
@@ -934,7 +934,7 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and not bottom_up: # TODO: make viz work with bottom_up=True
+  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
     with Context(PICKLE_BUFFERS=0):
       tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
