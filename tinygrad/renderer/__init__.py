@@ -1,8 +1,9 @@
+from __future__ import annotations
 from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools, math
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup
-from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
+from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable, ssimplify
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -21,6 +22,17 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   def get_local_axes(self):
     tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
     return tcd_axes[:int(math.log2(self.threads))]
+
+@dataclass(frozen=True)
+class Estimates:
+  # number of FLOPS used in the Kernel
+  ops:sint = 0
+  # bytes accessed in loads and stores
+  lds:sint = 0
+  # total bytes accessed, counting only once for bytes that are accessed multiple times
+  mem:sint = 0
+  def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
+  def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
 
 @dataclass
 class ProgramSpec:
@@ -55,12 +67,8 @@ class ProgramSpec:
       self.outs = sorted(dedup(self.outs))
       self._ran_post_init = True
 
-  @property
-  def op_estimate(self) -> sint: return self._ops_lds[0]
-  @property
-  def lds_estimate(self) -> sint: return self._ops_lds[1]
   @functools.cached_property
-  def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
+  def estimates(self) -> Estimates: return Estimates(*((0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)), self.mem_estimate)
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)

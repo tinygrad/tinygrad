@@ -94,10 +94,10 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto(); DETACH = auto() # noqa: E702
+  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
@@ -687,18 +687,12 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     if u.op is Ops.RANGE:
       mult_stack.append(mults)
       mults *= (u.src[1] - u.src[0]).ssimplify()
-    elif u.op is Ops.ENDRANGE:
-      mults = mult_stack.pop(-1)
-    elif u.op is Ops.SPECIAL:
-      mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-    elif u.op is Ops.LOAD:
-      mem += u.dtype.itemsize * mults
-    elif u.op is Ops.STORE:
-      mem += u.src[1].dtype.itemsize * mults
-    elif u.op in GroupOp.ALU and u not in dont_count:
-      flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
-    elif u.op is Ops.WMMA and u not in dont_count:
-      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
+    elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
+    elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
+    elif u.op is Ops.LOAD: mem += u.dtype.itemsize * mults
+    elif u.op is Ops.STORE: mem += u.src[1].dtype.itemsize * mults
+    elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
+    elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
 
 # ***** pattern matcher *****
