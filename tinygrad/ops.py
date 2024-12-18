@@ -594,6 +594,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
       if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
+      # SHL/SHR on consts only
+      if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
+      if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
       if self.op is Ops.MOD and s1_vmin > 0: return 0, s1_vmax-1
       if self.op is Ops.IDIV:
         if s1_vmin == s1_vmax:  # min/max are equal in a CONST
@@ -670,30 +673,6 @@ def print_uops(uops:List[UOp]):
     formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
 
-def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
-  flops: sint = 0
-  mem: sint = 0
-  mults: sint = 1
-  mult_stack: List[sint] = []
-  dont_count: Set[UOp] = set()
-  if ignore_indexing:
-    for u in uops:
-      if u.op in {Ops.LOAD, Ops.STORE}:
-        dont_count = dont_count.union(u.src[0].toposort)
-        if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort)
-      elif u.op is Ops.IF:
-        dont_count = dont_count.union(u.src[0].toposort)
-  for u in uops:
-    if u.op is Ops.RANGE:
-      mult_stack.append(mults)
-      mults *= (u.src[1] - u.src[0]).ssimplify()
-    elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
-    elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-    elif u.op is Ops.LOAD: mem += u.dtype.itemsize * mults
-    elif u.op is Ops.STORE: mem += u.src[1].dtype.itemsize * mults
-    elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
-    elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
-  return flops, mem
 
 # ***** pattern matcher *****
 
