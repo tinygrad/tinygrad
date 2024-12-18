@@ -94,10 +94,10 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto(); DETACH = auto() # noqa: E702
+  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702

@@ -212,6 +212,41 @@ class TestSchedule(unittest.TestCase):
     reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
+  def test_dedup_assign(self):
+    a = Tensor.ones(4).contiguous().realize()
+    b = Tensor.full((4,), 2.).contiguous()
+    first = a.assign(b)
+    second = a.assign(b)
+    check_schedule([first, second], 1)
+
+  # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
+  # should contiguous dedup?
+  def test_dedup_contiguous(self):
+    a = Tensor.ones(4).contiguous()
+    b = Tensor.ones(4).contiguous()
+    sched = check_schedule([a, b], 1)
+    run_schedule(sched)
+    # a and b share the same underlying device memory
+    self.assertIs(a.lazydata.realized, b.lazydata.realized)
+
+  # EMPTY and COPY are assigned to unique device Buffers
+
+  def test_no_dedup_copy(self):
+    src = Tensor.ones(4).contiguous().realize()
+    a = src.clone()
+    b = src.clone()
+    sched = check_schedule([a, b], 2, filter_sink=False)
+    run_schedule(sched)
+    # a and b are assigned to different device Buffers
+    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+
+  def test_no_dedup_empty(self):
+    a = Tensor.empty((4,))
+    b = Tensor.empty((4,))
+    sched = check_schedule([a, b], 2, filter_sink=False)
+    run_schedule(sched)
+    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+
   def test_fold_double_unary(self):
     y = Tensor.empty(2)
     out = y.sum(keepdim=True).sqrt().__neg__()
