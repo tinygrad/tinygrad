@@ -143,19 +143,20 @@ class ClassificationHead:
 
   def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
-    out = out[0].cat(*out[1:], dim=1).sigmoid()
+    out = out[0].cat(*out[1:], dim=1)
 
     if Tensor.training:
       assert y is not None and matches is not None, "y and matches should be passed in when training"
       return self._compute_loss(out, y, matches)
-    else:
-      return out
+
+    return out.sigmoid()
   
   def _compute_loss(self, x:Tensor, y:Tensor, matches:Tensor) -> Tensor:
     y = ((y + 1) * (fg_idxs := matches >= 0) - 1).one_hot(num_classes=x.shape[-1])
     valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
     loss = (sigmoid_focal_loss(x, y) * valid_idxs).sum(-1).sum(-1)
-    return loss / fg_idxs.sum(-1)
+    loss = (loss / fg_idxs.sum(-1)).sum() / matches.shape[0]
+    return loss
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
