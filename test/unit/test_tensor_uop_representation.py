@@ -3,6 +3,7 @@ from tinygrad import Tensor
 from tinygrad.ops import UPat, Ops
 
 realized_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
+const_pattern = UPat(Ops.VIEW, src=(UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)),))
 def is_pattern(ten:Tensor, pat:UPat): assert pat.match(ten.lazydata, {})
 
 class TestTensorUopRepresentation(unittest.TestCase):
@@ -17,6 +18,11 @@ class TestTensorUopRepresentation(unittest.TestCase):
     c = a+b
     print(c.lazydata)
     is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+
+  def test_const_pattern(self):
+    a = Tensor(1)
+    print(a.lazydata)
+    is_pattern(a, const_pattern)
 
   def test_consts_do_not_realize(self):
     a = Tensor(1)
