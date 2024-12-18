@@ -32,9 +32,8 @@ tensor_uop_spec = PatternMatcher([
   # tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
   # DETACH and CONTIGUOUS change how we interpret the source UOp
-  (UPat(Ops.DETACH, name="detach", src=(UPat.var("x"),), arg=None), lambda detach,x: detach.dtype == x.dtype),
-  # ensures the source UOp realizes to a device Buffer
-  (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat.var("x"),), arg=None), lambda contig,x: contig.dtype == x.dtype),
+  # CONTIGUOUS ensures the source UOp realizes to a device Buffer
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
 
   # ** specs with room for refactoring and improving
 
@@ -71,7 +70,15 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
 
   # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
-  (UPat(Ops.BUFFER_VIEW, src=(UPat(),)), lambda: True),
+  # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
+
+  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x:
+   # BUFFER_VIEW can replace contiguous, keeping dtype the same
+   (root.dtype == x.dtype) or
+   # it can also replace bitcast, this changes the dtype, but the itemsize stays the same
+   (root.dtype != x.dtype and root.dtype.itemsize == x.dtype.itemsize) or
+   # it can also represent shape changing bitcast (only on DISK)
+   (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
 ])
 
 # **** ScheduleItem return type
