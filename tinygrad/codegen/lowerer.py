@@ -104,8 +104,19 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ctx.acc_num += 1
   return acc.assign(acc.alu(alu_op, ret))
 
+def overflow(u):
+  return any((u.dtype is not dtypes.bool and u.vmax > dtypes.max(u.dtype),
+              u.dtype is not dtypes.bool and u.vmin < dtypes.min(u.dtype),
+              *(overflow(_u) for _u in u.src)))
+def upcast(u: UOp):
+  return UOp(u.op, dtypes.int64 if u.dtype is dtypes.int else u.dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
+
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
+  if overflow(idx):
+    idx = upcast(idx)
+    valid = upcast(valid)
+    ctx.idxs = [upcast(_idx) for _idx in ctx.idxs]
   # TODO: check has_valid in UPat, not here
   has_valid = valid.op is not Ops.CONST or valid.arg is not True
   buf = x.src[0]
@@ -125,11 +136,20 @@ def lower_load_store(ctx: IndexContext, x: UOp):
     has_valid = valid.op is not Ops.CONST or valid.arg is not True
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid if has_valid else None), x.src[2]))
 
-pm_lowerer = PatternMatcher([
-  (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx, x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
-  # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
+pm_lower_load_store = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
 ])
 
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+def view_to_uop(ctx, x):
+  return x.st_arg.to_indexed_uops(ctx.idxs)[1]
+
+pm_lowerer = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx, x: view_to_uop(ctx, x)),
+])
+
+def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  ctx = get_index(ast, opts)
+  ret = graph_rewrite(ast, pm_lower_load_store, ctx)
+  ret = graph_rewrite(ret, pm_lowerer, ctx=ctx)
+  return ret

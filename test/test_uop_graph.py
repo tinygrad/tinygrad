@@ -735,6 +735,7 @@ class TestIdxUpcast(unittest.TestCase):
   def assert_dtype(self, shape, dtype, offset=0):
     st = ShapeTracker((View.create(shape=shape, offset=offset),))
     elementwise_ast = self.e(st)
+    self.render_src(elementwise_ast)
     assert elementwise_ast.src[0].src[1].dtype is dtype
 
     # This asserts that upcast didn't happen partially
@@ -766,8 +767,39 @@ class TestIdxUpcast(unittest.TestCase):
         UOp(Ops.CONST, dtypes.int, arg=-1, src=()),
          x9,)),)),)),))
     indexed = rewrite_shapetracker_with_index(uop, self.renderer)
-    print(f"{indexed=}")
     print(self.render_src(indexed))
+
+  # @unittest.skip("")
+  def test_case2(self):
+    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=1, upcasted=1, dont_use_locals=False), src=(
+  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0, src=()),
+    x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 32, 4), strides=(128, 4, 1), offset=0, mask=None, contiguous=True),)), src=()),
+    UOp(Ops.ADD, dtypes.int, arg=None, src=(
+      UOp(Ops.WHERE, dtypes.int, arg=None, src=(
+        UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
+          x6:=UOp(Ops.CAST, dtypes.int, arg=None, src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                x9:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 32, 4), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                UOp(Ops.CONST, dtypes.float, arg=60000.0, src=()),
+                UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),)),
+              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
+                 x2,)),)),)),
+          x15:=UOp(Ops.WHERE, dtypes.int, arg=None, src=(
+             x9,
+            x16:=UOp(Ops.CONST, dtypes.int, arg=0, src=()),
+             x16,)),)),
+        UOp(Ops.WHERE, dtypes.int, arg=None, src=(
+           x9,
+          UOp(Ops.CONST, dtypes.int, arg=60000, src=()),
+           x16,)),
+         x15,)),
+       x6,)),)),))
+    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
+    self.render_src(indexed)
 
   # total 2**31: Use three dims so it doesn't exceed block limit
   # Symbolic has to subtract by 1 because var is inclusive
@@ -800,24 +832,9 @@ class TestIdxUpcast(unittest.TestCase):
     self.assert_dtype((dim1, dim2, dim3), dtypes.long, offset=offset)
     self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.long, offset=offset)
 
-  def test_overflow_masked(self):
-    shape = (2**12, 2**12, 2**7 + 1,)
-    mask = ((0, 2**12), (2, 2**12-1), (0, 2**7+1))
-    st = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
-    indexed = rewrite_shapetracker_with_index(store, Device[Device.DEFAULT].renderer)
-    index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
-    assert all(u.dtype is dtypes.long for u in index_ops.pop().src)
-    self.render_src(indexed)
-
-  def const_and_store_may_overflow(self, shape, mask, num_idx):
+  def const_and_store_may_overflow(self, shape, mask, num_idx, dtype):
+    # If either or both of these overflow, do upcast
     st = ShapeTracker((View.create(shape=shape),)).to_uop()
-
-    # This shapetracker will overflow when rendering CMPLT in `valid`
-    # UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
-    #   UOp(Ops.SPECIAL, dtypes.long, arg=('gidx0', 256), src=())
-    #   UOp(Ops.CONST, dtypes.long, arg=2147483649, src=()),)),)),
-    # )
     st_const = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
 
     const = UOp(Ops.WHERE, dtypes.float, src=(
@@ -827,13 +844,33 @@ class TestIdxUpcast(unittest.TestCase):
     ))
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, const)
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
-    assert len(self.find_ops_in_ast(indexed, Ops.SPECIAL, set())) == num_idx
+    self.render_src(indexed)
+    idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
+    assert len(idx_ops) == num_idx
+    assert all(u.dtype is dtype for u in idx_ops)
+    index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
+    assert all(u.dtype is dtype for u in index_ops.pop().src)
 
-  @unittest.expectedFailure
-  def test_const_overflow_store_in_range(self):
-    self.const_and_store_may_overflow((256,), ((10, 2**31+1),), 1)
+  def test_const_store_in_range(self):
+    self.const_and_store_may_overflow((256,), ((1, 256),), 1, dtypes.int)
   def test_store_overflow_const_in_range(self):
-    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((10, 20), (10, 20), (10, 20)), 3)
+    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((10, 20), (10, 20), (10, 20)), 3, dtypes.long)
+  def test_store_overflow_const_overflow(self):
+    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((1, 2**12), (1, 2**12), (1, 2**7+1)), 3, dtypes.long)
+
+  def test_load_overflow(self):
+    shape, mask = (2**12, 2**12, 2**7+1), ((0, 10), (0, 10), (0, 10))
+    st = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
+    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st))
+    store = UOp(Ops.STORE, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, load))
+    indexed = rewrite_shapetracker_with_index(store, self.renderer)
+    self.render_src(indexed)
+    idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
+    assert len(idx_ops) == 3
+    assert all(u.dtype is dtypes.long for u in idx_ops)
+    index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
+    assert all(u.dtype is dtypes.long for u in index_ops.pop().src)
+
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
 class TestIndexingOverflowWEBGPU(unittest.TestCase):
