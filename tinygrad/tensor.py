@@ -5,11 +5,11 @@ from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
+from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -37,9 +37,9 @@ class Function:
 
 import tinygrad.function as F
 
-def _metaop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Tuple[LazyBuffer, ...]=()):
-  if isinstance(device, str): return LazyBuffer.metaop(op, shape, dtype, device, arg, src)
-  return MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, d, arg, src) for d in device], None)
+def _metaop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str, ...]], arg=None, src:Tuple[UOp, ...]=()):
+  if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg, src)
+  return MultiLazyBuffer([UOp.metaop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
@@ -48,12 +48,11 @@ def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
-def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noqa: F821
-  ret = LazyBuffer.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
+def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
+  ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
-  del ret.srcs
-  return ret
+  return ret.buf_uop_view()
 
 def get_shape(x) -> Tuple[int, ...]:
   # NOTE: str is special because __getitem__ on a str is still a str
@@ -61,17 +60,16 @@ def get_shape(x) -> Tuple[int, ...]:
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
-def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
-  if isinstance(x, bytes): ret, data = LazyBuffer.metaop(Ops.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
+def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
+  if isinstance(x, bytes): ret, data = UOp.metaop(Ops.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
   else:
-    ret = LazyBuffer.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
+    ret = UOp.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
-  del ret.srcs
-  return ret
+  return ret.buf_uop_view()
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]], dtype:DType) -> List[List[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
@@ -123,10 +121,9 @@ class Tensor(SimpleMathTrait):
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, UOp, bytes, List, Tuple, LazyBuffer, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
-    assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
 
@@ -141,17 +138,17 @@ class Tensor(SimpleMathTrait):
     self._ctx: Optional[Function] = None
 
     # create a LazyBuffer from the different types of inputs
-    if isinstance(data, (LazyBuffer, MultiLazyBuffer)): assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
+    if isinstance(data, (UOp, MultiLazyBuffer)):
+      assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
+      # NOTE: this is here because LazyBuffer = UOp
+      if isinstance(data, UOp) and data.op is Ops.BIND: data = _metaop(Ops.CONST, tuple(), dtype or data.dtype, device, data)
     elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, UOp):
-      assert data.op is Ops.BIND and data.src[0].op is Ops.DEFINE_VAR and data.src[1].op is Ops.CONST, f"can't create tensor from UOp {data}"
-      data = _metaop(Ops.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
-        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
+        else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
       if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _frompy(data, dtype)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
@@ -164,12 +161,12 @@ class Tensor(SimpleMathTrait):
       data = _metaop(Ops.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
 
     # by this point, it has to be a LazyBuffer
-    if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
+    if not isinstance(data, (UOp, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    if isinstance(device, str): self.lazydata:Union[LazyBuffer, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
+    if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data, LazyBuffer): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
+    elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
@@ -185,7 +182,9 @@ class Tensor(SimpleMathTrait):
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
   def __repr__(self):
-    return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
+    if isinstance(ld:=self.lazydata, MultiLazyBuffer): ld_repr = f"{self.lazydata!r}"
+    else: ld_repr = f"<UOp {ld.device} {ld.shape} {str(ld.dtype)[7:]} {ld.st if ld.base is not ld else (ld.op, ld.realized)}>"
+    return f"<Tensor {ld_repr} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
@@ -260,13 +259,13 @@ class Tensor(SimpleMathTrait):
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
     """
-    return Tensor(self.lazydata, device=self.device, requires_grad=False)
+    return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
     cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
-    buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
+    buf = cast(Buffer, cast(UOp, cpu.lazydata).base.realized)
     if self.device != "CLANG": buf.options = BufferSpec(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
 
@@ -364,7 +363,7 @@ class Tensor(SimpleMathTrait):
     ```
 
     """
-    assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
+    assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
     if axis is not None:
       axis = self._resolve_dim(axis)
@@ -398,9 +397,9 @@ class Tensor(SimpleMathTrait):
   def _metaop(op, shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, arg=None, **kwargs):
     dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
     if isinstance(device, tuple):
-      return Tensor(MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], None),
+      return Tensor(MultiLazyBuffer([UOp.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], None),
                     device, dtype, **kwargs)
-    return Tensor(LazyBuffer.metaop(op, shape, dtype, Device.canonicalize(device), arg), device, dtype, **kwargs)
+    return Tensor(UOp.metaop(op, shape, dtype, Device.canonicalize(device), arg), device, dtype, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
@@ -429,7 +428,7 @@ class Tensor(SimpleMathTrait):
 
     r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
-    del r.lazydata.srcs # fake realize
+    r.lazydata.buf_uop_view()
     return r
 
   @staticmethod
@@ -492,6 +491,10 @@ class Tensor(SimpleMathTrait):
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     _device = device = Device.canonicalize(device)
 
+    # if shape has 0, return zero tensor
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    num = ceildiv(numel * dtype.itemsize, 4)
+
     # when using MOCKGPU and NV generate rand on CLANG
     if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
 
@@ -501,15 +504,8 @@ class Tensor(SimpleMathTrait):
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
-      had_counter = False
-    else: had_counter = True
-
-    # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
-    num = ceildiv(numel * dtype.itemsize, 4)
-
     # increment rng counter for devices
-    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
+    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
     counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
@@ -717,7 +713,7 @@ class Tensor(SimpleMathTrait):
       if self.lazydata.axis is None: return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
       contiguous = kwargs.pop("contiguous", True)
       rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata for lb in self.lazydata.lbs]
-      return Tensor(MultiLazyBuffer(cast(List[LazyBuffer], rands), self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
+      return Tensor(MultiLazyBuffer(cast(List[UOp], rands), self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
   # ***** rng hlops *****
@@ -866,6 +862,30 @@ class Tensor(SimpleMathTrait):
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
+
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
+    """
+    Compute the gradient of the targets with respect to self.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x = Tensor.eye(3)
+    y = Tensor([[2.0,0,-2.0]])
+    z = y.matmul(x).sum()
+    dx, dy = z.gradient(x, y)
+
+    print(dx.tolist())  # dz/dx
+    print(dy.tolist())  # dz/dy
+    ```
+    """
+    assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
+    target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
+    assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+    grads = compute_gradient(self.lazydata, self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata), target_uops)
+    ret = []
+    for x in target_uops:
+      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
+      ret.append(Tensor(y, device=x.device))
+    return ret
 
   def _deepwalk(self):
     def _walk(node, visited):
@@ -1195,7 +1215,7 @@ class Tensor(SimpleMathTrait):
       self._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    if not all(lb.st.contiguous for lb in self.lazydata.lbs): raise RuntimeError("setitem target needs to be contiguous")
+    if not all(unwrap(lb.st).contiguous for lb in self.lazydata.lbs): raise RuntimeError("setitem target needs to be contiguous")
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
@@ -2996,7 +3016,7 @@ class Tensor(SimpleMathTrait):
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
-    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
+    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.is_unrealized_unmasked_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:

@@ -1,5 +1,4 @@
 # the job of the lowerer is to do indexing
-from __future__ import annotations
 import functools, itertools, operator
 from dataclasses import dataclass
 from typing import List, Tuple, cast, Optional
@@ -79,7 +78,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   # upcast loops
   for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
     assert isinstance(g, int), "needs to be int to upcast/unroll"
-    idxs.append(UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
+    idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
   # late indexes (group for reduce)
   ridxs = idxs[:]
@@ -93,7 +92,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
-  assert all(x.op is Ops.EXPAND for x in reduce_expand), f"not all EXPANDS in {reduce_expand} for {x.axis_arg}"
+  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):

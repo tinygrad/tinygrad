@@ -1,14 +1,13 @@
 import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
-from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, UOp
 from tinygrad.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import getenv, Context, RING, DEBUG
 from typing import List, Union
 
-def realize(x: Union[LazyBuffer, List[LazyBuffer]]):
+def realize(x: Union[UOp, List[UOp]]):
   x = x if isinstance(x, list) else [x]
   run_schedule(create_schedule(x))
   for lb in x: Device[lb.device].synchronize()

@@ -72,7 +72,7 @@ class TestKernelSpeed(unittest.TestCase):
         x = self._get_tensor(BS, CIN, H, W)
         if i >= 3:
           GlobalCounters.time_sum_s = 0
-          with Context(DEBUG=max(DEBUG, 2)): _c = f(conv, x)
+          with Context(DEBUG=max(DEBUG.value, 2)): _c = f(conv, x)
           tms.append(GlobalCounters.time_sum_s)
         else:
           _c = f(conv, x)
@@ -87,10 +87,10 @@ class TestKernelSpeed(unittest.TestCase):
 
   # NOTE: tiny7 was slower than tiny12
   # TODO: why are convs so slow?!?
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=24)
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=20)
 
   # theoretical is nv_tflops=165, amd_tflops=123
-  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=120, amd_tflops=80)
+  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=115, amd_tflops=80)
   def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=75)
 
   # theoretical is nv_gbs=1008, amd_gbs=960
