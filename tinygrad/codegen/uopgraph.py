@@ -476,6 +476,11 @@ def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:Optional[UOp]=None) -> UOp
   nidx = buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx)
   return UOp.load(nidx, x.const_like(0), mask, *x.src[1:], dtype=x.dtype) if x.op is Ops.LOAD else UOp.store(nidx, x.src[1], mask, *x.src[2:])
 
+def int64_indexing(buf:UOp, idx:UOp):
+  def rec(u:UOp):
+    return UOp(u.op, dtypes.int64, tuple(rec(s).cast(dtypes.int64) for s in u.src), u.arg) if max(u._min_max, key=abs) > dtypes.max(u.dtype) else u
+  return buf.index(rec(idx)) if idx.dtype != dtypes.int64 and max(idx._min_max, key=abs) > dtypes.max(idx.dtype) else None
+
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
@@ -486,6 +491,8 @@ pm_render = PatternMatcher([
   # move masks of loads/stores
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
                                                masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
+  # int64 indexing
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), int64_indexing),
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
