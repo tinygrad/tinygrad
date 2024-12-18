@@ -75,6 +75,16 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 1)
     self.assertEqual(uop.vmax, 12)
 
+  def test_vmin_vmax_shl(self):
+    x = UOp.variable('x', 0, 10) << 5
+    self.assertEqual(x.vmin, 0)
+    self.assertEqual(x.vmax, 10 << 5)
+
+  def test_vmin_vmax_shr(self):
+    x = UOp.variable('x', 0, 10) >> 2
+    self.assertEqual(x.vmin, 0)
+    self.assertEqual(x.vmax, 10 >> 2)
+
 class TestVminVmaxDivMod(unittest.TestCase):
   def test_vmin_vmax_division_positive(self):
     # vmin and vmax for division of a variable by a positive constant
