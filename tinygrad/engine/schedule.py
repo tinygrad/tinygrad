@@ -26,14 +26,14 @@ tensor_uop_spec = PatternMatcher([
    # arg: (number, size)
    isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all(isinstance(x, int) for x in buf.arg) and \
    # dtype
-  isinstance(buf.dtype, (DType, ImageDType))),
+   isinstance(buf.dtype, (DType, ImageDType))),
   # movement ops
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple) and mv.dtype == x.dtype),
   # tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   (UPat(Ops.DETACH, name="detach", src=(UPat.var("x"),), arg=None), lambda detach,x: detach.dtype == x.dtype),
-  # ensures the source UOp is realized to memory
+  # ensures the source UOp realizes to a device Buffer
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat.var("x"),), arg=None), lambda contig,x: contig.dtype == x.dtype),
 
   # ** specs with room for refactoring and improving
