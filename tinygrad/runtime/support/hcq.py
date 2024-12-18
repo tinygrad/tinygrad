@@ -143,7 +143,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
   def _apply_var_vals(self, var_vals:Dict[Variable, int]):
-    resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
+    resolved_syms = [cast(int,sym_infer(sym, var_vals)) for sym in self.syms]
 
     for off, sym_idx in self.q_sints:
       if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
