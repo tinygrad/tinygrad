@@ -50,7 +50,7 @@ class WGSLRenderer(CStyleLanguage):
   invalid_dtype = {dtypes.int64: None}
   nan = "nan()"
   type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
-              dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool",}
+              dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", }
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "true" if x.arg else "false"),

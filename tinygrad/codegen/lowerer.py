@@ -140,12 +140,9 @@ pm_lower_load_store = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
 ])
 
-def view_to_uop(ctx, x):
-  return x.st_arg.to_indexed_uops(ctx.idxs)[1]
-
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx, x: view_to_uop(ctx, x)),
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
