@@ -471,6 +471,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # CAUTION: MUTABILITY!
   def become(self, u:UOp):
+    if TRACK_MATCH_STATS >= 2:
+      # map the new uop to a snapshot of the old one
+      with Context(PICKLE_BUFFERS=0): becomes[u] = pickle.dumps(self)
     del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
     self.op, self.dtype, self.src, self.arg = u.op, u.dtype, u.src, u.arg
 
@@ -844,7 +847,7 @@ class TrackedGraphRewrite:
   matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)   # before+after uops of all the matches
 tracked_keys:List[Any] = [] # this tracks all the functions decorated with @track_rewrites
 tracked_ctxs:List[List[TrackedGraphRewrite]] = [] # this tracks all the graph_rewrite calls within each @track_rewrites decorated fxn
-becomes:Dict[UOp, UOp] = {} # this saves the pre mutated state of a uop (prepickle)
+becomes:Dict[UOp, bytes] = {} # this saves the pre mutated state of a uop (prepickle)
 _name_cnt:Dict[str, int] = {} # this counts the number of times a @track_rewrites(named=True) function is called to keep keys unique
 def track_rewrites(named=False):
   def _decorator(func):
@@ -888,7 +891,7 @@ if TRACK_MATCH_STATS:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
+        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs, becomes), f)
     launch_viz("VIZ", temp("rewrites.pkl"))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]

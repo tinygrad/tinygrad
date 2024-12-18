@@ -49,12 +49,12 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
-def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> List[List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
+def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]], *_) -> List[List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
   kernels: Dict[str, List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
   for k,ctxs in tqdm(zip(keys, contexts), desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
-      if pickle.loads(ctx.sink).op is Ops.CONST: continue
+      if ctx.sink.op is Ops.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
@@ -83,18 +83,18 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   return ret
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
-def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
+def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, becomes:Dict[UOp, UOp]) -> GraphRewriteDetails:
+  sink = ctx.sink.substitute(becomes)
+  g = GraphRewriteDetails(**asdict(metadata), graphs=[sink], diffs=[], changed_nodes=[],
                           kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
   replaces: Dict[UOp, UOp] = {}
   sink = g.graphs[0]
-  for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
-    u0 = pickle.loads(u0_b)
+  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
     # if the match didn't result in a rewrite we move forward
-    if u1_b is None:
+    if u1 is None:
       replaces[u0] = u0
       continue
-    replaces[u0] = u1 = pickle.loads(u1_b)
+    replaces[u0] = u1
     # first, rewrite this UOp with the current rewrite + all the matches in replaces
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check
@@ -153,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
     elif url.path == "/kernels":
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
+        g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])], becomes=becomes)
         jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
@@ -198,9 +198,10 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   kernels = get_metadata(*contexts) if contexts is not None else []
+  becomes = {k:pickle.loads(v) for k,v in contexts[2].items()} if contexts is not None else {}
 
   if getenv("FUZZ_VIZ"):
-    ret = [get_details(*args) for v in tqdm(kernels) for args in v]
+    ret = [get_details(*args, becomes=becomes) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
