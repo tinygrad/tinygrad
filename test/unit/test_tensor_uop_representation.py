@@ -37,7 +37,7 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # UOp(Ops.EXPAND, dtypes.float, arg=(10, 10), src=(
   #   UOp(Ops.RESHAPE, dtypes.float, arg=(1, 1), src=(
   #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(-1, 'METAL', 1), src=()),
+  #       UOp(Ops.BUFFER, dtypes.float, arg=(-1, 'METAL', 1), src=()),
   #       UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),)),)),))
   # expected:
   # UOp(Ops.EXPAND, dtypes.float, arg=(10, 10), src=(
@@ -55,14 +55,14 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # currently, COPY has an extra BUFFER on the output
   # current:
   # UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #   UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(2, 'TEST', 3), src=()),
+  #   UOp(Ops.BUFFER, dtypes.float, arg=(2, 'TEST', 3), src=()),
   #   UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #       UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(1, 'METAL', 3), src=()),)),)),))
+  #       UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),)),)),))
   # expected:
   # UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #   UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
-  #     UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(1, 'METAL', 3), src=()),))
+  #     UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),))
   @unittest.expectedFailure
   def test_copyin(self):
     a = Tensor([1.,2,3]).realize()

@@ -151,7 +151,7 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
   ctx.bufs.append(x)
-  return UOp(Ops.DEFINE_GLOBAL, x.dtype, (), len(ctx.bufs)-1)
+  return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(), (), len(ctx.bufs)-1)
 append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
 
 def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
