@@ -119,6 +119,7 @@ class Mul(Function):
     return x * y
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+    assert self.y.base.buffer.dtype == grad_output.base.buffer.dtype, f"{self.y.base.buffer.dtype} != {grad_output.base.buffer.dtype}"
     return (self.y * grad_output) if self.needs_input_grad[0] else None, \
            (self.x * grad_output) if self.needs_input_grad[1] else None
 
