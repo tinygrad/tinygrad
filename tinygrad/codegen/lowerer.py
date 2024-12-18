@@ -104,8 +104,14 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ctx.acc_num += 1
   return acc.assign(acc.alu(alu_op, ret))
 
+def overflow(u): return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
+def upcast(u: UOp): return UOp(u.op, dtypes.int64 if u.dtype is dtypes.int else u.dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
+
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
+  if overflow(idx):
+    idx, valid = upcast(idx), upcast(valid)
+    ctx.idxs = [upcast(idx) for idx in ctx.idxs]
   buf = x.src[0]
   if x.op is Ops.LOAD:
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
@@ -122,12 +128,16 @@ def lower_load_store(ctx: IndexContext, x: UOp):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
 
+pm_lower_load_store_upcast = PatternMatcher([
+  # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
+])
+
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
-  # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  return graph_rewrite(graph_rewrite(ast, pm_lower_load_store_upcast, ctx:=get_index(ast, opts)), pm_lowerer, ctx)
