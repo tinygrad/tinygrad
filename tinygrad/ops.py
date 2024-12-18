@@ -839,12 +839,13 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: Tuple[str, int]                                                                              # location that called graph_rewrite
-  sink: bytes                                                                                       # sanpshot of the graph_rewrite input sink
-  matches: List[Tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
-tracked_keys:List[Any] = []
-tracked_ctxs:List[List[TrackedGraphRewrite]] = []
-_name_cnt:Dict[str, int] = {}
+  loc: Tuple[str, int]                                                                            # location that called graph_rewrite
+  sink: UOp                                                                                       # the graph_rewrite input sink
+  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)   # before+after uops of all the matches
+tracked_keys:List[Any] = [] # this tracks all the functions decorated with @track_rewrites
+tracked_ctxs:List[List[TrackedGraphRewrite]] = [] # this tracks all the graph_rewrite calls within each @track_rewrites decorated fxn
+becomes:Dict[UOp, UOp] = {} # this saves the pre mutated state of a uop (prepickle)
+_name_cnt:Dict[str, int] = {} # this counts the number of times a @track_rewrites(named=True) function is called to keep keys unique
 def track_rewrites(named=False):
   def _decorator(func):
     def __wrapper(self, *args, **kwargs):
@@ -873,10 +874,10 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
           if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0:
-            tracked_ctxs[-1][-1].matches.append((pickle.dumps(uop), pickle.dumps(ret), p, et))
+            tracked_ctxs[-1][-1].matches.append((uop, ret, p, et))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((pickle.dumps(uop), None, None, 0))
+    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
     return None
 
 if TRACK_MATCH_STATS:
@@ -928,7 +929,7 @@ class RewriteContext:
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
