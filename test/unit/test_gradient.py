@@ -104,5 +104,11 @@ class TestRealizeMeansRealize(unittest.TestCase):
     print(x.lazydata)
     self.assertEqual(x.lazydata.op, Ops.VIEW)
 
+  # NOTE: even though it doesn't realize, this seems fine
+  def test_uniform_gradient(self):
+    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    y = x * 2
+    y.sum().gradient(x)[0].realize()
+
 if __name__ == '__main__':
   unittest.main()
