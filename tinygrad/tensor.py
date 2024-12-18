@@ -2477,6 +2477,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return F.Exp.apply(self*math.log(2))
+
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2488,6 +2489,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return F.Relu.apply(self)
+
   def sigmoid(self):
     """
     Applies the Sigmoid function element-wise.
@@ -2498,7 +2500,8 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sigmoid().numpy())
     ```
     """
-    return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+    return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
+
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
     """
     Applies the Hardsigmoid function element-wise.
