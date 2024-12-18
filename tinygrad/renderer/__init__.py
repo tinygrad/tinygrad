@@ -23,7 +23,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   opts_seq: Tuple[str,str] = ("UP","LC") # upcast input, local the thread pattern
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
 
-@dataclass
+@dataclass(frozen=True)
 class Estimates:
   # number of FLOPS used in the Kernel
   ops:sint = 0
