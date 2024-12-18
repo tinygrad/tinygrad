@@ -46,7 +46,9 @@ tensor_uop_spec = PatternMatcher([
    copy.dtype == copyin.dtype),
 
   # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)), lambda view,buf: view.dtype == buf.dtype and view.size == buf.size),
+  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
+   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
   # BUFFER assignment
   (UPat(Ops.ASSIGN, name="assign", src=(UPat({Ops.VIEW, *GroupOp.Movement}, name="target"), UPat.var("new_val"))), lambda assign,target,new_val:
