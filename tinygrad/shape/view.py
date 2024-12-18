@@ -44,7 +44,6 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   """Returns the new mask if reshape is possible, and None if not possible."""
   if _mask is None: return tuple((0, s) for s in new_shape)
   if any(not all_int(m) for m in _mask): return None
-  if any(m[1] - m[0] < 1 for m in _mask): return ((0, 0),) * len(new_shape)  # zero mask
 
   new_mask: List[Tuple[int, int]] = []
   # _mask is all int here
@@ -54,16 +53,15 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   while len(new_mask) < len(new_shape):
     (l, r), next_stride = mask, new_dim * curr_stride
 
-    if old_dim >= next_stride: # need to split mask.
-      if old_dim == next_stride: # simply copy the mask and get next batch for merging
-        new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
-        curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-
-      else: # mask can only be splitted if reshape doesn't cut across the mask.
-        if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
-            or old_dim % next_stride != 0): return None
-        new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
-        curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
+    # need to split mask
+    if old_dim == next_stride: # simply copy the mask and get next batch for merging
+      new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
+      curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+    elif old_dim > next_stride: # mask can only be splitted if reshape doesn't cut across the mask.
+      if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
+          or old_dim % next_stride != 0): return None
+      new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
+      curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
       next_mask = next(r_masks, (0, 1))
