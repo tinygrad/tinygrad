@@ -153,7 +153,8 @@ class Handler(BaseHTTPRequestHandler):
     elif url.path == "/kernels":
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])], becomes=becomes)
+        k, ctx, metadata = kernels[int(qkernel[0])][int(query["idx"][0])]
+        g = get_details(k, ctx, metadata, becomes)
         jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
@@ -201,7 +202,7 @@ if __name__ == "__main__":
   becomes = {k:pickle.loads(v) for k,v in contexts[2].items()} if contexts is not None else {}
 
   if getenv("FUZZ_VIZ"):
-    ret = [get_details(*args, becomes=becomes) for v in tqdm(kernels) for args in v]
+    ret = [get_details(k, ctx, metadata, becomes) for v in tqdm(kernels) for k,ctx,metadata in v]
     print(f"fuzzed {len(ret)} rewrite details")
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
