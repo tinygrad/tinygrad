@@ -150,6 +150,7 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   return st.to_uop() if st != x.st else None
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
+  assert x.arg[0] != -1, "fake -1 BUFFERS should not make it here"
   ctx.bufs.append(x)
   return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(), (), len(ctx.bufs)-1)
 append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
