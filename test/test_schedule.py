@@ -2032,5 +2032,10 @@ class TestTensorConst(unittest.TestCase):
     self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
 
+  def test_const_schedule(self):
+    a = Tensor.ones((4, 4))
+    sched = a.schedule()
+    self.assertEqual(len(sched), 0)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
