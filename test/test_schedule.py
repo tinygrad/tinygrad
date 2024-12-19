@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize, remove_movement_ops
@@ -1999,6 +1999,25 @@ class TestBigGraph(unittest.TestCase):
     big_graph = big_graph_rewrite(out.sink(), ctx:=ScheduleContext())
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(ctx.realizes), 1)
+
+
+const_pm = PatternMatcher([
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
+])
+
+const_upat = UPat(Ops.CONST)
+class TestTensorConst(unittest.TestCase):
+  def test_tensor_const(self):
+    a = Tensor(1)
+    print(a.lazydata)
+    self.assertTrue(const_pm.rewrite(a.lazydata))
+
+  def test_tensor_variable(self):
+    vv = UOp.variable("a", 0, 10).bind(1)
+    a = Tensor(vv)
+    print(a.lazydata)
+    self.assertTrue(const_pm.rewrite(a.lazydata))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
