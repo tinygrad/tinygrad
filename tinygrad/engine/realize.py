@@ -142,7 +142,10 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
+  try:
+    assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
+  except AssertionError:
+    raise Exception(f"looks wrong {si.ast}")
   if si.ast.op is Ops.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)

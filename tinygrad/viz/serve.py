@@ -64,13 +64,13 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
-    if u.op in {Ops.CONST, Ops.DEVICE}:
+    if u.op in {Ops.DEVICE}:
       excluded.add(u)
       continue
     argst = ("\n".join([f"{v.shape} / {v.strides}"+(f" / {v.offset}" if v.offset else "") for v in u.arg.views])) if u.op is Ops.VIEW else str(u.arg)
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
-      if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
+      #if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
       if x.op is Ops.DEVICE: label += f"\nDEVICE{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
