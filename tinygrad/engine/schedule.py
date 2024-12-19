@@ -28,7 +28,12 @@ tensor_uop_spec = PatternMatcher([
    # dtype
    isinstance(buf.dtype, (DType, ImageDType))),
   # movement ops
-  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple) and mv.dtype == x.dtype),
+  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
+   # naturally correct
+   (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
+   # TODO: "make things that can't be images not images" can change a parent UOp
+   # is there a clean way to update its _mop children while marking the BUFFER as realized?
+   (isinstance(mv.dtype, ImageDType) and x.dtype == mv.dtype.base and x.is_realized)),
   # tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
   # DETACH and CONTIGUOUS change how we interpret the source UOp
@@ -264,10 +269,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # can only schedule once
   for buf_uop in si_ctx.sinked:
-    for luop in si_ctx.tensor_uops[buf_uop]:
-      buf_uop_view = buf_uop.view(unwrap(luop.st))
-      if luop.dtype != buf_uop_view.dtype: buf_uop_view = buf_uop_view.cast(luop.dtype)
-      luop.become(buf_uop_view)
+    for luop in si_ctx.tensor_uops[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))
