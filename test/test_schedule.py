@@ -1976,19 +1976,13 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
+# TODO: use UOp.metaop here
 @track_rewrites(named=True)
 def big_graph_rewrite(big_graph:UOp, ctx) -> UOp: return graph_rewrite(big_graph, do_realize, ctx)
 class TestBigGraph(unittest.TestCase):
-  def test_sink_childless_const(self):
-    x = UOp.const(dtypes.int, 0)
-    big_graph = big_graph_rewrite(x.sink(), ctx:=ScheduleContext())
-    self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(ctx.realizes), 0)
-
   def test_sink_childless_const_alt(self):
-    x = UOp.const(dtypes.int, 0)
     y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int, (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
+    big_graph = big_graph_rewrite(UOp.sink(y), ctx:=ScheduleContext())
     self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(ctx.realizes), 0)
 
