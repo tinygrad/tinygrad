@@ -81,7 +81,8 @@ class Kernel:
     # we use this to track which axes are reduced in each reduce
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
-      self.sts.append(unwrap(x.src[0].st))
+      buf_uop_srcs = [y for y in x.toposort if y.op in GroupOp.Buffer]
+      self.sts.append(unwrap(buf_uop_srcs[0].st))
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
