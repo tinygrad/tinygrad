@@ -322,39 +322,6 @@ class UPatScheduled(UPat):
 
 # ** this is schedule level const folding
 
-def _as_const(u:UOp, val:ConstType) -> UOp:
-  assert is_scheduled(u), f"must be scheduled to fold {u}"
-  st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
-  return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
-
-def simplify_reduceop(reduce:UOp, x:UOp) -> Optional[UOp]:
-  # remove reduce on unmasked const
-  if all_int(x.shape) and x.is_unrealized_unmasked_const():
-    prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
-    ret = x.const_arg
-    match reduce.arg[0]:
-      case Ops.ADD: ret *= prshape
-      case Ops.MUL: ret **= prshape
-      case Ops.MAX: pass # NOTE: Ops.MAX is passthrough
-      case _: return None
-    return UOp.const(reduce.dtype, ret)
-  return None
-
-def simplify_alu(alu:UOp):
-  if not all(x.is_unrealized_unmasked_const() for x in alu.src): return None
-  # this needs to have a VIEW next (it has to, right?)
-  return UOp.const(alu.dtype, exec_alu(alu.op, alu.dtype, [s.const_arg for s in alu.src]))
-
-def simplify_binop(binop:UOp, x:UOp, y:UOp):
-  if all_int(x.shape) and x.is_unrealized_unmasked_const(): other, const = y, x
-  elif all_int(y.shape) and y.is_unrealized_unmasked_const():
-    if binop.op is Ops.IDIV and y.const_arg == 1: return x
-    other, const = x, y
-  else: return None
-  if binop.op is Ops.ADD and const.const_arg == 0: return other
-  if binop.op is Ops.MUL and const.const_arg == 1: return other
-  if binop.op is Ops.MUL and const.const_arg == 0: return UOp.const(binop.dtype, 0)
-
 def found_contiguous(ctx:ScheduleContext, contig:UOp, base:UOp, b:UOp):
   if contig.src[0].op is Ops.VIEW and len(contig.src[0].src):
     old_base = contig.src[0].src[0]
@@ -389,15 +356,21 @@ def const_copy_folding(cp:UOp, const:UOp, b:UOp, base:UOp):
 
 ops_folding = symbolic+PatternMatcher([
   (UPat.cvar("x").view(name="view"), view_const),
+  # op with size 0 is zero
+  (UPatScheduled(), lambda b,to_store,base: base.const_like(0) if base.size == 0 else None),
   # DETACH is a NOOP here
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
+
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), fold_const_reduceop),
   (UPatScheduled(Ops.COPY, name="cp", src=(UPat.cvar("const"),)), const_copy_folding),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda x:x),
+
+  # support for using a contiguous permuted view instead of the parent view if one exists
+  (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
+  (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
 ])
 
 # ** buffer merging
