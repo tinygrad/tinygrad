@@ -36,7 +36,7 @@ class Estimates:
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0
-  mem: sint = 0
+  lds: sint = 0
   mults: sint = 1
   mult_stack: List[sint] = []
   dont_count: Set[UOp] = set()
@@ -53,11 +53,10 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       mults *= (u.src[1] - u.src[0]).ssimplify()
     elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
     elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-    elif u.op is Ops.LOAD: mem += u.dtype.itemsize * mults
-    elif u.op is Ops.STORE: mem += u.src[1].dtype.itemsize * mults
+    elif u.op in {Ops.LOAD, Ops.STORE}: lds += u.src[0].dtype.itemsize * mults
     elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
     elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
-  return flops, mem
+  return flops, lds
 
 @dataclass
 class ProgramSpec:
