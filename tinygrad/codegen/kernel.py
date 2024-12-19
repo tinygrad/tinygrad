@@ -57,7 +57,7 @@ class Kernel:
     if ast.op is Ops.SINK: self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: verify_ast(self.ast)
+    try: uop_sts_map = verify_ast(self.ast)
     except AssertionError as e:
       print("INVALID AST")
       print(self.ast)
@@ -82,6 +82,23 @@ class Kernel:
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
+      # TEMP
+      good = uop_sts_map[x]
+      compare = unwrap(x.st)
+      try:
+        assert good == compare
+      except AssertionError:
+        from test.helpers import print_diff
+        print_diff(good, compare)
+        print(f"SHAPETRACKER DOESN'T MATCH FOR REDUCEOP {x}")
+      good = uop_sts_map[x.src[0]]
+      compare = unwrap(x.src[0].st)
+      try:
+        assert good == compare
+      except AssertionError:
+        from test.helpers import print_diff
+        print_diff(good, compare)
+        print(f"SHAPETRACKER DOESN'T MATCH FOR REDUCEOP SRC {x.src[0]}")
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
