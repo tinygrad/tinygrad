@@ -2019,5 +2019,18 @@ class TestTensorConst(unittest.TestCase):
     print(a.lazydata)
     self.assertTrue(const_pm.rewrite(a.lazydata))
 
+  def test_uop_methods(self):
+    a = Tensor(1)
+    self.assertTrue(a.lazydata.is_unrealized_const())
+    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
+
+    a = Tensor.ones((4, 4))
+    self.assertTrue(a.lazydata.is_unrealized_const())
+    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
+
+    a = Tensor.ones((4, 4)).pad((1, 1),)
+    self.assertTrue(a.lazydata.is_unrealized_const())
+    self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
