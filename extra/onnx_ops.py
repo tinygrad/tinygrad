@@ -329,6 +329,7 @@ def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
   ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
   return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
 def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Optional[str]=None):
+  assert reduction in {None, "max", "min"}, "reduction doesn't support max or min"
   assert updates.shape == indices.shape[:-1] + x.shape[indices.shape[-1]:]
   x = x.contiguous()
   for idx, u in zip(indices.split(1, 0), updates.split(1, 0)):
