@@ -503,14 +503,9 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   return out, None, embedding_sum
 
 def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None,
-<<<<<<< HEAD
-              relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None,
-              num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
-=======
               relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary:Optional[int]=None,
               mask_filter_value:Optional[float]=None, num_heads:Optional[int]=None, past_present_share_buffer:Optional[int]=None,
               qkv_hidden_sizes:Optional[List[int]]=None, scale:Optional[float]=None, unidirectional:Optional[int]=None):
->>>>>>> master
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
@@ -567,13 +562,8 @@ def onnx_training(input_group_size):
   return _decorator
 
 @onnx_training(3)
-<<<<<<< HEAD
-def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
-  X, G, H = inputs
-=======
 def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:float=0.0, norm_coefficient:float=0.0):
   X, G, H = (i.detach() for i in inputs)
->>>>>>> master
   grad = norm_coefficient * X + G
   H.assign(H + grad.square())
   up = grad / (H.sqrt() + epsilon)

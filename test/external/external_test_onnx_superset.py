@@ -2,31 +2,15 @@ import numpy as np
 from onnx import helper
 from onnx.backend.test.case.test_case import TestCase
 from onnx.defs import AI_ONNX_PREVIEW_TRAINING_DOMAIN
-import onnxruntime as ort
-ort_options = ort.SessionOptions()
-ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-ort_options.log_severity_level = 3  # no warnings
 
 # ******* HELPERS *******
-
-def run_ort(op, inputs:dict[str, np.ndarray], outputs:list[str], domain:str="", **opts):
-  node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
-  inputs_info = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
-  outputs_info = [helper.make_empty_tensor_value_info(name) for name in outputs]    # dummy outputs
-  graph = helper.make_graph([node], "dummy_name", inputs_info, outputs_info)
-  model = helper.make_model(graph)
-  ort_session = ort.InferenceSession(model.SerializeToString(), ort_options, ["CPUExecutionProvider"])
-  onnx_out = ort_session.run(outputs, inputs)
-  onnx_out = dict([*list(zip(outputs, onnx_out))])
-  del ort_session
-  return onnx_out
 
 def create_testcase(op:str, name:str, inputs:dict[str, np.ndarray], outputs:dict[str, np.ndarray], domain='', rtol=1e-3, atol=1e-7, **opts):
   node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
   def parse_info(name, val):
     if isinstance(val, np.ndarray): return helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(val.dtype), val.shape)
     elif val is None: return helper.make_empty_tensor_value_info(name)
-    else: raise NotImplementedError(f"{val} is not implemented")
+    else: raise RuntimeError(f"{val=}")
   inputs_info = [parse_info(name, val) for name, val in inputs.items()]
   outputs_info = [parse_info(name, val) for name, val in outputs.items()]
   graph = helper.make_graph([node], name, inputs_info, outputs_info)
@@ -96,68 +80,90 @@ def test_momentum_large_training_iteration():
 def test_nesterov_momentum_large_training_iteration():
   return _test_momentum("nesterov")
 
-def test_maxunpool_pads():
+def test_max_unpool_pads():
   op = "MaxUnpool"
-  inputs = { "xT": np.array([[[[1, 2], [3, 4]]]], dtype=np.float32), "xI": np.array([[[[5, 7], [13, 15]]]], dtype=np.int64) }
+  inputs = {
+      "xT": np.array([[[[1, 3],
+                        [9, 11]]]], dtype=np.float32),
+      "xI": np.array([[[[1, 3],
+                        [9, 11]]]], dtype=np.int64)
+  }
   opts = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [1, 0, 0, 0]}
-  outputs = run_ort(op, inputs, ["y"], **opts)
-  return create_testcase(op, "test_maxunpool_export_without_output_shape", inputs, outputs, **opts)
-
-# com.microsoft Ops tests
-def test_skiplayernormalization():
-  op = "SkipLayerNormalization"
-  inputs = {
-    "x": np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
-    "skip": np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32),
-    "gamma": np.array([0.5, 0.5, 0.5], dtype=np.float32),
-    "beta": np.array([0.1, 0.1, 0.1], dtype=np.float32),
-    "bias": np.array([0.1, 0.1, 0.1], dtype=np.float32)
-  }
-  outputs = run_ort(op, inputs, ["output", "mean", "inv_std_var", "skip_out"], "com.microsoft")
-  return create_testcase(op, "test_skiplayernormalization", inputs, outputs, "com.microsoft")
-
-def test_fastgelu():
-  op = "FastGelu"
-  inputs = {
-    "x": np.array([[-1.0, 0.0, 1.0], [2.0, -3.0, 4.0]], dtype=np.float32),
-    "bias": np.array([0.1, 0.2, 0.3], dtype=np.float32)
-  }
-  outputs = run_ort(op, inputs, ["output"], domain="com.microsoft")
-  return create_testcase(op, "test_fastgelu", inputs, outputs, domain="com.microsoft")
-
-def test_embededlayernormalization():
-  op = "EmbedLayerNormalization"
-  inputs = {
-    "input_ids": np.array([[1, 2, 3, 4]], dtype=np.int32),
-    "segment_ids": np.array([[0, 0, 1, 1]], dtype=np.int32),
-    "word_embedding": np.random.randn(10, 3).astype(np.float32),
-    "position_embedding": np.random.randn(4, 3).astype(np.float32),
-    "segment_embedding": np.random.randn(2, 3).astype(np.float32),
-    "gamma": np.array([0.5, 0.5, 0.5], dtype=np.float32),
-    "beta": np.array([0.1, 0.1, 0.1], dtype=np.float32)
-  }
-  outputs = run_ort(op, inputs, ["output", "mask_index", "embedding_sum"], domain="com.microsoft")
-  return create_testcase(op, "test_embededlayernormalization", inputs, outputs, domain="com.microsoft")
-
-def test_attention():
-  op = "Attention"
-  inputs = {
-    "x": np.random.randn(2, 4, 12).astype(np.float32),
-    "weights": np.random.randn(12, 36).astype(np.float32),
-    "bias": np.random.randn(36).astype(np.float32)
-  }
-  opts = {"num_heads": 3, "qkv_hidden_sizes": [12, 12, 12], "unidirectional": False}
-  outputs = run_ort(op, inputs, ["output", "present"], domain="com.microsoft", **opts)
-  return create_testcase(op, "test_attention", inputs, outputs, domain="com.microsoft", **opts)
+  outputs = {"y": np.array([[[[ 0.,  1.,  0.,  3.], [ 0.,  0.,  0.,  0.], [ 0.,  9.,  0., 11.]]]], dtype=np.float32)}
+  return create_testcase(op, "test_maxunpool_pads_scenario1", inputs, outputs, **opts)
 
 TEST_CASES = [
   test_adam_large_training_iteration(),
   test_adagrad_large_training_iteration(),
   test_momentum_large_training_iteration(),
-  # TODO: test_nesterov_momentum_large_training_iteration,
-  # test_max_unpool_pads, NOTE: ORT doesn't even support pads
-  # test_skiplayernormalization(),
-  # test_fastgelu(),
-  # test_embededlayernormalization(),
-  # test_attention(),
+  # TODO: fix
+  # test_nesterov_momentum_large_training_iteration(),
+  # test_max_unpool_pads(),
 ]
+
+if __name__ == "__main__":
+  # running __main__ is only for running run_ort for getting the outputs
+  # outputs are then added into test functions and then imported through TEST_CASES
+  import onnxruntime as ort
+  ort_options = ort.SessionOptions()
+  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+  ort_options.log_severity_level = 3  # no warnings
+
+  def run_ort(op, inputs:dict[str, np.ndarray], outputs:list[str], domain:str="", **opts):
+    node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
+    inputs_info = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
+    outputs_info = [helper.make_empty_tensor_value_info(name) for name in outputs]    # dummy outputs
+    graph = helper.make_graph([node], "dummy_name", inputs_info, outputs_info)
+    model = helper.make_model(graph)
+    ort_session = ort.InferenceSession(model.SerializeToString(), ort_options, ["CPUExecutionProvider"])
+    onnx_out = ort_session.run(outputs, inputs)
+    onnx_out = dict([*list(zip(outputs, onnx_out))])
+    del ort_session
+    return onnx_out
+
+  # # com.microsoft Ops tests
+  # def test_skiplayernormalization():
+  #   op = "SkipLayerNormalization"
+  #   inputs = {
+  #     "x": np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
+  #     "skip": np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32),
+  #     "gamma": np.array([0.5, 0.5, 0.5], dtype=np.float32),
+  #     "beta": np.array([0.1, 0.1, 0.1], dtype=np.float32),
+  #     "bias": np.array([0.1, 0.1, 0.1], dtype=np.float32)
+  #   }
+  #   outputs = run_ort(op, inputs, ["output", "mean", "inv_std_var", "skip_out"], "com.microsoft")
+  #   return create_testcase(op, "test_skiplayernormalization", inputs, outputs, "com.microsoft")
+  #
+  # def test_fastgelu():
+  #   op = "FastGelu"
+  #   inputs = {
+  #     "x": np.array([[-1.0, 0.0, 1.0], [2.0, -3.0, 4.0]], dtype=np.float32),
+  #     "bias": np.array([0.1, 0.2, 0.3], dtype=np.float32)
+  #   }
+  #   outputs = run_ort(op, inputs, ["output"], domain="com.microsoft")
+  #   return create_testcase(op, "test_fastgelu", inputs, outputs, domain="com.microsoft")
+  #
+  # def test_embededlayernormalization():
+  #   op = "EmbedLayerNormalization"
+  #   inputs = {
+  #     "input_ids": np.array([[1, 2, 3, 4]], dtype=np.int32),
+  #     "segment_ids": np.array([[0, 0, 1, 1]], dtype=np.int32),
+  #     "word_embedding": np.random.randn(10, 3).astype(np.float32),
+  #     "position_embedding": np.random.randn(4, 3).astype(np.float32),
+  #     "segment_embedding": np.random.randn(2, 3).astype(np.float32),
+  #     "gamma": np.array([0.5, 0.5, 0.5], dtype=np.float32),
+  #     "beta": np.array([0.1, 0.1, 0.1], dtype=np.float32)
+  #   }
+  #   outputs = run_ort(op, inputs, ["output", "mask_index", "embedding_sum"], domain="com.microsoft")
+  #   return create_testcase(op, "test_embededlayernormalization", inputs, outputs, domain="com.microsoft")
+  #
+  # def test_attention():
+  #   op = "Attention"
+  #   inputs = {
+  #     "x": np.random.randn(2, 4, 12).astype(np.float32),
+  #     "weights": np.random.randn(12, 36).astype(np.float32),
+  #     "bias": np.random.randn(36).astype(np.float32)
+  #   }
+  #   opts = {"num_heads": 3, "qkv_hidden_sizes": [12, 12, 12], "unidirectional": False}
+  #   outputs = run_ort(op, inputs, ["output", "present"], domain="com.microsoft", **opts)
+  #   return create_testcase(op, "test_attention", inputs, outputs, domain="com.microsoft", **opts)
