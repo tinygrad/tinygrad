@@ -103,12 +103,13 @@ class View:
   def to_indexed_uops(self:View, idxs:Optional[Sequence[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
     """(idx, valid)"""
     if idxs is None: idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)]
-    iexpr = sint_to_uop(self.offset, dtype=idxs[0].dtype if len(idxs) else dtypes.int)
+    dtype = idxs[0].dtype if len(idxs) else dtypes.int
+    iexpr = sint_to_uop(self.offset, dtype=dtype)
 
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      if idx.dtype is dtypes.long:
-        if isinstance(sh, UOp): sh = upcast(sh)
-        if isinstance(st, UOp): st = upcast(st)
+      if dtype is dtypes.long:
+        sh = upcast(sh) if isinstance(sh, UOp) else UOp.const(dtype, sh)
+        st = upcast(st) if isinstance(st, UOp) else UOp.const(dtype, st)
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])

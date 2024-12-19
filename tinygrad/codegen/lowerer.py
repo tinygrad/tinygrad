@@ -105,8 +105,16 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ctx.acc_num += 1
   return acc.assign(acc.alu(alu_op, ret))
 
-def overflow(u): return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
-def upcast(u: UOp): return UOp(u.op, dtypes.int64 if u.dtype is dtypes.int else u.dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
+def overflow(u):
+  return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
+def upcast(u: UOp):
+  if u.dtype is dtypes.int:
+    dtype = dtypes.int64
+  elif u.dtype.count > 1:
+    dtype = dtypes.int64.vec(u.dtype.count)
+  else:
+    dtype = u.dtype
+  return UOp(u.op, dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -136,7 +144,6 @@ pm_lowerer = PatternMatcher([
 ])
 
 def check_upcast(ctx, x):
-  assert x.op is Ops.VIEW
   idx, _ = x.arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
   if overflow(idx): ctx.require_upcast = True
 
@@ -150,5 +157,6 @@ def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
   graph_rewrite(ast, pm_upcast_idx, ctx)
   if ctx.require_upcast:
     ctx.idxs = [upcast(idx) for idx in ctx.idxs]
+    ctx.ridxs = [upcast(idx) for idx in ctx.ridxs]
   ret = graph_rewrite(ast, pm_lowerer, ctx=ctx)
   return ret

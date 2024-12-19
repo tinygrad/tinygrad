@@ -875,6 +875,22 @@ class TestIdxUpcast(unittest.TestCase):
     index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
     assert all(u.dtype is dtypes.long for u in index_ops.pop().src)
 
+  def test_case3(self):
+    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=2, upcasted=4, dont_use_locals=False), src=(
+  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
+    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(8, 128, 16, 2, 8, 16, 1, 1, 4, 4, 1, 1), strides=(8388608, 16384, 1024, 64, 128, 4, 0, 0, 2097152, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),
+    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (6, 7, 10, 11)), src=(
+      UOp(Ops.MUL, dtypes.float, arg=None, src=(
+        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
+          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 1, 32, 4, 130, 4, 130, 4, 130), strides=(0, 0, 0, 2097152, 0, 16384, 0, 128, 0, 1), offset=-16513, mask=((0, 1), (0, 1), (0, 1), (0, 32), (0, 4), (1, 129), (0, 4), (1, 129), (0, 4), (1, 129)), contiguous=False), View(shape=(8, 128, 16, 2, 8, 16, 32, 3, 4, 4, 3, 3), strides=(0, 270400, 4160, 64, 520, 4, 140608000, 35422400, 0, 1, 131, 68120), offset=0, mask=None, contiguous=False))), src=()),)),
+        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
+          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(8, 128, 16, 2, 8, 16, 32, 3, 4, 4, 3, 3), strides=(3456, 0, 0, 0, 0, 0, 27, 9, 864, 0, 1, 3), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
+    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
+    print(self.render_src(indexed))
+
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
 class TestIndexingOverflowWEBGPU(unittest.TestCase):
