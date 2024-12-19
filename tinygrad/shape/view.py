@@ -109,8 +109,6 @@ class View:
       if idx.dtype is dtypes.long:
         if isinstance(sh, UOp): sh = upcast(sh)
         if isinstance(st, UOp): st = upcast(st)
-      print(f"{sh=}")
-      print(f"{st=}")
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
