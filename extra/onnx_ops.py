@@ -321,8 +321,29 @@ def Gather(x:Tensor, indices:Tensor, axis:int=0):
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
 def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
-def ScatterElements(x:Tensor, indices:Tensor, updates:Tensor, axis:int=0, reduction:Optional[str]=None):
-  if reduction in {"min", "max"}: raise NotImplementedError("min and max reduction not supported")
+def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
+  if batch_dims == 0: return x[tuple(i.squeeze(-1) for i in indices.split(1, -1))]
+  x_shape, i_shape = x.shape, indices.shape
+  b = math.prod(x.shape[dim] for dim in range(batch_dims))
+  # NOTE: each batched dim of both input and indices are equal
+  x = x.reshape(b, *x.shape[batch_dims:])
+  indices = indices.reshape(b, *indices.shape[batch_dims:])
+  b_idx = Tensor.arange(b, device=x.device).reshape(b, *(1,)*(indices.ndim - 2)).expand(*indices.shape[:-1])
+  ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
+  return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
+def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Optional[str]=None):
+  assert updates.shape == indices.shape[:-1] + x.shape[indices.shape[-1]:]
+  x = x.contiguous()
+  for idx, u in zip(indices.split(1, 0), updates.split(1, 0)):
+    idx = tuple(i.squeeze(-1) for i in idx.squeeze(0).split(1, -1))
+    u = u.squeeze(0)
+    if reduction is None: x[idx] = u
+    elif reduction == "add": x[idx] += u
+    elif reduction == "mul": x[idx] *= u
+    else: raise NotImplementedError("reduction doesn't support max or min")
+  return x
+
+def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.scatter(axis, indices, updates, reduction)
 def GatherElements(x:Tensor, indices:Tensor, axis:int):
