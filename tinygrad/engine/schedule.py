@@ -365,6 +365,8 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
 ops_folding = PatternMatcher([
+  # BUFFERs late folded to CONST are just CONST
+  (UPatScheduled(Ops.CONST, name="const"), lambda b,const,base: base.replace(src=(UOp(Ops.DEVICE, arg=b.device), const))),
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # DETACH is a NOOP here

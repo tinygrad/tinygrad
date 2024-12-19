@@ -2004,7 +2004,9 @@ tensor_const_pm = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
 ])
-class TestTensorConst(unittest.TestCase):
+class TestConst(unittest.TestCase):
+  # ** part 1: basic functionality of a tensor directly created from CONST
+
   def test_tensor_const(self):
     a = Tensor(1)
     print(a.lazydata)
@@ -2049,6 +2051,33 @@ class TestTensorConst(unittest.TestCase):
     self.assertEqual(len(ones_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [1, 1, 1, 1])
+
+  # ** part 2: scheduler behavior when const folding happens later
+
+  def test_const_folding_no_realize(self):
+    a = Tensor([1, 2, 3, 4])*0
+    sched = a.schedule()
+    self.assertEqual(len(sched), 0)
+
+  def test_src_const_folding(self):
+    a = Tensor.full((4,), 1).contiguous().realize()
+    b = Tensor.full((4,), 2).contiguous().realize()
+    mul0 = a*0
+    add = b+mul0
+    sched = add.schedule()
+    self.assertEqual(len(sched), 0)
+    # b+0 and b share the same underlying device memory
+    self.assertIs(add.lazydata.realized, b.lazydata.realized)
+    self.assertListEqual(add.tolist(), [2, 2, 2, 2])
+
+  def test_src_view_const_folding(self):
+    a = Tensor.full((4, 4, 4), 1).contiguous().realize()
+    b = Tensor.full((16, 1), 1).contiguous().realize()
+    ret = a.sum(axis=(2,))
+    add = ret.reshape(16, 1)+(b*0)
+    add.realize()
+
+  # ** part 3: Tensor variable bindings
 
   def test_var_schedule(self):
     vv = UOp.variable("a", 0, 10).bind(1)
