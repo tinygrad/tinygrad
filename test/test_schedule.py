@@ -2076,9 +2076,13 @@ class TestConst(unittest.TestCase):
       a = Tensor.full((4,), 1).contiguous().realize()
       b = Tensor.full((6,), 2).contiguous().realize()
     mul0 = a*0
-    add = b+mul0.pad((1, 1))
+    add = b+mul0.pad((1, 1), value=2)
     sched = add.schedule()
     self.assertEqual(len(sched), 1)
+    run_schedule(sched)
+    # add gets assigned to a new buffer
+    self.assertIsNot(add.lazydata.realized, b.lazydata.realized)
+    self.assertListEqual(add.tolist(), [4, 2, 2, 2, 2, 4])
 
   # ** part 3: Tensor variable bindings
 
@@ -2091,8 +2095,10 @@ class TestConst(unittest.TestCase):
   def test_add_tvar(self):
     vv = UOp.variable("a", 0, 10).bind(1)
     a = Tensor(vv)+2
-    sched = a.schedule()
+    sched, var_vals = a.schedule_with_vars()
     self.assertEqual(len(sched), 1)
+    run_schedule(sched, var_vals)
+    self.assertEqual(a.tolist(), 3)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
