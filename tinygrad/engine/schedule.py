@@ -410,12 +410,17 @@ def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
   return v1
 
+# root(src.view()) -> src.view()
+def collapse_src_view(root:UOp, src:UOp, mv:UOp):
+  assert src.size == root.size
+  return mv
+
 merge_bufs = PatternMatcher([
   # merge base
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat())))), merge),
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"),)))), merge_realized),
   # collapse view
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), lambda mv:mv),
+  (UPat(Ops.VIEW, name="root", src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), collapse_src_view),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).view(name="mv"))), lambda mv:mv),
 ])
 
