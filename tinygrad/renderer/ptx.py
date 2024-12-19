@@ -5,7 +5,7 @@ from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import prod, flatten
+from tinygrad.helpers import prod, flatten, get_single_element
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -172,8 +172,7 @@ class PTXRenderer(Renderer):
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.GEP:
-        assert len(u.arg) == 1
-        r[u] = r[u.src[0]][u.arg[0]]
+        r[u] = r[u.src[0]][get_single_element(u.arg)]
         continue
       if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         r[u] = r[u.src[0]]
