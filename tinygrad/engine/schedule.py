@@ -52,7 +52,7 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # shapeless op is passthrough
   # realized is passthrough
-  if buf.st is None or buf.base.is_realized: return buf
+  if buf.st is None or buf.base.is_realized or buf.base.is_unrealized_const(): return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
@@ -440,7 +440,7 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(sink:UOp) -> Optional[UOp]:
-  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
+  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and not x.base.is_unrealized_const())
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
@@ -502,7 +502,7 @@ remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda 
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
+  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not x.base.is_unrealized_const())) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[UOp, UOp] = {}

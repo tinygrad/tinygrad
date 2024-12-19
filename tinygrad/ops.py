@@ -326,7 +326,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_arg(self) -> ConstType:
     match self.base.op:
       case Ops.CONST: ret = self.base.arg
-      case Ops.VIEW: ret = self.base.src[1].const_arg
+      case Ops.VIEW: ret = self.base.src[0].const_arg
       case op: raise AssertionError(f"const_arg called on {op}")
     assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
     return ret
@@ -454,7 +454,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
     return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
+  def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 1 and s.realized is None and s.src[0].op is Ops.CONST
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
     return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
@@ -478,7 +478,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op not in {Ops.BUFFER, Ops.CONST, Ops.BIND} else self
   def view(self, new_st:ShapeTracker) -> UOp:
     if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
