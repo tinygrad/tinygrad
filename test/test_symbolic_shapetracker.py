@@ -33,6 +33,12 @@ class TestSymbolic(unittest.TestCase):
     vm1 = View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True)
     vm2.__add__(vm1)
 
+  @unittest.expectedFailure # RecursionError: maximum recursion depth exceeded in comparison
+  def test_merge_view_recursion_err2(self):
+    vm2 = View(shape=(Variable('a', 1, 10).bind(4),), strides=(0,), offset=0, mask=None, contiguous=False)
+    vm1 = View(shape=(Variable('a', 1, 10).bind(4),), strides=(1,), offset=0, mask=((0, Variable('a', 1, 10).bind(4)),), contiguous=False)
+    vm2+vm1
+
   def test_cat_dim0_strides(self):
     i = Variable("i", 1, 5).bind(3)
     j = Variable("j", 1, 5).bind(3)
