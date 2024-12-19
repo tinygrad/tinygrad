@@ -67,15 +67,15 @@ class TestTinygrad(unittest.TestCase):
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
     out.backward(retain_graph=True)
-    xgrad,wgrad = x.grad.numpy(), W.grad.numpy()
+    xgrad,wgrad = x.grad, W.grad
     out.backward(retain_graph=True)
-    xgrad2,wgrad2 = x.grad.numpy(), W.grad.numpy()
+    xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
-    xgrad3,wgrad3 = x.grad.numpy(), W.grad.numpy()
-    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
-    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
+    xgrad3,wgrad3 = x.grad, W.grad
+    np.testing.assert_allclose(xgrad3.numpy(), xgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3.numpy(), wgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2.numpy(), xgrad.numpy() * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
 
   def test_second_order_backward_pass(self):
     def test_pytorch():
@@ -742,8 +742,8 @@ class TestTensorMetadata(unittest.TestCase):
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
     self.assertEqual(out.lazydata.metadata.name, "__mul__")
-    self.assertEqual(out.lazydata.srcs[0].metadata.name, "relu")
-    self.assertEqual(out.lazydata.srcs[1].metadata.name, "sigmoid")
+    self.assertEqual(out.lazydata.src[0].metadata.name, "relu")
+    self.assertEqual(out.lazydata.src[1].metadata.name, "sigmoid")
     si = create_schedule([out.lazydata])[-1]
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})

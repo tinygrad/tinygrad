@@ -4,9 +4,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
-from tinygrad.ops import UOp, ssimplify, Variable, sint, sym_infer
+from tinygrad.ops import UOp, Variable, sym_infer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
@@ -75,10 +75,6 @@ class GraphRunner(Runner):
     self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
     self.launch_dims_base:Dict[int, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
 
-    op_estimate: sint = 0
-    mem_estimate: sint = 0
-    lds_estimate: sint = 0
-
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
@@ -86,10 +82,9 @@ class GraphRunner(Runner):
                                [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and is_sym_dim(d)])
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
+    estimates = Estimates()
     for j,ji in enumerate(jit_cache):
-      op_estimate += ji.prg.op_estimate
-      mem_estimate += ji.prg.mem_estimate
-      lds_estimate += ji.prg.lds_estimate
+      estimates += ji.prg.estimates
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
 
@@ -103,8 +98,7 @@ class GraphRunner(Runner):
     self.w_dependency_map: Dict[int, Any] = {}
     self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
 
-    super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0],
-                     ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
+    super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0], estimates.simplify())
 
   def updated_vars(self, var_vals: Dict[Variable, int]):
     vals = [var_vals[v] for v in self.vars]
