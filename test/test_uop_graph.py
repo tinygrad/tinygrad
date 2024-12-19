@@ -750,7 +750,6 @@ class TestIdxUpcast(unittest.TestCase):
     index_op = index_ops.pop()
     assert index_op is not None and index_op.src[1].dtype == dtype
 
-  @unittest.skip("")
   def test_case(self):
     uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=1, upcasted=2, dont_use_locals=False), src=(
   UOp(Ops.STORE, dtypes.void, arg=None, src=(
@@ -801,7 +800,7 @@ class TestIdxUpcast(unittest.TestCase):
          x15,)),
        x6,)),)),))
     indexed = rewrite_shapetracker_with_index(uop, self.renderer)
-    self.render_src(indexed)
+    print(self.render_src(indexed))
 
   # total 2**31: Use three dims so it doesn't exceed block limit
   # Symbolic has to subtract by 1 because var is inclusive
