@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, List, Tuple, Dict, Callable, Any, Set, cast, DefaultDict
 import functools, collections
 from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod, get_single_element
+from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp
 from tinygrad.dtype import DType, PtrDType
 
@@ -58,7 +58,7 @@ class Estimates:
       elif u.op in {Ops.LOAD, Ops.STORE}:
         lds += u.src[0].dtype.itemsize * mults
         if not (pdt:=cast(PtrDType, u.src[0].dtype)).local:
-          buf_idx = (get_single_element([x for x in u.src[0].toposort if x.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}]).arg, u.op)
+          buf_idx = ([x for x in u.src[0].toposort if x.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}][0].arg, u.op)
           # TODO: once tests are fixed bring this back
           #assert pdt.size != -1, f"{pdt} {pdt.size} {pdt.itemsize}"
           buf_size[buf_idx] = pdt.size*pdt.itemsize

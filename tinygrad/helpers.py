@@ -56,9 +56,6 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def get_single_element(x:List[T]) -> T:
-  assert len(x) == 1, f"list {x} must only have 1 element"
-  return x[0]
 def get_child(obj, key):
   for k in key.split('.'):
     if k.isnumeric(): obj = obj[int(k)]
