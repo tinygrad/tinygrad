@@ -410,12 +410,21 @@ def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
   return v1
 
+def merge_view_uops(ctx:ScheduleContext, b2:UOp, v1:UOp, v2:UOp, b1:UOp, mv:UOp):
+  if b2 in ctx.realizes:
+    ctx.realizes[b1] = b1
+    del ctx.realizes[b2]
+  ctx.tensor_uops[b1] += ctx.tensor_uops[b2]
+  del ctx.tensor_uops[b2]
+  return mv
+
 merge_bufs = PatternMatcher([
   # merge base
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat())))), merge),
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"),)))), merge_realized),
-  # collapse view
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), lambda mv:mv),
+  # expands shouldn't make it here
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat())).view(name="mv"))), merge_view_uops),
+  # collapse realized VIEW
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).view(name="mv"))), lambda mv:mv),
 ])
 
