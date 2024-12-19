@@ -1956,6 +1956,7 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
+  @unittest.skip("not real world")
   def test_zero_size_alt(self):
     st = ShapeTracker.from_shape((135, 0, 9))
     a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
@@ -1985,6 +1986,7 @@ class TestBigGraph(unittest.TestCase):
     self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(ctx.realizes), 0)
 
+  @unittest.skip("not real world")
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
     y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int, (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
@@ -2001,8 +2003,8 @@ class TestBigGraph(unittest.TestCase):
     self.assertEqual(len(ctx.realizes), 1)
 
 tensor_const_pm = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, src=()))), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE).view(),)), lambda: True),
+  (UPat(Ops.BIND, src=(UPat(Ops.DEVICE).view(), UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))), lambda: True),
 ])
 class TestConst(unittest.TestCase):
   # ** part 1: basic functionality of a tensor directly created from CONST

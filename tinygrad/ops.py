@@ -439,7 +439,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if op is Ops.CONST:
       # NOTE: BIND stays BIND, UOp.const unbinds here
       const_uop = arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))
-      return const_uop.replace(src=(UOp(Ops.DEVICE, arg=device).view(ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
+      return const_uop.replace(src=(UOp(Ops.DEVICE, arg=device).view(ShapeTracker.from_shape(())), *const_uop.src)).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
@@ -551,8 +551,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
     return UOp(Ops.BIND, self.dtype, (self, self.const_like(val)))
   def unbind(self) -> Tuple[Variable, int]:
-    assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
-    return self.src[0], self.src[1].arg
+    assert self.op is Ops.BIND and self.src[1].op is Ops.DEFINE_VAR and self.src[2].op is Ops.CONST, f"can't unbind {self}"
+    return self.src[1], self.src[2].arg
   @property
   def val(self) -> int: return self.unbind()[1]
   def vars(self) -> Set[UOp]:

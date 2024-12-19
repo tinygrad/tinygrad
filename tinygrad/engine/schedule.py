@@ -53,7 +53,7 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   # shapeless op is passthrough
   # realized is passthrough
   # const is passthrough
-  if buf.st is None or buf.base.is_realized or buf.base.op is Ops.CONST: return buf
+  if buf.st is None or buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND}: return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
@@ -178,6 +178,8 @@ add_assign_adjacents = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
 
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
+  assert not any(x.op is Ops.BIND for x in pre.toposort)
+  print(pre)
   # create the ast context
   si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
   create_ctx = add_metadata if len(si_ctx.assigns) == 0 else add_metadata+add_assign_adjacents
@@ -196,6 +198,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+
   # can only schedule once
   for buf_uop in si_ctx.sinked:
     for luop in si_ctx.tensor_uops[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
@@ -334,11 +337,10 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
 
 def view_const(x:UOp, view:UOp):
   if any(v.mask is not None for v in view.st.views): return None
-  ret = UOp(Ops.CONST, x.dtype, (UOp(Ops.DEVICE, arg=x.device).view(unwrap(x.st)+unwrap(view.st)), ), x.arg)
+  new_view = UOp(Ops.DEVICE, arg=x.device).view(unwrap(x.st)+unwrap(view.st))
+  ret = x.replace(src=(new_view, *x.src[1:]))
   assert ret.shape == view.shape
   return ret
-
-def panic(): raise Exception()
 
 def fold_const_reduceop(reduce:UOp, x:UOp):
   ret = x.const_arg
@@ -350,12 +352,8 @@ def fold_const_reduceop(reduce:UOp, x:UOp):
     case _: return None
   return reduce.const_like(ret)
 
-def const_copy_folding(cp:UOp, const:UOp, b:UOp, base:UOp):
-  #raise Exception(base)
-  return const
-
 ops_folding = symbolic+PatternMatcher([
-  (UPat.cvar("x").view(name="view"), view_const),
+  (UPat({Ops.CONST, Ops.BIND}, name="x").view(name="view"), view_const),
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: base.const_like(0) if base.size == 0 else None),
   # DETACH is a NOOP here
@@ -367,7 +365,7 @@ ops_folding = symbolic+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), fold_const_reduceop),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda x:x),
 
-  (UPatScheduled(Ops.COPY, name="cp", src=(UPat.cvar("const"),)), const_copy_folding),
+  (UPatScheduled(Ops.COPY, src=(UPat.cvar("x"),)), lambda x:x),
     # no double COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
   # no COPY to same device, except clone (arg is True)
@@ -449,9 +447,10 @@ do_realize = PatternMatcher([
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
-def generate_valid(ctx:ScheduleContext, const:UOp) -> UOp:
+def generate_valid(ctx:ScheduleContext, const:UOp, st:UOp) -> UOp:
+  assert all(v.mask is None for v in unwrap(st.st).views), f"can't have masks yet {st}"
   if const.op is Ops.BIND: ctx.var_vals.update([const.unbind()])
-  return UOp.const_with_shape(const.dtype.base, const if const.op is Ops.BIND else const.arg, unwrap(const.st).shape)
+  return UOp.const_with_shape(const.dtype.base, const if const.op is Ops.BIND else const.arg, unwrap(st.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
@@ -464,7 +463,8 @@ def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
 
 break_sched = PatternMatcher([
   # consts are always fused and generated
-  (UPat({Ops.CONST, Ops.BIND}, name="const", src=(UPat(Ops.VIEW),)), generate_valid),
+  (UPat(Ops.CONST, name="const", src=(UPat(Ops.VIEW, name="st"),)), generate_valid),
+  (UPat(Ops.BIND, name="const", src=(UPat(Ops.VIEW, name="st"), UPat(), UPat())), generate_valid),
   # view of realized buffer just loads
   (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, v.st.to_uop()))),
   # all other views either fold or realize with a store
