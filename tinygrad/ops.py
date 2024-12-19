@@ -1316,7 +1316,12 @@ ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
-merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+merge_views = PatternMatcher([
+  # VIEW on the edges gets replaced
+  (UPat(Ops.VIEW, name="v1", src=()).view(name="v2"), lambda v1,v2: v1.replace(arg=v1.st+v2.st)),
+  # merge double view on op
+  (UPat.var("x").view(name="v1").view(name="v2"), lambda x,v1,v2: x.view(v1.st+v2.st)),
+])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
