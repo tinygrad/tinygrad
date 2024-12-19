@@ -322,6 +322,7 @@ def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
   if batch_dims == 0: return x[tuple(i.squeeze(-1) for i in indices.split(1, -1))]
   x_shape, i_shape = x.shape, indices.shape
   b = math.prod(x.shape[dim] for dim in range(batch_dims))
+  # NOTE: each batched dim of both input and indices are equal
   x = x.reshape(b, *x.shape[batch_dims:])
   indices = indices.reshape(b, *indices.shape[batch_dims:])
   b_idx = Tensor.arange(b, device=x.device).reshape(b, *(1,)*(indices.ndim - 2)).expand(*indices.shape[:-1])
