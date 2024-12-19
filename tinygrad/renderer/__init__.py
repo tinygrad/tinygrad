@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Optional, List, Tuple, Dict, Callable, Any, Set
 import functools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, smin
+from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -33,7 +33,6 @@ class Estimates:
   mem:sint = 0
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
-  def update_mem(self, mem_estimate:sint): return Estimates(self.ops, self.lds, smin(mem_estimate, self.mem))
   @staticmethod
   def from_uops(uops:List[UOp], ignore_indexing=False) -> Estimates:
     flops: sint = 0
@@ -95,7 +94,7 @@ class ProgramSpec:
 
   @functools.cached_property
   def estimates(self) -> Estimates:
-    return (Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True)).update_mem(self.mem_estimate)
+    return replace(Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True), mem=self.mem_estimate)
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
