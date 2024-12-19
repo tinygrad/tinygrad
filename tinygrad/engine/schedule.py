@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, exec_alu
+from tinygrad.ops import buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -365,30 +365,7 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
 ops_folding = PatternMatcher([
-  # op with size 0 is zero
-  (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
-  # DETACH is a NOOP here
-  (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
-  # elementwise const folding
-  (UPat(GroupOp.ALU, name="alu"), simplify_alu),
-  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
-  (UPat(Ops.CAST, src=(UPat.var("x"),), name="cast"),
-   lambda x,cast: UOp.const(cast.dtype, x.const_arg) if all_int(x.shape) and x.is_unrealized_unmasked_const() else None),
-  # reduce of size 0 is the identity element
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-  # reduce of const is collapsed (TODO: make this a generic rule for stride0)
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
-  # CONST doesn't need COPY
-  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda x:x if x.is_unrealized_const() else None),
-  # no double COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
-  # no COPY to same device, except clone (arg is True)
-  (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
-   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg[1] is not True else None),
-  # support for using a contiguous permuted view instead of the parent view if one exists
-  (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
-  (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
+
 ])
 
 # ** buffer merging
