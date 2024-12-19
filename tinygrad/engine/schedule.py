@@ -461,9 +461,9 @@ do_realize = PatternMatcher([
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
-def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  if to_store.op is Ops.BIND: ctx.var_vals.update([to_store.unbind()])
-  return UOp.const_with_shape(base.dtype, to_store if to_store.op is Ops.BIND else to_store.arg, unwrap(base.st).shape)
+def generate_valid(ctx:ScheduleContext, const:UOp, st:UOp) -> UOp:
+  if const.op is Ops.BIND: ctx.var_vals.update([const.unbind()])
+  return UOp.const_with_shape(const.dtype, const if const.op is Ops.BIND else const.arg, unwrap(st.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
@@ -476,7 +476,7 @@ def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
 
 break_sched = PatternMatcher([
   # consts are always fused and generated
-  (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat({Ops.CONST, Ops.BIND}, name="const"))), generate_valid),
   # view of realized buffer just loads
   (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, v.st.to_uop()))),
   # all other views either fold or realize with a store

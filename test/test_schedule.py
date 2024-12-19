@@ -2034,14 +2034,21 @@ class TestTensorConst(unittest.TestCase):
     sched = a.schedule()
     self.assertEqual(len(sched), 0)
 
-  def test_const_schedule_view(self):
+  def test_const_contiguous_schedule(self):
     # this ends up in the big graph
-    a = Tensor.ones((4, 4)).contiguous()
+    a = Tensor.ones((4,)).contiguous()
     sched = a.schedule()
     self.assertEqual(len(sched), 1)
-    # currently, ast consts are VALID. TODO: it doesn't have to
-    ones_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(), name="store"),))
+
+  def test_ones_ast(self):
+    a = Tensor.ones((4,)).contiguous()
+    sched = a.schedule()
+    # currently, ast consts are represented as VALID. TODO: it doesn't have to be VALID
+    print(sched[0].ast)
+    ones_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0)))),))
     self.assertEqual(len(ones_ast_pattern.match(sched[0].ast, {})), 1)
+    run_schedule(sched)
+    self.assertListEqual(a.tolist(), [1, 1, 1, 1])
 
   def test_var_schedule(self):
     vv = UOp.variable("a", 0, 10).bind(1)
