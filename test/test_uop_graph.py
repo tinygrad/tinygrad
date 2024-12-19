@@ -724,7 +724,6 @@ class TestIdxUpcast(unittest.TestCase):
     return res
   def e(self, st):
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
-    print(f"{store=}")
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
     return indexed
   def r(self, st):
