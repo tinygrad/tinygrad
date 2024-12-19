@@ -116,10 +116,6 @@ backend_test.exclude('string')
 backend_test.exclude('test_strnorm_*')
 backend_test.exclude('test_regex_*')
 
-# no scatternd gathernd
-backend_test.exclude('test_gathernd_*')
-backend_test.exclude('test_scatternd_*')
-
 # no quantize
 backend_test.exclude('test_dynamicquantizelinear_*')
 backend_test.exclude('test_qlinearmatmul_*')
@@ -184,8 +180,11 @@ backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill v
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
+
 backend_test.exclude('test_scatter_elements_with_reduction_min_cpu') # min not yet supported
+backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
+backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')

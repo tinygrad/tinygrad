@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
-from tinygrad.helpers import dedup, flatten, getenv
+from tinygrad.helpers import dedup, flatten, getenv, unwrap
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
 
@@ -39,8 +39,8 @@ class Optimizer:
     assert Tensor.training, (
             f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
-    return self._step()+self.params+self.buffers
-  def _step(self) -> List[Tensor]: raise NotImplementedError
+    return self.schedule_step_with_grads([unwrap(t.grad) for t in self.params])+self.params+self.buffers
+  def schedule_step_with_grads(self, grads:List[Tensor]) -> List[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
   """
@@ -51,7 +51,7 @@ class OptimizerGroup(Optimizer):
     self.params, self.buffers = flatten([o.params for o in self.optimizers]), flatten([o.buffers for o in self.optimizers])
   def __getitem__(self, i): return self.optimizers[i]
   def zero_grad(self): [o.zero_grad() for o in self.optimizers]
-  def _step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o._step()]
+  def schedule_step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o.schedule_step()]
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
 def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False):
@@ -76,12 +76,11 @@ class LARS(Optimizer):
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
     self.b = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
 
-  def _step(self) -> List[Tensor]:
-    for i, t in enumerate(self.params):
-      assert t.grad is not None
+  def schedule_step_with_grads(self, grads:List[Tensor]) -> List[Tensor]:
+    for i, (t, g) in enumerate(zip(self.params, grads)):
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-      g = t.grad.contiguous()
+      g = g.contiguous()
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
@@ -130,13 +129,12 @@ class LAMB(Optimizer):
     self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
     self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
 
-  def _step(self) -> List[Tensor]:
+  def schedule_step_with_grads(self, grads:List[Tensor]) -> List[Tensor]:
     self.b1_t *= self.b1
     self.b2_t *= self.b2
-    for i, t in enumerate(self.params):
-      assert t.grad is not None
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
-      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
+    for i, (t, g) in enumerate(zip(self.params, grads)):
+      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g)
+      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()

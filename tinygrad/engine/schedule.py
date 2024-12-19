@@ -1,7 +1,7 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
+from typing import Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
@@ -23,7 +23,7 @@ class ScheduleItem:
   ast: UOp
   bufs: Tuple[Buffer, ...]
   metadata: Tuple[Metadata, ...]
-  assign_preloads: FrozenSet[UOp]
+  assign_preloads: Tuple[UOp, ...]
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -39,57 +39,45 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  lazybufs: Dict[UOp, List[UOp]] = field(default_factory=dict) # this maps BUFFER uops of this schedule to the underlying lazybuffer
+  tensor_uops: Dict[UOp, List[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: Dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
-  children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
   contiguous: Dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
-
-def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
+  children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # shapeless op is passthrough
-  if buf.st is None: return buf
+  # realized is passthrough
+  if buf.st is None or buf.base.is_realized: return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
   # make things that can't be images not images
-  dtype = buf.buf_uop.dtype.base if buf.is_realized else buf.dtype
+  dtype = buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
-  # base is a VIEW of (BUFFER, (optional) op)
-  if buf.is_realized:
-    buf_uop = buf.buf_uop
-    op = None
-  # metaops already have a BUFFER uop
-  elif is_scheduled(buf):
-    buf_uop = buf.buf_uop
-    op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
-  # ASSIGN uses the target buffer, otherwise we create a new buffer
-  else:
-    src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
-    buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-    op = UOp(buf.op, dtype.base, src, buf.arg)
-  ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
-  # track the underlying lazydata for this op
-  if op is not None: ctx.lazybufs[buf_uop] = [buf]
-  cache[buf] = ret
+  # meta ops and assign already have a target buffer, otherwise we create a new one
+  buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, Ops.VIEW} else UOp.new_buffer(buf.device, buf.size, dtype)
+  if buf.op is Ops.VIEW: op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
+  else: op = buf.replace(dtype=dtype.base, src=tuple(to_uop(x, ctx, cache) for x in buf.src))
+  # track the underlying tensor uop for this op
+  ctx.tensor_uops[buf_uop] = [buf]
+  # (early) bufferize
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
   return ret
 
 # **** AST graph rewrite
 
 # ** movement ops
 
-def apply_swizzle(u:UOp, arg:ShapeTracker) -> UOp:
-  assert u is u.base, f"must be base to swizzle {u}"
-  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u.view(arg), view_left)
+def apply_swizzle(u:UOp) -> UOp:
+  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
 def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   input_st = ShapeTracker.from_shape(unwrap(src.st).shape)
@@ -101,21 +89,24 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  return apply_swizzle(src, new_input_st).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
+  return apply_swizzle(src.view(new_input_st)).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
-def push_swizzle_down_through_reduce(r:UOp, v:UOp, src:UOp) -> UOp:
+def reduceop_view_right(r:UOp, v:UOp, src:UOp) -> UOp:
   if not (swizzle_st:=unwrap(v.st)).contiguous or v.size != src.size: raise AssertionError(f"can't push {v} down through {src}")
   output_shape = swizzle_st.reduce(r.axis_arg)
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
 
-def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-  if not (swizzles := [x for x in root.src if x.base is not x]): return None
-  assert all_same([(x.shape, prod(x.src[0].shape)) for x in swizzles]), f"swizzles must have the same size {swizzles}"
-  new_input_st = ShapeTracker.from_shape(swizzles[0].src[0].shape)
-  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src))
+def elementwise_view_right(root:UOp) -> Optional[UOp]:
+  if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
+  assert all(x.base.st is not None for x in swizzles), f"found shapeless VIEW src in {root}"
+  assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
+  # push the swizzle from src to root
+  output_swizzle = swizzles[0]
+  new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
+  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # update the ASSIGN offset to match the new shape
   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
-  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(swizzles[0].shape))
+  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(output_swizzle.shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -126,13 +117,14 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 view_right = merge_views+PatternMatcher([
   # ASSIGN with offset swizzles STORE
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
-   lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)), a.arg)),
-  # non contiguous VIEW on a reduce creates a new VIEW
+   lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)).view(a.arg))),
+  # REDUCE(src.view(contiguous=False)) -> REDUCE(src.view(contiguous=True)).view()
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
-  # push a VIEW down to STORE, through a reduce (ONLY reshapes)
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), push_swizzle_down_through_reduce),
-  # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  # REDUCE(src.view()) -> REDUCE(src).view()
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), reduceop_view_right),
+  # ALU(src.view()) -> ALU(src).view()
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), elementwise_view_right),
+  # double reduce op collapses to a single reduce op
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
@@ -140,7 +132,7 @@ view_right = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  lazybufs: Dict[UOp, List[UOp]]
+  tensor_uops: Dict[UOp, List[UOp]]
   ops_metadata: Dict[UOp, Metadata]
   assigns: Set[UOp]
   var_vals: Dict[Variable, int]
@@ -158,8 +150,9 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   return st.to_uop() if st != x.st else None
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
+  assert x.arg[0] != -1, "fake -1 BUFFERS should not make it here"
   ctx.bufs.append(x)
-  return UOp(Ops.DEFINE_GLOBAL, x.dtype, (), len(ctx.bufs)-1)
+  return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=x.arg[1]), (), len(ctx.bufs)-1)
 append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
 
 def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
@@ -170,31 +163,24 @@ check_preload = PatternMatcher([(UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), 
 
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
+  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
   # don't need contiguous or assign anymore
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda ctx,x: x),
+  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
 ])
 
-# ** fusion
-
-lazy = PatternMatcher([
-  # gather the metadata for this kernel
-  (UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.metadata.add(m) if (m:=ctx.ops_metadata.get(x)) is not None else None),
-])
-
-multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
-
-append_load = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambda ctx,b,x: ctx.assign_adj.setdefault(b, []).append(x)
+add_metadata = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: None if (m:=ctx.ops_metadata.get(x)) is None else ctx.metadata.add(m)),])
+add_assign_adjacents = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambda ctx,b,x: ctx.assign_adj.setdefault(b, []).append(x)
                                if b in ctx.assigns else None)])
 
-def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
-  si_ctx = ScheduleItemContext(ctx.lazybufs, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src},
-                               # TODO: fix metadata merging, this should be a list
-                               metadata={m for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and (m:=l[0].metadata) is not None})
-  # fuse and fold store -> loads
-  ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
-  sink = graph_rewrite(pre, ops_folding if len(si_ctx.assigns) == 0 else ops_folding+append_load, si_ctx)
+# late folding for multi output kernels
+multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
+
+def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
+  # create the ast context
+  si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
+  create_ctx = add_metadata if len(si_ctx.assigns) == 0 else add_metadata+add_assign_adjacents
+  sink = graph_rewrite(pre, create_ctx if len(si_ctx.sinked) == 1 else multioutput+create_ctx, si_ctx)
   # do movement ops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
@@ -209,9 +195,14 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+  # can only schedule once
+  for buf_uop in si_ctx.sinked:
+    for luop in si_ctx.tensor_uops[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
+  # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))
-  return sink, si_ctx
+  return ScheduleItem(sink, tuple(u.buffer for u in si_ctx.bufs if u.size != 0), tuple(si_ctx.metadata),
+                      tuple(ubuf for ubuf,ops in si_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops)))
 
 PROCESS_REPLAY_CAPTURE: Dict[str, bytes] = {}
 if getenv("RUN_PROCESS_REPLAY"):
@@ -221,6 +212,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # **** Schedule grouping
 
+def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
   return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
@@ -310,7 +302,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(luop.forced_realize for tr in group for luop in ctx.lazybufs[tr]): continue
+    if any(luop.forced_realize for tr in group for luop in ctx.tensor_uops[tr]): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
@@ -334,7 +326,7 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
-def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
+def simplify_reduceop(reduce:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
@@ -375,6 +367,8 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # DETACH is a NOOP here
+  (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
   # elementwise const folding
   (UPat(GroupOp.ALU, name="alu"), simplify_alu),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
@@ -391,7 +385,7 @@ ops_folding = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
   # no COPY to same device, except clone (arg is True)
   (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
-   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg is not True else None),
+   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg[1] is not True else None),
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
@@ -406,14 +400,14 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
     ctx.realizes[b1] = b1
     del ctx.realizes[b2]
   # ops referring to b2 now ref to b1
-  ctx.lazybufs[b1] += ctx.lazybufs[b2]
-  del ctx.lazybufs[b2]
+  ctx.tensor_uops[b1] += ctx.tensor_uops[b2]
+  del ctx.tensor_uops[b2]
   # merge
   return v1
 
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   # early become
-  for luop in ctx.lazybufs.get(b1, [])+ctx.lazybufs.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
+  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
   return v1
 
 merge_bufs = PatternMatcher([
@@ -423,7 +417,6 @@ merge_bufs = PatternMatcher([
   # collapse view
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), lambda mv:mv),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).view(name="mv"))), lambda mv:mv),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BUFFER).view(name="mv"))), lambda mv:mv),
 ])
 
 # ** this decides which ops get realized
@@ -478,7 +471,7 @@ def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
 
 def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
   # TODO: metadata post merge
-  if (m:=ctx.lazybufs[b][0].metadata) is not None: ctx.ops_metadata[to_store] = m
+  if (m:=ctx.tensor_uops[b][0].metadata) is not None: ctx.ops_metadata[to_store] = m
   return to_store
 
 break_sched = PatternMatcher([
@@ -503,14 +496,17 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
+remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[UOp, UOp] = {}
+  # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx)
+  big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
@@ -521,11 +517,7 @@ def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[
   prescheduled: List[ScheduleItem] = []
   for store_uops in store_groups:
     if len(stores:=[ctx.realizes[u] for u in store_uops if ctx.realizes[u].op is Ops.STORE]) != 0:
-      ast, ast_ctx = full_ast_rewrite(UOp.sink(*stores), ctx)
-      prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
-                                       frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
-      for buf_uop in ast_ctx.sinked:
-        for luop in ast_ctx.lazybufs[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
+      prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)

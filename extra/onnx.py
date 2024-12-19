@@ -71,7 +71,8 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
   # model initialization data
-  model_parameters = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
+  model_tensors = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
+  model_expected_inputs = {inp.name:inp for inp in onnx_model.graph.input if inp.name not in model_tensors}
   model_attributes = {num:{x.name:attribute_parse(x) for x in n.attribute} for num,n in enumerate(onnx_model.graph.node)}
 
   # model descriptions
@@ -86,6 +87,15 @@ def get_run_onnx(onnx_model: ModelProto):
     op:op.lower() for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan",
     "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh",
     "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")
+  }
+
+  # these values are expected to be python consts
+  required_input_python_consts: Dict[str, tuple[int, ...]] = {
+    "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
+    "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+    "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
+    **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
+    **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
   }
 
   # src: https://onnx.ai/onnx/repo-docs/IR.html#input-output-data-types
@@ -118,25 +128,21 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
-    intermediate_tensors: Dict[str,Tensor] = {}
 
-    input_tensors: Dict[str, Tensor | List[Tensor]] = {}
-    for model_input in onnx_model.graph.input:
-      if model_input.name in inputs: input_tensors[model_input.name] = prepare_input(inputs[model_input.name], model_input)
-      elif model_input.name not in model_parameters: raise RuntimeError(f"Please provide input data for {model_input.name}")
-
-    def fetch_tensor(x: str):
-      if x in model_parameters: return model_parameters[x]
-      if x in intermediate_tensors: return intermediate_tensors[x]
-      if x != "": return input_tensors[x]
-      return None
+    for name, value_info in model_expected_inputs.items():
+      if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
+      model_tensors[name] = prepare_input(inputs[name], value_info)
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp = [fetch_tensor(x) for x in n.input]
+      inp_tensors = [model_tensors.get(x) for x in n.input]
+      required_consts = required_input_python_consts.get(n.op_type, ())
+      inp = [to_python_const(t) if i in required_consts else t for i,t in enumerate(inp_tensors)]
       opt = model_attributes[num]
 
-      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" for i,(x,t) in enumerate(zip(n.input, inp))))
+      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp_tensors]} opt {opt}")
+      if debug >= 3:
+        print("\tinputs:")
+        print("\n".join(f"\t\t{x} - {t}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
 
       if n.op_type in tensor_methods:
         ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
@@ -145,11 +151,11 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Split":
         axis, n_outputs  = opt.get('axis', 0), opt.get('num_outputs') or len(n.output)
         sz = inp[0].shape[axis]
-        sizes = to_python_const(inp[1]) if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
+        sizes = inp[1] if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
         ret = inp[0].split(sizes, axis)
       elif n.op_type == "Gradient":
         y = opt["y"]
-        intermediate_tensors[y].backward()
+        model_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
 
       # onnx_ops.py
@@ -169,9 +175,9 @@ def get_run_onnx(onnx_model: ModelProto):
       # finalization after running the op
       if not isinstance(ret, tuple): ret = (ret, )
       if len(n.output) > len(ret): raise RuntimeError(f"expected output size must be less than {len(ret)}, it's {n.output}")
-      for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
+      for i in range(len(n.output)): model_tensors[n.output[i]] = ret[i]
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
 
-      if num == ONNXLIMIT: return {name:intermediate_tensors[name] for name in n.output}
-    return {x.name:intermediate_tensors[x.name] for x in onnx_model.graph.output}
+      if num == ONNXLIMIT: return {name:model_tensors[name] for name in n.output}
+    return {x.name:model_tensors[x.name] for x in onnx_model.graph.output}
   return run_onnx

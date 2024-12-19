@@ -7,6 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
+from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -51,8 +52,7 @@ def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
-  del ret.srcs
-  return ret
+  return ret.buf_uop_view()
 
 def get_shape(x) -> Tuple[int, ...]:
   # NOTE: str is special because __getitem__ on a str is still a str
@@ -69,8 +69,7 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
-  del ret.srcs
-  return ret
+  return ret.buf_uop_view()
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]], dtype:DType) -> List[List[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
@@ -260,7 +259,7 @@ class Tensor(SimpleMathTrait):
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
     """
-    return Tensor(self.lazydata, device=self.device, requires_grad=False)
+    return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
@@ -429,7 +428,7 @@ class Tensor(SimpleMathTrait):
 
     r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
-    del r.lazydata.srcs # fake realize
+    r.lazydata.buf_uop_view()
     return r
 
   @staticmethod
@@ -863,6 +862,30 @@ class Tensor(SimpleMathTrait):
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
+
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
+    """
+    Compute the gradient of the targets with respect to self.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x = Tensor.eye(3)
+    y = Tensor([[2.0,0,-2.0]])
+    z = y.matmul(x).sum()
+    dx, dy = z.gradient(x, y)
+
+    print(dx.tolist())  # dz/dx
+    print(dy.tolist())  # dz/dy
+    ```
+    """
+    assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
+    target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
+    assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+    grads = compute_gradient(self.lazydata, self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata), target_uops)
+    ret = []
+    for x in target_uops:
+      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
+      ret.append(Tensor(y, device=x.device))
+    return ret
 
   def _deepwalk(self):
     def _walk(node, visited):
@@ -2364,6 +2387,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='add').numpy())
     ```
     """
+    if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
@@ -2454,6 +2478,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return F.Exp.apply(self*math.log(2))
+
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2465,6 +2490,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return F.Relu.apply(self)
+
   def sigmoid(self):
     """
     Applies the Sigmoid function element-wise.
@@ -2475,7 +2501,8 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sigmoid().numpy())
     ```
     """
-    return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+    return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
+
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
     """
     Applies the Hardsigmoid function element-wise.

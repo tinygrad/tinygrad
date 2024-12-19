@@ -49,7 +49,7 @@ def fold_expanded(ex, buf):
               rootsrc[0] if isinstance(rootsrc, tuple) else None)
           else:
             # for non image, we upcast the index pointer
-            new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(new_src[0].dtype.local))
+            new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(local=new_src[0].dtype.local))
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(Ops.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
@@ -155,6 +155,10 @@ def threefry2x32(x: UOp, key: UOp):
     xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
 
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
+
+# ***** other math rewrite ****
+
+def sigmoid_like(x:UOp, y:UOp): return (t:=(1/(x+1))) * (1-t) * y
 
 # ***** main rewriter *****
 
@@ -303,11 +307,15 @@ sym = symbolic_flat+PatternMatcher([
   # remove NOOPs from SINK
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not Ops.NOOP)) != len(root.src) else None),
-  # remove EXPANDs from SINK/BARRIER
+  # remove VECTORIZE from SINK/BARRIER
   (UPat(Ops.BARRIER, src=(UPat((Ops.VECTORIZE, Ops.SINK), name='sink'),)), lambda sink: UOp(Ops.BARRIER, dtypes.void, sink.src)),
   (UPat(Ops.SINK, name="root"),
-    lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in {Ops.SINK, Ops.EXPAND} else (x,) for x in root.src)), root.arg)
-      if any(x.op in {Ops.SINK, Ops.EXPAND} for x in root.src) else None),
+    lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in {Ops.SINK, Ops.UNROLL} else (x,) for x in root.src)), root.arg)
+      if any(x.op in {Ops.SINK, Ops.UNROLL} for x in root.src) else None),
+  # stable sigmoid
+  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), lambda x: sigmoid_like(x, x.const_like(1))),
+  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()*UPat.var("y")), sigmoid_like),
+  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), lambda x: sigmoid_like(x, (x+1).reciprocal())),
 ])
 
 # *** uop expander ***
@@ -327,7 +335,7 @@ def _swizzle_args(cargs:Tuple[Tuple[int, int], ...], eargs:Tuple[Tuple[int, int]
   return [_expand_arg_to_idx(eargs, {**rpk, **{x:0 for x in exclude_args}} if exclude_args else rpk) for rpk in _choices_from_args(cargs)]
 
 def do_expand(root:UOp):
-  expands = [x for x in root.src if x.op is Ops.EXPAND]
+  expands = [x for x in root.src if x.op is Ops.UNROLL]
   if len(expands) == 0: return None
   # NOTE: we 0 out the reduce axis for WMMA. in theory they should all be the same, but is this always correct?
   exclude_args = tuple(dedup(root.arg[-1] + tuple(y[0] for y in flatten(root.arg[-2])))) if root.op is Ops.WMMA else ()
@@ -340,7 +348,7 @@ def do_expand(root:UOp):
   expand_sz = prod([x[1] for x in expand_args])
   new_srcs = []
   for i,src in enumerate(root.src):
-    if src.op is Ops.EXPAND:
+    if src.op is Ops.UNROLL:
       if root.op is Ops.IF and i == 0:
         # IF means OR on first arg to IF
         new_srcs.append(functools.reduce(operator.__or__, [src.src[0].gep(i) for i in range(expand_sz)]))
@@ -353,9 +361,9 @@ def do_expand(root:UOp):
         if src.dtype.count > 1: lst = flatten([[i*src.dtype.count+j for j in range(src.dtype.count)] for i in lst])
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
-      # non-EXPAND input
+      # non-UNROLL input
       if root.op is Ops.IF:
-        # for the first arg of IF, just pass them through ignoring EXPANDS
+        # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -371,18 +379,18 @@ def do_expand(root:UOp):
     # is this right?
     new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
   nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
-  return UOp(Ops.EXPAND, root.dtype, (nsrc,), expand_args)
+  return UOp(Ops.UNROLL, root.dtype, (nsrc,), expand_args)
 
 def do_contract(con:UOp):
   ex = con.src[0]
-  # CONTRACT without EXPAND repeats the element VECTORIZED
-  if ex.op is not Ops.EXPAND: return UOp(Ops.VECTORIZE, con.dtype, con.src*con.dtype.count)
-  # CONTRACT may remove several axes from EXPAND
+  # CONTRACT without UNROLL repeats the element VECTORIZED
+  if ex.op is not Ops.UNROLL: return UOp(Ops.VECTORIZE, con.dtype, con.src*con.dtype.count)
+  # CONTRACT may remove several axes from UNROLL
   assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
-  return UOp(Ops.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
+  return UOp(Ops.UNROLL, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
   if alu.dtype.vcount == 1: return None
@@ -402,22 +410,22 @@ def create_gate(root:UOp) -> Optional[UOp]:
 
 expander = PatternMatcher([
   # double expand
-  (UPat(Ops.EXPAND, name="outer", src=(UPat(Ops.EXPAND, name="inner"),)),
-   lambda outer, inner: UOp(Ops.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
+  (UPat(Ops.UNROLL, name="outer", src=(UPat(Ops.UNROLL, name="inner"),)),
+   lambda outer, inner: UOp(Ops.UNROLL, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.ASSIGN,
-         Ops.VECTORIZE, Ops.IF), name="root", custom_early_reject=set([Ops.EXPAND])), do_expand),
+         Ops.VECTORIZE, Ops.IF), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
   (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
   # BARRIERs aren't actually expanded
-  (UPat(Ops.BARRIER, src=(UPat(Ops.EXPAND, name="ex"),)),
-   lambda ex: UOp(Ops.EXPAND, dtypes.void, (UOp(Ops.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
-  # empty EXPAND is NOOP
-  (UPat(Ops.EXPAND, src=(UPat.var('x'),), arg=()), lambda x: x),
-  # EXPAND GEP (needed for WMMA, generalize this) -> vectorized ALU
-  (UPat(Ops.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
-    lambda ex,x,y: UOp(Ops.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
+  (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
+   lambda ex: UOp(Ops.UNROLL, dtypes.void, (UOp(Ops.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
+  # empty UNROLL is NOOP
+  (UPat(Ops.UNROLL, src=(UPat.var('x'),), arg=()), lambda x: x),
+  # UNROLL GEP (needed for WMMA, generalize this) -> vectorized ALU
+  (UPat(Ops.UNROLL, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
+    lambda ex,x,y: UOp(Ops.UNROLL, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
 ])
 
 def no_vectorized_load_store(ls:UOp):

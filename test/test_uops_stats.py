@@ -2,9 +2,10 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import lower_schedule_item
+from tinygrad.engine.realize import lower_schedule_item, ProgramSpec
+from tinygrad.renderer import flops_mem
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.ops import flops_mem, Ops, UOp
+from tinygrad.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 
@@ -13,7 +14,7 @@ from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 def get_stats(x:Tensor):
   si = create_schedule([x.lazydata])[-1]
   ei = lower_schedule_item(si)
-  return ei.prg.op_estimate, ei.prg.mem_estimate
+  return ei.prg.estimates.ops, ei.prg.estimates.mem
 
 class TestMemoryCount(unittest.TestCase):
   def test_add(self):
@@ -148,17 +149,17 @@ class TestStatsOptimized(unittest.TestCase):
     cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1].ast
     cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule()[-1].ast
 
-  def check_gemm(self, p, extra_flops=0):
+  def check_gemm(self, p:ProgramSpec, extra_flops=0):
     #p.uops.print()
     #print(p.src)
-    print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
-    self.assertEqual(p.op_estimate, 2*N*N*N + extra_flops)  # N**3 mulaccs
-    self.assertEqual(p.mem_estimate, 3*N*N*4) # 3 NxN mats with floats
+    print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
+    self.assertEqual(p.estimates.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
+    self.assertEqual(p.estimates.mem, 3*N*N*4) # 3 NxN mats with floats
 
   def test_gemm(self):
     p = Kernel(self.ast_gemm).to_program()
     self.check_gemm(p)
-    self.assertEqual(p.lds_estimate, 2*N*N*N*4 + 4*N*N)
+    self.assertEqual(p.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
   # this is a good lesson about why UPCASTing is a good idea
 
@@ -167,7 +168,7 @@ class TestStatsOptimized(unittest.TestCase):
     k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
     p = k.to_program()
     self.check_gemm(p)
-    self.assertEqual(p.lds_estimate, N*N*N*4 + N*N*N*4//4 + 4*N*N)
+    self.assertEqual(p.estimates.lds, N*N*N*4 + N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted(self):
     k = Kernel(self.ast_gemm)
@@ -176,7 +177,7 @@ class TestStatsOptimized(unittest.TestCase):
     k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
     p = k.to_program()
     self.check_gemm(p)
-    self.assertEqual(p.lds_estimate, 2*N*N*N*4//4 + 4*N*N)
+    self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted_locals(self):
     k = Kernel(self.ast_gemm)
@@ -189,7 +190,7 @@ class TestStatsOptimized(unittest.TestCase):
       raise unittest.SkipTest("no locals")
     p = k.to_program()
     self.check_gemm(p)
-    self.assertEqual(p.lds_estimate, 2*N*N*N*4//4 + 4*N*N)
+    self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_group(self):
     k = Kernel(self.ast_gemm)
@@ -201,14 +202,14 @@ class TestStatsOptimized(unittest.TestCase):
     p = k.to_program()
     # NOTE: these are sort of wrong. they aren't honoring the IF statement
     self.check_gemm(p, extra_flops=SZ*4)
-    self.assertEqual(p.lds_estimate, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
+    self.assertEqual(p.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
 
   def test_reduce(self):
     k = Kernel(self.ast_reduce)
     p = k.to_program()
-    print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
-    self.assertEqual(p.op_estimate, N*N)
-    self.assertEqual(p.mem_estimate, N*N*4 + 4)
+    print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
+    self.assertEqual(p.estimates.ops, N*N)
+    self.assertEqual(p.estimates.mem, N*N*4 + 4)
 
   def test_reduce_group(self):
     k = Kernel(self.ast_reduce)
@@ -218,7 +219,7 @@ class TestStatsOptimized(unittest.TestCase):
       raise unittest.SkipTest("no locals")
     p = k.to_program()
     # NOTE: these are wrong, they don't respect the if statement
-    print(p.name, p.op_estimate, p.mem_estimate, p.lds_estimate)
+    print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

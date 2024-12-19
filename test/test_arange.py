@@ -22,7 +22,7 @@ class TestArange(unittest.TestCase):
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
     np.testing.assert_equal(tt.numpy(), np.arange(N))
-    return p.op_estimate
+    return p.estimates.ops
 
   def test_complexity(self, opts=None, limit=None):
     # add 1 to avoid divide by 0. arange is 0 flops now!
