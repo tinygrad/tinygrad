@@ -412,10 +412,7 @@ def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
 
 def merge_view_uops(ctx:ScheduleContext, b2:UOp, v1:UOp, v2:UOp, b1:UOp, mv:UOp):
   if b2 in ctx.realizes:
-    ctx.realizes[b1] = b1
-    del ctx.realizes[b2]
-  ctx.tensor_uops[b1] += ctx.tensor_uops[b2]
-  del ctx.tensor_uops[b2]
+    return None
   return mv
 
 merge_bufs = PatternMatcher([
