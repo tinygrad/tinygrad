@@ -2000,24 +2000,21 @@ class TestBigGraph(unittest.TestCase):
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(ctx.realizes), 1)
 
-
-const_pm = PatternMatcher([
+tensor_const_pm = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
 ])
-
-const_upat = UPat(Ops.CONST)
 class TestTensorConst(unittest.TestCase):
   def test_tensor_const(self):
     a = Tensor(1)
     print(a.lazydata)
-    self.assertTrue(const_pm.rewrite(a.lazydata))
+    self.assertTrue(tensor_const_pm.rewrite(a.lazydata))
 
   def test_tensor_variable(self):
     vv = UOp.variable("a", 0, 10).bind(1)
     a = Tensor(vv)
     print(a.lazydata)
-    self.assertTrue(const_pm.rewrite(a.lazydata))
+    self.assertTrue(tensor_const_pm.rewrite(a.lazydata))
 
   def test_uop_methods(self):
     a = Tensor(1)
@@ -2036,6 +2033,27 @@ class TestTensorConst(unittest.TestCase):
     a = Tensor.ones((4, 4))
     sched = a.schedule()
     self.assertEqual(len(sched), 0)
+
+  def test_const_schedule_view(self):
+    # this ends up in the big graph
+    a = Tensor.ones((4, 4)).contiguous()
+    sched = a.schedule()
+    self.assertEqual(len(sched), 1)
+    # currently, ast consts are VALID. TODO: it doesn't have to
+    ones_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(), name="store"),))
+    self.assertEqual(len(ones_ast_pattern.match(sched[0].ast, {})), 1)
+
+  def test_var_schedule(self):
+    vv = UOp.variable("a", 0, 10).bind(1)
+    a = Tensor(vv)
+    sched = a.schedule()
+    self.assertEqual(len(sched), 0)
+
+  def test_add_tvar(self):
+    vv = UOp.variable("a", 0, 10).bind(1)
+    a = Tensor(vv)+2
+    sched = a.schedule()
+    self.assertEqual(len(sched), 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
