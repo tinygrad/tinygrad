@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import buffers, exec_alu
+from tinygrad.ops import buffers, exec_alu, symbolic
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -52,7 +52,7 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # shapeless op is passthrough
   # realized is passthrough
-  if buf.st is None or buf.base.is_realized: return buf
+  if buf.st is None or buf.base.is_realized or buf.op is Ops.CONST: return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
@@ -364,8 +364,14 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
-ops_folding = PatternMatcher([
+# VIEW(CONST(VIEW)) -> CONST(VIEW+VIEW)
+def view_const(const:UOp, view:UOp):
+  if any(v.mask is not None for v in unwrap(view.st).views): raise Exception("todo!")
+  return UOp(Ops.CONST, const.dtype, (UOp(Ops.DEVICE, arg=const.device).view(view.st+const.st),), const.arg)
 
+ops_folding = symbolic+PatternMatcher([
+  (UPat.cvar("const").view(name="view"), view_const),
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda x:x),
 ])
 
 # ** buffer merging
