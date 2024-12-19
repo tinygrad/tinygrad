@@ -365,8 +365,14 @@ ops_folding = symbolic+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), fold_const_reduceop),
-  (UPatScheduled(Ops.COPY, name="cp", src=(UPat.cvar("const"),)), const_copy_folding),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda x:x),
+
+  (UPatScheduled(Ops.COPY, name="cp", src=(UPat.cvar("const"),)), const_copy_folding),
+    # no double COPY
+  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
+  # no COPY to same device, except clone (arg is True)
+  (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
+   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg[1] is not True else None),
 
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
@@ -445,7 +451,7 @@ do_realize = PatternMatcher([
 
 def generate_valid(ctx:ScheduleContext, const:UOp) -> UOp:
   if const.op is Ops.BIND: ctx.var_vals.update([const.unbind()])
-  return UOp.const_with_shape(const.dtype, const if const.op is Ops.BIND else const.arg, unwrap(const.st).shape)
+  return UOp.const_with_shape(const.dtype.base, const if const.op is Ops.BIND else const.arg, unwrap(const.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
