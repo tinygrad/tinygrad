@@ -319,8 +319,14 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
 def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
 def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
-  indices = tuple(Tensor.arange(sh, device=x.device) for sh in x.shape[:batch_dims]) + tuple(i.squeeze(-1) for i in indices.split(1, -1))
-  return x[indices]
+  if batch_dims == 0: return x[tuple(i.squeeze(-1) for i in indices.split(1, -1))]
+  x_shape, i_shape = x.shape, indices.shape
+  b = math.prod(x.shape[dim] for dim in range(batch_dims))
+  x = x.reshape(b, *x.shape[batch_dims:])
+  indices = indices.reshape(b, *indices.shape[batch_dims:])
+  b_idx = Tensor.arange(b, device=x.device).reshape(b, *(1,)*(indices.ndim - 2)).expand(*indices.shape[:-1])
+  ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
+  return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
 def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Optional[str]=None):
   assert updates.shape == indices.shape[:-1] + x.shape[indices.shape[-1]:]
   x = x.contiguous()
