@@ -575,7 +575,7 @@ def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:flo
 def Adam(R:Tensor, T:int, *inputs:Tensor, alpha:float=0.9, beta:float=0.999, epsilon:float=0.0, norm_coefficient:float=0.0,
          norm_coefficient_post:float=0.0):
   X, G, V, H = inputs
-  G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't need these detaches
+  X.requires_grad = True
   X.grad = norm_coefficient * X.detach() + G
   opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
   opt.m, opt.v, opt.lr = [V], [H], R
@@ -592,7 +592,7 @@ def Adam(R:Tensor, T:int, *inputs:Tensor, alpha:float=0.9, beta:float=0.999, eps
 @onnx_training(3)
 def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str, norm_coefficient:float):
   X, G, V = inputs
-  G, V = G.detach(), V.detach()
+  X.requires_grad = True
   X.grad = (norm_coefficient * X.detach() + G) * (beta if T > 0 else 1)
   opt = SGD([X], momentum=alpha, nesterov=(mode=="nesterov"))
   opt.b, opt.lr = [V], R
