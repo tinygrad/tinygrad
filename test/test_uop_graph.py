@@ -750,58 +750,6 @@ class TestIdxUpcast(unittest.TestCase):
     index_op = index_ops.pop()
     assert index_op is not None and index_op.src[1].dtype == dtype
 
-  def test_case(self):
-    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=1, upcasted=2, dont_use_locals=False), src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
-    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0, src=()),
-    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(625, 32, 1, 3, 1), strides=(96, 3, 0, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
-    UOp(Ops.ADD, dtypes.int, arg=None, src=(
-      UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (2, 4)), src=(
-        UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-          UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(60001, 119999), strides=(0, 0), offset=0, mask=((0, 60001), (59999, 119999)), contiguous=False), View(shape=(625, 32, 15000, 3, 4), strides=(96, 3, 480000, 1, 120000), offset=0, mask=None, contiguous=False))), src=()),)),
-          UOp(Ops.CONST, dtypes.int, arg=1, src=()),
-          x9:=UOp(Ops.CONST, dtypes.int, arg=0, src=()),)),)),
-      UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-        UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(625, 32, 1, 3, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-        UOp(Ops.CONST, dtypes.int, arg=-1, src=()),
-         x9,)),)),)),))
-    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
-    print(self.render_src(indexed))
-
-  # @unittest.skip("")
-  def test_case2(self):
-    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=1, upcasted=1, dont_use_locals=False), src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
-    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0, src=()),
-    x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 32, 4), strides=(128, 4, 1), offset=0, mask=None, contiguous=True),)), src=()),
-    UOp(Ops.ADD, dtypes.int, arg=None, src=(
-      UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-        UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
-          x6:=UOp(Ops.CAST, dtypes.int, arg=None, src=(
-            UOp(Ops.MUL, dtypes.float, arg=None, src=(
-              UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                x9:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 32, 4), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                UOp(Ops.CONST, dtypes.float, arg=60000.0, src=()),
-                UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),)),
-              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
-                 x2,)),)),)),
-          x15:=UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-             x9,
-            x16:=UOp(Ops.CONST, dtypes.int, arg=0, src=()),
-             x16,)),)),
-        UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-           x9,
-          UOp(Ops.CONST, dtypes.int, arg=60000, src=()),
-           x16,)),
-         x15,)),
-       x6,)),)),))
-    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
-    print(self.render_src(indexed))
-
   # total 2**31: Use three dims so it doesn't exceed block limit
   # Symbolic has to subtract by 1 because var is inclusive
   def test_int32(self):
@@ -874,56 +822,6 @@ class TestIdxUpcast(unittest.TestCase):
     index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
     assert all(u.dtype is dtypes.long for u in index_ops.pop().src)
 
-  def test_case3(self):
-    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=2, upcasted=4, dont_use_locals=False), src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
-    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
-    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(8, 128, 16, 2, 8, 16, 1, 1, 4, 4, 1, 1), strides=(8388608, 16384, 1024, 64, 128, 4, 0, 0, 2097152, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),
-    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (6, 7, 10, 11)), src=(
-      UOp(Ops.MUL, dtypes.float, arg=None, src=(
-        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
-          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 1, 32, 4, 130, 4, 130, 4, 130), strides=(0, 0, 0, 2097152, 0, 16384, 0, 128, 0, 1), offset=-16513, mask=((0, 1), (0, 1), (0, 1), (0, 32), (0, 4), (1, 129), (0, 4), (1, 129), (0, 4), (1, 129)), contiguous=False), View(shape=(8, 128, 16, 2, 8, 16, 32, 3, 4, 4, 3, 3), strides=(0, 270400, 4160, 64, 520, 4, 140608000, 35422400, 0, 1, 131, 68120), offset=0, mask=None, contiguous=False))), src=()),)),
-        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
-          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(8, 128, 16, 2, 8, 16, 32, 3, 4, 4, 3, 3), strides=(3456, 0, 0, 0, 0, 0, 27, 9, 864, 0, 1, 3), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),))
-    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
-    print(self.render_src(indexed))
-
-  @unittest.skipUnless(Device.DEFAULT=="METAL", "METAL AMX test")
-  def test_case4(self):
-    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=4, upcasted=4, dont_use_locals=False), src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
-    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0, src=()),
-    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 128, 7, 8, 2, 1, 1, 1, 1, 2), strides=(25088, 196, 7, 1, 98, 0, 0, 0, 0, 49), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 1), (0, 1), (0, 1), (0, 1), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 1, 1, 1, 2, 7, 1), strides=(28672, 448, 2, 4, 224, 16, 0, 0, 0, 1, 32, 0), offset=0, mask=None, contiguous=False))), src=()),
-    UOp(Ops.MAX, dtypes.half, arg=None, src=(
-      UOp(Ops.MUL, dtypes.half, arg=None, src=(
-        UOp(Ops.CAST, dtypes.half, arg=None, src=(
-          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (6, 7, 11)), src=(
-            UOp(Ops.UNROLL, dtypes.float, arg=((9, 2),), src=(
-              UOp(Ops.WMMA, dtypes.float.vec(2), arg=('WMMA_8_8_8_half_float', (8, 8, 8), dtypes.half, dtypes.float, 'METAL', 32, (((9, 2),), ((9, 2),), ((9, 2),)), (8,)), src=(
-                UOp(Ops.CONTRACT, dtypes.half.vec(2), arg=((9, 2),), src=(
-                  UOp(Ops.LOAD, dtypes.half, arg=None, src=(
-                    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1, src=()),
-                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 1, 512, 4, 9, 4, 9), strides=(0, 25088, 0, 49, 0, 7, 0, 1), offset=-8, mask=((0, 1), (0, 64), (0, 1), (0, 512), (0, 4), (1, 8), (0, 4), (1, 8)), contiguous=False), View(shape=(64, 128, 7, 8, 2, 64, 3, 3, 8, 2), strides=(663552, 0, 36, 1, 0, 10368, 360, 10, 1296, 0), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 64), (0, 3), (0, 3), (0, 8), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 64, 3, 2, 2, 2, 2, 7, 3), strides=(132120576, 2064384, 4, 18432, 8, 73728, 144, 16, 9216, 1032192, 1, 2, 147456, 48), offset=0, mask=None, contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 64, 3, 8, 2, 7, 3), strides=(132120576, 2064384, 1032192, 258048, 129024, 64512, 1008, 336, 42, 21, 3, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),
-                UOp(Ops.CONTRACT, dtypes.half.vec(2), arg=((9, 2),), src=(
-                  UOp(Ops.LOAD, dtypes.half, arg=None, src=(
-                    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=2, src=()),
-                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 128, 7, 8, 2, 64, 3, 3, 8, 2), strides=(0, 18432, 0, 0, 9216, 72, 3, 1, 9, 4608), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 64), (0, 3), (0, 3), (0, 8), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 2, 2, 2, 2, 64, 3, 4, 2, 2, 7, 3), strides=(132120576, 2064384, 9216, 4, 2, 1032192, 8, 144, 16, 18432, 73728, 1, 147456, 48), offset=0, mask=None, contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 64, 3, 8, 2, 7, 3), strides=(132120576, 2064384, 1032192, 258048, 129024, 64512, 1008, 336, 42, 21, 3, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),
-                UOp(Ops.CONST, dtypes.float.vec(2), arg=0.0, src=()),)),)),)),)),
-        UOp(Ops.WHERE, dtypes.half, arg=None, src=(
-          x19:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 128, 7, 8, 2, 1, 1, 1, 1, 2), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 1), (0, 1), (0, 1), (0, 1), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 1, 1, 1, 2, 7, 1), strides=(28672, 448, 2, 4, 224, 16, 0, 0, 0, 1, 32, 0), offset=0, mask=None, contiguous=False))), src=()),)),
-          UOp(Ops.CONST, dtypes.half, arg=0.9999950000374996, src=()),
-          x22:=UOp(Ops.CONST, dtypes.half, arg=0.0, src=()),)),)),
-      UOp(Ops.WHERE, dtypes.half, arg=None, src=(
-         x19,
-         x22,
-         x22,)),)),)),))
-    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
-    print(self.render_src(indexed))
-
-
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
 class TestIndexingOverflowWEBGPU(unittest.TestCase):
   renderer = Device[Device.DEFAULT].renderer
@@ -937,7 +835,6 @@ class TestIndexingOverflowWEBGPU(unittest.TestCase):
   def test_success(self): self.render((2**12, 2**12, 2**7))
   def test_failure(self):
     with self.assertRaises(RuntimeError): self.render((2**12, 2**12, 2**7+1))
-
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
