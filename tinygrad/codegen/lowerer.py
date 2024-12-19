@@ -106,8 +106,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ctx.acc_num += 1
   return acc.assign(acc.alu(alu_op, ret))
 
-def overflow(u):
-  return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
+def overflow(u): return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
 
 def upcast(u: UOp):
   if u.dtype is dtypes.int:
@@ -151,14 +150,13 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def check_upcast(ctx, x):
-  idx, _ = x.arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
+def check_upcast(ctx, view):
+  idx, _ = view.arg.to_indexed_uops(ctx.idxs)
   idx = graph_rewrite(idx, sym, {})
   if overflow(idx): ctx.require_upcast = True
 
 pm_upcast_idx = PatternMatcher([
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name='x'),)), check_upcast),
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW, name='x')), allow_any_len=True), check_upcast),
+  (UPat(Ops.VIEW, name="view"), check_upcast)
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
