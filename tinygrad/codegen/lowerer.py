@@ -6,6 +6,7 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
+from tinygrad.codegen.uopgraph import sym
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
@@ -107,6 +108,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def overflow(u):
   return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
+
 def upcast(u: UOp):
   if u.dtype is dtypes.int:
     dtype = dtypes.int64
@@ -145,6 +147,7 @@ pm_lowerer = PatternMatcher([
 
 def check_upcast(ctx, x):
   idx, _ = x.arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
+  idx = graph_rewrite(idx, sym, {})
   if overflow(idx): ctx.require_upcast = True
 
 pm_upcast_idx = PatternMatcher([

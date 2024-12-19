@@ -891,6 +891,38 @@ class TestIdxUpcast(unittest.TestCase):
     indexed = rewrite_shapetracker_with_index(uop, self.renderer)
     print(self.render_src(indexed))
 
+  def test_case4(self):
+    uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=4, upcasted=4, dont_use_locals=False), src=(
+  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0, src=()),
+    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 128, 7, 8, 2, 1, 1, 1, 1, 2), strides=(25088, 196, 7, 1, 98, 0, 0, 0, 0, 49), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 1), (0, 1), (0, 1), (0, 1), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 1, 1, 1, 2, 7, 1), strides=(28672, 448, 2, 4, 224, 16, 0, 0, 0, 1, 32, 0), offset=0, mask=None, contiguous=False))), src=()),
+    UOp(Ops.MAX, dtypes.half, arg=None, src=(
+      UOp(Ops.MUL, dtypes.half, arg=None, src=(
+        UOp(Ops.CAST, dtypes.half, arg=None, src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (6, 7, 11)), src=(
+            UOp(Ops.UNROLL, dtypes.float, arg=((9, 2),), src=(
+              UOp(Ops.WMMA, dtypes.float.vec(2), arg=('WMMA_8_8_8_half_float', (8, 8, 8), dtypes.half, dtypes.float, 'METAL', 32, (((9, 2),), ((9, 2),), ((9, 2),)), (8,)), src=(
+                UOp(Ops.CONTRACT, dtypes.half.vec(2), arg=((9, 2),), src=(
+                  UOp(Ops.LOAD, dtypes.half, arg=None, src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1, src=()),
+                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 1, 512, 4, 9, 4, 9), strides=(0, 25088, 0, 49, 0, 7, 0, 1), offset=-8, mask=((0, 1), (0, 64), (0, 1), (0, 512), (0, 4), (1, 8), (0, 4), (1, 8)), contiguous=False), View(shape=(64, 128, 7, 8, 2, 64, 3, 3, 8, 2), strides=(663552, 0, 36, 1, 0, 10368, 360, 10, 1296, 0), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 64), (0, 3), (0, 3), (0, 8), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 64, 3, 2, 2, 2, 2, 7, 3), strides=(132120576, 2064384, 4, 18432, 8, 73728, 144, 16, 9216, 1032192, 1, 2, 147456, 48), offset=0, mask=None, contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 64, 3, 8, 2, 7, 3), strides=(132120576, 2064384, 1032192, 258048, 129024, 64512, 1008, 336, 42, 21, 3, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),
+                UOp(Ops.CONTRACT, dtypes.half.vec(2), arg=((9, 2),), src=(
+                  UOp(Ops.LOAD, dtypes.half, arg=None, src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=2, src=()),
+                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 128, 7, 8, 2, 64, 3, 3, 8, 2), strides=(0, 18432, 0, 0, 9216, 72, 3, 1, 9, 4608), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 64), (0, 3), (0, 3), (0, 8), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 2, 2, 2, 2, 64, 3, 4, 2, 2, 7, 3), strides=(132120576, 2064384, 9216, 4, 2, 1032192, 8, 144, 16, 18432, 73728, 1, 147456, 48), offset=0, mask=None, contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 64, 3, 8, 2, 7, 3), strides=(132120576, 2064384, 1032192, 258048, 129024, 64512, 1008, 336, 42, 21, 3, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),
+                UOp(Ops.CONST, dtypes.float.vec(2), arg=0.0, src=()),)),)),)),)),
+        UOp(Ops.WHERE, dtypes.half, arg=None, src=(
+          x19:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+            UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 128, 7, 8, 2, 1, 1, 1, 1, 2), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=((0, 64), (0, 128), (0, 7), (0, 7), (0, 2), (0, 1), (0, 1), (0, 1), (0, 1), (0, 2)), contiguous=False), View(shape=(64, 64, 2, 4, 2, 2, 1, 1, 1, 2, 7, 1), strides=(28672, 448, 2, 4, 224, 16, 0, 0, 0, 1, 32, 0), offset=0, mask=None, contiguous=False))), src=()),)),
+          UOp(Ops.CONST, dtypes.half, arg=0.9999950000374996, src=()),
+          x22:=UOp(Ops.CONST, dtypes.half, arg=0.0, src=()),)),)),
+      UOp(Ops.WHERE, dtypes.half, arg=None, src=(
+         x19,
+         x22,
+         x22,)),)),)),))
+    indexed = rewrite_shapetracker_with_index(uop, self.renderer)
+    print(self.render_src(indexed))
+
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
 class TestIndexingOverflowWEBGPU(unittest.TestCase):
