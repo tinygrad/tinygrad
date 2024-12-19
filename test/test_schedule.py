@@ -2060,8 +2060,9 @@ class TestConst(unittest.TestCase):
     self.assertEqual(len(sched), 0)
 
   def test_src_const_folding(self):
-    a = Tensor.full((4,), 1).contiguous().realize()
-    b = Tensor.full((4,), 2).contiguous().realize()
+    with Context(TRACK_MATCH_STATS=0):
+      a = Tensor.full((4,), 1).contiguous().realize()
+      b = Tensor.full((4,), 2).contiguous().realize()
     mul0 = a*0
     add = b+mul0
     sched = add.schedule()
@@ -2070,12 +2071,14 @@ class TestConst(unittest.TestCase):
     self.assertIs(add.lazydata.realized, b.lazydata.realized)
     self.assertListEqual(add.tolist(), [2, 2, 2, 2])
 
-  def test_src_view_const_folding(self):
-    a = Tensor.full((4, 4, 4), 1).contiguous().realize()
-    b = Tensor.full((16, 1), 1).contiguous().realize()
-    ret = a.sum(axis=(2,))
-    add = ret.reshape(16, 1)+(b*0)
-    add.realize()
+  def test_src_masked_const_folding(self):
+    with Context(TRACK_MATCH_STATS=0):
+      a = Tensor.full((4,), 1).contiguous().realize()
+      b = Tensor.full((6,), 2).contiguous().realize()
+    mul0 = a*0
+    add = b+mul0.pad((1, 1))
+    sched = add.schedule()
+    self.assertEqual(len(sched), 1)
 
   # ** part 3: Tensor variable bindings
 
