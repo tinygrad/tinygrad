@@ -5,6 +5,7 @@ from typing import Tuple, List, Optional, Dict, Set, cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
+def upcast(u: UOp): return UOp(u.op, dtypes.int64 if u.dtype is dtypes.int else u.dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -102,8 +103,14 @@ class View:
   def to_indexed_uops(self:View, idxs:Optional[Sequence[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
     """(idx, valid)"""
     if idxs is None: idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)]
-    iexpr = sint_to_uop(self.offset)
+    iexpr = sint_to_uop(self.offset, dtype=idxs[0].dtype if len(idxs) else dtypes.int)
+
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
+      if idx.dtype is dtypes.long:
+        if isinstance(sh, UOp): sh = upcast(sh)
+        if isinstance(st, UOp): st = upcast(st)
+      print(f"{sh=}")
+      print(f"{st=}")
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])

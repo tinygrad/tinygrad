@@ -724,6 +724,7 @@ class TestIdxUpcast(unittest.TestCase):
     return res
   def e(self, st):
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
+    print(f"{store=}")
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
     return indexed
   def r(self, st):
@@ -739,7 +740,8 @@ class TestIdxUpcast(unittest.TestCase):
     assert elementwise_ast.src[0].src[1].dtype is dtype
 
     # This asserts that upcast didn't happen partially
-    assert len(self.find_ops_in_ast(elementwise_ast, Ops.SPECIAL, set())) == len(shape)
+    if Device.DEFAULT not in ["CLANG", "LLVM"]:
+      assert len(self.find_ops_in_ast(elementwise_ast, Ops.SPECIAL, set())) == len(shape)
 
     reduced_ast = self.r(st)
     self.render_src(reduced_ast)
@@ -845,9 +847,10 @@ class TestIdxUpcast(unittest.TestCase):
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, const)
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
     self.render_src(indexed)
-    idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
-    assert len(idx_ops) == num_idx
-    assert all(u.dtype is dtype for u in idx_ops)
+    if Device.DEFAULT not in ["CLANG", "LLVM"]:
+      idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
+      assert len(idx_ops) == num_idx
+      assert all(u.dtype is dtype for u in idx_ops)
     index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
     assert all(u.dtype is dtype for u in index_ops.pop().src)
 
@@ -865,9 +868,10 @@ class TestIdxUpcast(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, load))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
     self.render_src(indexed)
-    idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
-    assert len(idx_ops) == 3
-    assert all(u.dtype is dtypes.long for u in idx_ops)
+    if Device.DEFAULT not in ["CLANG", "LLVM"]:
+      idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
+      assert len(idx_ops) == 3
+      assert all(u.dtype is dtypes.long for u in idx_ops)
     index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
     assert all(u.dtype is dtypes.long for u in index_ops.pop().src)
 

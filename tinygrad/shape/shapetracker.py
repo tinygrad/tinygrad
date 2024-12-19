@@ -8,6 +8,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid
 
+
 @functools.lru_cache(None)
 def views_to_indexed_uops(views: Tuple[View, ...], _idxs:Optional[Tuple[UOp, ...]]=None) -> Tuple[UOp, UOp]:
   idx, valid = views[-1].to_indexed_uops(_idxs)
