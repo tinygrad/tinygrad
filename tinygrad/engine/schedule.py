@@ -28,8 +28,7 @@ tensor_uop_spec = PatternMatcher([
    # dtype
    isinstance(buf.dtype, (DType, ImageDType))),
   # movement ops
-  # TODO: we make this base here because "make things that can't be images not images" can override the movement op src's dtype
-  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple) and mv.dtype.base == x.dtype.base),
+  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple) and mv.dtype == x.dtype),
   # tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
   # DETACH and CONTIGUOUS change how we interpret the source UOp
@@ -267,7 +266,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   for buf_uop in si_ctx.sinked:
     for luop in si_ctx.tensor_uops[buf_uop]:
       buf_uop_view = buf_uop.view(unwrap(luop.st))
-      if luop.dtype != buf_uop_view.dtype: buf_uop_view.cast(luop.dtype)
+      if luop.dtype != buf_uop_view.dtype: buf_uop_view = buf_uop_view.cast(luop.dtype)
       luop.become(buf_uop_view)
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
