@@ -611,6 +611,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.dtype == dtypes.bool:
         if self.op is Ops.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
         if self.op is Ops.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
+      else:
+        # inaccurate (but not wrong) AND
+        if self.op is Ops.AND: return min(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
@@ -622,6 +625,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
+    # indexing vmin/vmax for buffer access computation
+    if self.op is Ops.INDEX: return self.src[1]._min_max  # TODO: handle masks here
+    if self.op is Ops.CAST and isinstance(self.dtype, PtrDType):
+      return cast(Tuple[ConstType, ConstType], tuple(x*(self.dtype.itemsize//self.src[0].dtype.itemsize) for x in self.src[0]._min_max))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property

@@ -3,11 +3,15 @@ from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, ProgramSpec
-from tinygrad.renderer import flops_mem
+from tinygrad.renderer import Estimates
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
+
+def flops_mem(uops, ignore_indexing=False):
+  est = Estimates.from_uops(uops, ignore_indexing)
+  return est.ops, est.lds
 
 # **************** new FlopCounter ****************
 
@@ -120,7 +124,7 @@ class TestUOpsStats(unittest.TestCase):
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
-    globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
+    globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(3), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
     u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
@@ -130,7 +134,7 @@ class TestUOpsStats(unittest.TestCase):
     u5 = UOp(Ops.ADD, dtypes.int, (u4,u3))
     uops = linearize_uop(u5.sink())
 
-    globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
+    globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(3), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
     u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))

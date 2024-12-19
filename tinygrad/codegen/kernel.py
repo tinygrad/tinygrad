@@ -617,7 +617,7 @@ class Kernel:
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), (f"temp{i + 1}", st.real_size()))
               if tc_pattern: store_st = fix_st(store_st, *tc_pattern)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
@@ -646,7 +646,8 @@ class Kernel:
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
+          local_size = st_uop.arg.real_size()
+          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), (f"temp{self.reduceops.index(op)+1}", local_size))
           local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce

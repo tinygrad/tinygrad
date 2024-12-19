@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Optional, List, Tuple, Dict, Callable, Any, Set, cast
-import functools
+from typing import Optional, List, Tuple, Dict, Callable, Any, Set, cast, DefaultDict
+import functools, collections
 from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod
+from tinygrad.helpers import to_function_name, dedup, prod, get_single_element
 from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp
 from tinygrad.dtype import DType, PtrDType
 
@@ -34,13 +34,14 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:List[UOp], ignore_indexing=False):
+  def from_uops(uops:List[UOp], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mults: sint = 1
     mult_stack: List[sint] = []
     dont_count: Set[UOp] = set()
-    buffer_accesses: Dict[int, int] = {}
+    buf_size: Dict[Any, int] = {}
+    buf_rng: DefaultDict[Any, List[Tuple[int, int]]] = collections.defaultdict(list)
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
@@ -54,13 +55,17 @@ class Estimates:
         mults *= (u.src[1] - u.src[0]).ssimplify()
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.LOAD: lds += u.dtype.itemsize * mults
-      elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
+      elif u.op in {Ops.LOAD, Ops.STORE}:
+        lds += u.src[0].dtype.itemsize * mults
+        if not (pdt:=cast(PtrDType, u.src[0].dtype)).local:
+          buf_idx = (get_single_element([x for x in u.src[0].toposort if x.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}]).arg, u.op)
+          # TODO: once tests are fixed bring this back
+          #assert pdt.size != -1, f"{pdt} {pdt.size} {pdt.itemsize}"
+          buf_size[buf_idx] = pdt.size*pdt.itemsize
+          buf_rng[buf_idx].append((int(u.src[0].vmin)*pdt.itemsize, (int(u.src[0].vmax)+1)*pdt.itemsize))
       elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
       elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
-      # TODO: remove the pdt.size != -1 check here
-      elif u.op is Ops.DEFINE_GLOBAL and not (pdt:=cast(PtrDType, u.dtype)).local and pdt.size != -1: buffer_accesses[u.arg] = pdt.size
-    return Estimates(flops, lds, sum(buffer_accesses.values()))
+    return Estimates(flops, lds, sum([min(max(x[1] for x in buf_rng[b]), sz) - max(min(x[0] for x in buf_rng[b]), 0) for b,sz in buf_size.items()]))
 
 @dataclass
 class ProgramSpec:
