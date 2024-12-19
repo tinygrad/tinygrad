@@ -29,5 +29,6 @@
 ::: tinygrad.nn.state.get_state_dict
 ::: tinygrad.nn.state.get_parameters
 ::: tinygrad.nn.state.load_state_dict
+::: tinygrad.nn.state.tar_extract
 ::: tinygrad.nn.state.torch_load
 ::: tinygrad.nn.state.gguf_load

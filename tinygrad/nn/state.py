@@ -35,6 +35,7 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
+# NOTE: to ensure correct docs there is a mkdocs extension in docs/mkdocs_exts.py
 R = TypeVar('R')
 def accept_filename(func: Callable[[Tensor], R]) -> Callable[[Union[Tensor, str, pathlib.Path]], R]:
   @functools.wraps(func)
@@ -44,14 +45,14 @@ def accept_filename(func: Callable[[Tensor], R]) -> Callable[[Union[Tensor, str,
 @accept_filename
 def safe_load_metadata(t:Tensor) -> Tuple[Tensor, int, Dict[str, Any]]:
   """
-  Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
+  Loads a .safetensor file, returning the source tensor, data start position, and metadata.
   """
   data_start = int.from_bytes(t[0:8].data(), "little") + 8
   return t, data_start, json.loads(t[8:data_start].data().tobytes())
 
 def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> Dict[str, Tensor]:
   """
-  Loads a .safetensor file from disk, returning the state_dict.
+  Loads a .safetensor file, returning the `state_dict`.
 
   ```python
   state_dict = nn.state.safe_load("test.safetensor")
@@ -64,7 +65,7 @@ def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> Dict[str, Tensor]:
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   """
-  Saves a state_dict to disk in a .safetensor file with optional metadata.
+  Saves a `state_dict` to disk in a .safetensor file with optional metadata.
 
   ```python
   t = Tensor([1, 2, 3])
@@ -89,7 +90,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
 from collections import OrderedDict
 def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   """
-  Returns a state_dict of the object, with optional prefix.
+  Returns a `state_dict` of the object, with optional prefix.
 
   ```python exec="true" source="above" session="tensor" result="python"
   class Net:
@@ -127,7 +128,7 @@ def get_parameters(obj) -> List[Tensor]:
 
 def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True, consume=False) -> None:
   """
-  Loads a state_dict into a model.
+  Loads a `state_dict` into a model.
 
   ```python
   class Net:
@@ -161,7 +162,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
 @accept_filename
 def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   """
-  Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
+  Extracts files from a tar archive and returns them as a dictionary of names (keys) and tensors (values).
 
   ```python
   tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
@@ -175,7 +176,7 @@ def tar_extract(t: Tensor) -> Dict[str, Tensor]:
 @accept_filename
 def torch_load(t:Tensor) -> Dict[str, Tensor]:
   """
-  Loads a torch .pth file from disk.
+  Loads a torch .pth file, returning the `state_dict`.
 
   ```python
   state_dict = nn.state.torch_load("test.pth")
@@ -290,16 +291,16 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
-@accept_filename
 def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   """
-  Loads a gguf file from a tensor.
+  Loads a .gguf file, returning the `kv_data` and `state_dict`.
 
   ```python
-  fn = "Meta-Llama-3-8B-Instruct.Q4_0.gguf"
-  gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
-  kv_data, state_dict = gguf_load(gguf_tensor)
+  gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
+  kv_data, state_dict = nn.state.gguf_load(gguf_tensor)
   ```
+
+  NOTE: The provided tensor must be on a device that supports execution.
   """
   reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
