@@ -118,7 +118,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     ridx2 = Range(2, 2)
     ridx3 = Range(3, 2)
     idx = (((ridx0*2)+((((ridx2*2)+(ridx3*3))+3)%4))+-2)
-    valid = ((((((ridx2*2)+(ridx3*3))+3)%4)<2)!=True)
+    valid = ((((((ridx2*2)+(ridx3*3))+3)%4)<2)!=True) # noqa: E712
     load = get_gated_load_uop(valid, idx)
     self.check(load,
       "(((ridx0*2)+(ridx3*-1))+1)",
