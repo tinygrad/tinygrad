@@ -212,9 +212,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # **** Schedule grouping
 
-def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 def uval(u:UOp) -> UOp:
-  assert is_scheduled(u), f"must be a scheduled op {u}"
   return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
@@ -232,7 +230,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Di
     # max one reduceop per kernel
     if (tr_next_uop:=uval(allbufs[tr_next]).base).op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
+    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
 def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
@@ -243,7 +241,7 @@ def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultD
     cache.add(p)
     # max one reduceop per kernel
     if p.op is Ops.REDUCE_AXIS: return {}
-    rc_parents.extend(x.base.buf_uop for x in p.src if is_scheduled(x.base) and x.base.buf_uop is not r)
+    rc_parents.extend(x.base.buf_uop for x in p.src if x.base.buf_uop is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
   for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
@@ -282,7 +280,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
         st = unwrap(r_uop.st)
         while len(ctx.children[tr]) == 1:
           tr_next_uop = uval(ctx.allbufs[(tr_next:=next(iter(ctx.children[tr])))])
-          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop is tr])
+          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if x.base.buf_uop is tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
           st = st + st_childs[0]
@@ -322,7 +320,6 @@ class UPatScheduled(UPat):
 # ** this is schedule level const folding
 
 def _as_const(u:UOp, val:ConstType) -> UOp:
-  assert is_scheduled(u), f"must be scheduled to fold {u}"
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
@@ -441,7 +438,7 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(sink:UOp) -> Optional[UOp]:
-  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
+  new_src = tuple(x.base for x in sink.src if not x.base.is_realized and not x.base.is_unrealized_const())
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
@@ -489,7 +486,7 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
   if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
-    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+    if not x.base.is_realized: ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   # BUFFER_VIEW overrides the underlying buffer
   if op.op is Ops.BUFFER_VIEW:
     buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
@@ -500,7 +497,7 @@ remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda 
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
+  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not x.base.is_unrealized_const())) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[UOp, UOp] = {}
