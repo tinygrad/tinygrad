@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import unicodedata
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
@@ -275,3 +275,37 @@ def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
 
   inter, union = _box_inter_union(boxes1, boxes2)
   return inter / union
+
+def generate_anchors(input_size:Tuple[int, int], batch_size:int = 1, scales:Optional[Tuple[Tensor, ...]] = None, aspect_ratios:Optional[Tuple[Tensor, ...]] = None) -> List[Tensor]:
+  def _compute_grid_sizes(input_size:Tuple[int, int]) -> np.ndarray:
+    return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
+  
+  scales = tuple(Tensor((i, int(i * 2 ** (1/3)), int(i * 2 ** (2/3)))) for i in 2 ** np.arange(5, 10)) if scales is None else scales
+  aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
+  aspect_ratios = tuple(Tensor(ar) for ar in aspect_ratios)
+  grid_sizes = _compute_grid_sizes(input_size)
+
+  assert len(scales) == len(aspect_ratios) == len(grid_sizes), "scales, aspect_ratios, and grid_sizes must have the same length"
+
+  anchors_over_all_feature_maps = []
+  for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
+    h_ratios = ar.sqrt()
+    w_ratios = 1 / h_ratios
+    ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
+    hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
+    base_anchors = (Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2).round()
+    stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
+    shifts_x, shifts_y = (Tensor.arange(gs[1]) * stride_w).meshgrid(Tensor.arange(gs[0]) * stride_h, indexing="xy")
+    shifts_x, shifts_y = shifts_x.reshape(-1), shifts_y.reshape(-1)
+    shifts = Tensor.stack(shifts_x, shifts_y, shifts_x, shifts_y, dim=1)
+    anchors_over_all_feature_maps.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
+
+  if batch_size > 1:
+    anchors = []
+    for _ in range(batch_size):
+      anchors_in_img = [a for a in anchors_over_all_feature_maps]
+      anchors.append(anchors_in_img)
+
+    return [Tensor.cat(*anchors_per_img) for anchors_per_img in anchors]
+  
+  return anchors_over_all_feature_maps

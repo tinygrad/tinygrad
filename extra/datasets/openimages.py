@@ -206,7 +206,7 @@ def resize(img:Image, tgt:Optional[Dict[str, Union[np.ndarray, Tuple]]]=None, si
 
   return img, img_size
 
-def normalize(img:Tensor, device:List[str]):
+def normalize(img:Tensor, device:Optional[List[str]] = None):
   mean = Tensor([0.485, 0.456, 0.406], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   std = Tensor([0.229, 0.224, 0.225], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   img = ((img.permute([0, 3, 1, 2]) / 255.0) - mean) / std

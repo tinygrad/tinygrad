@@ -4,6 +4,7 @@ import math
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
+from examples.mlperf.helpers import generate_anchors
 from examples.mlperf.initializers import Conv2dNormal, Conv2dKaimingUniform
 from examples.mlperf.losses import sigmoid_focal_loss
 from extra.models.helpers import meshgrid, nms
@@ -20,24 +21,6 @@ def decode_bbox(offsets, anchors):
   pred_x2, pred_y2 = pred_cx + 0.5 * pred_w, pred_cy + 0.5 * pred_h
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
-def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
-  assert len(scales) == len(aspect_ratios) == len(grid_sizes)
-  anchors = []
-  for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
-    s, ar = np.array(s), np.array(ar)
-    h_ratios = np.sqrt(ar)
-    w_ratios = 1 / h_ratios
-    ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
-    hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
-    base_anchors = (np.stack([-ws, -hs, ws, hs], axis=1) / 2).round()
-    stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
-    shifts_x, shifts_y = np.meshgrid(np.arange(gs[1]) * stride_w, np.arange(gs[0]) * stride_h)
-    shifts_x = shifts_x.reshape(-1)
-    shifts_y = shifts_y.reshape(-1)
-    shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
-    anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
-  return anchors
-
 class RetinaNet:
   def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None):
     assert isinstance(backbone, ResNet)
@@ -48,7 +31,6 @@ class RetinaNet:
 
     self.backbone = ResNetFPN(backbone)
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
-    self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
 
   def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
     return self.forward(x, y=y, matches=matches)
@@ -73,7 +55,7 @@ class RetinaNet:
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
   def postprocess_detections(self, predictions, input_size=(800, 800), image_sizes=None, orig_image_sizes=None, score_thresh=0.05, topk_candidates=1000, nms_thresh=0.5):
-    anchors = self.anchor_gen(input_size)
+    anchors = generate_anchors(input_size)
     grid_sizes = self.backbone.compute_grid_sizes(input_size)
     split_idx = np.cumsum([int(self.num_anchors * sz[0] * sz[1]) for sz in grid_sizes[:-1]])
     detections = []
@@ -86,6 +68,8 @@ class RetinaNet:
 
       image_boxes, image_scores, image_labels = [], [], []
       for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
+        anchors_per_level = anchors_per_level.numpy()
+
         # remove low scoring boxes
         scores_per_level = scores_per_level.flatten()
         keep_idxs = scores_per_level > score_thresh
