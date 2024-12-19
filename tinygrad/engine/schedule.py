@@ -411,8 +411,8 @@ def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   return v1
 
 # root(src.view()) -> src.view()
-def collapse_src_view(root:UOp, src:UOp, mv:UOp):
-  assert src.size == root.size
+def collapse_src_view(ctx:ScheduleContext, root:UOp, src:UOp, mv:UOp):
+  if root.buf_uop in ctx.realizes: return None
   return mv
 
 merge_bufs = PatternMatcher([
