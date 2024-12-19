@@ -109,12 +109,8 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 def overflow(u): return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
 
 def upcast(u: UOp):
-  if u.dtype is dtypes.int:
-    dtype = dtypes.int64
-  elif u.dtype.count > 1:
-    dtype = dtypes.int64.vec(u.dtype.count)
-  else:
-    dtype = u.dtype
+  if u.dtype.scalar() is dtypes.int: dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
+  else: dtype = u.dtype
   return UOp(u.op, dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
 
 def lower_load_store(ctx: IndexContext, x: UOp):
@@ -150,14 +146,12 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def check_upcast(ctx, view):
+# If any of the views overflows (after sym folding), upcast need to be done on all
+def check_upcast(ctx: IndexContext, view: UOp):
   idx, _ = view.arg.to_indexed_uops(ctx.idxs)
   idx = graph_rewrite(idx, sym, {})
   if overflow(idx): ctx.require_upcast = True
-
-pm_upcast_idx = PatternMatcher([
-  (UPat(Ops.VIEW, name="view"), check_upcast)
-])
+pm_upcast_idx = PatternMatcher([(UPat(Ops.VIEW, name="view"), check_upcast)])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
   ctx = get_index(ast, opts)
