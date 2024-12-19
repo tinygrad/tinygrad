@@ -393,16 +393,21 @@ ops_folding = PatternMatcher([
 
 # ** buffer merging
 
-def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
-  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
+# if we merge two buffers, the underlying tensor uops now share a Buffer on device
+def merge_tensor_uops(ctx:ScheduleContext, b1:UOp, b2:UOp):
+  assert b1.size == b2.size and b1.dtype == b2.dtype and b1.device == b2.device, f"can't merge {b1} and {b2} if they aren't strictly identical"
   # if b2 is realized also realize b1
   if b2 in ctx.realizes:
     ctx.realizes[b1] = b1
     del ctx.realizes[b2]
-  # ops referring to b2 now ref to b1
+  # tensor uops referring to b2 now ref to b1
   ctx.tensor_uops[b1] += ctx.tensor_uops[b2]
   del ctx.tensor_uops[b2]
+
+def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
+  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
   # merge
+  merge_tensor_uops(ctx, b1, b2)
   return v1
 
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
@@ -412,7 +417,9 @@ def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
 
 # root(src.view()) -> src.view()
 def collapse_src_view(ctx:ScheduleContext, root:UOp, src:UOp, mv:UOp):
-  if root.buf_uop in ctx.realizes: return None
+  if root.buf_uop in ctx.realizes:
+    if root.size != src.size: return None
+    merge_tensor_uops(ctx, src.buf_uop, root.buf_uop)
   return mv
 
 merge_bufs = PatternMatcher([
