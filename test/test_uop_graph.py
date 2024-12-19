@@ -891,6 +891,7 @@ class TestIdxUpcast(unittest.TestCase):
     indexed = rewrite_shapetracker_with_index(uop, self.renderer)
     print(self.render_src(indexed))
 
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "METAL AMX test")
   def test_case4(self):
     uop = UOp(Ops.SINK, dtypes.void, arg=KernelInfo(local_dims=4, upcasted=4, dont_use_locals=False), src=(
   UOp(Ops.STORE, dtypes.void, arg=None, src=(
