@@ -195,8 +195,9 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # can only schedule once
-  for buf_uop in si_ctx.sinked:
-    for luop in si_ctx.tensor_uops[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
+  for buf_uop, store in si_ctx.sinked.items():
+    for luop in si_ctx.tensor_uops[buf_uop]:
+      luop.become(buf_uop.view(unwrap(store.st)))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))

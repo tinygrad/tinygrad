@@ -475,6 +475,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def become(self, u:UOp):
     del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
     self.op, self.dtype, self.src, self.arg = u.op, u.dtype, u.src, u.arg
+    del self.__dict__["st"]
 
   # *** uop movement ops ***
 
