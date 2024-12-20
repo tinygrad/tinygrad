@@ -1,8 +1,8 @@
 from typing import Dict, List, Optional
-import unittest, decimal, json
+import unittest, decimal, json, pickle
 from tinygrad.dtype import dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
-from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
+from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, becomes
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
 
@@ -13,8 +13,8 @@ def helper_test_viz(sink:UOp, pm:PatternMatcher, **kwargs) -> List[UOp]:
   rewrite(sink, pm, **kwargs)
   assert len(contexts) == 1
   assert len(contexts[0]) == 1
-  k = get_metadata(keys, contexts)[0][0]
-  g = get_details(*k)
+  k, ctx, metadata = get_metadata(keys, contexts)[0][0]
+  g = get_details(k, ctx, metadata, {k:pickle.loads(v) for k,v in becomes.items()})
   return g.graphs[1:]
 
 class TestViz(unittest.TestCase):
