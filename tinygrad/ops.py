@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA
+from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -673,7 +673,6 @@ def print_uops(uops:List[UOp]):
     formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
 
-
 # ***** pattern matcher *****
 
 def get_location() -> Tuple[str, int]:
@@ -724,8 +723,7 @@ class UPat(MathTrait):
   def var(name:Optional[str]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True):
-    return UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name)
+  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
   @staticmethod
   def const(dtype:Optional[Union[DType, Tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
@@ -773,10 +771,8 @@ class UPat(MathTrait):
 
 class UPatAny(UPat):
   def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-    ret = []
-    for x in self.src[0]:
-      if (match:=x.match(uop, store.copy())): ret.extend(match)
-    return ret
+    matches = [x.match(uop, store.copy()) for x in self.src[0]]
+    return flatten([x for x in matches if x is not None])
 
 def deconstruct_function(fxn:Callable) -> Tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
@@ -989,7 +985,6 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-  (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64),), allow_any_len=True)), lambda: True),
 ])
 
 def type_verify(uops:List[UOp]):
@@ -997,14 +992,6 @@ def type_verify(uops:List[UOp]):
     if not spec.rewrite(u):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
-
-# *** uop helpers ***
-
-def cast_float_to_bf16(x: UOp) -> UOp:
-  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
-  x = x.bitcast(dtypes.uint)
-  x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
-  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 # *** most of symbolic lives here now ***
 
