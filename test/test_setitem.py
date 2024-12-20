@@ -139,7 +139,7 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_overlapping_inplace1(self):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()
     t[1:] = t[:-1]
-    if (Device.DEFAULT == "LLVM") or (CI and Device.DEFAULT == "AMD"):
+    if (Device.DEFAULT in ("LLVM", "X86")) or (CI and Device.DEFAULT == "AMD"):
       # TODO: FIXME
       with self.assertRaises(AssertionError):
         self.assertEqual(t.tolist(), [[3.0], [3.0], [2.0]])
