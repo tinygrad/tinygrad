@@ -94,10 +94,10 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto(); DETACH = auto() # noqa: E702
+  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
@@ -145,6 +145,9 @@ class Ops(FastEnum):
 
   # consts last!
   VCONST = auto(); CONST = auto() # noqa: E702
+
+  # device
+  DEVICE = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -290,7 +293,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[2] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -433,11 +436,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
-    # NOTE: we embed device on CONST with a fake BUFFER uop
     if op is Ops.CONST:
-      fake = UOp(Ops.BUFFER, dtype.ptr(), (), (-1, device, 1))
-      return UOp(Ops.VIEW, dtype, (fake, arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))),
-                 ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+      # NOTE: we embed device on CONST with a fake BUFFER uop
+      fake = UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (-1, 1))
+      # NOTE: BIND stays BIND, UOp.const unbinds here
+      const_uop = arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))
+      return UOp(Ops.VIEW, dtype, (fake, const_uop), ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
@@ -501,12 +505,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType) -> UOp: return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), device, size))
+  def new_buffer(device:str, size:int, dtype:DType) -> UOp:
+    return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
   def _device(self) -> Optional[str]:
-    if self.op is Ops.BUFFER: return self.arg[1]
+    if self.op is Ops.DEVICE: return self.arg
     # TODO: why does this fail?
     #if self.op is Ops.COPY: return self.arg[0]
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
@@ -590,6 +595,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
       if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
+      # SHL/SHR on consts only
+      if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
+      if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
       if self.op is Ops.MOD and s1_vmin > 0: return 0, s1_vmax-1
       if self.op is Ops.IDIV:
         if s1_vmin == s1_vmax:  # min/max are equal in a CONST
@@ -666,36 +674,6 @@ def print_uops(uops:List[UOp]):
     formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
 
-def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
-  flops: sint = 0
-  mem: sint = 0
-  mults: sint = 1
-  mult_stack: List[sint] = []
-  dont_count: Set[UOp] = set()
-  if ignore_indexing:
-    for u in uops:
-      if u.op in {Ops.LOAD, Ops.STORE}:
-        dont_count = dont_count.union(u.src[0].toposort)
-        if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort)
-      elif u.op is Ops.IF:
-        dont_count = dont_count.union(u.src[0].toposort)
-  for u in uops:
-    if u.op is Ops.RANGE:
-      mult_stack.append(mults)
-      mults *= (u.src[1] - u.src[0]).ssimplify()
-    elif u.op is Ops.ENDRANGE:
-      mults = mult_stack.pop(-1)
-    elif u.op is Ops.SPECIAL:
-      mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-    elif u.op is Ops.LOAD:
-      mem += u.dtype.itemsize * mults
-    elif u.op is Ops.STORE:
-      mem += u.src[1].dtype.itemsize * mults
-    elif u.op in GroupOp.ALU and u not in dont_count:
-      flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
-    elif u.op is Ops.WMMA and u not in dont_count:
-      flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
-  return flops, mem
 
 # ***** pattern matcher *****
 
@@ -840,25 +818,21 @@ class PatternMatcher:
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
-class TrackedRewriteContext:
+class TrackedGraphRewrite:
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
-  sink: UOp                                                                                         # the sink passed into the rewrite
-  bottom_up: bool
-  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # all matches of sparents
-
-rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-_rewrite_cnt: Dict[str, int] = {}
+  sink: bytes                                                                                       # sanpshot of the graph_rewrite input sink
+  matches: List[Tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
+tracked_keys:List[Any] = []
+tracked_ctxs:List[List[TrackedGraphRewrite]] = []
+_name_cnt:Dict[str, int] = {}
 def track_rewrites(named=False):
   def _decorator(func):
     def __wrapper(self, *args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if named: _rewrite_cnt[func.__name__] = _rewrite_cnt.setdefault(func.__name__, 0)+1
-        rewrite_stack.append((f"{(n:=func.__name__)}_{_rewrite_cnt[n]}" if named else self, []))
-      try: ret = func(self, *args, **kwargs)
-      finally: # NOTE: save everything in the stack
-        if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
-      return ret
+        if named: _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
+        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if named else self)
+        tracked_ctxs.append([])
+      return func(self, *args, **kwargs)
     return __wrapper
   return _decorator
 
@@ -878,10 +852,12 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp): rewrite_stack[-1][1][-1].matches.append((uop, ret, p, et))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0:
+            with Context(PICKLE_BUFFERS=0): tracked_ctxs[-1][-1].matches.append((pickle.dumps(uop), pickle.dumps(ret), p, et))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0: rewrite_stack[-1][1][-1].matches.append((uop, ret, None, 0))
+    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
+      with Context(PICKLE_BUFFERS=0): tracked_ctxs[-1][-1].matches.append((pickle.dumps(uop), None, None, 0))
     return None
 
 if TRACK_MATCH_STATS:
@@ -891,11 +867,9 @@ if TRACK_MATCH_STATS:
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
-        print(f"rewrote {len(contexts)} graphs and matched {sum(len(r.matches) for _,x in contexts for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump(contexts, f)
-    if getenv("VIZ"):
-      os.environ["VIZ"] = "0"
-      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py"), temp("rewrites.pkl")])
+        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
+        pickle.dump((tracked_keys, tracked_ctxs), f)
+    launch_viz("VIZ", temp("rewrites.pkl"))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -903,6 +877,14 @@ if TRACK_MATCH_STATS:
         if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
+
+def launch_viz(env_str:str, data:str):
+  os.environ[env_str] = "0"
+  os.environ[f"{env_str}_DATA"] = data
+  if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
+    args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
+    args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
+    os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
 
 # *** simple graph rewrite engine ***
 
@@ -926,8 +908,9 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
-    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
+  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
+    with Context(PICKLE_BUFFERS=0):
+      tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****

@@ -171,6 +171,10 @@ class Tensor(SimpleMathTrait):
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
 
+  def requires_grad_(self, requires_grad=True) -> Tensor:
+    self.requires_grad = requires_grad
+    return self
+
   class train(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
     def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
@@ -719,7 +723,7 @@ class Tensor(SimpleMathTrait):
   # ***** rng hlops *****
 
   @staticmethod
-  def randn(*shape, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
+  def randn(*shape, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with mean `0` and standard deviation `1`.
     If `dtype` is not specified, the default type is used.
@@ -734,10 +738,10 @@ class Tensor(SimpleMathTrait):
     """
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
     src = Tensor.rand((2, *argfix(*shape)), **{**kwargs, "dtype": dtypes.float32})
-    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
+    return (src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)).requires_grad_(requires_grad)
 
   @staticmethod
-  def randint(*shape, low=0, high=10, **kwargs) -> Tensor:
+  def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random integer values generated uniformly from the interval `[low, high)`.
     If `dtype` is not specified, the default type is used.
@@ -751,12 +755,12 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if not isinstance(low, int) or not isinstance(high, int): raise TypeError(f"{low=} and {high=} must be integers")
-    dtype = to_dtype(kwargs.pop("dtype", dtypes.int32))
+    dtype = to_dtype(dtype)
     if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
-  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor:
+  def normal(*shape, mean=0.0, std=1.0, requires_grad:Optional[bool]=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
 
@@ -768,10 +772,10 @@ class Tensor(SimpleMathTrait):
     print(Tensor.normal(2, 3, mean=10, std=2).numpy())
     ```
     """
-    return (std * Tensor.randn(*shape, **kwargs)) + mean
+    return ((std * Tensor.randn(*shape, **kwargs)) + mean).requires_grad_(requires_grad)
 
   @staticmethod
-  def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
+  def uniform(*shape, low=0.0, high=1.0, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[low, high)`.
 
@@ -783,8 +787,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor.uniform(2, 3, low=2, high=10).numpy())
     ```
     """
-    dtype = kwargs.pop("dtype", dtypes.default_float)
-    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
+    return (((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype or dtypes.default_float) + low).requires_grad_(requires_grad)
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor:
@@ -2378,6 +2381,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='add').numpy())
     ```
     """
+    if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
@@ -2468,6 +2472,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return F.Exp.apply(self*math.log(2))
+
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2479,6 +2484,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return F.Relu.apply(self)
+
   def sigmoid(self):
     """
     Applies the Sigmoid function element-wise.
@@ -2489,7 +2495,8 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sigmoid().numpy())
     ```
     """
-    return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+    return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
+
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
     """
     Applies the Hardsigmoid function element-wise.

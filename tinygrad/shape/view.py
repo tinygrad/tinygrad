@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, operator, itertools, math
+import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Sequence
 from tinygrad.dtype import dtypes
@@ -43,8 +43,7 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   -> Optional[Tuple[Tuple[sint, sint], ...]]:
   """Returns the new mask if reshape is possible, and None if not possible."""
   if _mask is None: return tuple((0, s) for s in new_shape)
-  if any(not all_int(m) for m in _mask): return None
-  if any(m[1] - m[0] < 1 for m in _mask): return ((0, 0),) * len(new_shape)  # zero mask
+  if not all_int(flatten(_mask)): return None
 
   new_mask: List[Tuple[int, int]] = []
   # _mask is all int here
@@ -54,30 +53,26 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   while len(new_mask) < len(new_shape):
     (l, r), next_stride = mask, new_dim * curr_stride
 
-    if old_dim >= next_stride: # need to split mask.
-      if old_dim == next_stride: # simply copy the mask and get next batch for merging
-        new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
-        curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-
-      else: # mask can only be splitted if reshape doesn't cut across the mask.
-        if (((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride)
-            or old_dim % next_stride != 0): return None
-        new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
-        curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
-
+    # need to split mask
+    if old_dim == next_stride: # simply copy the mask and get next batch for merging
+      new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
+      curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+    elif old_dim > next_stride: # mask can only be splitted if reshape doesn't cut across the mask.
+      if old_dim % next_stride != 0: return None
+      if (l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride: return None
+      new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
+      curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
     else:
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
       if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return None
       mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
-  for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
-    if mask != (0, 1): return ((0, 0),) * len(new_shape) # invalid mask
-
   return tuple(reversed(new_mask))
 
-def un1d(shape:Tuple[sint, ...], offset:sint) -> List[sint]:
+def unravel(shape:Tuple[sint, ...], offset:sint) -> List[sint]:
   # find the position of offset on each dimension based on shape
+  # similar to unravel_index in numpy/torch
   ret = []
   for stride in strides_for_shape(shape):
     ret.append(offset // stride if stride != 0 else 0)
@@ -135,7 +130,7 @@ class View:
     # simplify as we go
     if isinstance(offset, UOp): offset = cast(sint, offset.ssimplify())
     shape = tuple(cast(sint, x.ssimplify()) if isinstance(x, UOp) else x for x in shape)
-    # TODO: enabling stride simplification breaks it
+    # TODO: enabling stride simplification breaks symbolic jit
     """
     strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
     if mask: mask = tuple((s.ssimplify() if isinstance(s, UOp) else s, e.ssimplify() if isinstance(e, UOp) else e) for s,e in mask)
@@ -152,7 +147,7 @@ class View:
   def unbind(self) -> Tuple[View, Dict[Variable, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars()]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
-    def substitute(x): return x if isinstance(x, int) else x.substitute(unbound_vars)
+    def substitute(x:sint): return x if isinstance(x, int) else x.substitute(unbound_vars)
     new_shape = tuple(map(substitute, self.shape))
     new_strides = tuple(map(substitute, self.strides))
     new_offset = substitute(self.offset)
@@ -166,24 +161,23 @@ class View:
     if vm1.contiguous and vm1.shape == vm2.shape: return vm2
     if vm1.contiguous and vm1.size() == vm2.size() and (ret := vm2.reshape(vm1.shape)) is not None: return ret
     if vm1.mask:
-      for b,e in vm1.mask:
-        if not resolve(b < e): return View.create(vm1.shape, (0,) * len(vm1.shape), 0, ((0,0),) * len(vm1.shape))
-      return (merged := vm2 + vm1.shrink(vm1.mask)) and merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
+      if (new_vm1 := vm1.shrink(vm1.mask)) == vm1 or (merged := vm2 + new_vm1) is None: return None
+      return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
+    if not all_int(vm1.shape): return None
 
     # Project vm1's offset and strides on to vm2.
-    origin = un1d(vm2.shape, vm1.offset)
+    origin = unravel(vm2.shape, vm1.offset)
     terms: List[List[Tuple[int, sint]]] = [[] for _ in vm2.shape]
     strides: List[sint] = [0] * len(vm1.shape)
     for d1, st in enumerate(vm1.strides):
       if st == 0: continue
-      for d2, (o, s1) in enumerate(zip(origin, un1d(vm2.shape, vm1.offset + st))):
+      for d2, (o, s1) in enumerate(zip(origin, unravel(vm2.shape, vm1.offset + st))):
         if (s1 := s1 - o) == 0: continue
         terms[d2].append((d1, s1))
         strides[d1] += s1 * vm2.strides[d2]
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    if not all_int(vm1.shape): return None
     idxs: List[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
     merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     extents: List[Tuple[sint, UOp]] = []
@@ -196,6 +190,7 @@ class View:
     if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       if (reshaped_vm2 := vm2.reshape(vm2_shape)) is None: return None
+      # NOTE: this != to prevent infinite loop
       if reshaped_vm2.shape != vm2.shape: return reshaped_vm2 + vm1
 
     if vm2.mask:
@@ -214,13 +209,12 @@ class View:
         if not all_int([s1, newe[d1]]):
           bad = True
           continue
-        newb[d1] = max(newb[d1], math.ceil((b - o if s1 > 0 else e - o - 1) / s1))
+        newb[d1] = max(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
         newe[d1] = min(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
 
       # If any of vm1 was masked off, try again with that mask in place.
-      for b, e, s in zip(newb, newe, vm1.shape):
-        if (b, e) != (0, s):
-          return vm2 + View.create(vm1.shape, vm1.strides, vm1.offset, tuple(zip(newb, newe)))
+      if any((b, e) != (0, s) for b, e, s in zip(newb, newe, vm1.shape)):
+        return vm2 + View.create(vm1.shape, vm1.strides, vm1.offset, tuple(zip(newb, newe)))
       # Otherwise if vm2's mask was violated, then cannot merge.
       if bad: return None
 
@@ -245,9 +239,7 @@ class View:
       nmask = tuple([(smax(0, smin(mx-ax,ay-ax)), smax(0, smin(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
       mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    shape = [y-x for x,y in arg]
-    if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
-    return View.create(tuple(s.ssimplify() if isinstance(s, UOp) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
@@ -273,7 +265,6 @@ class View:
     # NOTE: does not check multiple of symbolic shape
     assert all(resolve(s == ns) or s == 1 for s,ns in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     if 0 in self.shape: return View.create(new_shape)
-    # NOTE: can the mask ever be (0,0)?
     # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) \
                   for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None

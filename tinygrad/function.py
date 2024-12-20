@@ -67,17 +67,6 @@ class Sqrt(Function):
 
   def backward(self, grad_output:UOp) -> UOp: return grad_output / (self.ret*2)
 
-# NOTE: the implicit derivative of sigmoid is not stable
-# https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
-# TODO: have the backend automatically find this
-class Sigmoid(Function):
-  def forward(self, x:UOp) -> UOp:
-    self.ret = (1 + (x * (-1/math.log(2))).exp2()).reciprocal()
-    return self.ret
-
-  def backward(self, grad_output:UOp) -> UOp:
-    return (self.ret * (1 - self.ret)) * grad_output
-
 class Sign(Function):
   # NOTE: the x*0 is to match torch behavior without function.py
   def forward(self, x:UOp) -> UOp: return x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0)) + x*0
