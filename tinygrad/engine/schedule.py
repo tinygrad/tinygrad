@@ -19,13 +19,15 @@ BUF_LIMIT = {"METAL":32}
 
 tensor_uop_spec = PatternMatcher([
   # ** stable and well understood specs
+
   # DEVICE and BUFFER
   (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"), lambda buf:
    # arg: (number, size)
-   isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all(isinstance(x, int) for x in buf.arg) and \
+   isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and \
    # dtype
    isinstance(buf.dtype, (DType, ImageDType))),
+
   # movement ops
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
    # naturally correct
@@ -33,8 +35,10 @@ tensor_uop_spec = PatternMatcher([
    # TODO: "make things that can't be images not images" can override the source dtype
    # is there a clean way to update its _mop children?
    (isinstance(mv.dtype, ImageDType) and x.dtype == mv.dtype.base and x.is_realized)),
+
   # tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
+
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
@@ -56,7 +60,7 @@ tensor_uop_spec = PatternMatcher([
   # ASSIGN changes the value of an existing buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val:
    # destination must be a realized device buffer
-   (target.op is Ops.BUFFER or target.base.is_realized) and
+   (target.op is Ops.BUFFER or target.is_realized) and
    # dtype
    (assign.dtype == target.dtype == new_val.dtype) and
    # arg (TODO: replace this ShapeTracker arg with a VIEW on the target BUFFER)
