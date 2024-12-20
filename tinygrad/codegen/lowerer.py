@@ -1,14 +1,14 @@
 # the job of the lowerer is to do indexing
 import functools, itertools, operator
 from dataclasses import dataclass
-from typing import cast, Optional
+from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> Optional[list[list[int]]]:
+def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
   try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
   except ValueError: return None
@@ -27,7 +27,7 @@ def _limit_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
     else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
   return dims
 
-def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:Optional[tuple[int, ...]], reverse=False) -> list[UOp]:
+def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
   limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]

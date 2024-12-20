@@ -1,4 +1,4 @@
-from typing import DefaultDict, Union, Optional, cast, Callable
+from typing import cast, Callable
 import struct
 from collections import defaultdict
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
@@ -156,12 +156,12 @@ class PTXRenderer(Renderer):
     kernel:list[str] = []
     bufs = []
 
-    c: DefaultDict[str, int] = defaultdict(int)
-    r: dict[UOp, Union[list[str], str]] = {}
+    c: defaultdict[str, int] = defaultdict(int)
+    r: dict[UOp, list[str]|str] = {}
     self.r = r
     self.uops = uops
 
-    def ssa(prefix:str, u:UOp|None=None, dtype:Optional[str]=None) -> str:
+    def ssa(prefix:str, u:UOp|None=None, dtype:str|None=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
@@ -192,7 +192,7 @@ class PTXRenderer(Renderer):
         Ops.DEFINE_GLOBAL: ("dat", self.types[dtypes.ulong]), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
-      if (l:=cast(Union[str, list[str]], string_rewrite.rewrite(u, ctx=self))) is None:
+      if (l:=cast(str|list[str], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
