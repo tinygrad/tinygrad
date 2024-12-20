@@ -363,6 +363,14 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+def cast_before_view(ctx:ScheduleContext, b:UOp, base:UOp, root:UOp, src:UOp, view:UOp):
+  if root.dtype.itemsize > src.dtype.itemsize: return None
+  new_op = src.cast(root.dtype)
+  target_buf = UOp.new_buffer(new_op.device, new_op.size, new_op.dtype)
+  ctx.tensor_uops[target_buf] = ctx.tensor_uops[b]
+  del ctx.tensor_uops[b]
+  return UOp(Ops.VIEW, new_op.dtype, (target_buf, new_op), unwrap(new_op.st)).view(unwrap(view.st))
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
@@ -388,6 +396,8 @@ ops_folding = PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
+  # CAST(VIEW(src)) -> VIEW(CAST(src))
+  (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="view"),)), cast_before_view),
 ])
 
 # ** buffer merging
