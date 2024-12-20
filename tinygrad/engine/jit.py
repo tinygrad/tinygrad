@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
@@ -14,11 +14,11 @@ from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 
-def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], max_batch_size=0) -> List[ExecItem]:
+def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], max_batch_size=0) -> list[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
-  graphed_jit_cache: List[ExecItem] = []
-  current_batch: List[ExecItem] = []
+  graphed_jit_cache: list[ExecItem] = []
+  current_batch: list[ExecItem] = []
   current_device: Optional[Compiled] = None
 
   def flush_batch():
@@ -28,7 +28,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
+      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -59,8 +59,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
-def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
-  input_replace: Dict[Tuple[int, int], int] = {}
+def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) -> dict[tuple[int, int], int]:
+  input_replace: dict[tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.bufs):
       if a in input_rawbuffers:
@@ -68,12 +68,12 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
-    self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
-    self.var_vals_replace:Dict[int, List[int]] = {}
-    self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
-    self.launch_dims_base:Dict[int, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
+    self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
+    self.var_vals_replace:dict[int, list[int]] = {}
+    self.launch_dims_replace:dict[int, tuple[Optional[int], Optional[int]]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
@@ -95,22 +95,22 @@ class GraphRunner(Runner):
           self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
 
     # used in MultiGraphRunner. the ints are id() of _bufs
-    self.w_dependency_map: Dict[int, Any] = {}
-    self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
+    self.w_dependency_map: dict[int, Any] = {}
+    self.r_dependency_map: dict[int, list[Any]] = collections.defaultdict(list)
 
     super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0], estimates.simplify())
 
-  def updated_vars(self, var_vals: Dict[Variable, int]):
+  def updated_vars(self, var_vals: dict[Variable, int]):
     vals = [var_vals[v] for v in self.vars]
     for j, vidxs in self.var_vals_replace.items():
       for i, v in enumerate(vidxs): yield j, i, vals[v]
 
-  def updated_launch_dims(self, var_vals: Dict[Variable, int]):
+  def updated_launch_dims(self, var_vals: dict[Variable, int]):
     dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
     for j, (gl, lc) in self.launch_dims_replace.items():
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
-  def _access_resources(self, rawbufs:List[Buffer], write:List[int], new_dependency:Any):
+  def _access_resources(self, rawbufs:list[Buffer], write:list[int], new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
     wait_nodes = []
@@ -131,19 +131,19 @@ ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
-  jit_cache: List[ExecItem]
-  input_replace: Dict[Tuple[int, int], int]
-  extra_view_inputs: List[Tuple[int, int, str, int, DType]]
-  expected_names: List[Union[int, str]]
-  expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
+  jit_cache: list[ExecItem]
+  input_replace: dict[tuple[int, int], int]
+  extra_view_inputs: list[tuple[int, int, str, int, DType]]
+  expected_names: list[Union[int, str]]
+  expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
                             self.expected_names, self.expected_st_vars_dtype_device)
 
   def __post_init__(self):
-    self._jit_cache: List[ExecItem] = self.jit_cache
-    self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
+    self._jit_cache: list[ExecItem] = self.jit_cache
+    self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._graphed = False
     self._clear_inputs()
 
@@ -151,7 +151,7 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
   # jit exec
-  def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
+  def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
@@ -169,11 +169,11 @@ class CapturedJit(Generic[ReturnType]):
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):
-  input_tensors: List[Tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
+  input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if tensors: Tensor.realize(*tensors)
-  lbs: List[UOp] = flatten([t.lazydata.lbs for t in tensors])
-  input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
+  lbs: list[UOp] = flatten([t.lazydata.lbs for t in tensors])
+  input_buffers: list[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
   st_varval_dtype_device = [(*unwrap(lb.st).unbind(), lb.dtype, lb.device) for lb in lbs]
   var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
@@ -211,9 +211,9 @@ class TinyJit(Generic[ReturnType]):
 
   # keep legacy code working
   @property
-  def jit_cache(self) -> List[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
+  def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
   @property
-  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
+  def input_replace(self) -> dict[tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
@@ -229,7 +229,7 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      self._jit_cache: List[ExecItem] = []
+      self._jit_cache: list[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
       # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
@@ -246,7 +246,7 @@ class TinyJit(Generic[ReturnType]):
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
-      extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
+      extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
           if b is not None and b._base is not None and b._base in input_buffers:
@@ -274,7 +274,7 @@ class TinyJit(Generic[ReturnType]):
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)

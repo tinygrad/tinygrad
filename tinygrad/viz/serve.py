@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Dict, List, Tuple, Optional
+from typing import Any, Callable, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -21,23 +21,23 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB"
 @dataclass
 class GraphRewriteMetadata:
   """Overview of a tracked rewrite to viz the sidebar"""
-  loc: Tuple[str, int]
+  loc: tuple[str, int]
   """File_path, Lineno"""
   code_line: str
   """The Python line calling graph_rewrite"""
   kernel_name: str
   """The kernel calling graph_rewrite"""
-  upats: List[Tuple[Tuple[str, int], str, float]]
+  upats: list[tuple[tuple[str, int], str, float]]
   """List of all the applied UPats"""
 
 @dataclass
 class GraphRewriteDetails(GraphRewriteMetadata):
   """Full details about a single call to graph_rewrite"""
-  graphs: List[UOp]
+  graphs: list[UOp]
   """Sink at every step of graph_rewrite"""
-  diffs: List[List[str]]
+  diffs: list[list[str]]
   """.diff style before and after of the rewritten UOp child"""
-  changed_nodes: List[List[int]]
+  changed_nodes: list[list[int]]
   """Nodes that changed at every step of graph_rewrite"""
   kernel_code: Optional[str]
   """The program after all rewrites"""
@@ -49,8 +49,8 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
-def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> List[List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
-  kernels: Dict[str, List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
+def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
+  kernels: dict[str, list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
   for k,ctxs in tqdm(zip(keys, contexts), desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
@@ -59,9 +59,9 @@ def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> Li
       kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
   assert isinstance(x, UOp)
-  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
+  graph: dict[int, tuple[str, str, list[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
     if u.op in {Ops.CONST, Ops.DEVICE}:
@@ -74,7 +74,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
       if x.op is Ops.DEVICE: label += f"\nDEVICE{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
-def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
+def _replace_uop(base:UOp, replaces:dict[UOp, UOp]) -> UOp:
   if (found:=replaces.get(base)) is not None: return found
   ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
   if (final := replaces.get(ret)) is not None:
@@ -86,7 +86,7 @@ def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
                           kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
-  replaces: Dict[UOp, UOp] = {}
+  replaces: dict[UOp, UOp] = {}
   sink = g.graphs[0]
   for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
     u0 = pickle.loads(u0_b)
@@ -106,7 +106,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
   return g
 
 # Profiler API
-devices:Dict[str, Tuple[decimal.Decimal, decimal.Decimal, int]] = {}
+devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
 def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
 def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
@@ -126,7 +126,7 @@ def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
       ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
       ret += [{"ph": "f", **dev_to_pid(e.device, e.is_copy), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st, e.is_copy), "bp": "e"}]
   return ret
-def to_perfetto(profile:List[ProfileEvent]):
+def to_perfetto(profile:list[ProfileEvent]):
   # Start json with devices.
   prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
   for ev in tqdm(profile, desc="preparing profile"):
