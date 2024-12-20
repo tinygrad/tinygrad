@@ -73,7 +73,8 @@ tensor_uop_spec = PatternMatcher([
                                                                      UPat({Ops.CONST, Ops.BIND}, name="const_uop"))),
    lambda view,fake,const_uop: view.dtype == fake.dtype == const_uop.dtype),
 
-  # TODO: is EMPTY required? Can it be represented with an existing spec?
+  # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
+  # TODO: this should be EMPTY(VIEW(BUFFER))
   (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
 
   # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
