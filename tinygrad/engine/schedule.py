@@ -45,7 +45,7 @@ class ScheduleContext:
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
-  late_views: dict[UOp, ShapeTracker] = field(default_factory=dict)
+  late_views: dict[UOp, ShapeTracker] = field(default_factory=dict)  # this maps resized BUFFERs to a ShapeTracker to keep shapes the same
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
@@ -199,10 +199,10 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # can only schedule once
   for buf_uop in si_ctx.sinked:
     for luop in si_ctx.tensor_uops[buf_uop]:
-      if (lv:=ctx.late_views.get(buf_uop)) is not None:
-        realized = buf_uop.view(lv)
-      else: realized = buf_uop.view(unwrap(luop.st))
-      luop.become(realized)
+      # if we resize the buffer, we should VIEW it as the movement op we skipped
+      output_view = ctx.late_views.get(buf_uop, unwrap(luop.st))
+      assert output_view.shape == luop.shape, f"tensor expects {luop.shape}, scheduled {output_view.shape}"
+      luop.become(buf_uop.view(output_view))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))
@@ -501,20 +501,26 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
+# **** Stack movement ops on top of UOps with VIEW
+
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
 def cast_before_view(ctx:ScheduleContext, b:UOp, base:UOp, root:UOp, src:UOp, view:UOp):
   if root.dtype.itemsize > src.dtype.itemsize: return None
   new_op = src.cast(root.dtype)
+  # we should first resize the target BUFFER
   target_buf = UOp.new_buffer(new_op.device, new_op.size, new_op.dtype)
+  # tensors refering to CAST(VIEW(x)) now refer to CAST(x), keep the movement op around in late_views
   ctx.tensor_uops[target_buf] = ctx.tensor_uops[b]
   del ctx.tensor_uops[b]
-  if b in ctx.realizes: del ctx.realizes[b]
+  # the tensor becomes: target_buf.view(late_view) if we realize this buf
   ctx.late_views[target_buf] = unwrap(view.st)
   return UOp(Ops.VIEW, new_op.dtype, (target_buf, new_op), unwrap(new_op.st)).view(unwrap(view.st))
+
 rewrite_views = remove_movement_ops+PatternMatcher([
   # CAST(VIEW(src)) -> VIEW(CAST(src))
   (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="view"),)), cast_before_view),
+  # merge views TODO: why is BUFFER wrong?
   (UPat.var("x").view(name="v1").view(name="v2"), lambda x,v1,v2: None if x.op is Ops.BUFFER else x.view(v1.st+v2.st)),
 ])
 
