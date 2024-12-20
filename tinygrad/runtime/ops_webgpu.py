@@ -1,14 +1,12 @@
-import functools
+import functools, struct
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 import wgpu
-import struct
 
 def create_uniform(wgpu_device, val) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
-  if isinstance(val, int): wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
-  else: wgpu_device.queue.write_buffer(buf, 0, struct.pack('<f', val))
+  wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
   return buf
 
 class WebGPUProgram:

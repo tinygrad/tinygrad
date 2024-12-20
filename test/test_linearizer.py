@@ -1716,6 +1716,8 @@ class TestHandCodedOpts(unittest.TestCase):
     with Context(WINO=1):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
       out = Tensor.conv2d(x,w, padding=1)
+      out.mean().backward()
+
       upcasts = []
       wino_schedule = create_schedule([out.lazydata])
       # collect upcasts of tile transform kernels
@@ -1730,7 +1732,6 @@ class TestHandCodedOpts(unittest.TestCase):
       # this test case's inputs are too small, so one of the 4-stacks became a local, which is fine i guess
       assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
 
-      out.mean().backward()
       backward_schedule = create_schedule([x.grad.lazydata, w.grad.lazydata])
       for si in backward_schedule:
         k = Kernel(si.ast)

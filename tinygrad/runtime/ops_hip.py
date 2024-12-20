@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes, functools
-from typing import Tuple
 from tinygrad.helpers import init_c_var, from_mv, init_c_struct_t, getenv
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec
 from tinygrad.runtime.autogen import hip
@@ -21,7 +20,7 @@ class HIPProgram:
   def __del__(self):
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
       self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
