@@ -228,7 +228,7 @@ class OpenCLRenderer(CStyleLanguage):
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
   tensor_cores = [TensorCore(dims=(8,8,16), threads=8, upcast_size=(16,16,8), dtype_in=dti, dtype_out=dto,
-                             swizzle=(((4,5,6),(0,1,2,7,8,9,3)), ((4,5,6),(7,8,9,0,1,2,3)), None)) for dti,dto in [(dtypes.float,dtypes.float)]]
+    swizzle=(((4,5,6),(0,1,2,7,8,9,3)), ((4,5,6),(7,8,9,0,1,2,3)), None)) for dti,dto in [(dtypes.float,dtypes.float)]]
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x[0]]})"),
@@ -250,6 +250,7 @@ class MetalRenderer(CStyleLanguage):
     swizzle=(((6,8,3,7,4),(0,1,2,5)), ((1,5,6,2,7),(3,4,8,0)), ((1,8,3,2,4),(5,6,7,0)))) for dti,dto in [(dtypes.float,dtypes.float),
     (dtypes.half,dtypes.float), (dtypes.half,dtypes.half), (dtypes.bfloat16,dtypes.float), (dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+
   # language options
   kernel_prefix = "kernel "
   buffer_prefix = "device "
