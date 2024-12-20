@@ -57,20 +57,20 @@ class Encoding:
   def _encode_word(self, word: bytes):
     parts = [bytes([b]) for b in word]
     while True:
-        min_idx = None
-        min_rank = None
-        for i, pair in enumerate(zip(parts[:-1], parts[1:])):
-            rank = self._mergeable_ranks.get(pair[0] + pair[1])
-            if rank is not None and (min_rank is None or rank < min_rank):
-                min_idx = i
-                min_rank = rank
+      min_idx = None
+      min_rank = None
+      for i, pair in enumerate(zip(parts[:-1], parts[1:])):
+        rank = self._mergeable_ranks.get(pair[0] + pair[1])
+        if rank is not None and (min_rank is None or rank < min_rank):
+          min_idx = i
+          min_rank = rank
 
-        # If there were no pairs we could merge, we're done!
-        if min_rank is None:
-            break
+      # If there were no pairs we could merge, we're done!
+      if min_rank is None:
+        break
 
-        # Otherwise, merge that pair and leave the rest unchanged. Then repeat.
-        parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
+      # Otherwise, merge that pair and leave the rest unchanged. Then repeat.
+      parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
 
     tokens = [self._mergeable_ranks[part] for part in parts]
     return tokens
