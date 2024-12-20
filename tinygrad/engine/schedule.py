@@ -506,7 +506,7 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
 def cast_before_view(ctx:ScheduleContext, b:UOp, base:UOp, root:UOp, src:UOp, view:UOp):
-  if root.dtype.itemsize > src.dtype.itemsize: return None
+  if not getenv("CAST_BEFORE_VIEW", 1) or root.dtype.itemsize > src.dtype.itemsize: return None
   new_op = src.cast(root.dtype)
   # we should first resize the target BUFFER
   target_buf = UOp.new_buffer(new_op.device, new_op.size, new_op.dtype)
