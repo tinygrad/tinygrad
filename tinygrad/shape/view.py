@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools
 from dataclasses import dataclass
-from typing import Optional, Set, cast, Sequence
+from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
@@ -139,7 +139,7 @@ class View:
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def vars(self) -> Set[Variable]:
+  def vars(self) -> set[Variable]:
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, UOp)], set())
 

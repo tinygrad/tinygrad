@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import Optional, Set, Callable
+from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
@@ -83,7 +83,7 @@ class ShapeTracker:
     assert idx.vmax < 1e12, f"real_size broken for {self}"
     return int(idx.vmax+1)
 
-  def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
+  def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
   def var_vals(self) -> dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])

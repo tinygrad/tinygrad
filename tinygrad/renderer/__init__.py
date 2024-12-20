@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Callable, Any, Set
+from typing import Optional, Callable, Any
 import functools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -39,7 +39,7 @@ class Estimates:
     lds: sint = 0
     mults: sint = 1
     mult_stack: list[sint] = []
-    dont_count: Set[UOp] = set()
+    dont_count: set[UOp] = set()
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:

@@ -182,7 +182,7 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM",
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:Set[UOp]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:set[UOp]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
   visisted.add(u)
@@ -557,13 +557,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0], self.src[1].arg
   @property
   def val(self) -> int: return self.unbind()[1]
-  def vars(self) -> Set[UOp]:
+  def vars(self) -> set[UOp]:
     bound_vars = set([x for x in self.toposort if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR])
     bound_var_base = set(x.src[0] for x in bound_vars)
     all_vars = set([x for x in self.toposort if x.op is Ops.DEFINE_VAR])
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> list[Variable]:
-    st_vars: list[Set[Variable]] = [x.st_arg.vars() for x in self.toposort if x.op in GroupOp.Buffer]
+    st_vars: list[set[Variable]] = [x.st_arg.vars() for x in self.toposort if x.op in GroupOp.Buffer]
     return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
@@ -689,9 +689,9 @@ def lines(fn) -> list[str]:
 
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
-  def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], Set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
+  def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
                src:Optional[Union[tuple[UPat, ...], list[UPat], UPat]]=None, arg:Any=None,
-               name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[Set[Ops]]=None):
+               name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[set[Ops]]=None):
     assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
     self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: Optional[tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype

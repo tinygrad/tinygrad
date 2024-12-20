@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING, Any, DefaultDict, Callable, Set
+from typing import Optional, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -33,7 +33,7 @@ def fold_expanded(ex, buf):
 
   # then rewrite everything we can
   lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
-  used: Set[tuple[UOp, UOp]] = set()
+  used: set[tuple[UOp, UOp]] = set()
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
       for fold_length in lengths:

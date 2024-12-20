@@ -1,7 +1,7 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Set, Optional, DefaultDict
+from typing import Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
@@ -41,7 +41,7 @@ class ScheduleItem:
 class ScheduleContext:
   tensor_uops: dict[UOp, list[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
   var_vals: dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
-  assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
+  assigns: set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
@@ -134,12 +134,12 @@ view_right = merge_views+PatternMatcher([
 class ScheduleItemContext:
   tensor_uops: dict[UOp, list[UOp]]
   ops_metadata: dict[UOp, Metadata]
-  assigns: Set[UOp]
+  assigns: set[UOp]
   var_vals: dict[Variable, int]
   sinked: dict[UOp, UOp]
-  sts: Set[ShapeTracker] = field(default_factory=set)
+  sts: set[ShapeTracker] = field(default_factory=set)
   bufs: list[UOp] = field(default_factory=list)
-  metadata: Set[Metadata] = field(default_factory=set)
+  metadata: set[Metadata] = field(default_factory=set)
   assign_adj: dict[UOp, list[UOp]] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:

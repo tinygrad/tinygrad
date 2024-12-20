@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Tuple, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -161,7 +161,7 @@ promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.lru_cache(None)
-def _get_recursive_parents(dtype:DType) -> Set[DType]:
+def _get_recursive_parents(dtype:DType) -> set[DType]:
   return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
 @functools.lru_cache(None)
 def least_upper_dtype(*ds:DType) -> DType:

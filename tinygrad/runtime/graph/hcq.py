@@ -1,5 +1,5 @@
 import collections, time
-from typing import List, Any, cast, Optional, Set
+from typing import List, Any, cast, Optional
 from tinygrad.helpers import round_up, PROFILE
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
@@ -59,7 +59,7 @@ class HCQGraph(MultiGraphRunner):
 
     last_j: dict[HWQueue, Optional[int]] = collections.defaultdict(lambda: None)
     queue_access: dict[HWQueue, dict[HWQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
-    dev_access: dict[HWQueue, Set[HCQCompiled]] = collections.defaultdict(set)
+    dev_access: dict[HWQueue, set[HCQCompiled]] = collections.defaultdict(set)
 
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
@@ -120,7 +120,7 @@ class HCQGraph(MultiGraphRunner):
     self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(self.prof_signals))]
 
     # Build hardware queues.
-    self.copy_to_devs: dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
+    self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
 
     # Create variable timeline signals for each device.
     timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{dev.device_id}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
