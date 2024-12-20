@@ -344,6 +344,7 @@ def train_resnet():
 
 def train_retinanet():
   from examples.mlperf.dataloader import batch_load_retinanet
+  from examples.mlperf.helpers import generate_anchors
   from examples.mlperf.initializers import FrozenBatchNorm2d
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models.retinanet import RetinaNet
@@ -411,18 +412,17 @@ def train_retinanet():
 
   # ** optimizer **
   # optim = Adam(params, lr=LR)
+  optim = None
 
   # ** dataset **
-  anchors = np.concatenate(model.anchor_gen((800, 800)), axis=0)
+  anchors = generate_anchors((800, 800), batch_size=BS)
 
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
   val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
 
-  train_dataloader = batch_load_retinanet(train_dataset, False, anchors, Path(BASE_DIR), batch_size=256)
-
   # ** training loop **
   for e in range(1, NUM_EPOCHS + 1):
-    train_dataloader = batch_load_retinanet(train_dataset, False, anchors, Path(BASE_DIR), batch_size=BS, seed=SEED)
+    train_dataloader = batch_load_retinanet(train_dataset, False, anchors[0], Path(BASE_DIR), batch_size=BS, seed=SEED)
     it = iter(tqdm(train_dataloader, total=(train_dataset_len:=len(train_dataset.imgs.keys())) // BS, desc=f"epoch {e}"))
     i, proc = 0, _data_get(it)
 

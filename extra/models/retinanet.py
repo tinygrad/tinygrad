@@ -68,8 +68,6 @@ class RetinaNet:
 
       image_boxes, image_scores, image_labels = [], [], []
       for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
-        anchors_per_level = anchors_per_level.numpy()
-
         # remove low scoring boxes
         scores_per_level = scores_per_level.flatten()
         keep_idxs = scores_per_level > score_thresh
