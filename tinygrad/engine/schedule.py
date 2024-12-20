@@ -126,14 +126,15 @@ class ScheduleContext:
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 # TODO: delete this once CONST has a VIEW source
-def is_constant(u:UOp): return u.base.src[-1].op in {Ops.CONST, Ops.BIND}
+# currently tensor uop is VIEW(DEVICE, CONST)
+def is_constant(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2 and u.src[1].op in {Ops.CONST, Ops.BIND}
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
-  if buf.st is None or buf.base.is_realized or is_constant(buf): return buf
+  if buf.st is None or buf.base.is_realized or is_constant(buf.base): return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
