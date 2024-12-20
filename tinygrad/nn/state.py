@@ -1,5 +1,5 @@
 import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from typing import Dict, Union, Optional, Any, Callable, BinaryIO, Iterable, TypeVar
+from typing import Union, Optional, Any, Callable, BinaryIO, Iterable, TypeVar
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up
@@ -291,7 +291,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename
-def gguf_load(tensor: Tensor) -> tuple[Dict, dict[str, Tensor]]:
+def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   """
   Loads a gguf file from a tensor.
 

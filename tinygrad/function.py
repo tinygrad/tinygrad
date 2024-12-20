@@ -1,6 +1,5 @@
 """This is where the forwards and backwards passes live."""
 import math
-from typing import Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import Ops, resolve, sint, UOp
@@ -77,11 +76,11 @@ class Sign(Function):
 
 class Less(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x<y
-  def backward(self, grad_output:UOp) -> tuple[Optional[UOp], Optional[UOp]]: return None, None
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]: return None, None
 
 class Neq(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x.ne(y)
-  def backward(self, grad_output:UOp) -> tuple[Optional[UOp], Optional[UOp]]: return None, None
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]: return None, None
 
 class Xor(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x^y
@@ -98,7 +97,7 @@ class Threefry(Function):
 class Add(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x+y
 
-  def backward(self, grad_output:UOp) -> tuple[Optional[UOp], Optional[UOp]]:
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]:
     return grad_output if self.needs_input_grad[0] else None, \
            grad_output if self.needs_input_grad[1] else None
 
@@ -107,7 +106,7 @@ class Mul(Function):
     self.x, self.y = x, y
     return x * y
 
-  def backward(self, grad_output:UOp) -> tuple[Optional[UOp], Optional[UOp]]:
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]:
     return (self.y * grad_output) if self.needs_input_grad[0] else None, \
            (self.x * grad_output) if self.needs_input_grad[1] else None
 
@@ -121,7 +120,7 @@ class Where(Function):
     self.x = x
     return self.x.where(y, z)
 
-  def backward(self, grad_output:UOp) -> tuple[None, Optional[UOp], Optional[UOp]]:
+  def backward(self, grad_output:UOp) -> tuple[None, UOp|None, UOp|None]:
     return None, \
       self.x.where(grad_output, grad_output.const_like(0)) if self.needs_input_grad[1] else None, \
       self.x.where(grad_output.const_like(0), grad_output) if self.needs_input_grad[2] else None

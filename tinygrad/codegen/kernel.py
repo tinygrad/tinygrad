@@ -139,7 +139,7 @@ class Kernel:
   def first_upcast(self) -> int: return self.shape_len-self.upcasted
 
   @property
-  def reduceop(self) -> Optional[UOp]: return self.reduceops[0] if len(self.reduceops) > 0 else None
+  def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
 
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape

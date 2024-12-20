@@ -161,7 +161,7 @@ class PTXRenderer(Renderer):
     self.r = r
     self.uops = uops
 
-    def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
+    def ssa(prefix:str, u:UOp|None=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
