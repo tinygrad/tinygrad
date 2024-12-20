@@ -144,13 +144,14 @@ MODEL_PARAMS = {
     "files": 8
   }
 }
-def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None):
+def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None, load_weights=True):
   # build model
   if quantize == "int8": linear = Int8Linear
   elif quantize == "nf4": linear = NF4Linear(64)
   else: linear = nn.Linear
   model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
 
+  if not load_weights: return model
   # load weights
   if model_path.is_dir():
     if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
