@@ -1987,7 +1987,7 @@ class TestBigGraph(unittest.TestCase):
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int, (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
     self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(ctx.realizes), 0)
