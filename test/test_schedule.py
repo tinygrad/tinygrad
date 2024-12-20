@@ -1987,7 +1987,7 @@ class TestBigGraph(unittest.TestCase):
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int, (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
     self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(ctx.realizes), 0)
@@ -2001,8 +2001,8 @@ class TestBigGraph(unittest.TestCase):
     self.assertEqual(len(ctx.realizes), 1)
 
 tensor_const_pm = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, src=()))), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
 ])
 class TestConst(unittest.TestCase):
   # ** part 1: basic functionality of a tensor directly created from CONST
