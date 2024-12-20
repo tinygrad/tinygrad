@@ -137,13 +137,14 @@ class Asm236x(Asm2x6x):
 
         return bytes(data)
 
-    def pcie_cfg_req(self, byte_addr, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=4):
+    def pcie_cfg_req(self, byte_addr, bus=1, dev=0, fn=0, value=None, size=4):
         assert byte_addr >> 12 == 0
 
         assert bus >> 8 == 0
         assert dev >> 5 == 0
         assert fn >> 3 == 0
 
+        cfgreq_type = int(bus > 0)
         assert cfgreq_type >> 1 == 0
 
         fmt_type = 0x04
@@ -964,7 +965,7 @@ def main():
             bs = dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=None, size=4)
             bar_size = 0xffffffff - (bs & 0xFFFFFFF0) + 1
             
-            if bar_size < 0x100000000:    
+            if bar_size < 0x100000000:
                 bar_start += round_up(bar_size, 2 << 20)
                 print(bar, hex(bar_size), hex(bar_start))
                 

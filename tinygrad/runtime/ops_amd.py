@@ -8,7 +8,7 @@ from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio, pci
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
@@ -552,6 +552,22 @@ class PCIIface:
 
   def device_fini(self): self.adev.fini()
 
+class USBTrackedMemoryView:
+  def __init__(self, bar_info, usb, elsz=1):
+    (self.addr, self.size), self.usb = bar_info, usb
+    self.elsz = elsz
+
+  def __getitem__(self, index):
+    print(hex(self.addr + index * self.elsz), self.size, index)
+    return self.usb.pcie_mem_req(self.addr + index * self.elsz, None, self.elsz)
+  def __setitem__(self, index, value): self.usb.pcie_mem_req(self.addr + index * self.elsz, value, self.elsz)
+  def cast(self, new_type, **kwargs): return self
+
+  @property
+  def nbytes(self): return self.size
+  def __len__(self): return self.size // self.elsz
+  def __repr__(self): return "USBTrackedMemoryView"
+
 class USBIface(VFIOIface):
   iommu_set:bool = False
   gpus:List[Any] = []
@@ -560,8 +576,78 @@ class USBIface(VFIOIface):
     self.dev = dev
     self.usb = Asm236x("/dev/sg0")
 
-    # setup pci
-    
+    # setup pci switch
+    self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
+    self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0x2000, size=2)
+
+    self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x4000, size=2)
+    self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0xffff, size=2)
+
+    for bus in [1, 2]:
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=3, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=(2 if bus == 1 else 3), size=1)
+      self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=1, size=1)
+
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
+      time.sleep(1)
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)      
+      self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+
+    bar_next_addr, bar_off, self.bars = [0x10000, 0x40000000], 0, {}
+    for bar_id in range(4):
+      bar_cfg = self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)
+      if bar_cfg & pci.PCI_BASE_ADDRESS_SPACE == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
+        self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, value=0xffffffff, size=4)
+        bar_size = 0xffffffff - (self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4) & 0xFFFFFFF0) + 1
+        if bar_id in {0, 1, 3}:
+          is_pref = int(bool(bar_cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH))
+          self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
+          self.bars[bar_id] = (bar_next_addr[is_pref], bar_size)
+          bar_next_addr[is_pref] += round_up(bar_size, 2 << 20)
+          print(bar_id, hex(self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)))
+      print(bar_id, hex(bar_cfg))
+      bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
+
+    cap_ptr = self.usb.pcie_cfg_req(0x34, bus=3, dev=0, fn=0, value=None, size=1)
+    caps = {}
+    while True:
+        cap_0 = self.usb.pcie_cfg_req(cap_ptr, bus=3, dev=0, fn=0, value=None, size=1)
+        cap_nxt = self.usb.pcie_cfg_req(cap_ptr+1, bus=3, dev=0, fn=0, value=None, size=1)
+        cap_len = self.usb.pcie_cfg_req(cap_ptr+2, bus=3, dev=0, fn=0, value=None, size=1)
+        # print(cap_0, cap_nxt, cap_len)
+        caps[cap_0] = cap_ptr
+        if cap_nxt == 0: break
+        cap_ptr = cap_nxt
+
+    print(caps)
+
+    pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=3, dev=0, fn=0, value=None, size=1)
+    self.usb.pcie_cfg_req(caps[0x1]+4, bus=3, dev=0, fn=0, value=0x0, size=1)
+    # print("PM cap now", pm_state)
+
+    self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=3, dev=0, fn=0, value=pci.PCI_COMMAND_MEMORY, size=1)
+
+    # print(caps)
+
+    # print(self.bars)
+
+    aa, size = self.bars[3]
+    # print(hex(aa))
+    # print(self.usb.pcie_mem_req(aa, None, size=4))
+    # exit(0)
+
+    # print(self.bars)
+    vram_bar = USBTrackedMemoryView(self.bars[0], self.usb, elsz=1)
+    doorbell_bar = USBTrackedMemoryView(self.bars[1], self.usb, elsz=8)
+    mmio_bar = USBTrackedMemoryView(self.bars[3], self.usb, elsz=4)
+    AMDev(None, vram_bar, doorbell_bar, mmio_bar)
+    # print(bars)
 
 class AMDDevice(HCQCompiled):
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
@@ -570,7 +656,9 @@ class AMDDevice(HCQCompiled):
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    # self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    self.dev_iface = USBIface(self, self.device_id)
+
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")

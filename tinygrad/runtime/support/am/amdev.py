@@ -337,7 +337,12 @@ class AMDev:
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
+    
+    print(self.rreg(0x16061))
+
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    print("vram", self.vram_size)
+    exit(0)
 
     bhdr = am.struct_binary_header.from_address(self.paddr2cpu(self.vram_size - (64 << 10)))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)
