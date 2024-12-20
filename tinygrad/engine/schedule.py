@@ -54,12 +54,14 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
    lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
-  # ASSIGN stores a new value to the existing target device buffer
-  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val: target.base.is_realized and
+  # ASSIGN changes the value of an existing buffer
+  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val:
+   # destination must be a realized device buffer
+   (target.op is Ops.BUFFER or target.base.is_realized) and
    # dtype
-   (assign.dtype == target.dtype == new_val.dtype) and \
+   (assign.dtype == target.dtype == new_val.dtype) and
    # arg (TODO: replace this ShapeTracker arg with a VIEW on the target BUFFER)
-   # NOTE: this ShapeTracker must not change shape, but it's free to change the STORE st offset
+   # NOTE: this ShapeTracker must not change shape, but it's free to swizzle the STORE st
    (assign.arg is None or (isinstance(assign.arg, ShapeTracker) and not assign.arg.contiguous and assign.arg.shape == assign.shape))),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
