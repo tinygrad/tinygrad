@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union, Dict
 
 import math
 from tinygrad import Tensor, dtypes
@@ -6,9 +6,10 @@ from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
 from examples.mlperf.helpers import generate_anchors
 from examples.mlperf.initializers import Conv2dNormal, Conv2dKaimingUniform
-from examples.mlperf.losses import sigmoid_focal_loss
-from extra.models.helpers import meshgrid, nms
+from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
+from extra.models.helpers import nms
 from extra.models.resnet import ResNet
+from extra.models.mask_rcnn import BoxCoder
 import numpy as np
 
 def decode_bbox(offsets, anchors):
@@ -32,11 +33,11 @@ class RetinaNet:
     self.backbone = ResNetFPN(backbone)
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
 
-  def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
-    return self.forward(x, y=y, matches=matches)
+  def __call__(self, x:Tensor, **kwargs):
+    return self.forward(x, **kwargs)
 
-  def forward(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
-    return self.head(self.backbone(x), y=y, matches=matches)
+  def forward(self, x:Tensor, **kwargs):
+    return self.head(self.backbone(x), **kwargs)
 
   def load_from_pretrained(self):
     model_urls = {
@@ -123,41 +124,67 @@ class ClassificationHead:
     self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.cls_logits = Conv2dNormal(in_channels, num_anchors * num_classes, kernel_size=3, padding=1, prior_prob=prior_prob)
 
-  def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
+  def __call__(self, x:Tensor, labels:Optional[Tensor] = None, matches:Optional[Tensor] = None):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     out = out[0].cat(*out[1:], dim=1)
 
     if Tensor.training:
-      assert y is not None and matches is not None, "y and matches should be passed in when training"
-      return self._compute_loss(out, y, matches)
+      assert labels is not None and matches is not None, "labels and matches should be passed in when training"
+      return self._compute_loss(out, labels, matches)
 
     return out.sigmoid()
   
-  def _compute_loss(self, x:Tensor, y:Tensor, matches:Tensor) -> Tensor:
-    y = ((y + 1) * (fg_idxs := matches >= 0) - 1).one_hot(num_classes=x.shape[-1])
+  def _compute_loss(self, x:Tensor, labels:Tensor, matches:Tensor) -> Tensor:
+    labels = ((labels + 1) * (fg_idxs := matches >= 0) - 1).one_hot(num_classes=x.shape[-1])
     valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
-    loss = (sigmoid_focal_loss(x, y) * valid_idxs).sum(-1).sum(-1)
+    loss = (sigmoid_focal_loss(x, labels) * valid_idxs).sum(-1).sum(-1)
     loss = (loss / fg_idxs.sum(-1)).sum() / matches.shape[0]
     return loss
 
 class RegressionHead:
-  def __init__(self, in_channels, num_anchors):
+  def __init__(self, in_channels, num_anchors, box_coder:Optional[BoxCoder] = None):
     self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
-  def __call__(self, x):
+
+    if box_coder is None:
+      box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0))
+    self.box_coder = box_coder
+
+  def __call__(self, x:Tensor, bboxes:Optional[Tensor] = None, matches:Optional[Tensor] = None, anchors:Optional[Tensor] = None):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
-    return out[0].cat(*out[1:], dim=1)
+    out = out[0].cat(*out[1:], dim=1)
+
+    if Tensor.training:
+      assert bboxes is not None and matches is not None and anchors is not None, "bboxes, matches, and anchors should be passed in when training"
+      return self._compute_loss(out, bboxes, matches, anchors)
+
+    return out
+    
+  def _compute_loss(self, x:Tensor, bboxes:Tensor, matches:Tensor, anchors:Tensor) -> Tensor:
+    mask = (fg_idxs := matches >= 0).reshape(matches.shape[0], -1, 1)
+
+    tgt = self.box_coder.encode(bboxes, anchors) * mask
+    x *= mask
+
+    loss = l1_loss(x, tgt).sum(-1).sum(-1)
+    loss = (loss / fg_idxs.sum(-1)).sum() / matches.shape[0]
+    return loss
 
 class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.classification_head = ClassificationHead(in_channels, num_anchors, num_classes)
     self.regression_head = RegressionHead(in_channels, num_anchors)
 
-  def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
-    return self.classification_head(x, y=y, matches=matches)
-    # pred_bbox, pred_class = self.regression_head(x), self.classification_head(x, y=y, matches=matches)
-    # out = pred_bbox.cat(pred_class, dim=-1)
-    # return out
+  def __call__(self, x:Tensor, **kwargs) -> Union[Tensor, Dict[str, Tensor]]:
+    if Tensor.training:
+      return {
+        "classification_loss": self.classification_head(x, labels=kwargs["labels"], matches=kwargs["matches"]),
+        "bbox_regression": self.regression_head(x, bboxes=kwargs["bboxes"], matches=kwargs["matches"], anchors=kwargs["anchors"])
+      }
+    else:
+      pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
+      out = pred_bbox.cat(pred_class, dim=-1)
+      return out
 
 class ResNetFPN:
   def __init__(self, resnet, out_channels=256, returned_layers=[2, 3, 4]):

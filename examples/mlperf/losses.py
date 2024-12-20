@@ -21,3 +21,11 @@ def sigmoid_focal_loss(pred:Tensor, tgt:Tensor, alpha:float = 0.25, gamma:float 
   if reduction == "mean": loss = loss.mean()
   elif reduction == "sum": loss = loss.sum()
   return loss
+
+def l1_loss(pred:Tensor, tgt:Tensor, reduction:str = "none") -> Tensor:
+  assert reduction in ["mean", "sum", "none"], f"unsupported reduction {reduction}"
+  loss = (pred - tgt).abs()
+
+  if reduction == "mean": loss = loss.mean()
+  elif reduction == "sum": loss = loss.sum()
+  return loss

@@ -509,16 +509,16 @@ class BoxCoder(object):
     self.bbox_xform_clip = bbox_xform_clip
 
   def encode(self, reference_boxes, proposals):
-    TO_REMOVE = 1  # TODO remove
-    ex_widths = proposals[:, 2] - proposals[:, 0] + TO_REMOVE
-    ex_heights = proposals[:, 3] - proposals[:, 1] + TO_REMOVE
-    ex_ctr_x = proposals[:, 0] + 0.5 * ex_widths
-    ex_ctr_y = proposals[:, 1] + 0.5 * ex_heights
+    TO_REMOVE = 0  # TODO remove
+    ex_widths = proposals[..., 2] - proposals[..., 0] + TO_REMOVE
+    ex_heights = proposals[..., 3] - proposals[..., 1] + TO_REMOVE
+    ex_ctr_x = proposals[..., 0] + 0.5 * ex_widths
+    ex_ctr_y = proposals[..., 1] + 0.5 * ex_heights
 
-    gt_widths = reference_boxes[:, 2] - reference_boxes[:, 0] + TO_REMOVE
-    gt_heights = reference_boxes[:, 3] - reference_boxes[:, 1] + TO_REMOVE
-    gt_ctr_x = reference_boxes[:, 0] + 0.5 * gt_widths
-    gt_ctr_y = reference_boxes[:, 1] + 0.5 * gt_heights
+    gt_widths = reference_boxes[..., 2] - reference_boxes[..., 0] + TO_REMOVE
+    gt_heights = reference_boxes[..., 3] - reference_boxes[..., 1] + TO_REMOVE
+    gt_ctr_x = reference_boxes[..., 0] + 0.5 * gt_widths
+    gt_ctr_y = reference_boxes[..., 1] + 0.5 * gt_heights
 
     wx, wy, ww, wh = self.weights
     targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
@@ -526,7 +526,7 @@ class BoxCoder(object):
     targets_dw = ww * Tensor.log(gt_widths / ex_widths)
     targets_dh = wh * Tensor.log(gt_heights / ex_heights)
 
-    targets = Tensor.stack(targets_dx, targets_dy, targets_dw, targets_dh, dim=1)
+    targets = Tensor.stack(targets_dx, targets_dy, targets_dw, targets_dh, dim=-1)
     return targets
 
   def decode(self, rel_codes, boxes):
