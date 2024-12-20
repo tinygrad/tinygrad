@@ -300,12 +300,5 @@ def generate_anchors(input_size:Tuple[int, int], batch_size:int = 1, scales:Opti
     shifts = Tensor.stack(shifts_x, shifts_y, shifts_x, shifts_y, dim=1)
     anchors_over_all_feature_maps.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
 
-  if batch_size > 1:
-    anchors = []
-    for _ in range(batch_size):
-      anchors_in_img = [a for a in anchors_over_all_feature_maps]
-      anchors.append(anchors_in_img)
-
-    return [Tensor.cat(*anchors_per_img) for anchors_per_img in anchors]
-  
+  if batch_size > 1: return [Tensor.cat(*anchors_over_all_feature_maps)] * batch_size
   return anchors_over_all_feature_maps
