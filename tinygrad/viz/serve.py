@@ -64,14 +64,16 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
   graph: dict[int, tuple[str, str, list[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
-    if u.op in {Ops.CONST, Ops.DEVICE}:
+    # NOTE: we are hiding the BUFFERs on consts. they should at least be devices
+    if u.op in {Ops.CONST, Ops.DEVICE} or (u.op is Ops.BUFFER and u.arg[0] == -1):
       excluded.add(u)
       continue
     argst = ("\n".join([f"{v.shape} / {v.strides}"+(f" / {v.offset}" if v.offset else "") for v in u.arg.views])) if u.op is Ops.VIEW else str(u.arg)
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
-      if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
-      if x.op is Ops.DEVICE: label += f"\nDEVICE{idx} {x.arg}"
+      if x in excluded:
+        if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
+        else: label += f"\n{x.op.name}{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 def _replace_uop(base:UOp, replaces:dict[UOp, UOp]) -> UOp:
