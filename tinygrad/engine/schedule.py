@@ -369,7 +369,12 @@ def cast_before_view(ctx:ScheduleContext, b:UOp, base:UOp, root:UOp, src:UOp, vi
   target_buf = UOp.new_buffer(new_op.device, new_op.size, new_op.dtype)
   ctx.tensor_uops[target_buf] = ctx.tensor_uops[b]
   del ctx.tensor_uops[b]
+  if b in ctx.realizes: del ctx.realizes[b]
   return UOp(Ops.VIEW, new_op.dtype, (target_buf, new_op), unwrap(new_op.st)).view(unwrap(view.st))
+rewrite_views = PatternMatcher([
+  # CAST(VIEW(src)) -> VIEW(CAST(src))
+  (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="view"),)), cast_before_view),
+])
 
 ops_folding = PatternMatcher([
   # op with size 0 is zero
@@ -396,8 +401,6 @@ ops_folding = PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
-  # CAST(VIEW(src)) -> VIEW(CAST(src))
-  (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="view"),)), cast_before_view),
 ])
 
 # ** buffer merging
@@ -515,6 +518,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
+  big_graph = graph_rewrite(big_graph, rewrite_views, ctx)
+  print(big_graph)
   big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # create the scheduler context
