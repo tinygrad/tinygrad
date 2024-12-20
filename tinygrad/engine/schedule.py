@@ -197,7 +197,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # can only schedule once
   for buf_uop, store in si_ctx.sinked.items():
     for luop in si_ctx.tensor_uops[buf_uop]:
-      luop.become(buf_uop.view(unwrap(store.st)))
+      luop.become(buf_uop.view(unwrap(store.st)).view(unwrap(luop.st)))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))

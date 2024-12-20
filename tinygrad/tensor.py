@@ -329,6 +329,7 @@ class Tensor(SimpleMathTrait):
     print(self.lazydata)
     print(self.shape)
     print(self.lazydata.shape)
+    print(self.lazydata.base.shape, self.lazydata.shape)
     assert self.shape == self.lazydata.shape
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)
 
