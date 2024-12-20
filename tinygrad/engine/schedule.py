@@ -197,11 +197,11 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # can only schedule once
-  for buf_uop, store in si_ctx.sinked.items():
+  for buf_uop in si_ctx.sinked:
     for luop in si_ctx.tensor_uops[buf_uop]:
-      realized = buf_uop.view(unwrap(store.st))
       if (lv:=ctx.late_views.get(buf_uop)) is not None:
-        realized = realized.view(lv)
+        realized = buf_uop.view(lv)
+      else: realized = buf_uop.view(unwrap(luop.st))
       luop.become(realized)
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
