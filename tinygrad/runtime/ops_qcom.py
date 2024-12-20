@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Tuple, List, Any, cast, Optional
+from typing import Any, cast, Optional
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.autogen import kgsl, adreno, libc
@@ -170,7 +170,7 @@ class QCOMComputeQueue(HWQueue):
     return self
 
 class QCOMArgsState(HCQArgsState):
-  def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+  def __init__(self, ptr:int, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(ptr, prg, bufs, vals=vals)
 
     if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
@@ -208,7 +208,7 @@ class QCOMProgram(HCQProgram):
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
@@ -268,7 +268,7 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferSpec(cpu_access=True, nolru=True))
 
 class QCOMTextureInfo:
-  def __init__(self, pitch:int, real_stride:int, desc:List[int], ibo:List[int]):
+  def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):
     self.pitch, self.real_stride, self.desc, self.ibo = pitch, real_stride, desc, ibo
 
 class QCOMAllocator(HCQAllocatorBase):
@@ -320,7 +320,7 @@ class QCOMAllocator(HCQAllocatorBase):
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None
-  signals_pool: List[int] = []
+  signals_pool: list[int] = []
   gpu_id: int = 0
   dummy_addr: int = 0
 

@@ -5,7 +5,7 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Tuple, Optional, Dict, Any, DefaultDict, List
+from typing import Optional, Any, DefaultDict
 from collections import defaultdict
 from dataclasses import dataclass, field
 import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
@@ -39,8 +39,8 @@ class ProgramFree(CloudRequest): name: str; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramExec(CloudRequest):
-  name: str; datahash: str; bufs: Tuple[int, ...]; vals: Tuple[int, ...] # noqa: E702
-  global_size: Optional[Tuple[int, ...]]; local_size: Optional[Tuple[int, ...]]; wait: bool # noqa: E702
+  name: str; datahash: str; bufs: tuple[int, ...]; vals: tuple[int, ...] # noqa: E702
+  global_size: Optional[tuple[int, ...]]; local_size: Optional[tuple[int, ...]]; wait: bool # noqa: E702
 
 # for safe deserialization
 whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferSpec]}
@@ -51,8 +51,8 @@ def safe_eval(node): return eval_fxns[node.__class__](node)
 
 class BatchRequest:
   def __init__(self):
-    self._q: List[CloudRequest] = []
-    self._h: Dict[str, bytes] = {}
+    self._q: list[CloudRequest] = []
+    self._h: dict[str, bytes] = {}
   def h(self, d:bytes) -> str:
     binhash = hashlib.sha256(d).digest()
     self._h[datahash:=binascii.hexlify(binhash).decode()] = binhash+struct.pack("<Q", len(d))+d
@@ -74,9 +74,9 @@ class BatchRequest:
 
 @dataclass
 class CloudSession:
-  programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
+  programs: dict[tuple[str, str], Any] = field(default_factory=dict)
   # TODO: the buffer should track this internally
-  buffers: Dict[int, Tuple[Any, int, Optional[BufferSpec]]] = field(default_factory=dict)
+  buffers: dict[int, tuple[Any, int, Optional[BufferSpec]]] = field(default_factory=dict)
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
@@ -164,7 +164,7 @@ class CloudProgram:
     super().__init__()
   def __del__(self): self.dev.req.q(ProgramFree(self.name, self.datahash))
 
-  def __call__(self, *bufs, global_size=None, local_size=None, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
     self.dev.req.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
     if wait: return float(self.dev.batch_submit())
 
