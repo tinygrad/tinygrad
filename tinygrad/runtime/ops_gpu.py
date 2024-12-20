@@ -41,9 +41,8 @@ class CLProgram:
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), status := ctypes.c_int32()), status)
 
   def __del__(self):
-    with contextlib.suppress(TypeError):
-      with contextlib.suppress(AttributeError): check(cl.clReleaseKernel(self.kernel))
-      with contextlib.suppress(AttributeError): check(cl.clReleaseProgram(self.program))
+    with contextlib.suppress(TypeError, AttributeError): check(cl.clReleaseKernel(self.kernel))
+    with contextlib.suppress(TypeError, AttributeError): check(cl.clReleaseProgram(self.program))
 
   def __call__(self, *bufs:tuple[ctypes._CData, BufferSpec], global_size:tuple[int,int,int]=(1,1,1), local_size:Optional[tuple[int,int,int]]=None, vals:tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,(b,_) in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
