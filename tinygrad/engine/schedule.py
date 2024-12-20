@@ -574,7 +574,14 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
-remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
+remove_movement_ops = PatternMatcher([
+  (UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),
+  # merge one src (unrealized) views (why doesn't this work?)
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(),), name="v1")), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
+  # merge const views (why doesn't this work?)
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST)), name="v1")), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
+  # NOTE: we can't merge buffer views here because the buffer might be realized, and it's realized before the view
+])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
