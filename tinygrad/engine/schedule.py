@@ -59,7 +59,7 @@ tensor_uop_spec = PatternMatcher([
    # dtype
    (assign.dtype == target.dtype == new_val.dtype) and \
    # arg (TODO: replace this ShapeTracker arg with a VIEW on the target BUFFER)
-   # NOTE: this ShapeTracker can only add an offset the store ShapeTracker
+   # NOTE: this ShapeTracker must not change shape, but it's free to change the STORE st offset
    (assign.arg is None or (isinstance(assign.arg, ShapeTracker) and not assign.arg.contiguous and assign.arg.shape == assign.shape))),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
