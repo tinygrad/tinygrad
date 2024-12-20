@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
+from typing import Any, Optional, Set, Union, Tuple, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -182,7 +182,7 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM",
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:Dict[UOp, UOp], visisted:Set[UOp]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:Set[UOp]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
   visisted.add(u)
@@ -203,7 +203,7 @@ def smax(*lst): return _suop(argfix(*lst), UOp.maximum, max)
 def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
-def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
+def sym_infer(uop: Union[UOp, int], var_vals: dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -217,7 +217,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 class UOpMetaClass(type):
-  ucache:Dict[Tuple, weakref.ReferenceType[UOp]] = {}
+  ucache:dict[Tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -257,10 +257,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else self.arg
 
   @property
-  def toposort(self) -> Dict[UOp, None]:
-    def _toposort(u:UOp, cache:Dict[UOp, Dict[UOp, None]]):
+  def toposort(self) -> dict[UOp, None]:
+    def _toposort(u:UOp, cache:dict[UOp, dict[UOp, None]]):
       if (cret:=cache.get(u)) is not None: return cret
-      nodes: Dict[UOp, None] = {}
+      nodes: dict[UOp, None] = {}
       # NOTE: this is a lot faster than the comprehension in parents
       for parent in u.src: nodes.update(_toposort(parent, cache))
       nodes[u] = None
@@ -310,7 +310,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:Dict[UOp, UOp]):
+  def substitute(self, dvars:dict[UOp, UOp]):
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, _substitute, dvars, bottom_up=True)
 
@@ -631,7 +631,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
 
-  def sym_infer(self, var_vals:Dict[UOp, int]):
+  def sym_infer(self, var_vals:dict[UOp, int]):
     fxn, varnames = self._sym_fxn
     return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
 
@@ -651,7 +651,7 @@ def safe_exp2(x):
   try: return 2 ** x
   except OverflowError: return math.inf
 
-python_alu: Dict[Ops, Callable]  = {
+python_alu: dict[Ops, Callable]  = {
   Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: safe_exp2,
   Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
@@ -755,14 +755,14 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> list[Dict[str, UOp]]:
+  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (self.allowed_len != -1 and len(uop.src) != self.allowed_len): return []
     if self.src is None: return [store]
-    res: list[Dict[str, UOp]] = []
+    res: list[dict[str, UOp]] = []
     for vp in self.src:
       stores, new_stores = [store.copy()], []
       for uu, vv in zip(uop.src, vp):
@@ -772,7 +772,7 @@ class UPat(MathTrait):
     return res
 
 class UPatAny(UPat):
-  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> list[Dict[str, UOp]]:
+  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     ret = []
     for x in self.src[0]:
       if (match:=x.match(uop, store.copy())): ret.extend(match)
@@ -791,7 +791,7 @@ class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: Dict[Ops, list[tuple[UPat, Callable, Set, bool]]] = {}
+    self.pdict: dict[Ops, list[tuple[UPat, Callable, Set, bool]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
@@ -815,7 +815,7 @@ class PatternMatcher:
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
-match_stats:Dict[UPat, list[Union[int, float]]] = dict()
+match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                              # location that called graph_rewrite
@@ -823,7 +823,7 @@ class TrackedGraphRewrite:
   matches: list[tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
-_name_cnt:Dict[str, int] = {}
+_name_cnt:dict[str, int] = {}
 def track_rewrites(named=False):
   def _decorator(func):
     def __wrapper(self, *args, **kwargs):
@@ -891,7 +891,7 @@ class RewriteContext:
   def __init__(self, pm, ctx):
     self.pm: PatternMatcher = pm
     self.ctx = ctx
-    self.replace: Dict[UOp, UOp] = {}
+    self.replace: dict[UOp, UOp] = {}
   def rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple(map(self.rewrite, n.src))

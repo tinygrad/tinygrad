@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Dict, Callable, Any, Set
+from typing import Optional, Callable, Any, Set
 import functools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -99,7 +99,7 @@ class ProgramSpec:
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
-  def launch_dims(self, var_vals:Dict[Variable, int]):
+  def launch_dims(self, var_vals:dict[Variable, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
@@ -117,7 +117,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   extra_matcher: Any = None
-  code_for_op: Dict[Ops, Callable] = {}
+  code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

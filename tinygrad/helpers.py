@@ -45,7 +45,7 @@ def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def data64(data:Any) -> tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
 def data64_le(data:Any) -> tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32) # Any is sint
-def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
+def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
@@ -87,7 +87,7 @@ class Context(contextlib.ContextDecorator):
     for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, ContextVar._cache[k].value)
 
 class ContextVar:
-  _cache: ClassVar[Dict[str, ContextVar]] = {}
+  _cache: ClassVar[dict[str, ContextVar]] = {}
   value: int
   key: str
   def __init__(self, key, default_value):

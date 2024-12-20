@@ -5,7 +5,7 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, DefaultDict
+from typing import Optional, Any, DefaultDict
 from collections import defaultdict
 from dataclasses import dataclass, field
 import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
@@ -52,7 +52,7 @@ def safe_eval(node): return eval_fxns[node.__class__](node)
 class BatchRequest:
   def __init__(self):
     self._q: list[CloudRequest] = []
-    self._h: Dict[str, bytes] = {}
+    self._h: dict[str, bytes] = {}
   def h(self, d:bytes) -> str:
     binhash = hashlib.sha256(d).digest()
     self._h[datahash:=binascii.hexlify(binhash).decode()] = binhash+struct.pack("<Q", len(d))+d
@@ -74,9 +74,9 @@ class BatchRequest:
 
 @dataclass
 class CloudSession:
-  programs: Dict[tuple[str, str], Any] = field(default_factory=dict)
+  programs: dict[tuple[str, str], Any] = field(default_factory=dict)
   # TODO: the buffer should track this internally
-  buffers: Dict[int, tuple[Any, int, Optional[BufferSpec]]] = field(default_factory=dict)
+  buffers: dict[int, tuple[Any, int, Optional[BufferSpec]]] = field(default_factory=dict)
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'

@@ -3,7 +3,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 import sys
-from typing import Optional, Any, Dict, TYPE_CHECKING
+from typing import Optional, Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
@@ -33,12 +33,12 @@ class PythonProgram:
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      ul: Dict[int, Any] = {}
-      dl: Dict[int, DType] = {}
+      ul: dict[int, Any] = {}
+      dl: dict[int, DType] = {}
       pbufs: list[memoryview] = list(bufs)
       pvals: list[int] = list(vals)
       i = 0
-      loop_ends: Dict[int, int] = {}
+      loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF}

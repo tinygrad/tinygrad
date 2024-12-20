@@ -71,10 +71,10 @@ class CStyleLanguage(Renderer):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
+  code_for_workitem: dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   extra_args: list[str] = []
   float4: Optional[str] = None
-  type_map: Dict[DType, str] = {}
+  type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: Dict = {
@@ -110,11 +110,11 @@ class CStyleLanguage(Renderer):
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:list[UOp]) -> str:
-    r: Dict[UOp, str] = {}
+    r: dict[UOp, str] = {}
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    bufs: Dict[UOp, tuple[str, tuple[DType, bool]]] = {}
+    bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)

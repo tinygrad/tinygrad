@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools, functools
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Optional, cast, Dict, Final, DefaultDict, Callable, Sequence
+from typing import Optional, cast, Final, DefaultDict, Callable, Sequence
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
@@ -693,7 +693,7 @@ class Kernel:
 
 # the living definition of intermediate UOps
 
-def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
+def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> None:
   if not uop.has_st or uop in sts: return
   # restore globals from the two stage reduce
   if uop.op is Ops.LOAD and uop.src[0].op is Ops.DEFINE_LOCAL:
@@ -716,10 +716,10 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
       raise AssertionError(f"found implicit expand {sizes} {shapes}")
   sts[uop] = st
 
-def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
+def verify_ast(ast:UOp) -> dict[UOp, ShapeTracker]:
   assert ast.op is Ops.SINK and all(x.op is Ops.STORE for x in ast.src), "must be SINK"
   assert all_same([x.st_arg.size for x in ast.src]), "outputs must be exactly the same size"
-  sts: Dict[UOp, ShapeTracker] = {}
+  sts: dict[UOp, ShapeTracker] = {}
   for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"

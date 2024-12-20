@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import Optional, Dict, Set, Callable
+from typing import Optional, Set, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
@@ -86,9 +86,9 @@ class ShapeTracker:
   def vars(self) -> Set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
-  def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
+  def var_vals(self) -> dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self) -> tuple[ShapeTracker, Dict[Variable, int]]:
+  def unbind(self) -> tuple[ShapeTracker, dict[Variable, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
@@ -118,5 +118,5 @@ class ShapeTracker:
 
   def mop(self, op, arg): return mops[op](self, arg)
 
-mops: Dict[Ops, Callable] = {Ops.RESHAPE: ShapeTracker.reshape, Ops.PERMUTE: ShapeTracker.permute, Ops.EXPAND: ShapeTracker.expand,
+mops: dict[Ops, Callable] = {Ops.RESHAPE: ShapeTracker.reshape, Ops.PERMUTE: ShapeTracker.permute, Ops.EXPAND: ShapeTracker.expand,
                              Ops.SHRINK: ShapeTracker.shrink, Ops.STRIDE: ShapeTracker.stride, Ops.PAD: ShapeTracker.pad}

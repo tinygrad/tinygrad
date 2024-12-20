@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Dict, TYPE_CHECKING, Any, DefaultDict, Callable, Set
+from typing import Optional, TYPE_CHECKING, Any, DefaultDict, Callable, Set
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -321,14 +321,14 @@ sym = symbolic_flat+PatternMatcher([
 
 # *** uop expander ***
 
-def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:Dict[int, int]) -> int:
+def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
   for axis,m in args[::-1]:
     idx += rpk[axis] * mul
     mul *= m
   return idx
 
-def _choices_from_args(args:tuple[tuple[int, int], ...]) -> list[Dict[int, int]]:
+def _choices_from_args(args:tuple[tuple[int, int], ...]) -> list[dict[int, int]]:
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
 @functools.lru_cache(None)

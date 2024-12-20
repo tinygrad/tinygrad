@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Set, Tuple, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -10,7 +10,7 @@ FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
-  dcache: Dict[Tuple, DType] = {}
+  dcache: dict[Tuple, DType] = {}
   def __call__(cls, *args, **kwargs):
     if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
@@ -110,7 +110,7 @@ class dtypes:
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
-  def fields() -> Dict[str, DType]: return DTYPES_DICT
+  def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
@@ -181,7 +181,7 @@ def truncate_fp16(x):
   try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
+truncate: dict[DType, Callable] = {dtypes.bool: bool,
   # TODO: bfloat16
   dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,

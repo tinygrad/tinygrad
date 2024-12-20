@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Tuple, Optional, DefaultDict
+from typing import Tuple, Optional, DefaultDict
 import collections, heapq
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
@@ -24,15 +24,15 @@ class BasicBlock:
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-def append_to_block(ctx:tuple[Dict[UOp, tuple[UOp, ...]], Dict[UOp, list[UOp]]], x:UOp):
+def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]], x:UOp):
   block_ctxs, children = ctx
   in_this_block = set(x.arg.lst)
 
   # collections to build
   new_srcs: list[UOp] = []
   to_append: list[UOp] = []
-  old_blocks: Dict[tuple[UOp, ...], UOp] = {}
-  new_blocks: Dict[tuple[UOp, ...], list[UOp]] = {}
+  old_blocks: dict[tuple[UOp, ...], UOp] = {}
+  new_blocks: dict[tuple[UOp, ...], list[UOp]] = {}
 
   for u in x.src:
     if u.op is Ops.BLOCK:
@@ -117,7 +117,7 @@ def block_reorder(in_block:UOp):
   in_this_block = set(in_block.arg.lst)
   local_children: DefaultDict[UOp, list[UOp]] = collections.defaultdict(list)
   in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
-  priorities:Dict[UOp, int] = {}
+  priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
   for u in reversed(in_block.arg.lst):
@@ -151,8 +151,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # get children and all block contexts
-  temp_block_ctxs: Dict[UOp, list[UOp]] = {}
-  children: Dict[UOp, list[UOp]] = {}
+  temp_block_ctxs: dict[UOp, list[UOp]] = {}
+  children: dict[UOp, list[UOp]] = {}
   for u in sink.toposort:
     this_block_ctx: list[UOp] = []
     for s in u.src:
@@ -176,7 +176,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     temp_block_ctxs[u] = sorted(dedup(this_block_ctx), key=lambda x: x.tuplize)
 
   # make final block_ctxs, add BLOCKSTART to block_ctxs for IF and RANGE
-  block_ctxs: Dict[UOp, tuple[UOp, ...]] = {}
+  block_ctxs: dict[UOp, tuple[UOp, ...]] = {}
   for u in sink.toposort:
     block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + tuple(temp_block_ctxs[u])) if u.op in {Ops.IF, Ops.RANGE} else tuple(temp_block_ctxs[u])
 
@@ -194,7 +194,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     sink = sink.substitute(forks)
 
   # combine matching BLOCKENDS
-  blockends_to_arg: Dict[UOp, list[UOp]] = {}
+  blockends_to_arg: dict[UOp, list[UOp]] = {}
   for be in sink.toposort:
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}

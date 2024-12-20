@@ -1,4 +1,4 @@
-from typing import Dict, List, cast, DefaultDict, Optional, Callable
+from typing import List, cast, DefaultDict, Optional, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
@@ -33,7 +33,7 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p:ProgramSpec, lib:bytes, var_vals:Dict[Variable, int], rawbufs:list[Buffer], early_stop:Optional[float]=None,
+def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:Optional[float]=None,
                   max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
   if p.global_size is not None and max_global_size is not None:
@@ -100,7 +100,7 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   return cast(list[Buffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_kernel_actions(lin:Kernel, include_0=True) -> Dict[int, Kernel]:
+def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   for i,a in enumerate(actions):
     if a.axis is not None and a.op is not OptOps.TC:
@@ -139,7 +139,7 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: Dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
+    var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
@@ -196,7 +196,7 @@ def time_linearizer(lin:Kernel, rawbufs:list[Buffer], allow_test_size=True, max_
   assert dev.compiler is not None
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals: Dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
+  var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
   p = lin.to_program()
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))

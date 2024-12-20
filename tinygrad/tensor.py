@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
@@ -210,7 +210,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** data handlers ****
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], Dict[Variable, int]]:
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
@@ -449,8 +449,8 @@ class Tensor(SimpleMathTrait):
     return Tensor(fetch(url, gunzip=gunzip), **kwargs)
 
   _seed: int = int(time.time())
-  _device_seeds: Dict[str, Tensor] = {}
-  _device_rng_counters: Dict[str, Tensor] = {}
+  _device_seeds: dict[str, Tensor] = {}
+  _device_rng_counters: dict[str, Tensor] = {}
   @staticmethod
   def manual_seed(seed=0):
     """
@@ -3467,7 +3467,7 @@ class Tensor(SimpleMathTrait):
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
-    reductions: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
+    reductions: dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
     return reductions[reduction](self)
 
   def binary_crossentropy(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:

@@ -1,7 +1,7 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Set, Dict, Optional, DefaultDict
+from typing import Set, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
@@ -39,16 +39,16 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  tensor_uops: Dict[UOp, list[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
-  var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
+  tensor_uops: dict[UOp, list[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
+  var_vals: dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
-  realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
-  allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
-  ops_metadata: Dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
-  contiguous: Dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
-  children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+  realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
+  allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
+  ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
+  contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
+  children: DefaultDict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
-def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
+def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # shapeless op is passthrough
   # realized is passthrough
@@ -132,15 +132,15 @@ view_right = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  tensor_uops: Dict[UOp, list[UOp]]
-  ops_metadata: Dict[UOp, Metadata]
+  tensor_uops: dict[UOp, list[UOp]]
+  ops_metadata: dict[UOp, Metadata]
   assigns: Set[UOp]
-  var_vals: Dict[Variable, int]
-  sinked: Dict[UOp, UOp]
+  var_vals: dict[Variable, int]
+  sinked: dict[UOp, UOp]
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: list[UOp] = field(default_factory=list)
   metadata: Set[Metadata] = field(default_factory=set)
-  assign_adj: Dict[UOp, list[UOp]] = field(default_factory=dict)
+  assign_adj: dict[UOp, list[UOp]] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -204,7 +204,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   return ScheduleItem(sink, tuple(u.buffer for u in si_ctx.bufs if u.size != 0), tuple(si_ctx.metadata),
                       tuple(ubuf for ubuf,ops in si_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops)))
 
-PROCESS_REPLAY_CAPTURE: Dict[str, bytes] = {}
+PROCESS_REPLAY_CAPTURE: dict[str, bytes] = {}
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay() -> None:
@@ -217,8 +217,8 @@ def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
   return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
 
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
-                     reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[tuple[UOp, ShapeTracker], None]) -> None:
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp], realizes:dict[UOp, UOp],
+                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -235,8 +235,8 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
-def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
-                           realizes:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
+def get_isolated_children(r:UOp, reduce_for_op:dict[UOp, UOp], children:DefaultDict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp],
+                           realizes:dict[UOp, UOp], group:dict[UOp, None]) -> dict[UOp, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
     if (p:=uval(allbufs[rc_parents.pop()])) in cache: continue
@@ -245,21 +245,21 @@ def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultD
     if p.op is Ops.REDUCE_AXIS: return {}
     rc_parents.extend(x.base.buf_uop for x in p.src if is_scheduled(x.base) and x.base.buf_uop is not r)
   # search descendants of the reduceop that can cleanly group
-  descendants: Dict[UOp, None] = {}
+  descendants: dict[UOp, None] = {}
   for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
 def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: Dict[UOp, UOp] = {}
+  reduce_for_op: dict[UOp, UOp] = {}
   reduce_of_const: list[UOp] = []
   double_reduces: list[UOp] = []
   for r, r_uop in ctx.allbufs.items():
     if (r_uop:=uval(r_uop)).op is not Ops.REDUCE_AXIS: continue
     if FUSE_CONV_BW and uval((x:=r_uop.src[0]).base).op is r_uop.op and x.base is not x: double_reduces.append(r)
     if r in ctx.realizes: continue
-    group: Dict[UOp, None] = {}
+    group: dict[UOp, None] = {}
     recursive_group(r, unwrap(r_uop.st), r, ctx.children, ctx.allbufs, ctx.realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
@@ -499,11 +499,11 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
 @track_rewrites(named=True)
-def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], Dict[Variable, int]]:
+def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
-  cache: Dict[UOp, UOp] = {}
+  cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)

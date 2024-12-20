@@ -1,4 +1,4 @@
-from typing import DefaultDict, Dict, Union, Optional, cast, Callable
+from typing import DefaultDict, Union, Optional, cast, Callable
 import struct
 from collections import defaultdict
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
@@ -14,7 +14,7 @@ def render_val(x, dtype):
     return "0f%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
-asm_for_op: Dict[Ops, Callable] = {
+asm_for_op: dict[Ops, Callable] = {
   Ops.RECIP: lambda d,a,dt,name: f"rcp{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a};",
   Ops.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", Ops.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
   Ops.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", Ops.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
@@ -139,11 +139,11 @@ class PTXRenderer(Renderer):
   barrier = "bar.sync\t0;"
   supports_half = supports_half
   # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
-  types: Dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+  types: dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
                               dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
                               dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "pred" }
 
-  mem_types: Dict[DType, str] =  types.copy()
+  mem_types: dict[DType, str] =  types.copy()
   mem_types.update({dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"})
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str:
@@ -157,7 +157,7 @@ class PTXRenderer(Renderer):
     bufs = []
 
     c: DefaultDict[str, int] = defaultdict(int)
-    r: Dict[UOp, Union[list[str], str]] = {}
+    r: dict[UOp, Union[list[str], str]] = {}
     self.r = r
     self.uops = uops
 

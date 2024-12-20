@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools
 from dataclasses import dataclass
-from typing import Optional, Dict, Set, cast, Sequence
+from typing import Optional, Set, cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
@@ -144,7 +144,7 @@ class View:
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, UOp)], set())
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def unbind(self) -> tuple[View, Dict[Variable, int]]:
+  def unbind(self) -> tuple[View, dict[Variable, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars()]
     unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
     def substitute(x:sint): return x if isinstance(x, int) else x.substitute(unbound_vars)

@@ -1,4 +1,4 @@
-from typing import Dict, cast
+from typing import cast
 import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
@@ -90,14 +90,14 @@ class LLVMRenderer(Renderer):
   ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
-    r: Dict[UOp, str] = {}
+    r: dict[UOp, str] = {}
     args: list[str] = []
     kernel: list[str] = []
-    end_lines: Dict[str, None] = {}
+    end_lines: dict[str, None] = {}
     vc = -1
 
     # prealloc all assigns
-    acc_to_assign: Dict[UOp, UOp] = {}
+    acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
       if u.op is Ops.ASSIGN:
         vc += 1

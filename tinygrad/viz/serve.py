@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -50,7 +50,7 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   except Exception as e: return f"ERROR: {e}"
 
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
-  kernels: Dict[str, list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
+  kernels: dict[str, list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
   for k,ctxs in tqdm(zip(keys, contexts), desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
@@ -59,9 +59,9 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
       kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def uop_to_json(x:UOp) -> Dict[int, tuple[str, str, list[int], str, str]]:
+def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
   assert isinstance(x, UOp)
-  graph: Dict[int, tuple[str, str, list[int], str, str]] = {}
+  graph: dict[int, tuple[str, str, list[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
     if u.op in {Ops.CONST, Ops.DEVICE}:
@@ -74,7 +74,7 @@ def uop_to_json(x:UOp) -> Dict[int, tuple[str, str, list[int], str, str]]:
       if x.op is Ops.DEVICE: label += f"\nDEVICE{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
-def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
+def _replace_uop(base:UOp, replaces:dict[UOp, UOp]) -> UOp:
   if (found:=replaces.get(base)) is not None: return found
   ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
   if (final := replaces.get(ret)) is not None:
@@ -86,7 +86,7 @@ def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
                           kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
-  replaces: Dict[UOp, UOp] = {}
+  replaces: dict[UOp, UOp] = {}
   sink = g.graphs[0]
   for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
     u0 = pickle.loads(u0_b)
@@ -106,7 +106,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
   return g
 
 # Profiler API
-devices:Dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
+devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
 def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
 def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):

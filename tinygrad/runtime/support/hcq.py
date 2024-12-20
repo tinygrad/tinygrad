@@ -142,7 +142,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       if isinstance(val, int): mv[i] = val if mask is None else ((mv[i] & ~mask) | val)
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
-  def _apply_var_vals(self, var_vals:Dict[Variable, int]):
+  def _apply_var_vals(self, var_vals:dict[Variable, int]):
     resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
 
     for off, sym_idx in self.q_sints:
@@ -155,7 +155,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 
     self._prev_resolved_syms = cast(list[Optional[int]], resolved_syms)
 
-  def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
+  def submit(self, dev:DeviceType, var_vals:Optional[dict[Variable, int]]=None):
     """
     Submits the command queue to a specific device for execution.
 

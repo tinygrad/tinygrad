@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Callable, Union, Dict, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
@@ -14,7 +14,7 @@ from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 
-def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: Dict[Variable, int], max_batch_size=0) -> list[ExecItem]:
+def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], max_batch_size=0) -> list[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   graphed_jit_cache: list[ExecItem] = []
@@ -59,8 +59,8 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
-def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) -> Dict[tuple[int, int], int]:
-  input_replace: Dict[tuple[int, int], int] = {}
+def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) -> dict[tuple[int, int], int]:
+  input_replace: dict[tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.bufs):
       if a in input_rawbuffers:
@@ -68,12 +68,12 @@ def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
-    self.input_replace:Dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
-    self.var_vals_replace:Dict[int, list[int]] = {}
-    self.launch_dims_replace:Dict[int, tuple[Optional[int], Optional[int]]] = {}
-    self.launch_dims_base:Dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
+    self.var_vals_replace:dict[int, list[int]] = {}
+    self.launch_dims_replace:dict[int, tuple[Optional[int], Optional[int]]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
@@ -95,17 +95,17 @@ class GraphRunner(Runner):
           self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
 
     # used in MultiGraphRunner. the ints are id() of _bufs
-    self.w_dependency_map: Dict[int, Any] = {}
-    self.r_dependency_map: Dict[int, list[Any]] = collections.defaultdict(list)
+    self.w_dependency_map: dict[int, Any] = {}
+    self.r_dependency_map: dict[int, list[Any]] = collections.defaultdict(list)
 
     super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0], estimates.simplify())
 
-  def updated_vars(self, var_vals: Dict[Variable, int]):
+  def updated_vars(self, var_vals: dict[Variable, int]):
     vals = [var_vals[v] for v in self.vars]
     for j, vidxs in self.var_vals_replace.items():
       for i, v in enumerate(vidxs): yield j, i, vals[v]
 
-  def updated_launch_dims(self, var_vals: Dict[Variable, int]):
+  def updated_launch_dims(self, var_vals: dict[Variable, int]):
     dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
     for j, (gl, lc) in self.launch_dims_replace.items():
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
@@ -132,7 +132,7 @@ ReturnType = TypeVar('ReturnType')
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   jit_cache: list[ExecItem]
-  input_replace: Dict[tuple[int, int], int]
+  input_replace: dict[tuple[int, int], int]
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[Union[int, str]]
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
@@ -143,7 +143,7 @@ class CapturedJit(Generic[ReturnType]):
 
   def __post_init__(self):
     self._jit_cache: list[ExecItem] = self.jit_cache
-    self._input_replace: Dict[tuple[int, int], int] = self.input_replace
+    self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._graphed = False
     self._clear_inputs()
 
@@ -151,7 +151,7 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
   # jit exec
-  def __call__(self, input_buffers:list[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
+  def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
@@ -213,7 +213,7 @@ class TinyJit(Generic[ReturnType]):
   @property
   def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
   @property
-  def input_replace(self) -> Dict[tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
+  def input_replace(self) -> dict[tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
