@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, List, TYPE_CHECKING, Any, DefaultDict, Callable, Set
+from typing import Optional, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -33,7 +33,7 @@ def fold_expanded(ex, buf):
 
   # then rewrite everything we can
   lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
-  used: Set[Tuple[UOp, UOp]] = set()
+  used: set[tuple[UOp, UOp]] = set()
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
       for fold_length in lengths:
@@ -49,7 +49,8 @@ def fold_expanded(ex, buf):
               rootsrc[0] if isinstance(rootsrc, tuple) else None)
           else:
             # for non image, we upcast the index pointer
-            new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(new_src[0].dtype.local))
+            new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(size=new_src[0].dtype.size//fold_length,
+                                                                                    local=new_src[0].dtype.local))
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(Ops.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
@@ -83,7 +84,7 @@ float4_folding = PatternMatcher([
 
 # ***** image load valid simplification *****
 
-def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
+def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
 
@@ -122,7 +123,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
 powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
 def get_late_rewrite_patterns(ops, force_transcendental=False):
-  pat: List[Tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
+  pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
            ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops:
@@ -320,18 +321,18 @@ sym = symbolic_flat+PatternMatcher([
 
 # *** uop expander ***
 
-def _expand_arg_to_idx(args:Tuple[Tuple[int, int], ...], rpk:Dict[int, int]) -> int:
+def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
   for axis,m in args[::-1]:
     idx += rpk[axis] * mul
     mul *= m
   return idx
 
-def _choices_from_args(args:Tuple[Tuple[int, int], ...]) -> List[Dict[int, int]]:
+def _choices_from_args(args:tuple[tuple[int, int], ...]) -> list[dict[int, int]]:
   return [dict(x) for x in itertools.product(*[zip(itertools.repeat(axis), range(m)) for axis,m in args])]
 
 @functools.lru_cache(None)
-def _swizzle_args(cargs:Tuple[Tuple[int, int], ...], eargs:Tuple[Tuple[int, int], ...], exclude_args:Tuple[int, ...]) -> List[int]:
+def _swizzle_args(cargs:tuple[tuple[int, int], ...], eargs:tuple[tuple[int, int], ...], exclude_args:tuple[int, ...]) -> list[int]:
   return [_expand_arg_to_idx(eargs, {**rpk, **{x:0 for x in exclude_args}} if exclude_args else rpk) for rpk in _choices_from_args(cargs)]
 
 def do_expand(root:UOp):
@@ -397,7 +398,7 @@ def no_vectorized_alu(alu):
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
-def create_gate(root:UOp) -> Optional[UOp]:
+def create_gate(root:UOp) -> UOp|None:
   @functools.lru_cache(None)
   def _gate_srcs(u:UOp, gate:UOp) -> UOp:
     if u.op is Ops.BARRIER: return u
@@ -449,7 +450,7 @@ devectorize = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
-def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optional[UOp]=None) -> Optional[UOp]:
+def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
   if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
@@ -471,7 +472,7 @@ migrate_indexing = PatternMatcher([
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
 
-def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:Optional[UOp]=None) -> UOp:
+def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:UOp|None=None) -> UOp:
   # this moves the mask from the indexing to the load/store op for rendering
   nidx = buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx)
   return UOp.load(nidx, x.const_like(0), mask, *x.src[1:], dtype=x.dtype) if x.op is Ops.LOAD else UOp.store(nidx, x.src[1], mask, *x.src[2:])

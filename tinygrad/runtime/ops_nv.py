@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
-from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
+from typing import Any, cast, Union, Type, Optional
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.ops import sint
@@ -58,7 +58,7 @@ def make_uvm_type():
 uvm = make_uvm_type()
 
 def make_qmd_struct_type():
-  fields: List[Tuple[str, Union[Type[ctypes.c_uint64], Type[ctypes.c_uint32]], Any]] = []
+  fields: list[tuple[str, Union[Type[ctypes.c_uint64], Type[ctypes.c_uint32]], Any]] = []
   bits = [(name,dt) for name,dt in nv_gpu.__dict__.items() if name.startswith("NVC6C0_QMDV03_00") and isinstance(dt, tuple)]
   bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
   bits = sorted(bits, key=lambda x: x[1][1])
@@ -111,7 +111,7 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
     for i, value in enumerate(self._q): hw_view[i] = value
 
     # From now on, the queue is on the device for faster submission.
-    self._q = hw_view # type: ignore
+    self._q = hw_view
 
   def _submit_to_gpfifo(self, dev:NVDevice, gpfifo:GPFifo):
     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
@@ -131,7 +131,7 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
-  def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
@@ -187,7 +187,7 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVArgsState(CLikeArgsState):
-  def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+  def __init__(self, ptr:int, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     if MOCKGPU: prg.constbuffer_0[0:2] = [len(bufs), len(vals)]
     super().__init__(ptr, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
 
@@ -202,7 +202,7 @@ class NVProgram(HCQProgram):
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferSpec(cpu_access=True))
 
     self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0
-    self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
+    self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
     for sh in sections:
       if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
       if sh.name == f".text.{self.name}":
@@ -254,7 +254,7 @@ class NVProgram(HCQProgram):
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True))
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size) or self.lcmem_usage > cast(NVDevice, self.dev).slm_per_thread:
       raise RuntimeError("Too many resources requested for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
@@ -285,9 +285,9 @@ class NVDevice(HCQCompiled[NVSignal]):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
-  gpus_info: Union[List, ctypes.Array] = []
+  gpus_info: Union[list, ctypes.Array] = []
   signals_page: Any = None
-  signals_pool: List[int] = []
+  signals_pool: list[int] = []
 
   # TODO: Need a proper allocator for va addresses
   # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
@@ -412,7 +412,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.gpu_mmio = to_mv(self._gpu_map_to_cpu(self.usermode, mmio_sz:=0x10000, flags=2), mmio_sz).cast("I")
 
     self._setup_nvclasses()
-    self._debug_mappings: Dict[Tuple[int, int], str] = dict()
+    self._debug_mappings: dict[tuple[int, int], str] = dict()
 
     rmctrl.perf_boost(self.fd_ctl, self.root, self.subdevice, duration=0xffffffff, flags=((nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_YES << 4) | \
       (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_PRIORITY_HIGH << 6) | (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CMD_BOOST_TO_MAX << 0)))
@@ -427,7 +427,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=self.gpu_uuid)
     uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl, hClient=self.root, hVaSpace=vaspace)
 
-    for dev in cast(List[NVDevice], self.devices):
+    for dev in cast(list[NVDevice], self.devices):
       try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.gpu_uuid)
       except RuntimeError as e: raise RuntimeError(str(e) + f". Make sure GPUs #{self.gpu_minor} & #{dev.gpu_minor} have P2P enabled between.") from e
 
@@ -541,7 +541,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     if sm_errors.mmuFault.valid:
       mmu_info = rmctrl.debug_read_mmu_fault_info(self.fd_ctl, self.root, self.debugger)
       for i in range(mmu_info.count):
-        pfinfo = mmu_info.mmuFaultInfoList[i]
+        pfinfo = mmu_info.mmuFaultInfolist[i]
         report += [f"MMU fault: 0x{pfinfo.faultAddress:X} | {NV_PFAULT_FAULT_TYPE[pfinfo.faultType]} | {NV_PFAULT_ACCESS_TYPE[pfinfo.accessType]}"]
         if DEBUG >= 5:
           report += ["GPU mappings:\n"+"\n".join(f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings))]
