@@ -20,7 +20,7 @@ def create_testcase(op:str, name:str, inputs:dict[str, np.ndarray], outputs:dict
 
 # ******* TESTS *******
 
-# ground truth either comes from `onnx.backend.test.case.node` or running ort and passing the result in
+# ground truth either comes from `onnx.backend.test.case.node` or running ort and copy-pasting the result in as output
 
 def test_adam_large_training_iteration():
   from onnx.backend.test.case.node.adam import apply_adam
@@ -30,7 +30,7 @@ def test_adam_large_training_iteration():
   outputs = ["x_new", "v_new", "h_new"]
   opts = {"alpha": 0.95, "beta": 0.1, "epsilon": 1e-7, "norm_coefficient": 0.001, "norm_coefficient_post": 0.0}
   onnx_out = apply_adam(**inputs, **opts)
-  outputs = dict([*list(zip(outputs, onnx_out))])
+  outputs = dict(zip(outputs, onnx_out))
   # NOTE: fix x_new since np.sqrt turns float32 into float64
   outputs["x_new"] = outputs["x_new"].astype(np.float32)
   return create_testcase(op, "test_adam_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
@@ -57,7 +57,7 @@ def test_adagrad_large_training_iteration():
   outputs = ["x_new", "h_new"]
   opts = {"norm_coefficient": 0.001, "epsilon": 1e-5, "decay_factor": 0.1}
   onnx_out = apply_adagrad(**inputs, **opts)
-  outputs = dict([*list(zip(outputs, onnx_out))])
+  outputs = dict(zip(outputs, onnx_out))
   # NOTE: fix x_new since np.sqrt turns float32 into float64
   outputs["x_new"] = outputs["x_new"].astype(np.float32)
   return create_testcase(op, "test_adagrad_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
@@ -73,12 +73,11 @@ def _test_momentum(mode):
   outputs = ["x_new", "v_new"]
   opts = {"norm_coefficient": 0.001, "alpha": 0.95, "beta": 0.1, "mode": "standard"}
   onnx_out = apply_momentum(**inputs, **{"norm_coefficient": 0.001, "alpha": 0.95, "beta": 0.1})
-  outputs = dict([*list(zip(outputs, onnx_out))])
+  outputs = dict(zip(outputs, onnx_out))
   return create_testcase(op, f"test_{mode}_momentum_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
-def test_momentum_large_training_iteration():
-  return _test_momentum("standard")
-def test_nesterov_momentum_large_training_iteration():
-  return _test_momentum("nesterov")
+
+def test_momentum_large_training_iteration(): return _test_momentum("standard")
+def test_nesterov_momentum_large_training_iteration(): return _test_momentum("nesterov")
 
 def test_max_unpool_pads():
   op = "MaxUnpool"
@@ -89,13 +88,55 @@ def test_max_unpool_pads():
                         [9, 11]]]], dtype=np.int64)
   }
   opts = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [1, 0, 0, 0]}
-  outputs = {"y": np.array([[[[ 0.,  1.,  0.,  3.], [ 0.,  0.,  0.,  0.], [ 0.,  9.,  0., 11.]]]], dtype=np.float32)}
-  return create_testcase(op, "test_maxunpool_pads_scenario1", inputs, outputs, **opts)
+  outputs = {"y": np.array([[[[0.,1.,0.,3.], [0.,0.,0.,0.], [0.,9.,0.,11.]]]], dtype=np.float32)}
+  return create_testcase(op, "test_maxunpool_pads_internal", inputs, outputs, **opts)
+
+def test_gathernd_large_batch_dims():
+  from onnx.backend.test.case.node.gathernd import gather_nd_impl
+  op = "GatherND"
+  inputs = {
+    "data": np.array([[[[[0,1],[2,3]],[[4,5],[6,7]]],[[[8,9],[10,11]],[[12,13],[14,15]]]]], dtype=np.float32),
+    "indices": np.array([[[[[0]],[[1]]],[[[1]],[[0]]]]], dtype=np.int64),
+  }
+  opts = {"batch_dims": 3}
+  outputs = ["out"]
+  onnx_out = gather_nd_impl(**inputs, **opts)
+  outputs = dict(zip(outputs, [onnx_out]))
+  return create_testcase(op=op, name="test_gathernd_large_batch_dims_interal", inputs=inputs, outputs=outputs, **opts)
+
+def test_gathernd_large_batch_dims_multiple_indices():
+  from onnx.backend.test.case.node.gathernd import gather_nd_impl
+  op = "GatherND"
+  inputs = {
+    "data": np.array([[[[0,1,2],[3,4,5]],[[6,7,8],[9,10,11]]],[[[12,13,14],[15,16,17]],[[18,19,20],[21,22,23]]]], dtype=np.float32),
+    "indices": np.array([[[[0,1]],[[1,0]]],[[[1,1]],[[0,0]]]], dtype=np.int64)
+  }
+  opts = {"batch_dims": 2}
+  outputs = ["out"]
+  onnx_out = gather_nd_impl(**inputs, **opts)
+  outputs = dict(zip(outputs, [onnx_out]))
+  return create_testcase(op=op, name="test_gathernd_large_batch_dims_multiple_indices_internal", inputs=inputs, outputs=outputs, **opts)
+
+def test_scatternd_duplicate_indices_none_reduction():
+  from onnx.backend.test.case.node.scatternd import scatter_nd_impl
+  op = "ScatterND"
+  inputs = {
+    "data": np.array([0,1,2]),
+    "indices": np.array([[1],[1]]),
+    "updates": np.array([99,100])
+  }
+  outputs = ["out"]
+  onnx_out = scatter_nd_impl(**inputs)
+  outputs = dict(zip(outputs, [onnx_out]))
+  return create_testcase(op=op, name="test_scatternd_duplicate_indices_none_reduction_internal", inputs=inputs, outputs=outputs)
 
 TEST_CASES = [
   test_adam_large_training_iteration(),
   test_adagrad_large_training_iteration(),
   test_momentum_large_training_iteration(),
+  test_gathernd_large_batch_dims(),
+  test_gathernd_large_batch_dims_multiple_indices(),
+  test_scatternd_duplicate_indices_none_reduction(),
   # TODO: fix
   # test_nesterov_momentum_large_training_iteration(),
   # test_max_unpool_pads(),
