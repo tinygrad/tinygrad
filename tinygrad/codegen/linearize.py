@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Tuple, Optional, DefaultDict
 import collections, heapq
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
@@ -18,7 +17,7 @@ def disp(y:UOp) -> str:
 class BasicBlock:
   ctx: tuple[UOp, ...]
   lst: tuple[UOp, ...]
-  end: Optional[UOp] = None
+  end: UOp|None = None
   def __lt__(self, o:BasicBlock): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
@@ -115,8 +114,8 @@ pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), blo
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(in_block:UOp):
   in_this_block = set(in_block.arg.lst)
-  local_children: DefaultDict[UOp, list[UOp]] = collections.defaultdict(list)
-  in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
+  local_children: collections.defaultdict[UOp, list[UOp]] = collections.defaultdict(list)
+  in_degree: collections.defaultdict[UOp, int] = collections.defaultdict(int)
   priorities:dict[UOp, int] = {}
 
   # get local children and assign priorities
@@ -129,7 +128,7 @@ def block_reorder(in_block:UOp):
     priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
 
   # placement queue
-  queue:list[tuple[int, Tuple, UOp]] = []
+  queue:list[tuple[int, tuple, UOp]] = []
   def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
 
   # place the first ones that don't have deps

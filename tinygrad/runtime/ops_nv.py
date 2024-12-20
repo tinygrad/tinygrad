@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
-from typing import List, Any, cast, Union, Type, Optional
+from typing import Any, cast, Union, Type, Optional
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.ops import sint
@@ -285,7 +285,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
-  gpus_info: Union[List, ctypes.Array] = []
+  gpus_info: Union[list, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: list[int] = []
 
