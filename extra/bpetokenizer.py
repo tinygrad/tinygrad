@@ -36,7 +36,7 @@ class Encoding:
     if (disallowed_token := next((s for s in special_strs if s in disallowed_special), None)) is not None:
       raise ValueError(f"Encountered text corresponding to disallowed special token '{disallowed_token}'.")
     special_matches = [ m for m in special_matches if m.group(0) in allowed_special ]
-    special_tokens = [self._special_tokens[s] for s in special_strs]
+    special_tokens = [self._special_tokens[s] for s in special_strs if s in allowed_special]
 
     patch_ends = [m.start() for m in special_matches] + [len(text)]
     patch_starts = [0] + [m.end() for m in special_matches]
