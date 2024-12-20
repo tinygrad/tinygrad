@@ -988,9 +988,8 @@ spec = PatternMatcher([
 ])
 
 def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
-  spec_pm = spec if extra_spec is None else spec+extra_spec
   for i,u in enumerate(uops):
-    if not spec_pm.rewrite(u):
+    if not (spec if extra_spec is None else spec+extra_spec).rewrite(u):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
