@@ -30,13 +30,13 @@ tensor_uop_spec = PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
    # naturally correct
    (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
-   # TODO: "make things that can't be images not images" can change a parent UOp
-   # is there a clean way to update its _mop children while marking the BUFFER as realized?
+   # TODO: "make things that can't be images not images" can override the source dtype
+   # is there a clean way to update its _mop children?
    (isinstance(mv.dtype, ImageDType) and x.dtype == mv.dtype.base and x.is_realized)),
   # tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
   # DETACH and CONTIGUOUS change how we interpret the source UOp
-  # CONTIGUOUS ensures the source UOp realizes to a device Buffer
+  # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
 
   # ** specs with room for refactoring and improving
@@ -44,7 +44,6 @@ tensor_uop_spec = PatternMatcher([
   # COPY
   (UPat(Ops.COPY, name="copy", src=(UPat.var("copyin"),)), lambda copy,copyin:
    # arg (device, clone?)
-   # TODO: use Ops.DEVICE src
    isinstance(copy.arg, tuple) and len(copy.arg) == 2 and isinstance(copy.arg[0], str) and isinstance(copy.arg[1], bool) and \
    # dtype
    copy.dtype == copyin.dtype),
