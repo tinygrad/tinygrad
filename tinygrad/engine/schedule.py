@@ -57,9 +57,10 @@ tensor_uop_spec = PatternMatcher([
   # BUFFER assignment
   (UPat(Ops.ASSIGN, name="assign", src=(UPat({Ops.VIEW, Ops.BUFFER, *GroupOp.Movement}, name="target"), UPat.var("new_val"))), lambda assign,target,new_val:
    # dtype
-   assign.dtype == target.dtype == new_val.dtype and \
+   (assign.dtype == target.dtype == new_val.dtype) and \
    # arg (TODO: replace this ShapeTracker arg with a VIEW on the target BUFFER)
-   assign.arg is None or (isinstance(assign.arg, ShapeTracker) and not assign.arg.contiguous)),
+   # NOTE: this ShapeTracker can only add an offset the store ShapeTracker
+   (assign.arg is None or (isinstance(assign.arg, ShapeTracker) and not assign.arg.contiguous and assign.arg.shape == assign.shape))),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
