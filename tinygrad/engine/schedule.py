@@ -508,7 +508,7 @@ def cast_before_view(ctx:ScheduleContext, b:UOp, base:UOp, root:UOp, src:UOp, vi
 rewrite_views = remove_movement_ops+PatternMatcher([
   # CAST(VIEW(src)) -> VIEW(CAST(src))
   (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="view"),)), cast_before_view),
-  (UPat(Ops.VIEW, name="vm2", src=(UPat(),)).view(name="vm1"), lambda vm1,vm2: vm2.replace(arg=vm2.arg+vm1.arg)), # merge views
+  (UPat.var("x").view(name="v1").view(name="v2"), lambda x,v1,v2: None if x.op is Ops.BUFFER else x.view(v1.st+v2.st)),
 ])
 
 @track_rewrites(named=True)
