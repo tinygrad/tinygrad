@@ -97,7 +97,7 @@ class QCOMComputeQueue(HWQueue):
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
     self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
     # From now on, the queue is on the device for faster submission.
-    self._q = to_mv(self.obj.gpuaddr, len(self._q) * 4).cast("I") # type: ignore
+    self._q = to_mv(self.obj.gpuaddr, len(self._q) * 4).cast("I")
 
   def _submit(self, dev:QCOMDevice):
     if self.binded_device == dev: submit_req = self.submit_req
