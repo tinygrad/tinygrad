@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes, ctypes.util, functools
-from typing import Optional
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -19,7 +18,7 @@ def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
 
-def cu_time_execution(cb, enable=False) -> Optional[float]:
+def cu_time_execution(cb, enable=False) -> float|None:
   if not enable: return cb()
   evs = [init_c_var(cuda.CUevent(), lambda x: cuda.cuEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
   cuda.cuEventRecord(evs[0], None)
@@ -110,7 +109,7 @@ class CUDADevice(Compiled):
       CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}"
-    self.pending_copyin: list[tuple[int, int, Optional[BufferSpec]]] = []
+    self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

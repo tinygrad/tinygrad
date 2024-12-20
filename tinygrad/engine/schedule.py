@@ -1,7 +1,6 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
@@ -46,7 +45,7 @@ class ScheduleContext:
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
-  children: DefaultDict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+  children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
@@ -96,7 +95,7 @@ def reduceop_view_right(r:UOp, v:UOp, src:UOp) -> UOp:
   output_shape = swizzle_st.reduce(r.axis_arg)
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
 
-def elementwise_view_right(root:UOp) -> Optional[UOp]:
+def elementwise_view_right(root:UOp) -> UOp|None:
   if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
   assert all(x.base.st is not None for x in swizzles), f"found shapeless VIEW src in {root}"
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
@@ -142,7 +141,7 @@ class ScheduleItemContext:
   metadata: set[Metadata] = field(default_factory=set)
   assign_adj: dict[UOp, list[UOp]] = field(default_factory=dict)
 
-def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
+def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> UOp|None:
   if (st:=unwrap(x.st)) in ctx.sts: return None
   st, var_vals = st.simplify().unbind()
   ctx.var_vals.update(var_vals)
@@ -217,7 +216,7 @@ def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
   return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
 
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp], realizes:dict[UOp, UOp],
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp], realizes:dict[UOp, UOp],
                      reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
@@ -235,7 +234,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
-def get_isolated_children(r:UOp, reduce_for_op:dict[UOp, UOp], children:DefaultDict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp],
+def get_isolated_children(r:UOp, reduce_for_op:dict[UOp, UOp], children:defaultdict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp],
                            realizes:dict[UOp, UOp], group:dict[UOp, None]) -> dict[UOp, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
@@ -307,7 +306,7 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
   # group BUFFER uops into kernels
-  output_groups: DefaultDict[UOp, list[UOp]] = defaultdict(list)
+  output_groups: defaultdict[UOp, list[UOp]] = defaultdict(list)
   for ubuf in ctx.realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
   return list(output_groups.values())
 
@@ -326,7 +325,7 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
-def simplify_reduceop(reduce:UOp, x:UOp) -> Optional[UOp]:
+def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
@@ -435,12 +434,12 @@ def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> Non
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
 
-def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
+def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> UOp|None:
   if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op in GroupOp.Meta: return None
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
-def init_big_graph(sink:UOp) -> Optional[UOp]:
+def init_big_graph(sink:UOp) -> UOp|None:
   new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
@@ -520,8 +519,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
       prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
-  graph: DefaultDict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
-  in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
+  graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
+  in_degree: defaultdict[ScheduleItem, int] = defaultdict(int)
   for si in prescheduled:
     # realize outputs before a parent is assigned to
     parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(x.buffer)) and xsi is not si)
