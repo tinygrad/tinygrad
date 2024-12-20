@@ -3,7 +3,23 @@ from onnx import helper
 from onnx.backend.test.case.test_case import TestCase
 from onnx.defs import AI_ONNX_PREVIEW_TRAINING_DOMAIN
 
-# ******* HELPERS *******
+# running run_ort is only for getting the outputs
+# outputs are then added into test functions and then imported through TEST_CASES
+def run_ort(op, inputs:dict[str, np.ndarray], outputs:list[str], domain:str="", **opts):
+  import onnxruntime as ort
+  ort_options = ort.SessionOptions()
+  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+  ort_options.log_severity_level = 3  # no warnings
+  node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
+  inputs_info = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
+  outputs_info = [helper.make_empty_tensor_value_info(name) for name in outputs]    # dummy outputs
+  graph = helper.make_graph([node], "dummy_name", inputs_info, outputs_info)
+  model = helper.make_model(graph)
+  ort_session = ort.InferenceSession(model.SerializeToString(), ort_options, ["CPUExecutionProvider"])
+  onnx_out = ort_session.run(outputs, inputs)
+  onnx_out = dict([*list(zip(outputs, onnx_out))])
+  del ort_session
+  return onnx_out
 
 def create_testcase(op:str, name:str, inputs:dict[str, np.ndarray], outputs:dict[str, np.ndarray], domain='', rtol=1e-3, atol=1e-7, **opts):
   node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
@@ -33,7 +49,7 @@ def test_adam_large_training_iteration():
   outputs = dict(zip(outputs, onnx_out))
   # NOTE: fix x_new since np.sqrt turns float32 into float64
   outputs["x_new"] = outputs["x_new"].astype(np.float32)
-  return create_testcase(op, "test_adam_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
+  return create_testcase(op, "test_adam", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
 
 def test_adam_multiple():
   from onnx.backend.test.case.node.adam import apply_adam
@@ -60,7 +76,7 @@ def test_adagrad_large_training_iteration():
   outputs = dict(zip(outputs, onnx_out))
   # NOTE: fix x_new since np.sqrt turns float32 into float64
   outputs["x_new"] = outputs["x_new"].astype(np.float32)
-  return create_testcase(op, "test_adagrad_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
+  return create_testcase(op, "test_adagrad", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
 
 def _test_momentum(mode):
   if mode == "standard":
@@ -74,7 +90,7 @@ def _test_momentum(mode):
   opts = {"norm_coefficient": 0.001, "alpha": 0.95, "beta": 0.1, "mode": "standard"}
   onnx_out = apply_momentum(**inputs, **{"norm_coefficient": 0.001, "alpha": 0.95, "beta": 0.1})
   outputs = dict(zip(outputs, onnx_out))
-  return create_testcase(op, f"test_{mode}_momentum_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
+  return create_testcase(op, f"test_{mode}_momentum", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
 
 def test_momentum_large_training_iteration(): return _test_momentum("standard")
 def test_nesterov_momentum_large_training_iteration(): return _test_momentum("nesterov")
@@ -89,7 +105,7 @@ def test_max_unpool_pads():
   }
   opts = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [1, 0, 0, 0]}
   outputs = {"y": np.array([[[[0.,1.,0.,3.], [0.,0.,0.,0.], [0.,9.,0.,11.]]]], dtype=np.float32)}
-  return create_testcase(op, "test_maxunpool_pads_internal", inputs, outputs, **opts)
+  return create_testcase(op, "test_maxunpool_pads", inputs, outputs, **opts)
 
 def test_gathernd_large_batch_dims():
   from onnx.backend.test.case.node.gathernd import gather_nd_impl
@@ -115,7 +131,7 @@ def test_gathernd_large_batch_dims_multiple_indices():
   outputs = ["out"]
   onnx_out = gather_nd_impl(**inputs, **opts)
   outputs = dict(zip(outputs, [onnx_out]))
-  return create_testcase(op=op, name="test_gathernd_large_batch_dims_multiple_indices_internal", inputs=inputs, outputs=outputs, **opts)
+  return create_testcase(op=op, name="test_gathernd_large_batch_dims_multiple_indices", inputs=inputs, outputs=outputs, **opts)
 
 def test_scatternd_duplicate_indices_none_reduction():
   from onnx.backend.test.case.node.scatternd import scatter_nd_impl
@@ -128,7 +144,7 @@ def test_scatternd_duplicate_indices_none_reduction():
   outputs = ["out"]
   onnx_out = scatter_nd_impl(**inputs)
   outputs = dict(zip(outputs, [onnx_out]))
-  return create_testcase(op=op, name="test_scatternd_duplicate_indices_none_reduction_internal", inputs=inputs, outputs=outputs)
+  return create_testcase(op=op, name="test_scatternd_duplicate_indices_none_reduction", inputs=inputs, outputs=outputs)
 
 TEST_CASES = [
   test_adam_large_training_iteration(),
@@ -141,70 +157,4 @@ TEST_CASES = [
   # test_nesterov_momentum_large_training_iteration(),
   # test_max_unpool_pads(),
 ]
-
-if __name__ == "__main__":
-  # running __main__ is only for running run_ort for getting the outputs
-  # outputs are then added into test functions and then imported through TEST_CASES
-  import onnxruntime as ort
-  ort_options = ort.SessionOptions()
-  ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-  ort_options.log_severity_level = 3  # no warnings
-
-  def run_ort(op, inputs:dict[str, np.ndarray], outputs:list[str], domain:str="", **opts):
-    node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
-    inputs_info = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
-    outputs_info = [helper.make_empty_tensor_value_info(name) for name in outputs]    # dummy outputs
-    graph = helper.make_graph([node], "dummy_name", inputs_info, outputs_info)
-    model = helper.make_model(graph)
-    ort_session = ort.InferenceSession(model.SerializeToString(), ort_options, ["CPUExecutionProvider"])
-    onnx_out = ort_session.run(outputs, inputs)
-    onnx_out = dict([*list(zip(outputs, onnx_out))])
-    del ort_session
-    return onnx_out
-
-  # # com.microsoft Ops tests
-  # def test_skiplayernormalization():
-  #   op = "SkipLayerNormalization"
-  #   inputs = {
-  #     "x": np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
-  #     "skip": np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32),
-  #     "gamma": np.array([0.5, 0.5, 0.5], dtype=np.float32),
-  #     "beta": np.array([0.1, 0.1, 0.1], dtype=np.float32),
-  #     "bias": np.array([0.1, 0.1, 0.1], dtype=np.float32)
-  #   }
-  #   outputs = run_ort(op, inputs, ["output", "mean", "inv_std_var", "skip_out"], "com.microsoft")
-  #   return create_testcase(op, "test_skiplayernormalization", inputs, outputs, "com.microsoft")
-  #
-  # def test_fastgelu():
-  #   op = "FastGelu"
-  #   inputs = {
-  #     "x": np.array([[-1.0, 0.0, 1.0], [2.0, -3.0, 4.0]], dtype=np.float32),
-  #     "bias": np.array([0.1, 0.2, 0.3], dtype=np.float32)
-  #   }
-  #   outputs = run_ort(op, inputs, ["output"], domain="com.microsoft")
-  #   return create_testcase(op, "test_fastgelu", inputs, outputs, domain="com.microsoft")
-  #
-  # def test_embededlayernormalization():
-  #   op = "EmbedLayerNormalization"
-  #   inputs = {
-  #     "input_ids": np.array([[1, 2, 3, 4]], dtype=np.int32),
-  #     "segment_ids": np.array([[0, 0, 1, 1]], dtype=np.int32),
-  #     "word_embedding": np.random.randn(10, 3).astype(np.float32),
-  #     "position_embedding": np.random.randn(4, 3).astype(np.float32),
-  #     "segment_embedding": np.random.randn(2, 3).astype(np.float32),
-  #     "gamma": np.array([0.5, 0.5, 0.5], dtype=np.float32),
-  #     "beta": np.array([0.1, 0.1, 0.1], dtype=np.float32)
-  #   }
-  #   outputs = run_ort(op, inputs, ["output", "mask_index", "embedding_sum"], domain="com.microsoft")
-  #   return create_testcase(op, "test_embededlayernormalization", inputs, outputs, domain="com.microsoft")
-  #
-  # def test_attention():
-  #   op = "Attention"
-  #   inputs = {
-  #     "x": np.random.randn(2, 4, 12).astype(np.float32),
-  #     "weights": np.random.randn(12, 36).astype(np.float32),
-  #     "bias": np.random.randn(36).astype(np.float32)
-  #   }
-  #   opts = {"num_heads": 3, "qkv_hidden_sizes": [12, 12, 12], "unidirectional": False}
-  #   outputs = run_ort(op, inputs, ["output", "present"], domain="com.microsoft", **opts)
-  #   return create_testcase(op, "test_attention", inputs, outputs, domain="com.microsoft", **opts)
+REPLACEMENT_ADAM_MULTIPLE_TEST = test_adam_multiple()

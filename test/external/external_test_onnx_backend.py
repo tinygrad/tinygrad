@@ -57,7 +57,7 @@ class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
 
 backend_test = TinygradBackendTestRunner(TinygradBackend, __name__)
 
-from test.external.external_test_onnx_superset import TEST_CASES, test_adam_multiple
+from test.external.external_test_onnx_superset import TEST_CASES, REPLACEMENT_ADAM_MULTIPLE_TEST
 
 # add local tests
 for test in TEST_CASES:
@@ -66,7 +66,8 @@ for test in TEST_CASES:
 # BUG: onnx didn't include epsilon in their node
 # https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/adam.py#L93
 backend_test.exclude('test_adam_multiple_cpu')
-backend_test.include_in_memory_test(test_adam_multiple(), "Tinygrad")
+# correct replacement test of incorrect onnx test
+backend_test.include_in_memory_test(REPLACEMENT_ADAM_MULTIPLE_TEST, "Tinygrad")
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
