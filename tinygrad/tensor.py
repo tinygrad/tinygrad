@@ -325,11 +325,6 @@ class Tensor(SimpleMathTrait):
     if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
     assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    print("---------------")
-    print(self.lazydata)
-    print(self.shape)
-    print(self.lazydata.shape)
-    print(self.lazydata.base.shape, self.lazydata.shape)
     assert self.shape == self.lazydata.shape
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)
 
