@@ -5,7 +5,7 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Optional, Any, DefaultDict
+from typing import Optional, Any
 from collections import defaultdict
 from dataclasses import dataclass, field
 import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
@@ -81,7 +81,7 @@ class CloudSession:
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
   device: str
-  sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
+  sessions: defaultdict[str, CloudSession] = defaultdict(CloudSession)
 
   def setup(self):
     super().setup()

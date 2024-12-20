@@ -146,7 +146,7 @@ class AMDComputeQueue(HWQueue):
 
     self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
                          len(self._q) | amd_gpu.INDIRECT_BUFFER_VALID]
-    self._q = hw_view # type: ignore
+    self._q = hw_view
     return self
 
   def _submit(self, dev:AMDDevice):

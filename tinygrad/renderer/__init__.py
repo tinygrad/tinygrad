@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Optional, Callable, Any
+from typing import Optional, Callable
 import functools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp
+from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -116,7 +116,7 @@ class Renderer:
   local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
-  extra_matcher: Any = None
+  extra_matcher: Optional[PatternMatcher] = None
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
