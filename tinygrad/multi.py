@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType
 from tinygrad.ops import Ops, MathTrait, UOp
 from tinygrad.shape.shapetracker import sint
 
-def all_reduce(bop: Ops, lbs: List[UOp]) -> List[UOp]:
+def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   n_lbs, shape, numel = len(lbs), lbs[0].shape, prod(lbs[0].shape)
@@ -39,12 +39,12 @@ def all_reduce(bop: Ops, lbs: List[UOp]) -> List[UOp]:
   pads = [((s,numel-e),) for s,e in chunks]
   return [functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads,lb_c)]).reshape(shape) for lb_c in chunked]
 
-def to_sharded(lbs:List[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> List[UOp]:
+def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> list[UOp]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
 class MultiLazyBuffer(MathTrait):
-  def __init__(self, lbs:List[UOp], axis:Optional[int], real:Optional[List[bool]]=None):
+  def __init__(self, lbs:list[UOp], axis:Optional[int], real:Optional[list[bool]]=None):
     assert all(isinstance(x, UOp) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
@@ -75,7 +75,7 @@ class MultiLazyBuffer(MathTrait):
       # if we already have a copy on the device, return that
       return next((lb for lb in self.real_lbs if lb.device == device), self.real_lbs[0].copy_to_device(device))
     # copy lbs to device, pad to final shape, and sum
-    llbs:List[UOp] = []
+    llbs:list[UOp] = []
     for lb,real,(start,end) in zip(self.lbs, self.real, self.bounds):
       if not real: continue
       pad_arg = tuple((0,0) if a != self.axis else (start, self.bounds[-1][1]-end) for a in range(len(lb.shape)))
@@ -101,7 +101,7 @@ class MultiLazyBuffer(MathTrait):
 
     # NOTE: they all have to share an axis, we always choose [-1]
     axis, bounds = axes[-1] if len(axes := dedup([(x.axis, x.bounds) for x in msrcs if x.axis is not None])) else (None, None)
-    srcs:List[List[UOp]] = []
+    srcs:list[list[UOp]] = []
     not_all_real = not all(all(mlb.real) for mlb in msrcs)
     new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else self.real
     assert any(new_real), "output contains no real lb"
@@ -137,7 +137,7 @@ class MultiLazyBuffer(MathTrait):
   def reshape(self, arg:tuple[sint, ...]):
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
     assert prod(self.shape) == prod(arg), "reshape must maintain prod(shape)"
-    arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
+    arg_acc:list[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
     # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
     # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
     new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1

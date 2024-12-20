@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -27,17 +27,17 @@ class GraphRewriteMetadata:
   """The Python line calling graph_rewrite"""
   kernel_name: str
   """The kernel calling graph_rewrite"""
-  upats: List[tuple[tuple[str, int], str, float]]
+  upats: list[tuple[tuple[str, int], str, float]]
   """List of all the applied UPats"""
 
 @dataclass
 class GraphRewriteDetails(GraphRewriteMetadata):
   """Full details about a single call to graph_rewrite"""
-  graphs: List[UOp]
+  graphs: list[UOp]
   """Sink at every step of graph_rewrite"""
-  diffs: List[List[str]]
+  diffs: list[list[str]]
   """.diff style before and after of the rewritten UOp child"""
-  changed_nodes: List[List[int]]
+  changed_nodes: list[list[int]]
   """Nodes that changed at every step of graph_rewrite"""
   kernel_code: Optional[str]
   """The program after all rewrites"""
@@ -49,8 +49,8 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
-def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> List[List[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
-  kernels: Dict[str, List[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
+def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
+  kernels: Dict[str, list[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
   for k,ctxs in tqdm(zip(keys, contexts), desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
@@ -59,9 +59,9 @@ def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> Li
       kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def uop_to_json(x:UOp) -> Dict[int, tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> Dict[int, tuple[str, str, list[int], str, str]]:
   assert isinstance(x, UOp)
-  graph: Dict[int, tuple[str, str, List[int], str, str]] = {}
+  graph: Dict[int, tuple[str, str, list[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
     if u.op in {Ops.CONST, Ops.DEVICE}:
@@ -126,7 +126,7 @@ def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
       ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
       ret += [{"ph": "f", **dev_to_pid(e.device, e.is_copy), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st, e.is_copy), "bp": "e"}]
   return ret
-def to_perfetto(profile:List[ProfileEvent]):
+def to_perfetto(profile:list[ProfileEvent]):
   # Start json with devices.
   prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
   for ev in tqdm(profile, desc="preparing profile"):

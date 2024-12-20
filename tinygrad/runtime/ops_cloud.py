@@ -5,7 +5,7 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, DefaultDict, List
+from typing import Optional, Dict, Any, DefaultDict
 from collections import defaultdict
 from dataclasses import dataclass, field
 import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
@@ -51,7 +51,7 @@ def safe_eval(node): return eval_fxns[node.__class__](node)
 
 class BatchRequest:
   def __init__(self):
-    self._q: List[CloudRequest] = []
+    self._q: list[CloudRequest] = []
     self._h: Dict[str, bytes] = {}
   def h(self, d:bytes) -> str:
     binhash = hashlib.sha256(d).digest()

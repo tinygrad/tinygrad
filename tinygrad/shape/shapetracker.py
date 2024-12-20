@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import List, Optional, Dict, Set, Callable
+from typing import Optional, Dict, Set, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
@@ -24,7 +24,7 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
   # NOTE: if a stride is not always valid, it will be None
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
-  ret: List[Optional[sint]] = [None] * len(views[-1].shape)
+  ret: list[Optional[sint]] = [None] * len(views[-1].shape)
   idx, valid = (graph_rewrite(u, symbolic_flat) for u in views_to_indexed_uops(views))
   # TODO: always apply these in to_indexed_uops?
   if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
@@ -49,7 +49,7 @@ class ShapeTracker:
     return ret
 
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[ShapeTracker]:
-    inverted_views:List[View] = []
+    inverted_views:list[View] = []
     for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
       if (inverted:= v.invert(s)) is None: return None
       inverted_views.append(inverted)
@@ -73,7 +73,7 @@ class ShapeTracker:
   def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
-  def to_indexed_uops(self, _idxs:Optional[List[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
 
   def real_size(self) -> int:
@@ -93,7 +93,7 @@ class ShapeTracker:
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
   def real_strides(self, ignore_valid=False) -> tuple[Optional[sint], ...]: return views_to_real_strides(self.views, ignore_valid)
-  def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
+  def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()

@@ -1,5 +1,5 @@
 import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from typing import Dict, Union, List, Optional, Any, Callable, BinaryIO, Iterable, TypeVar
+from typing import Dict, Union, Optional, Any, Callable, BinaryIO, Iterable, TypeVar
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up
@@ -111,7 +111,7 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   elif isinstance(obj, dict):
     for k,v in obj.items(): state_dict.update(get_state_dict(v, f"{prefix}{str(k)}.", tensor_type))
   return state_dict
-def get_parameters(obj) -> List[Tensor]:
+def get_parameters(obj) -> list[Tensor]:
   """
   ```python exec="true" source="above" session="tensor" result="python"
   class Net:

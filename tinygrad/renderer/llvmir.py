@@ -1,4 +1,4 @@
-from typing import List, Dict, cast
+from typing import Dict, cast
 import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
@@ -89,10 +89,10 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   ])
 
-  def render(self, name: str, uops: List[UOp]) -> str:
+  def render(self, name: str, uops: list[UOp]) -> str:
     r: Dict[UOp, str] = {}
-    args: List[str] = []
-    kernel: List[str] = []
+    args: list[str] = []
+    kernel: list[str] = []
     end_lines: Dict[str, None] = {}
     vc = -1
 

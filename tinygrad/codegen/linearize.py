@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple, Optional, DefaultDict
+from typing import Dict, Tuple, Optional, DefaultDict
 import collections, heapq
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
@@ -24,15 +24,15 @@ class BasicBlock:
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-def append_to_block(ctx:tuple[Dict[UOp, tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
+def append_to_block(ctx:tuple[Dict[UOp, tuple[UOp, ...]], Dict[UOp, list[UOp]]], x:UOp):
   block_ctxs, children = ctx
   in_this_block = set(x.arg.lst)
 
   # collections to build
-  new_srcs: List[UOp] = []
-  to_append: List[UOp] = []
+  new_srcs: list[UOp] = []
+  to_append: list[UOp] = []
   old_blocks: Dict[tuple[UOp, ...], UOp] = {}
-  new_blocks: Dict[tuple[UOp, ...], List[UOp]] = {}
+  new_blocks: Dict[tuple[UOp, ...], list[UOp]] = {}
 
   for u in x.src:
     if u.op is Ops.BLOCK:
@@ -90,8 +90,8 @@ def block_merge(ctx, x:UOp):
         return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
                   BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end), tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)))
 
-  new_srcs: List[UOp] = []
-  to_append: List[UOp] = []
+  new_srcs: list[UOp] = []
+  to_append: list[UOp] = []
   new_ctx = x.arg.ctx
   placed = set()
   for u in x.src:
@@ -115,7 +115,7 @@ pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), blo
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(in_block:UOp):
   in_this_block = set(in_block.arg.lst)
-  local_children: DefaultDict[UOp, List[UOp]] = collections.defaultdict(list)
+  local_children: DefaultDict[UOp, list[UOp]] = collections.defaultdict(list)
   in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
   priorities:Dict[UOp, int] = {}
 
@@ -129,7 +129,7 @@ def block_reorder(in_block:UOp):
     priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
 
   # placement queue
-  queue:List[tuple[int, Tuple, UOp]] = []
+  queue:list[tuple[int, Tuple, UOp]] = []
   def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
 
   # place the first ones that don't have deps
@@ -147,14 +147,14 @@ def block_reorder(in_block:UOp):
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
+def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # get children and all block contexts
-  temp_block_ctxs: Dict[UOp, List[UOp]] = {}
-  children: Dict[UOp, List[UOp]] = {}
+  temp_block_ctxs: Dict[UOp, list[UOp]] = {}
+  children: Dict[UOp, list[UOp]] = {}
   for u in sink.toposort:
-    this_block_ctx: List[UOp] = []
+    this_block_ctx: list[UOp] = []
     for s in u.src:
       # save children
       children.setdefault(s, []).append(u)
@@ -194,7 +194,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     sink = sink.substitute(forks)
 
   # combine matching BLOCKENDS
-  blockends_to_arg: Dict[UOp, List[UOp]] = {}
+  blockends_to_arg: Dict[UOp, list[UOp]] = {}
   for be in sink.toposort:
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}

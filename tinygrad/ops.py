@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
+from typing import Any, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -562,8 +562,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     bound_var_base = set(x.src[0] for x in bound_vars)
     all_vars = set([x for x in self.toposort if x.op is Ops.DEFINE_VAR])
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
-  def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.toposort if x.op in GroupOp.Buffer]
+  def variables(self) -> list[Variable]:
+    st_vars: list[Set[Variable]] = [x.st_arg.vars() for x in self.toposort if x.op in GroupOp.Buffer]
     return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
@@ -668,7 +668,7 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 # ***** uop helpers *****
 
-def print_uops(uops:List[UOp]):
+def print_uops(uops:list[UOp]):
   for i,u in enumerate(uops):
     formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
@@ -684,13 +684,13 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
-def lines(fn) -> List[str]:
+def lines(fn) -> list[str]:
   with open(fn) as f: return f.readlines()
 
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], Set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
-               src:Optional[Union[tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
+               src:Optional[Union[tuple[UPat, ...], list[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[Set[Ops]]=None):
     assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
     self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
@@ -755,14 +755,14 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> list[Dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (self.allowed_len != -1 and len(uop.src) != self.allowed_len): return []
     if self.src is None: return [store]
-    res: List[Dict[str, UOp]] = []
+    res: list[Dict[str, UOp]] = []
     for vp in self.src:
       stores, new_stores = [store.copy()], []
       for uu, vv in zip(uop.src, vp):
@@ -772,7 +772,7 @@ class UPat(MathTrait):
     return res
 
 class UPatAny(UPat):
-  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> list[Dict[str, UOp]]:
     ret = []
     for x in self.src[0]:
       if (match:=x.match(uop, store.copy())): ret.extend(match)
@@ -788,10 +788,10 @@ def deconstruct_function(fxn:Callable) -> Tuple:
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 class PatternMatcher:
-  def __init__(self, patterns:List[tuple[UPat, Callable]]):
+  def __init__(self, patterns:list[tuple[UPat, Callable]]):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: Dict[Ops, List[tuple[UPat, Callable, Set, bool]]] = {}
+    self.pdict: Dict[Ops, list[tuple[UPat, Callable, Set, bool]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
@@ -815,14 +815,14 @@ class PatternMatcher:
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
-match_stats:Dict[UPat, List[Union[int, float]]] = dict()
+match_stats:Dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                              # location that called graph_rewrite
   sink: bytes                                                                                       # sanpshot of the graph_rewrite input sink
-  matches: List[tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
-tracked_keys:List[Any] = []
-tracked_ctxs:List[List[TrackedGraphRewrite]] = []
+  matches: list[tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
+tracked_keys:list[Any] = []
+tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:Dict[str, int] = {}
 def track_rewrites(named=False):
   def _decorator(func):
@@ -992,7 +992,7 @@ spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64),), allow_any_len=True)), lambda: True),
 ])
 
-def type_verify(uops:List[UOp]):
+def type_verify(uops:list[UOp]):
   for i,u in enumerate(uops):
     if not spec.rewrite(u):
       print_uops(uops)
@@ -1134,7 +1134,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
   # return None if valid is always False, otherwise the simplified uop (might be the same as input)
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
-  bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
+  bounds:DefaultDict[UOp, list[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in split_uop(valid, Ops.AND):
     try: expr, is_upper, c = parse_valid(stmt)
     except ValueError: return uop  # give up if we cannot parse the valid
@@ -1164,13 +1164,13 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   return uop
 
-def _valid_priority(v: UOp, valids:List[UOp]):
+def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
   try: return sum(-1 if parse_valid(v)[0] in other.toposort else 0 for other in valids)
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> Optional[UOp]:
-  ret:List[UOp] = []
+  ret:list[UOp] = []
   something_changed = False
   valids = list(split_uop(valid, Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):

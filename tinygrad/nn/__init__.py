@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Optional, Union, List
+from typing import Optional, Union
 from tinygrad.tensor import Tensor, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import prod, make_tuple, flatten
@@ -41,7 +41,7 @@ class BatchNorm:
     if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
-    shape_mask: List[int] = [1, -1, *([1]*(x.ndim-2))]
+    shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
     if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, List, Dict, Callable, Any, Set
+from typing import Optional, Dict, Callable, Any, Set
 import functools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -11,12 +11,12 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dims: tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  threads: List[tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  reduce_axes: List[tuple[int,int]] # list of (TC dim,amt) that constructs the shape of the reduce dim
+  threads: list[tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
+  reduce_axes: list[tuple[int,int]] # list of (TC dim,amt) that constructs the shape of the reduce dim
   @property
-  def early_upcast_axes(self) -> List[tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
+  def early_upcast_axes(self) -> list[tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
     return [(d,self.dims[d]//sz) for d,sz in [(dim,prod(sz for d,sz in self.threads if d==dim)) for dim in range(2)] if self.dims[d]>sz]
-  upcast_axes: tuple[List[tuple[int,int]], List[tuple[int,int]], List[tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
+  upcast_axes: tuple[list[tuple[int,int]], list[tuple[int,int]], list[tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
   st1_pattern: Optional[tuple[tuple[tuple[int,int], ...], tuple[tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
   st2_pattern: Optional[tuple[tuple[tuple[int,int], ...], tuple[tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
   expanded_shape: Optional[tuple[int, ...]] = None
@@ -34,11 +34,11 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:List[UOp], ignore_indexing=False) -> Estimates:
+  def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mults: sint = 1
-    mult_stack: List[sint] = []
+    mult_stack: list[sint] = []
     dont_count: Set[UOp] = set()
     if ignore_indexing:
       for u in uops:
@@ -64,15 +64,15 @@ class ProgramSpec:
   name:str
   src:str
   device:str
-  uops:Optional[List[UOp]]=None
+  uops:Optional[list[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
   # filled in from uops (if we have uops)
-  global_size:Optional[List[int]]=None
-  local_size:Optional[List[int]]=None
-  vars:List[Variable]=field(default_factory=list)
-  globals:List[int]=field(default_factory=list)
-  outs:List[int]=field(default_factory=list)
+  global_size:Optional[list[int]]=None
+  local_size:Optional[list[int]]=None
+  vars:list[Variable]=field(default_factory=list)
+  globals:list[int]=field(default_factory=list)
+  outs:list[int]=field(default_factory=list)
   _ran_post_init:bool=False  # NOTE: this is needed if you call replace on the Program
 
   def __post_init__(self):
@@ -115,9 +115,9 @@ class Renderer:
   global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
-  tensor_cores: List[TensorCore] = []
+  tensor_cores: list[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, name:str, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

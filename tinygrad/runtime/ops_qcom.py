@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import List, Any, cast, Optional
+from typing import Any, cast, Optional
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.autogen import kgsl, adreno, libc
@@ -268,7 +268,7 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferSpec(cpu_access=True, nolru=True))
 
 class QCOMTextureInfo:
-  def __init__(self, pitch:int, real_stride:int, desc:List[int], ibo:List[int]):
+  def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):
     self.pitch, self.real_stride, self.desc, self.ibo = pitch, real_stride, desc, ibo
 
 class QCOMAllocator(HCQAllocatorBase):
@@ -320,7 +320,7 @@ class QCOMAllocator(HCQAllocatorBase):
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None
-  signals_pool: List[int] = []
+  signals_pool: list[int] = []
   gpu_id: int = 0
   dummy_addr: int = 0
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, cast, Type, TypeVar, Generic, Any
+from typing import Optional, Dict, cast, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
@@ -31,10 +31,10 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def __init__(self):
     self._q:Any = []
     self.binded_device:Optional[DeviceType] = None
-    self.q_sints:List[tuple[int, int]] = []
-    self.mv_sints:List[tuple[memoryview, int, int, Optional[int]]] = []
-    self.syms:List[sint] = []
-    self._prev_resolved_syms:List[Optional[int]] = []
+    self.q_sints:list[tuple[int, int]] = []
+    self.mv_sints:list[tuple[memoryview, int, int, Optional[int]]] = []
+    self.syms:list[sint] = []
+    self._prev_resolved_syms:list[Optional[int]] = []
 
   def _new_sym(self, sym:sint) -> int:
     if sym not in self.syms:
@@ -153,7 +153,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
       mv[off] = resolved_syms[sym_idx] if mask is None else ((mv[off] & ~mask) | resolved_syms[sym_idx])
 
-    self._prev_resolved_syms = cast(List[Optional[int]], resolved_syms)
+    self._prev_resolved_syms = cast(list[Optional[int]], resolved_syms)
 
   def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
     """
@@ -237,12 +237,12 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):
     self.ptr, self.prg = ptr, prg
-    self.bind_data:List[tuple[tuple[sint, ...], int, str]] = []
+    self.bind_data:list[tuple[tuple[sint, ...], int, str]] = []
 
   def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt): self.bind_data.append((vals, ptr, fmt))
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=(), prefix:Optional[List[int]]=None):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=(), prefix:Optional[list[int]]=None):
     super().__init__(ptr, prg, bufs, vals=vals)
 
     if prefix is not None: to_mv(self.ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
@@ -298,7 +298,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
-  devices: List[HCQCompiled] = []
+  devices: list[HCQCompiled] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
@@ -307,9 +307,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_value:int = 1
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
-    self.sig_prof_records:List[tuple[HCQSignal, HCQSignal, str, bool]] = []
-    self.raw_prof_records:List[tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
-    self.dep_prof_records:List[tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
+    self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
+    self.raw_prof_records:list[tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
+    self.dep_prof_records:list[tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)

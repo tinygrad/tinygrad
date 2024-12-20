@@ -1,7 +1,7 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Set, List, Dict, Optional, DefaultDict
+from typing import Set, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
@@ -39,7 +39,7 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  tensor_uops: Dict[UOp, List[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
+  tensor_uops: Dict[UOp, list[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
@@ -132,15 +132,15 @@ view_right = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  tensor_uops: Dict[UOp, List[UOp]]
+  tensor_uops: Dict[UOp, list[UOp]]
   ops_metadata: Dict[UOp, Metadata]
   assigns: Set[UOp]
   var_vals: Dict[Variable, int]
   sinked: Dict[UOp, UOp]
   sts: Set[ShapeTracker] = field(default_factory=set)
-  bufs: List[UOp] = field(default_factory=list)
+  bufs: list[UOp] = field(default_factory=list)
   metadata: Set[Metadata] = field(default_factory=set)
-  assign_adj: Dict[UOp, List[UOp]] = field(default_factory=dict)
+  assign_adj: Dict[UOp, list[UOp]] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -249,12 +249,12 @@ def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultD
   for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
+def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[UOp, UOp] = {}
-  reduce_of_const: List[UOp] = []
-  double_reduces: List[UOp] = []
+  reduce_of_const: list[UOp] = []
+  double_reduces: list[UOp] = []
   for r, r_uop in ctx.allbufs.items():
     if (r_uop:=uval(r_uop)).op is not Ops.REDUCE_AXIS: continue
     if FUSE_CONV_BW and uval((x:=r_uop.src[0]).base).op is r_uop.op and x.base is not x: double_reduces.append(r)
@@ -307,7 +307,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
   # group BUFFER uops into kernels
-  output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+  output_groups: DefaultDict[UOp, list[UOp]] = defaultdict(list)
   for ubuf in ctx.realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
   return list(output_groups.values())
 
@@ -499,7 +499,7 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
 @track_rewrites(named=True)
-def create_schedule_with_vars(outs:List[UOp]) -> tuple[List[ScheduleItem], Dict[Variable, int]]:
+def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
@@ -514,13 +514,13 @@ def create_schedule_with_vars(outs:List[UOp]) -> tuple[List[ScheduleItem], Dict[
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
   # preschedule realize groups
-  prescheduled: List[ScheduleItem] = []
+  prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
     if len(stores:=[ctx.realizes[u] for u in store_uops if ctx.realizes[u].op is Ops.STORE]) != 0:
       prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
-  graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
+  graph: DefaultDict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for si in prescheduled:
     # realize outputs before a parent is assigned to
@@ -534,7 +534,7 @@ def create_schedule_with_vars(outs:List[UOp]) -> tuple[List[ScheduleItem], Dict[
       graph[x].append(si)
       in_degree[si] += 1
   queue = deque(si for si in prescheduled if in_degree[si] == 0)
-  schedule: List[ScheduleItem] = []
+  schedule: list[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
     for x in graph[si]:
@@ -545,7 +545,7 @@ def create_schedule_with_vars(outs:List[UOp]) -> tuple[List[ScheduleItem], Dict[
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
 
-def create_schedule(outs:List[UOp]) -> List[ScheduleItem]:
+def create_schedule(outs:list[UOp]) -> list[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
   assert len(var_vals) == 0
   return schedule

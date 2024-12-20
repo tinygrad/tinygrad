@@ -1,4 +1,4 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
+from typing import DefaultDict, Dict, Union, Optional, cast, Callable
 import struct
 from collections import defaultdict
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
@@ -32,7 +32,7 @@ asm_for_op: Dict[Ops, Callable] = {
     f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
 }
 
-supports_half: List[Ops] = [Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE]
+supports_half: list[Ops] = [Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE]
 doesnt_support_half: tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
 ptx_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
@@ -152,12 +152,12 @@ class PTXRenderer(Renderer):
     params = ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs])
     return f"{self.kernel_prefix} {function_name}(\n\t{params}\n)\n{{\n{kernel}\n}}"
 
-  def render(self, name:str, uops:List[UOp]) -> str:
-    kernel:List[str] = []
+  def render(self, name:str, uops:list[UOp]) -> str:
+    kernel:list[str] = []
     bufs = []
 
     c: DefaultDict[str, int] = defaultdict(int)
-    r: Dict[UOp, Union[List[str], str]] = {}
+    r: Dict[UOp, Union[list[str], str]] = {}
     self.r = r
     self.uops = uops
 
@@ -192,7 +192,7 @@ class PTXRenderer(Renderer):
         Ops.DEFINE_GLOBAL: ("dat", self.types[dtypes.ulong]), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
-      if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
+      if (l:=cast(Union[str, list[str]], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 

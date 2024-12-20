@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union, DefaultDict, Literal, Callable, cast
+from typing import Dict, Optional, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, cast_float_to_bf16
@@ -60,7 +60,7 @@ extra_pm = PatternMatcher([
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
 
-def uops_to_dtypes(uops:List[UOp]) -> List[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
+def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
@@ -72,7 +72,7 @@ class CStyleLanguage(Renderer):
   arg_int_prefix: str = "const int"
   barrier: str = ""
   code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
-  extra_args: List[str] = []
+  extra_args: list[str] = []
   float4: Optional[str] = None
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
@@ -89,8 +89,8 @@ class CStyleLanguage(Renderer):
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
 
-  def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[tuple[str,tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
@@ -109,7 +109,7 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def render(self, name:str, uops:List[UOp]) -> str:
+  def render(self, name:str, uops:list[UOp]) -> str:
     r: Dict[UOp, str] = {}
     self.r = r
 
@@ -352,7 +352,7 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-  def get_kernel_modifier(self, uops:List[UOp]) -> str:
+  def get_kernel_modifier(self, uops:list[UOp]) -> str:
     maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
@@ -421,7 +421,7 @@ class AMDRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def get_kernel_modifier(self, uops:List[UOp]) -> str:
+  def get_kernel_modifier(self, uops:list[UOp]) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

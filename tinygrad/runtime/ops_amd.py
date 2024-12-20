@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Any, Optional, cast
+from typing import Any, Optional, cast
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -288,8 +288,8 @@ class AMDDevice(HCQCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signals_pool:List[int] = []
-  gpus:List[pathlib.Path] = []
+  signals_pool:list[int] = []
+  gpus:list[pathlib.Path] = []
 
   def _gpu_map(self, mem:HCQBuffer):
     if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return

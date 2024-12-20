@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, sys, mmap, io, ctypes, ctypes.util, contextlib
-from typing import Optional, Generator, Callable, List
+from typing import Optional, Generator, Callable
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 with contextlib.suppress(ImportError):
@@ -38,7 +38,7 @@ class DiskAllocator(Allocator):
 
     fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
     processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
-    reqs: List[tuple[int, int, int, int]] = []
+    reqs: list[tuple[int, int, int, int]] = []
 
     while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
       if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Set, cast, Sequence
+from typing import Optional, Dict, Set, cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
@@ -45,7 +45,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
   if _mask is None: return tuple((0, s) for s in new_shape)
   if not all_int(flatten(_mask)): return None
 
-  new_mask: List[tuple[int, int]] = []
+  new_mask: list[tuple[int, int]] = []
   # _mask is all int here
   r_masks, r_shape, r_new_shape = reversed(cast(tuple[tuple[int, int], ...], _mask)), reversed(old_shape), reversed(new_shape)
   curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
@@ -70,7 +70,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
 
   return tuple(reversed(new_mask))
 
-def unravel(shape:tuple[sint, ...], offset:sint) -> List[sint]:
+def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # find the position of offset on each dimension based on shape
   # similar to unravel_index in numpy/torch
   ret = []
@@ -167,8 +167,8 @@ class View:
 
     # Project vm1's offset and strides on to vm2.
     origin = unravel(vm2.shape, vm1.offset)
-    terms: List[List[tuple[int, sint]]] = [[] for _ in vm2.shape]
-    strides: List[sint] = [0] * len(vm1.shape)
+    terms: list[list[tuple[int, sint]]] = [[] for _ in vm2.shape]
+    strides: list[sint] = [0] * len(vm1.shape)
     for d1, st in enumerate(vm1.strides):
       if st == 0: continue
       for d2, (o, s1) in enumerate(zip(origin, unravel(vm2.shape, vm1.offset + st))):
@@ -178,9 +178,9 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: List[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
+    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
     merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
-    extents: List[tuple[sint, UOp]] = []
+    extents: list[tuple[sint, UOp]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += (sum([idxs[d1] * s1 for d1, s1 in term]) + o) * merged_size
       merged_size *= s

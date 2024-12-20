@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, ctypes.util, functools
-from typing import Optional, List
+from typing import Optional
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -90,7 +90,7 @@ class CUDAAllocator(LRUAllocator):
   def _offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
 
 class CUDADevice(Compiled):
-  devices: List[CUDADevice] = []
+  devices: list[CUDADevice] = []
   peer_access = False
 
   def __init__(self, device:str):
@@ -110,7 +110,7 @@ class CUDADevice(Compiled):
       CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}"
-    self.pending_copyin: List[tuple[int, int, Optional[BufferSpec]]] = []
+    self.pending_copyin: list[tuple[int, int, Optional[BufferSpec]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
