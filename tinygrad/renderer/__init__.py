@@ -1,19 +1,19 @@
 from __future__ import annotations
-from typing import Optional, List, Tuple, Dict, Callable, Any, Set
+from typing import Optional, Callable
 import functools, math
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp
+from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
-  dims: Tuple[int,int,int] # N, M, K
+  dims: tuple[int,int,int] # N, M, K
   threads: int # number of threads that construct the warp
-  upcast_size: Tuple[int, int, int]
+  upcast_size: tuple[int, int, int]
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  swizzle: Tuple[Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]], ...] = (None, None, None) # swizzle patterns to fix shapetrackers
+  swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], ...] = (None, None, None) # swizzle patterns to fix shapetrackers
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self):
@@ -34,12 +34,12 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:List[UOp], ignore_indexing=False) -> Estimates:
+  def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mults: sint = 1
-    mult_stack: List[sint] = []
-    dont_count: Set[UOp] = set()
+    mult_stack: list[sint] = []
+    dont_count: set[UOp] = set()
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
@@ -64,15 +64,15 @@ class ProgramSpec:
   name:str
   src:str
   device:str
-  uops:Optional[List[UOp]]=None
+  uops:Optional[list[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
   # filled in from uops (if we have uops)
-  global_size:Optional[List[int]]=None
-  local_size:Optional[List[int]]=None
-  vars:List[Variable]=field(default_factory=list)
-  globals:List[int]=field(default_factory=list)
-  outs:List[int]=field(default_factory=list)
+  global_size:Optional[list[int]]=None
+  local_size:Optional[list[int]]=None
+  vars:list[Variable]=field(default_factory=list)
+  globals:list[int]=field(default_factory=list)
+  outs:list[int]=field(default_factory=list)
   _ran_post_init:bool=False  # NOTE: this is needed if you call replace on the Program
 
   def __post_init__(self):
@@ -99,7 +99,7 @@ class ProgramSpec:
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
-  def launch_dims(self, var_vals:Dict[Variable, int]):
+  def launch_dims(self, var_vals:dict[Variable, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
@@ -112,12 +112,12 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
-  local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
-  tensor_cores: List[TensorCore] = []
-  extra_matcher: Any = None
-  code_for_op: Dict[Ops, Callable] = {}
+  tensor_cores: list[TensorCore] = []
+  extra_matcher: Optional[PatternMatcher] = None
+  code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, name:str, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
