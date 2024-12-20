@@ -1,4 +1,4 @@
-from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
+from typing import Dict, List, cast, DefaultDict, Optional, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
@@ -55,7 +55,7 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:Dict[Variable, int], rawbuf
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
-def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[ProgramSpec, bytes, float]]]:
+def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, Optional[tuple[ProgramSpec, bytes, float]]]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
@@ -126,7 +126,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
-  beam: List[Tuple[Kernel, float]] = [(lin, float("inf"))]
+  beam: List[tuple[Kernel, float]] = [(lin, float("inf"))]
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL"} else 0
@@ -144,7 +144,7 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
     dev = Device[lin.opts.device]
     while not exiting:
       acted_lins: List[Kernel] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
-      timed_lins: List[Tuple[Kernel, float]] = []
+      timed_lins: List[tuple[Kernel, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       least_compute_ops = math.inf
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):

@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple
+from typing import List, Dict, Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
@@ -103,7 +103,7 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
+method_cache: Dict[tuple[str, bytes, int, int, bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   ckey = (device, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
@@ -121,7 +121,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
-  metadata: Optional[Tuple[Metadata, ...]] = None
+  metadata: Optional[tuple[Metadata, ...]] = None
   def run(self, _var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     var_vals = {} if _var_vals is None else _var_vals
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]

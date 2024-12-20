@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Dict, List, Tuple, Optional
+from typing import Any, Callable, Dict, List, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -21,13 +21,13 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB"
 @dataclass
 class GraphRewriteMetadata:
   """Overview of a tracked rewrite to viz the sidebar"""
-  loc: Tuple[str, int]
+  loc: tuple[str, int]
   """File_path, Lineno"""
   code_line: str
   """The Python line calling graph_rewrite"""
   kernel_name: str
   """The kernel calling graph_rewrite"""
-  upats: List[Tuple[Tuple[str, int], str, float]]
+  upats: List[tuple[tuple[str, int], str, float]]
   """List of all the applied UPats"""
 
 @dataclass
@@ -49,8 +49,8 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
-def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> List[List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
-  kernels: Dict[str, List[Tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
+def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> List[List[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]]:
+  kernels: Dict[str, List[tuple[Any, TrackedGraphRewrite, GraphRewriteMetadata]]] = {}
   for k,ctxs in tqdm(zip(keys, contexts), desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
@@ -59,9 +59,9 @@ def get_metadata(keys:List[Any], contexts:List[List[TrackedGraphRewrite]]) -> Li
       kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> Dict[int, tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
-  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
+  graph: Dict[int, tuple[str, str, List[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
     if u.op in {Ops.CONST, Ops.DEVICE}:
@@ -106,7 +106,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
   return g
 
 # Profiler API
-devices:Dict[str, Tuple[decimal.Decimal, decimal.Decimal, int]] = {}
+devices:Dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
 def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
 def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):

@@ -1,5 +1,5 @@
 import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable, TypeVar
+from typing import Dict, Union, List, Optional, Any, Callable, BinaryIO, Iterable, TypeVar
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up
@@ -42,7 +42,7 @@ def accept_filename(func: Callable[[Tensor], R]) -> Callable[[Union[Tensor, str,
   return wrapper
 
 @accept_filename
-def safe_load_metadata(t:Tensor) -> Tuple[Tensor, int, Dict[str, Any]]:
+def safe_load_metadata(t:Tensor) -> tuple[Tensor, int, Dict[str, Any]]:
   """
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
@@ -291,7 +291,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename
-def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
+def gguf_load(tensor: Tensor) -> tuple[Dict, Dict[str, Tensor]]:
   """
   Loads a gguf file from a tensor.
 

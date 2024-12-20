@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, sys, mmap, io, ctypes, ctypes.util, contextlib
-from typing import Optional, Generator, Tuple, Callable, List
+from typing import Optional, Generator, Callable, List
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 with contextlib.suppress(ImportError):
@@ -33,12 +33,12 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[Tuple[int, int, int, int], None, None]:
+  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[tuple[int, int, int, int], None, None]:
     assert hasattr(DiskDevice, 'io_uring'), "function requires io uring support"
 
     fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
     processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
-    reqs: List[Tuple[int, int, int, int]] = []
+    reqs: List[tuple[int, int, int, int]] = []
 
     while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
       if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:

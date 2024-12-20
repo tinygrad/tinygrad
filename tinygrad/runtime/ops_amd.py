@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any, Optional, cast
+from typing import List, Any, Optional, cast
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -79,7 +79,7 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)

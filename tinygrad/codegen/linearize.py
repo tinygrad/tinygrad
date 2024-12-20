@@ -16,23 +16,23 @@ def disp(y:UOp) -> str:
 
 @dataclass(frozen=True)
 class BasicBlock:
-  ctx: Tuple[UOp, ...]
-  lst: Tuple[UOp, ...]
+  ctx: tuple[UOp, ...]
+  lst: tuple[UOp, ...]
   end: Optional[UOp] = None
   def __lt__(self, o:BasicBlock): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
+def append_to_block(ctx:tuple[Dict[UOp, tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
   block_ctxs, children = ctx
   in_this_block = set(x.arg.lst)
 
   # collections to build
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
-  old_blocks: Dict[Tuple[UOp, ...], UOp] = {}
-  new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
+  old_blocks: Dict[tuple[UOp, ...], UOp] = {}
+  new_blocks: Dict[tuple[UOp, ...], List[UOp]] = {}
 
   for u in x.src:
     if u.op is Ops.BLOCK:
@@ -129,7 +129,7 @@ def block_reorder(in_block:UOp):
     priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
 
   # placement queue
-  queue:List[Tuple[int, Tuple, UOp]] = []
+  queue:List[tuple[int, Tuple, UOp]] = []
   def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
 
   # place the first ones that don't have deps
@@ -176,7 +176,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     temp_block_ctxs[u] = sorted(dedup(this_block_ctx), key=lambda x: x.tuplize)
 
   # make final block_ctxs, add BLOCKSTART to block_ctxs for IF and RANGE
-  block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
+  block_ctxs: Dict[UOp, tuple[UOp, ...]] = {}
   for u in sink.toposort:
     block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + tuple(temp_block_ctxs[u])) if u.op in {Ops.IF, Ops.RANGE} else tuple(temp_block_ctxs[u])
 

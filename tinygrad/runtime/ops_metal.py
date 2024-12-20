@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, pathlib, struct, ctypes, tempfile, functools, decimal
-from typing import List, Any, Union, Tuple, cast
+from typing import List, Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -125,7 +125,7 @@ class MetalProgram:
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()), restype=objc_instance)
     error_check(error_pipeline_creation)
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
     if prod(local_size) > cast(int, max_total_threads):
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)

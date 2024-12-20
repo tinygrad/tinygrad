@@ -7,7 +7,7 @@ from tinygrad.ops import Ops
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:List[Union[List[Buffer], tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
@@ -18,7 +18,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
   # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
-  free_segs: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
+  free_segs: Dict[Tuple, List[tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, tuple[start, end, buffer to reuse on the seg]]
   def find_replace_buffer(buf, st, en):
     key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
 

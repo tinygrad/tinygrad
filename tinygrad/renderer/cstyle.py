@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
+from typing import Dict, List, Optional, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, cast_float_to_bf16
@@ -90,7 +90,7 @@ class CStyleLanguage(Renderer):
   extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[tuple[str,tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
@@ -114,7 +114,7 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
+    bufs: Dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)

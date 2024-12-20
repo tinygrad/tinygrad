@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, ctypes.util, functools
-from typing import Tuple, Optional, List
+from typing import Optional, List
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -12,7 +12,7 @@ if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint:
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
 
-def encode_args(args, vals) -> Tuple[ctypes.Structure, ctypes.Array]:
+def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
   c_args = init_c_struct_t(tuple([(f'f{i}', cuda.CUdeviceptr_v2) for i in range(len(args))] +
                                  [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
@@ -50,7 +50,7 @@ class CUDAProgram:
   def __del__(self):
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
       self.c_args, self.vargs = encode_args(args, vals)
@@ -110,7 +110,7 @@ class CUDADevice(Compiled):
       CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}"
-    self.pending_copyin: List[Tuple[int, int, Optional[BufferSpec]]] = []
+    self.pending_copyin: List[tuple[int, int, Optional[BufferSpec]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

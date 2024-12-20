@@ -1,7 +1,7 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Set, Tuple, List, Dict, Optional, DefaultDict
+from typing import Set, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
@@ -21,19 +21,19 @@ BUF_LIMIT = {"METAL":32}
 @dataclass(frozen=True)
 class ScheduleItem:
   ast: UOp
-  bufs: Tuple[Buffer, ...]
-  metadata: Tuple[Metadata, ...]
-  assign_preloads: Tuple[UOp, ...]
+  bufs: tuple[Buffer, ...]
+  metadata: tuple[Metadata, ...]
+  assign_preloads: tuple[UOp, ...]
   @property
-  def outputs(self) -> Tuple[Buffer, ...]:
+  def outputs(self) -> tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
     return tuple(b for i,b in enumerate(self.bufs) if i in self.output_idxs)
   @property
-  def inputs(self) -> Tuple[Buffer, ...]:
+  def inputs(self) -> tuple[Buffer, ...]:
     """Read only buffers in the schedule."""
     return tuple(b for i,b in enumerate(self.bufs) if i not in self.output_idxs)
   @functools.cached_property
-  def output_idxs(self) -> Tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
+  def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
 
 # **** Schedule context and big graph
 
@@ -218,7 +218,7 @@ def uval(u:UOp) -> UOp:
   return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
-                     reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
+                     reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[tuple[UOp, ShapeTracker], None]) -> None:
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -499,7 +499,7 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
 @track_rewrites(named=True)
-def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+def create_schedule_with_vars(outs:List[UOp]) -> tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()

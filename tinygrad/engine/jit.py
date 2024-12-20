@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, List, Union, Dict, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
@@ -59,8 +59,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
-def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
-  input_replace: Dict[Tuple[int, int], int] = {}
+def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) -> Dict[tuple[int, int], int]:
+  input_replace: Dict[tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.bufs):
       if a in input_rawbuffers:
@@ -70,10 +70,10 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
 class GraphRunner(Runner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
-    self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
+    self.input_replace:Dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:Dict[int, List[int]] = {}
-    self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
-    self.launch_dims_base:Dict[int, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
+    self.launch_dims_replace:Dict[int, tuple[Optional[int], Optional[int]]] = {}
+    self.launch_dims_base:Dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
@@ -132,10 +132,10 @@ ReturnType = TypeVar('ReturnType')
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   jit_cache: List[ExecItem]
-  input_replace: Dict[Tuple[int, int], int]
-  extra_view_inputs: List[Tuple[int, int, str, int, DType]]
+  input_replace: Dict[tuple[int, int], int]
+  extra_view_inputs: List[tuple[int, int, str, int, DType]]
   expected_names: List[Union[int, str]]
-  expected_st_vars_dtype_device: List[Tuple[ShapeTracker, Tuple[Variable, ...], DType, str]]
+  expected_st_vars_dtype_device: List[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
@@ -143,7 +143,7 @@ class CapturedJit(Generic[ReturnType]):
 
   def __post_init__(self):
     self._jit_cache: List[ExecItem] = self.jit_cache
-    self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
+    self._input_replace: Dict[tuple[int, int], int] = self.input_replace
     self._graphed = False
     self._clear_inputs()
 
@@ -169,7 +169,7 @@ class CapturedJit(Generic[ReturnType]):
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):
-  input_tensors: List[Tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
+  input_tensors: List[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if tensors: Tensor.realize(*tensors)
   lbs: List[UOp] = flatten([t.lazydata.lbs for t in tensors])
@@ -213,7 +213,7 @@ class TinyJit(Generic[ReturnType]):
   @property
   def jit_cache(self) -> List[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
   @property
-  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
+  def input_replace(self) -> Dict[tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
@@ -246,7 +246,7 @@ class TinyJit(Generic[ReturnType]):
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
-      extra_view_inputs: List[Tuple[int, int, str, int, DType]] = []
+      extra_view_inputs: List[tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
           if b is not None and b._base is not None and b._base in input_buffers:

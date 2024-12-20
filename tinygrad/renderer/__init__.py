@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, List, Tuple, Dict, Callable, Any, Set
+from typing import Optional, List, Dict, Callable, Any, Set
 import functools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -8,19 +8,19 @@ from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
-  dims: Tuple[int,int,int] # N, M, K
+  dims: tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  reduce_axes: List[Tuple[int,int]] # list of (TC dim,amt) that constructs the shape of the reduce dim
+  threads: List[tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
+  reduce_axes: List[tuple[int,int]] # list of (TC dim,amt) that constructs the shape of the reduce dim
   @property
-  def early_upcast_axes(self) -> List[Tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
+  def early_upcast_axes(self) -> List[tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
     return [(d,self.dims[d]//sz) for d,sz in [(dim,prod(sz for d,sz in self.threads if d==dim)) for dim in range(2)] if self.dims[d]>sz]
-  upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
-  st1_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
-  st2_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
-  expanded_shape: Optional[Tuple[int, ...]] = None
-  opts_seq: Tuple[str,str] = ("UP","LC") # upcast input, local the thread pattern
+  upcast_axes: tuple[List[tuple[int,int]], List[tuple[int,int]], List[tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
+  st1_pattern: Optional[tuple[tuple[tuple[int,int], ...], tuple[tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
+  st2_pattern: Optional[tuple[tuple[tuple[int,int], ...], tuple[tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
+  expanded_shape: Optional[tuple[int, ...]] = None
+  opts_seq: tuple[str,str] = ("UP","LC") # upcast input, local the thread pattern
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
 
 @dataclass(frozen=True)
@@ -112,8 +112,8 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
-  local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None

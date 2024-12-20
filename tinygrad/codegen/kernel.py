@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools, functools
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callable, Sequence
+from typing import Optional, List, cast, Dict, Final, DefaultDict, Callable, Sequence
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
@@ -42,9 +42,9 @@ class Opt:
 
 @dataclass
 class TensorCoreOptions:
-  axes: Tuple[int, ...] # the location of the original N and M axes if still in the shape
-  axes_exist: Tuple[bool, ...] # true if the original N and M axes are still in the shape
-  axis_pads: Tuple[Tuple[int, int], ...]
+  axes: tuple[int, ...] # the location of the original N and M axes if still in the shape
+  axes_exist: tuple[bool, ...] # true if the original N and M axes are still in the shape
+  axis_pads: tuple[tuple[int, int], ...]
   def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when a dimension is removed
     axes, axes_exist = list(self.axes), list(self.axes_exist)
     for tc_dim in [i for i in range(2) if axes_exist[i]]:
@@ -125,7 +125,7 @@ class Kernel:
   # TODO: these need more tests or it might silently be no-op
   def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
-  def upcasted_axis(self, i:int) -> List[Tuple[int, Optional[sint], bool]]:
+  def upcasted_axis(self, i:int) -> List[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
     assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
     return list(zip(upcasted_shape, upcasted_stride,
@@ -142,13 +142,13 @@ class Kernel:
   def reduceop(self) -> Optional[UOp]: return self.reduceops[0] if len(self.reduceops) > 0 else None
 
   @property
-  def output_shape(self) -> Tuple[sint, ...]: return self.sts[0].shape
+  def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
 
   @property
-  def full_shape(self) -> Tuple[sint, ...]: return self.sts[self.full_buf_index].shape
+  def full_shape(self) -> tuple[sint, ...]: return self.sts[self.full_buf_index].shape
 
   @property
-  def full_unupcasted_shape(self) -> Tuple[sint, ...]: return self.full_shape[:self.first_upcast]
+  def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
 
   @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
@@ -188,7 +188,7 @@ class Kernel:
   # ******************** base simplifiers ********************
 
   # apply reshape and permute to all shapetrackers
-  def reshape_and_permute(self, new_shape_fxn:Optional[Callable[[Tuple[sint, ...]], Sequence[sint]]], axis:Optional[Sequence[int]]):
+  def reshape_and_permute(self, new_shape_fxn:Optional[Callable[[tuple[sint, ...]], Sequence[sint]]], axis:Optional[Sequence[int]]):
     def reshape(st:ShapeTracker): return st.reshape(tuple(new_shape_fxn(st.shape))) if new_shape_fxn is not None else st
     def permute(st:ShapeTracker): return st.permute(tuple(axis)) if axis is not None else st
     self.sts = [permute(reshape(st)) for st in self.sts]
@@ -230,7 +230,7 @@ class Kernel:
     if isinstance(self.membufs[0].dtype, ImageDType):
       base_shape = self.membufs[0].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
-        special_strides: Tuple[sint, ...] = tuple()
+        special_strides: tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
           shape_piece = tuple(self.output_shape[x] for x in g)
           assert prod(shape_piece) == base_shape[i], f"get_contraction was wrong? {shape_piece} != {base_shape[i]}"
@@ -550,7 +550,7 @@ class Kernel:
       else:
         # prioritize making expand axes local
         local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]  # noqa: E501
-        to_local: List[Tuple[int, int]] = []
+        to_local: List[tuple[int, int]] = []
         for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
           local_size = prod(sz for _, sz in to_local)
           local_sz: Optional[int] = next((x for x in ([32] * (axis == 0) + [16, 8, 4, 3, 2]) if self.full_shape[axis] % x == 0 and local_size * x <= 128), None)  # noqa: E501

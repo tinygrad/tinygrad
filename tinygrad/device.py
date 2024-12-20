@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Dict, Tuple, Any, Iterator, List, Set, Generator
+from typing import Optional, Dict, Any, Iterator, List, Set, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
@@ -190,7 +190,7 @@ class LRUAllocator(Allocator):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+  def __init__(self): self.cache: Dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)

@@ -218,7 +218,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:Dict[Tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     # NOTE: this will soon be set by Tensor once we remove function.py
@@ -235,7 +235,7 @@ forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 class UOp(MathTrait, metaclass=UOpMetaClass):
   op:Ops
   dtype:DType = dtypes.void
-  src:Tuple[UOp, ...] = tuple()
+  src:tuple[UOp, ...] = tuple()
   arg:Any = None
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
@@ -269,7 +269,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache={})
 
   @functools.cached_property
-  def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
+  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], Tuple]:
     return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
@@ -288,10 +288,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
   @functools.cached_property
-  def full_shape(self) -> Tuple[sint, ...]:
+  def full_shape(self) -> tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   @property
-  def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
+  def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
   def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
@@ -331,7 +331,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
     return ret
   @property
-  def axis_arg(self) -> Tuple[int, ...]:
+  def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
     ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
@@ -372,7 +372,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         output_shape = self.shape[:-1]+((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
       return UOp.metaop(Ops.BUFFER_VIEW, output_shape, dtype, self.device, None, (self,))
     return UOp(Ops.BITCAST, dtype, (self,))
-  def gep(self, i:Union[Tuple[int, ...], int]):
+  def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
       if self.op is Ops.VECTORIZE: return self.src[i]
@@ -394,10 +394,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
-  def _reduce_op(self, op:Ops, axis:Tuple[int, ...]):
+  def _reduce_op(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
-  def r(self, op:Ops, axis:Tuple[int, ...]) -> UOp:
+  def r(self, op:Ops, axis:tuple[int, ...]) -> UOp:
     new_shape = unwrap(self.st).reduce(axis)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
@@ -430,11 +430,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** from LazyBuffer ***
 
   @staticmethod
-  def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
+  def const_with_shape(dtype:DType, val:ConstLike, shape:tuple[sint,...]) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
   @staticmethod
-  def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()) -> UOp:
+  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     if op is Ops.CONST:
       # NOTE: we embed device on CONST with a fake BUFFER uop
@@ -493,12 +493,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
-  def reshape(self, arg:Tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
-  def expand(self, arg:Tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
-  def permute(self, arg:Tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
-  def stride(self, arg:Tuple[sint, ...]): return self._mop(Ops.STRIDE, arg)
+  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
+  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
+  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
+  def permute(self, arg:tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
+  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
+  def stride(self, arg:tuple[sint, ...]): return self._mop(Ops.STRIDE, arg)
 
   # *** uop Buffer stuff ***
 
@@ -552,7 +552,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
     return UOp(Ops.BIND, self.dtype, (self, self.const_like(val)))
-  def unbind(self) -> Tuple[Variable, int]:
+  def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
   @property
@@ -589,7 +589,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
-  def _min_max(self) -> Tuple[ConstType, ConstType]:
+  def _min_max(self) -> tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
@@ -676,7 +676,7 @@ def print_uops(uops:List[UOp]):
 
 # ***** pattern matcher *****
 
-def get_location() -> Tuple[str, int]:
+def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
@@ -689,12 +689,12 @@ def lines(fn) -> List[str]:
 
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
-  def __init__(self, op:Optional[Union[Ops, Tuple[Ops, ...], Set[Ops]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
-               src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
+  def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], Set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
+               src:Optional[Union[tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[Set[Ops]]=None):
     assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
-    self.op: Optional[Tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
-    self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
+    self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
+    self.dtype: Optional[tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
     assert self.name != "ctx", "UPat can't be named ctx"
@@ -721,13 +721,13 @@ class UPat(MathTrait):
 
   @staticmethod
   @functools.lru_cache(None)
-  def var(name:Optional[str]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
+  def var(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True):
     return UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name)
   @staticmethod
-  def const(dtype:Optional[Union[DType, Tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
+  def const(dtype:Optional[Union[DType, tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
   def index(self, idx:UPat, valid:Optional[UPat]=None): return UPat(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
@@ -788,10 +788,10 @@ def deconstruct_function(fxn:Callable) -> Tuple:
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
+  def __init__(self, patterns:List[tuple[UPat, Callable]]):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: Dict[Ops, List[Tuple[UPat, Callable, Set, bool]]] = {}
+    self.pdict: Dict[Ops, List[tuple[UPat, Callable, Set, bool]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
@@ -818,9 +818,9 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: Tuple[str, int]                                                                              # location that called graph_rewrite
+  loc: tuple[str, int]                                                                              # location that called graph_rewrite
   sink: bytes                                                                                       # sanpshot of the graph_rewrite input sink
-  matches: List[Tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
+  matches: List[tuple[bytes, Optional[bytes], Optional[UPat], float]] = field(default_factory=list) # before+after snapshot of all the matches
 tracked_keys:List[Any] = []
 tracked_ctxs:List[List[TrackedGraphRewrite]] = []
 _name_cnt:Dict[str, int] = {}
@@ -1119,7 +1119,7 @@ def is_increasing(f:UOp) -> bool:
   if f.op in (Ops.MUL, Ops.IDIV) and f.src[1].op is Ops.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
 
-def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
+def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
 
@@ -1312,7 +1312,7 @@ renderer = PatternMatcher([
 sint = Union[int, UOp]
 Variable = UOp
 
-ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
+ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 

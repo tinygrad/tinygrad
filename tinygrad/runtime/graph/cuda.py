@@ -1,5 +1,5 @@
 import ctypes
-from typing import Any, Optional, Tuple, Dict, List, cast
+from typing import Any, Optional, Dict, List, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, dedup
 from tinygrad.device import Buffer, Device
@@ -16,7 +16,7 @@ class CUDAGraph(MultiGraphRunner):
     if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
 
     self.jc_idx_with_updatable_rawbufs = dedup([x[0] for x in self.input_replace.keys()])
-    self.updatable_nodes: Dict[int, Tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
+    self.updatable_nodes: Dict[int, tuple[Any, Any, Any, bool]] = {} # Dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
 

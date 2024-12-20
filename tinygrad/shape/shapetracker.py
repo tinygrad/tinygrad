@@ -2,14 +2,14 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import Tuple, List, Optional, Dict, Set, Callable
+from typing import List, Optional, Dict, Set, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid
 
 @functools.lru_cache(None)
-def views_to_indexed_uops(views: Tuple[View, ...], _idxs:Optional[Tuple[UOp, ...]]=None) -> Tuple[UOp, UOp]:
+def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
   idx, valid = views[-1].to_indexed_uops(_idxs)
   for view in reversed(views[0:-1]):
     view = view.minify()
@@ -21,7 +21,7 @@ def views_to_indexed_uops(views: Tuple[View, ...], _idxs:Optional[Tuple[UOp, ...
   return idx, valid
 
 @functools.lru_cache(None)
-def views_to_real_strides(views: Tuple[View, ...], ignore_valid=False) -> Tuple[Optional[sint], ...]:
+def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
   # NOTE: if a stride is not always valid, it will be None
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: List[Optional[sint]] = [None] * len(views[-1].shape)
@@ -41,14 +41,14 @@ def views_to_real_strides(views: Tuple[View, ...], ignore_valid=False) -> Tuple[
 
 @dataclass(frozen=True, order=True)
 class ShapeTracker:
-  views: Tuple[View, ...]
+  views: tuple[View, ...]
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     ret = self
     for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
     return ret
 
-  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
+  def invert(self, out_shape:tuple[sint, ...]) -> Optional[ShapeTracker]:
     inverted_views:List[View] = []
     for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
       if (inverted:= v.invert(s)) is None: return None
@@ -56,7 +56,7 @@ class ShapeTracker:
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
 
   @staticmethod
-  def from_shape(shape:Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
+  def from_shape(shape:tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
 
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
@@ -65,15 +65,15 @@ class ShapeTracker:
   def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
 
   @property
-  def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
+  def shape(self) -> tuple[sint, ...]: return self.views[-1].shape
 
   @property
   def size(self) -> int: return self.views[-1].size()
 
-  def reduce(self, axis:Tuple[int, ...]) -> Tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+  def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
-  def to_indexed_uops(self, _idxs:Optional[List[UOp]|Tuple[UOp, ...]]=None) -> Tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[List[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
 
   def real_size(self) -> int:
@@ -88,11 +88,11 @@ class ShapeTracker:
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
+  def unbind(self) -> tuple[ShapeTracker, Dict[Variable, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
-  def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]: return views_to_real_strides(self.views, ignore_valid)
+  def real_strides(self, ignore_valid=False) -> tuple[Optional[sint], ...]: return views_to_real_strides(self.views, ignore_valid)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def axis_is_masked(self, axis:int) -> bool:
@@ -106,13 +106,13 @@ class ShapeTracker:
 
   # *** under this line are the movement ops ***
 
-  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
-  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
-  def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
-  def permute(self, axis: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
-  def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
+  def pad(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
+  def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
+  def expand(self, new_shape: tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
+  def permute(self, axis: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
+  def stride(self, mul: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
-  def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
+  def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
     return ShapeTracker(self.views + (View.create(new_shape), ))
 

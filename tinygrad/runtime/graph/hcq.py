@@ -1,5 +1,5 @@
 import collections, time
-from typing import List, Any, Dict, cast, Optional, Tuple, Set
+from typing import List, Any, Dict, cast, Optional, Set
 from tinygrad.helpers import round_up, PROFILE
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
@@ -15,7 +15,7 @@ class HCQGraph(MultiGraphRunner):
 
     # Replace input buffers with variables.
     self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in jit_cache]
-    self.input_replace_to_var: Dict[Tuple[int, int], Variable] = {}
+    self.input_replace_to_var: Dict[tuple[int, int], Variable] = {}
 
     for (j,i), input_idx in self.input_replace.items():
       x = self.input_replace_to_var.setdefault((j,i), UOp.variable(f"input_{input_idx}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
@@ -42,7 +42,7 @@ class HCQGraph(MultiGraphRunner):
     # graph-related tasks. This synchronization uses a global timeline signal per device. Within the graph, the compute queue coordinates with
     # global operations and sets a kickoff signal. Any queue accessing a buffer from another device waits for this signal from the device’s
     # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
-    self.ji_schedule: Dict[int, Tuple[HCQCompiled, HWQueue, List, List, HCQSignal, Optional[int]]] = {}
+    self.ji_schedule: Dict[int, tuple[HCQCompiled, HWQueue, List, List, HCQSignal, Optional[int]]] = {}
 
     self.comp_queues: Dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: Dict[HCQCompiled, HWQueue] = {} # lazy allocation
@@ -161,7 +161,7 @@ class HCQGraph(MultiGraphRunner):
       self.comp_queues[dev].signal(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev] + 1).bind(dev)
       if dev in self.copy_queues: self.copy_queues[dev].bind(dev)
 
-    self.last_timeline: Dict[HCQCompiled, Tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
+    self.last_timeline: Dict[HCQCompiled, tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
     self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
