@@ -3,10 +3,15 @@ from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, ProgramSpec
+from tinygrad.renderer import Estimates
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.ops import flops_mem, Ops, UOp
+from tinygrad.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
+
+def flops_mem(uops, ignore_indexing=False):
+  est = Estimates.from_uops(uops, ignore_indexing)
+  return est.ops, est.lds
 
 # **************** new FlopCounter ****************
 

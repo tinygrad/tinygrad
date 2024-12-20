@@ -1,11 +1,11 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable, Tuple
+from typing import cast, Callable
 import struct
 from collections import defaultdict
 from tinygrad.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import prod, flatten
+from tinygrad.helpers import prod, flatten, get_single_element
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -14,7 +14,7 @@ def render_val(x, dtype):
     return "0f%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
-asm_for_op: Dict[Ops, Callable] = {
+asm_for_op: dict[Ops, Callable] = {
   Ops.RECIP: lambda d,a,dt,name: f"rcp{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a};",
   Ops.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", Ops.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
   Ops.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", Ops.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
@@ -32,8 +32,8 @@ asm_for_op: Dict[Ops, Callable] = {
     f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
 }
 
-supports_half: List[Ops] = [Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE]
-doesnt_support_half: Tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
+supports_half = (Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE)
+doesnt_support_half: tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
 ptx_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
   (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
@@ -137,14 +137,12 @@ class PTXRenderer(Renderer):
 .address_size 64
 .visible .entry"""
   barrier = "bar.sync\t0;"
-  supports_half = supports_half
   # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
-  types: Dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+  types: dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
                               dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
                               dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "pred" }
 
-  mem_types: Dict[DType, str] =  types.copy()
-  mem_types.update({dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"})
+  mem_types = {**types, dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"}
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str:
     def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
@@ -152,16 +150,16 @@ class PTXRenderer(Renderer):
     params = ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs])
     return f"{self.kernel_prefix} {function_name}(\n\t{params}\n)\n{{\n{kernel}\n}}"
 
-  def render(self, name:str, uops:List[UOp]) -> str:
-    kernel:List[str] = []
+  def render(self, name:str, uops:list[UOp]) -> str:
+    kernel:list[str] = []
     bufs = []
 
-    c: DefaultDict[str, int] = defaultdict(int)
-    r: Dict[UOp, Union[List[str], str]] = {}
+    c: defaultdict[str, int] = defaultdict(int)
+    r: dict[UOp, list[str]|str] = {}
     self.r = r
     self.uops = uops
 
-    def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
+    def ssa(prefix:str, u:UOp|None=None, dtype:str|None=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
@@ -172,8 +170,7 @@ class PTXRenderer(Renderer):
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.GEP:
-        assert len(u.arg) == 1
-        r[u] = r[u.src[0]][u.arg[0]]
+        r[u] = r[u.src[0]][get_single_element(u.arg)]
         continue
       if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         r[u] = r[u.src[0]]
@@ -193,7 +190,7 @@ class PTXRenderer(Renderer):
         Ops.DEFINE_GLOBAL: ("dat", self.types[dtypes.ulong]), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
-      if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
+      if (l:=cast(str|list[str], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 

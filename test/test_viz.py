@@ -1,10 +1,8 @@
 from typing import Dict, List, Optional
-import unittest, decimal, json, pickle
-from tinygrad import Tensor
+import unittest, decimal, json
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import Context
 from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
-from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, becomes
+from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
 
@@ -16,18 +14,8 @@ def helper_test_viz(sink:UOp, pm:PatternMatcher, **kwargs) -> List[UOp]:
   assert len(contexts) == 1
   assert len(contexts[0]) == 1
   k = get_metadata(keys, contexts)[0][0]
-  g = get_details(*k, becomes={})
+  g = get_details(*k)
   return g.graphs[1:]
-
-def viz():
-  # assert the context isn't empty
-  assert len(contexts) != 0
-  # unpickle becomes
-  dbecomes = {k:pickle.loads(v) for k,v in becomes.items()}
-  # this is the data the frontend gets from the API
-  sidebar_list = get_metadata(keys, contexts)
-  all_graphs = [[get_details(*x, becomes=dbecomes) for x in ctx] for ctx in sidebar_list]
-  return sidebar_list, all_graphs
 
 class TestViz(unittest.TestCase):
   def setUp(self):
@@ -150,33 +138,6 @@ class TestViz(unittest.TestCase):
     fp, lineno = contexts[0][0].loc
     self.assertEqual(lineno, inner_rewrite.__code__.co_firstlineno)
     self.assertEqual(fp, inner_rewrite.__code__.co_filename)
-
-  def test_post_mutate_uops_simple(self):
-    add = Tensor([1, 2, 3])+2
-    with Context(TRACK_MATCH_STATS=2): add.schedule()
-    _, tracked_rewrites = viz()
-    # TOOD: using [0] here is fargile, what if we add another rewrite step pre create_schedule?
-    sched_viz = tracked_rewrites[0]
-    first_sink = sched_viz[0].graphs[0]
-    adds = [x for x in first_sink.toposort if x.op is Ops.ADD]
-    # the ADD uop is preserved
-    self.assertEqual(len(adds), 1)
-    # even though the underlying UOp changed
-    self.assertIsNot(add.lazydata.op, Ops.ADD)
-
-  def test_post_mutate_uops_advanced(self):
-    # multiple tensor uops in the sink get mutated
-    ones = Tensor.ones((4, 4)).contiguous()
-    multi = ones - ones.sum()
-    with Context(TRACK_MATCH_STATS=2): multi.schedule()
-    _, tracked_rewrites = viz()
-    sched_viz = tracked_rewrites[0]
-    first_sink = sched_viz[0].graphs[0]
-    # preserves the underlying uops that got realized
-    reduceops = [x for x in first_sink.toposort if x.op is Ops.REDUCE_AXIS]
-    adds = [x for x in first_sink.toposort if x.op is Ops.ADD]
-    self.assertEqual(len(reduceops), 1)
-    self.assertEqual(len(adds), 1)
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
