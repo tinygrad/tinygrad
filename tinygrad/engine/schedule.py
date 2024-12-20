@@ -55,7 +55,7 @@ tensor_uop_spec = PatternMatcher([
    lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
   # BUFFER assignment
-  (UPat(Ops.ASSIGN, name="assign", src=(UPat({Ops.VIEW, Ops.BUFFER, *GroupOp.Movement}, name="target"), UPat.var("new_val"))), lambda assign,target,new_val:
+  (UPat(Ops.ASSIGN, name="assign", src=(UPat({Ops.VIEW, *GroupOp.Movement}, name="target"), UPat.var("new_val"))), lambda assign,target,new_val:
    # dtype
    (assign.dtype == target.dtype == new_val.dtype) and \
    # arg (TODO: replace this ShapeTracker arg with a VIEW on the target BUFFER)
