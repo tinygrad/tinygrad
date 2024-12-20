@@ -9,12 +9,27 @@ def sign_extend(val:UOp, sext_am:int):
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
-def packed_store(bidx:UOp, var:UOp):
-  shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//var.dtype.itemsize))*UOp.const(dtypes.uint32, 8*var.dtype.itemsize)
-  new_v = (var & (0xFF if var.dtype.itemsize == 1 else 0xFFFF)).cast(dtypes.uint32) << shift_am
-  mask = (((0xFF if var.dtype.itemsize == 1 else 0xFFFF) << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  buf = UOp.load(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), dtype=dtypes.uint32)
-  return UOp.store(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), ((buf & mask) | new_v.cast(dtypes.uint32)))
+def compute_shift_amount(bidx: UOp, var: UOp) -> UOp:
+    return (bidx.src[1].cast(dtypes.uint32) % UOp.const(dtypes.uint32, 4 // var.dtype.itemsize)) * UOp.const(dtypes.uint32, 8 * var.dtype.itemsize)
+
+def compute_value_mask(var: UOp) -> int:
+    return 0xFF if var.dtype.itemsize == 1 else 0xFFFF
+
+def compute_mask(shift_am: UOp, value_mask: int) -> UOp:
+    return ((UOp.const(dtypes.uint32, value_mask) << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
+
+def compute_new_value(var: UOp, shift_am: UOp, value_mask: int) -> UOp:
+    return ((var & UOp.const(dtypes.uint32, value_mask)).cast(dtypes.uint32) << shift_am)
+
+def packed_store(bidx: UOp, var: UOp):
+    shift_am = compute_shift_amount(bidx, var)
+    value_mask = compute_value_mask(var)
+    new_value = compute_new_value(var, shift_am, value_mask)
+    mask = compute_mask(shift_am, value_mask)
+    buffer_index = UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1] // (4 // var.dtype.itemsize)))
+    buf = UOp.load(buffer_index, dtype=dtypes.uint32)
+    packed_value = (buf & mask) | new_value
+    return UOp.store(buffer_index, packed_value)
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
 def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):
