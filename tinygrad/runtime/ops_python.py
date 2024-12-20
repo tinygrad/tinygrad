@@ -156,7 +156,7 @@ class PythonProgram:
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
-            def a_elem(x, i, j, goff): return x[i][goff+j]
+            def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
             # B (16 elements on 8 threads)
             def b_elem(x, i, j, goff): return x[j][goff+i]
             # C, D (8 elements on 8 threads)
