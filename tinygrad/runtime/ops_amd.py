@@ -13,6 +13,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
+from tinygrad.runtime.support.am.asm2x6x import Asm236x
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
@@ -550,6 +551,17 @@ class PCIIface:
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.adev.fini()
+
+class USBIface(VFIOIface):
+  iommu_set:bool = False
+  gpus:List[Any] = []
+
+  def __init__(self, dev, dev_id):
+    self.dev = dev
+    self.usb = Asm236x("/dev/sg0")
+
+    # setup pci
+    
 
 class AMDDevice(HCQCompiled):
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
