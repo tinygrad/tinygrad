@@ -64,8 +64,7 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
   graph: dict[int, tuple[str, str, list[int], str, str]] = {}
   excluded = set()
   for u in x.toposort:
-    # NOTE: we are hiding the BUFFERs on consts. they should at least be devices
-    if u.op in {Ops.CONST, Ops.DEVICE} or (u.op is Ops.BUFFER and u.arg[0] == -1):
+    if u.op in {Ops.CONST, Ops.DEVICE}:
       excluded.add(u)
       continue
     argst = ("\n".join([f"{v.shape} / {v.strides}"+(f" / {v.offset}" if v.offset else "") for v in u.arg.views])) if u.op is Ops.VIEW else str(u.arg)

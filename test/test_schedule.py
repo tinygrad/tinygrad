@@ -1957,13 +1957,9 @@ class TestView(unittest.TestCase):
     np.testing.assert_equal(b.numpy(), 0)
 
   def test_zero_size_alt(self):
-    st = ShapeTracker.from_shape((135, 0, 9))
-    a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
-    b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
-    self.assertEqual(b.st, st.pad(pad_arg))
-    # TODO: why does this help?
-    b = graph_rewrite(b, remove_movement_ops)
-    self.assertIs(b.base.src[1], UOp.const(dtypes.float, 0))
+    a = Tensor.empty(135, 0, 9)
+    b = a.pad(((0, 0), (0, 0), (18, 0)))
+    check_schedule(b, 0)
 
   def test_partial_mask(self):
     # partial masked out does not degrade into CONST
@@ -1987,7 +1983,7 @@ class TestBigGraph(unittest.TestCase):
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int, (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
     self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(ctx.realizes), 0)
@@ -2001,8 +1997,8 @@ class TestBigGraph(unittest.TestCase):
     self.assertEqual(len(ctx.realizes), 1)
 
 tensor_const_pm = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, src=()))), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
 ])
 class TestConst(unittest.TestCase):
   # ** part 1: basic functionality of a tensor directly created from CONST

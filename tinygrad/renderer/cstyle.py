@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union, DefaultDict, Literal, Callable, cast
+from typing import Optional, Union, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
@@ -77,7 +77,7 @@ class CStyleLanguage(Renderer):
   type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_op: Dict = {
+  code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}|{b})",
@@ -117,7 +117,7 @@ class CStyleLanguage(Renderer):
     bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
-    c: DefaultDict[str, int] = defaultdict(int)
+    c: defaultdict[str, int] = defaultdict(int)
     for u in uops:
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]

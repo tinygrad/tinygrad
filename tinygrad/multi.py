@@ -2,8 +2,7 @@ from __future__ import annotations
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType
-from tinygrad.ops import Ops, MathTrait, UOp
-from tinygrad.shape.shapetracker import sint
+from tinygrad.ops import Ops, MathTrait, UOp, sint
 
 def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"

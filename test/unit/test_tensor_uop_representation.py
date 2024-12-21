@@ -3,7 +3,7 @@ from tinygrad import Tensor
 from tinygrad.ops import UPat, Ops
 
 realized_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
-const_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.CONST)))
+const_pattern = UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST)))
 def is_pattern(ten:Tensor, pat:UPat): assert pat.match(ten.lazydata, {})
 
 class TestTensorUopRepresentation(unittest.TestCase):
@@ -51,7 +51,6 @@ class TestTensorUopRepresentation(unittest.TestCase):
   #     UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
   #       UOp(Ops.CONST, dtypes.float, arg=1.0, src=(
   #         UOp(Ops.DEVICE, dtypes.void, arg="METAL", src=()),)),)),))
-  @unittest.expectedFailure
   def test_consts_dont_have_buffers(self):
     a = Tensor.ones(10, 10)
     print(a.lazydata)
