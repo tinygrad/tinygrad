@@ -120,6 +120,7 @@ class CStyleLanguage(Renderer):
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
     for u in uops:
+      if u.dtype in self.invalid_dtype: raise RuntimeError(f"dtype unsupported {u.dtype=} {u.op=} {u.arg=}")
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
@@ -139,7 +140,6 @@ class CStyleLanguage(Renderer):
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.NOOP: "precast",
                   Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
-
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
@@ -155,8 +155,6 @@ class CStyleLanguage(Renderer):
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
-      if u.op is Ops.INDEX and u.src[1].dtype in self.invalid_dtype:
-        raise RuntimeError("Index was upcasted to int64 but not supported on this device")
     del self.r
 
     # NOTE: this relies on bufs dict preserving order
