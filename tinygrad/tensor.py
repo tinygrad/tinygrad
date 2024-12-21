@@ -2757,13 +2757,12 @@ class Tensor(SimpleMathTrait):
     """
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
 
-    NOTE: only when `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
+    NOTE: prelu follows unconventional broadcasting rules determined by `channel_dim` only when `weight` is a non-scalar 1-D Tensor:
       - If `channel_dim` is an integer, it specifies the channel dimension whose size must match the size of `weight`.
       - If `channel_dim` is `None`, it is inferred by finding the first dimension of `self` that matches the size of `weight`.
 
     - Described: https://paperswithcode.com/method/prelu
     - Paper: https://arxiv.org/abs/1502.01852v1
-    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.prelu.html
 
     ```python exec="true" source="above" session="tensor" result="python"
     x = Tensor([[1.0, -2.0, 3.0, -4.0], [-1.0, 2.0, -3.0, 4.0]])
