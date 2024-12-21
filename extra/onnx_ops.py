@@ -57,8 +57,8 @@ def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
 def Softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
-def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):
-  return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
+def Clip(x: Tensor, min_:Tensor|None=None, max_:Tensor|None=None):
+  return x.clip(float('-inf') if min_ is None else min_, float('inf') if max_ is None else max_).cast(x.dtype)
 
 def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 def ReduceMax(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
@@ -516,7 +516,7 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-  assert relative_position_bias==do_rotary==past_sequence_length==mask_filter_value==past_present_share_buffer==scale==None, \
+  assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
     "functionality not supported yet"  # TODO strange params
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
