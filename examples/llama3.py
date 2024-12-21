@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import List
 import json, argparse, random, time, os
-import tiktoken
-from tiktoken.load import load_tiktoken_bpe
+import extra.bpetokenizer as tiktoken
+from extra.bpetokenizer import load_tiktoken_bpe
 from extra.models.llama import Transformer, convert_from_huggingface, convert_from_gguf, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters

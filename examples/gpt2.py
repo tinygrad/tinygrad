@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, argparse
 from typing import Optional, Union
-import tiktoken
+import extra.bpetokenizer as tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable, dtypes
 from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
