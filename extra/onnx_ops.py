@@ -57,8 +57,8 @@ def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
 def Softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
-def Clip(x: Tensor, min_:Tensor|None=None, max_:Tensor|None=None):
-  return x.clip(float('-inf') if min_ is None else min_, float('inf') if max_ is None else max_).cast(x.dtype)
+def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):    # noqa: A002
+  return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 def ReduceMax(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
