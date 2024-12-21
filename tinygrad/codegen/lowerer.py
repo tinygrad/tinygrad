@@ -47,7 +47,6 @@ class IndexContext:
   idxs: list[UOp]
   ridxs: list[UOp]
   acc_num: int = 0
-  require_upcast: bool = False
 
 def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()

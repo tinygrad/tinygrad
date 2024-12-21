@@ -1,4 +1,4 @@
-from typing import Optional, Union, Literal, Callable, cast, Dict
+from typing import Optional, Union, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
@@ -74,8 +74,8 @@ class CStyleLanguage(Renderer):
   code_for_workitem: dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   extra_args: list[str] = []
   float4: Optional[str] = None
-  type_map: Dict[DType, str] = {}
-  invalid_dtype: Dict[DType, None] = {}
+  type_map: dict[DType, str] = {}
+  invalid_dtype: dict[DType, None] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: dict = {
@@ -140,6 +140,7 @@ class CStyleLanguage(Renderer):
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.NOOP: "precast",
                   Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
+
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
