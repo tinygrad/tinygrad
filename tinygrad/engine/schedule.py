@@ -597,10 +597,11 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  # TOOD: how slow is this?
-  big_graph = graph_rewrite(big_graph, remove_image_dtype, ctx)
   big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
+  # NOTE: do this after const folding
+  # TOOD: how slow is this?
+  big_graph = graph_rewrite(big_graph, remove_image_dtype, ctx)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
   # group realizes into kernels
