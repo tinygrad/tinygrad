@@ -1957,13 +1957,9 @@ class TestView(unittest.TestCase):
     np.testing.assert_equal(b.numpy(), 0)
 
   def test_zero_size_alt(self):
-    st = ShapeTracker.from_shape((135, 0, 9))
-    a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
-    b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
-    self.assertEqual(b.st, st.pad(pad_arg))
-    # TODO: why does this help?
-    b = graph_rewrite(b, remove_movement_ops)
-    self.assertIs(b.base.src[1], UOp.const(dtypes.float, 0))
+    a = Tensor.empty(135, 0, 9)
+    b = a.pad(((0, 0), (0, 0), (18, 0)))
+    check_schedule(b, 0)
 
   def test_partial_mask(self):
     # partial masked out does not degrade into CONST
