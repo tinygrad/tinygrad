@@ -436,7 +436,7 @@ def train_retinanet():
 
     while proc is not None:
       x, y_bboxes, y_labels, matches, proc = proc
-      _train_step(model, None, lr_scheduler, x, labels=y_labels, matches=matches, anchors=Tensor.stack(*[Tensor(a, device=GPUS) for a in anchors]), bboxes=y_bboxes) # TODO: enable once full model has been integrated
+      _train_step(model, None, lr_scheduler, x, labels=y_labels, matches=matches, anchors=Tensor.stack(*[Tensor(a) for a in anchors]).shard(GPUS, axis=0), bboxes=y_bboxes) # TODO: enable once full model has been integrated
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
