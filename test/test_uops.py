@@ -410,7 +410,7 @@ class TestUOpMethod(unittest.TestCase):
     with self.assertRaises(AssertionError): UOp.const(dtypes.int, var).const_arg
     const = UOp.const(dtypes.int, 1)
     self.assertEqual(const.const_arg, 1)
-    tensor_const = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), const), ShapeTracker.from_shape(()))
+    tensor_const = UOp.metaop(Ops.CONST, (), dtypes.int, Device.DEFAULT, 1)
     self.assertEqual(tensor_const.const_arg, 1)
 
 class TestUOpStr(unittest.TestCase):
