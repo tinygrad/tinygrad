@@ -2753,12 +2753,12 @@ class Tensor(SimpleMathTrait):
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
-  def prelu(self, weight: Tensor, channel_dim:Optional[int]=None):
+  def prelu(self, weight:Tensor, channel_dim:int|None=None):
     """
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
-    NOTE: if `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
-    When `channel_dim` is `1`, the behavior matches that of pytorch's prelu
-    When `channel_dim` is `None`, `channel_dim` is determined by the first dimension of target tensor that has the same shape as weight
+    NOTE: only when `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
+    If `channel_dim` is an integer, `channel_dim` specifies the channel dimension where the size of that dimension must equal the size of weight
+    If `channel_dim` is `None`, `channel_dim` is determined by the first dimension of target tensor that has the same size as weight
 
     - Described: https://paperswithcode.com/method/prelu
     - Paper: https://arxiv.org/abs/1502.01852v1
@@ -2768,12 +2768,9 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).prelu().numpy())
     ```
     """
-    if self.shape == weight.shape: return (self > 0).where(self, self * weight)
-    if weight.ndim > 1: raise ValueError("weight must be a scalar or a 1-D Tensor")
-    if self.ndim <= 2 and weight.ndim != 0: raise ValueError("weight must be scalar if there are no channels")
-    if channel_dim is not None and weight.shape and self.size(channel_dim) != weight.size(0): raise ValueError("weight size must equal channel size")
-    if weight.numel() != 1:
-      weight = weight.reshape(*(self.size(i) if i == (channel_dim or self.shape.index(weight.size(0))) else 1 for i in range(self.ndim)))
+    if weight.ndim == 1 and weight.numel() > 1:
+      channel_dim = self.shape.index(weight.shape[0]) if channel_dim is None else channel_dim
+      weight = weight.reshape([self.shape[i] if i == channel_dim else 1 for i in range(self.ndim)])
     return (self > 0).where(self, self * weight)
 
   def selu(self, alpha=1.67326, gamma=1.0507):
