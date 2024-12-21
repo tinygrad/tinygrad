@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes, functools
-from typing import Tuple
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import cpu_time_execution, getenv, cpu_objdump
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -32,7 +31,7 @@ class LLVMProgram:
     self.fxn = dev.engine.get_function_address(name)
     assert self.fxn != 0, "LLVM failed to get function address"
 
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
     if not hasattr(self, 'cfunc'):
       self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
