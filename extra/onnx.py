@@ -1,5 +1,4 @@
-from __future__ import annotations
-from typing import List, Dict, Union, Callable, Any, Sequence
+from typing import Callable, Any, Sequence
 import importlib, functools
 import numpy as np
 from tinygrad import Tensor, dtypes
@@ -22,7 +21,7 @@ def _cached_to_python_const(t:Tensor):
   return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
+def to_python_const(t) -> list[ConstType]|ConstType|bytes:
   if not isinstance(t, Tensor): return t
   global cache_misses
   ret = _cached_to_python_const(t)
@@ -33,7 +32,7 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
 
 # TODO: use real float16
 # src: onnx/mapping.py
-DTYPE_MAP: Dict[TensorProto.DataType | int, DType] = {
+DTYPE_MAP: dict[TensorProto.DataType | int, DType] = {
   TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
   TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
   TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
@@ -45,7 +44,7 @@ def dtype_parse(onnx_dtype: TensorProto.DataType | int) -> DType:
   return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype]) else dtypes.float
 
 # src: onnx/onnx_ml_pb2.pyi
-ATTRIBUTE_MAP: Dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
+ATTRIBUTE_MAP: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
   AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
   AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
   AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
@@ -86,7 +85,7 @@ def get_run_onnx(onnx_model: ModelProto):
   }
 
   # these values are expected to be python consts
-  required_input_python_consts: Dict[str, tuple[int, ...]] = {
+  required_input_python_consts: dict[str, tuple[int, ...]] = {
     "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
     "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
     "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
@@ -138,24 +137,14 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp_tensors]} opt {opt}")
       if debug >= 3:
         print("\tinputs:")
-        print("\n".join(f"\t\t{x} - {t}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
+        print("\n".join(f"\t\t{x} - {t!r}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
 
-      if n.op_type in tensor_methods:
-        ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
+      # special case additional inps or opts
+      if n.op_type == "Split" and 'num_outputs' not in opt: opt['num_outputs'] = len(n.output)
+      if n.op_type == "Gradient": opt['intermediate_tensors'] = model_tensors
 
-      # NOTE some ops live here because they require access to some local variables
-      elif n.op_type == "Split":
-        axis, n_outputs  = opt.get('axis', 0), opt.get('num_outputs') or len(n.output)
-        sz = inp[0].shape[axis]
-        sizes = inp[1] if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
-        ret = inp[0].split(sizes, axis)
-      elif n.op_type == "Gradient":
-        assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
-        y = opt["y"]
-        model_tensors[y].backward()
-        ret = tuple([t.grad for t in inp])
-
-      # onnx_ops.py
+      # run op
+      if n.op_type in tensor_methods: ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
