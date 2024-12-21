@@ -111,9 +111,25 @@ def upcast(u: UOp):
   else: dtype = u.dtype
   return UOp(u.op, dtype, arg=u.arg, src=tuple(upcast(_u) for _u in u.src))
 
+def overflow2(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min(dtype) if u.op is not Ops.CAST else overflow2(u.src[0], dtype)
+def upcast2(u: UOp):
+  srcs = [upcast2(_src) for _src in u.src]
+  ret = u.replace(src=tuple(srcs))
+  if u.dtype.scalar() is dtypes.int:
+    dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
+    if overflow2(u, u.dtype):
+      srcs = [_src.cast(dtype) for _src in srcs]
+      ret = ret.replace(dtype=dtype, src=tuple(srcs))
+    elif any((overflow2(src, u.dtype) for src in u.src)):
+      srcs = [_src.cast(dtype) for _src in srcs]
+      ret = ret.replace(dtype=dtype, src=tuple(srcs))
+      ret = ret.cast(u.dtype)
+  return ret
+
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
-  if ctx.require_upcast: idx, valid = upcast(idx), upcast(valid)
+  idx, valid = graph_rewrite(idx, sym, {}), graph_rewrite(valid, sym, {})
+  idx, valid = upcast2(idx), upcast2(valid)
   buf = x.src[0]
   if x.op is Ops.LOAD:
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
@@ -126,15 +142,17 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
   if store_back:
     idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[2].src else u for u in ctx.idxs])
-    if ctx.require_upcast: idx = upcast(idx)
+    idx = graph_rewrite(idx, sym, {})
+    idx = upcast2(idx)
   if (not cast(PtrDType, x.src[0].dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
 
 def valid_view_to_uop(ctx: IndexContext, x:UOp):
-  ret = x.st_arg.to_indexed_uops(ctx.idxs)[1]
-  return upcast(ret) if ctx.require_upcast else ret
+  _, valid = x.st_arg.to_indexed_uops(ctx.idxs)
+  valid = graph_rewrite(valid, sym, {})
+  return upcast2(valid)
 
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
@@ -144,18 +162,5 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def overflow(u): return any((u.vmax > dtypes.max(u.dtype), u.vmin < dtypes.min(u.dtype), *(overflow(_u) for _u in u.src)))
-
-# If any of the views overflows after sym folding, upcast need to be done on all
-def check_upcast(ctx: IndexContext, view: UOp):
-  idx, _ = view.arg.to_indexed_uops(ctx.idxs)
-  idx = graph_rewrite(idx, sym, {})
-  if overflow(idx): ctx.require_upcast = True
-pm_upcast_idx = PatternMatcher([(UPat(Ops.VIEW, name="view"), check_upcast)])
-
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
-  graph_rewrite(ast, pm_upcast_idx, ctx:=get_index(ast, opts))
-  if ctx.require_upcast:
-    ctx.idxs = [upcast(idx) for idx in ctx.idxs]
-    ctx.ridxs = [upcast(idx) for idx in ctx.ridxs]
-  return graph_rewrite(ast, pm_lowerer, ctx=ctx)
+  return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))

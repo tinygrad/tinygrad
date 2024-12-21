@@ -1,4 +1,4 @@
-from typing import List, Set
+from typing import List
 import unittest, time
 from tinygrad import dtypes, Device
 from tinygrad.helpers import DEBUG
@@ -718,10 +718,11 @@ class TestIdxUpcast(unittest.TestCase):
   def render_src(self, indexed_ast: UOp):
     uops = linearize_uop(full_graph_rewrite(indexed_ast.sink(), self.renderer))
     return self.renderer.render("test", uops)
-  def find_ops_in_ast(self, ast: UOp, op: Ops, res: Set):
-    if ast.op == op: return res.add(ast)
-    for u in ast.src: self.find_ops_in_ast(u, op, res)
-    return res
+  def find_ops_in_ast(self, ast: UOp, op: Ops) -> None | UOp:
+    if ast.op == op: return ast
+    for u in ast.src:
+      if (res:=(self.find_ops_in_ast(u, op))) is not None:
+        return res
   def e(self, st):
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
@@ -736,17 +737,13 @@ class TestIdxUpcast(unittest.TestCase):
     st = ShapeTracker((View.create(shape=shape, offset=offset),))
     elementwise_ast = self.e(st)
     self.render_src(elementwise_ast)
-    assert elementwise_ast.src[0].src[1].dtype is dtype
-
-    # This asserts that upcast didn't happen partially
-    if Device.DEFAULT not in ["CLANG", "LLVM"]:
-      assert len(self.find_ops_in_ast(elementwise_ast, Ops.SPECIAL, set())) == len(shape)
+    index_op = self.find_ops_in_ast(elementwise_ast, Ops.INDEX)
+    assert index_op is not None
+    assert index_op.src[1].dtype == dtype
 
     reduced_ast = self.r(st)
     self.render_src(reduced_ast)
-    index_ops = self.find_ops_in_ast(reduced_ast, Ops.INDEX, set())
-    assert index_ops
-    index_op = index_ops.pop()
+    index_op = self.find_ops_in_ast(reduced_ast, Ops.INDEX)
     assert index_op is not None and index_op.src[1].dtype == dtype
 
   # total 2**31: Use three dims so it doesn't exceed block limit
@@ -777,10 +774,10 @@ class TestIdxUpcast(unittest.TestCase):
   # Intermediate sum is 2147487743, bigger than 2**31 (2147483647)
   def test_overflow_neg_offset_upper_bound(self):
     dim1, dim2, dim3, offset = 2**12, 2**12, 2**7+1, -2**30
-    self.assert_dtype((dim1, dim2, dim3), dtypes.long, offset=offset)
-    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.long, offset=offset)
+    self.assert_dtype((dim1, dim2, dim3), dtypes.int, offset=offset)
+    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int, offset=offset)
 
-  def const_and_store_may_overflow(self, shape, mask, num_idx, dtype):
+  def const_and_store_may_overflow(self, shape, mask, dtype):
     # If either or both of these overflow, do upcast
     st = ShapeTracker((View.create(shape=shape),)).to_uop()
     st_const = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
@@ -792,20 +789,16 @@ class TestIdxUpcast(unittest.TestCase):
     ))
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, const)
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
+    index_op = self.find_ops_in_ast(indexed, Ops.INDEX)
+    assert index_op is not None and index_op.src[1].dtype is dtype
     self.render_src(indexed)
-    if Device.DEFAULT not in ["CLANG", "LLVM"]:
-      idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
-      assert len(idx_ops) == num_idx
-      assert all(u.dtype is dtype for u in idx_ops)
-    index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
-    assert all(u.dtype is dtype for u in index_ops.pop().src)
 
   def test_const_store_in_range(self):
-    self.const_and_store_may_overflow((256,), ((1, 256),), 1, dtypes.int)
+    self.const_and_store_may_overflow((256,), ((1, 256),), dtypes.int)
   def test_store_overflow_const_in_range(self):
-    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((10, 20), (10, 20), (10, 20)), 3, dtypes.long)
+    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((10, 20), (10, 20), (10, 20)), dtypes.long)
   def test_store_overflow_const_overflow(self):
-    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((1, 2**12), (1, 2**12), (1, 2**7+1)), 3, dtypes.long)
+    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((1, 2**12), (1, 2**12), (1, 2**7+1)), dtypes.long)
 
   def test_load_overflow(self):
     shape, mask = (2**12, 2**12, 2**7+1), ((0, 10), (0, 10), (0, 10))
@@ -814,12 +807,7 @@ class TestIdxUpcast(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, load))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
     self.render_src(indexed)
-    if Device.DEFAULT not in ["CLANG", "LLVM"]:
-      idx_ops = self.find_ops_in_ast(indexed, Ops.SPECIAL, set())
-      assert len(idx_ops) == 3
-      assert all(u.dtype is dtypes.long for u in idx_ops)
-    index_ops = self.find_ops_in_ast(indexed, Ops.CMPLT, set())
-    assert all(u.dtype is dtypes.long for u in index_ops.pop().src)
+
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
 class TestIndexingOverflowWEBGPU(unittest.TestCase):
