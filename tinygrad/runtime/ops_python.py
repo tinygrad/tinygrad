@@ -2,9 +2,8 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-import sys
 from typing import Optional, Any, TYPE_CHECKING
-import pickle, base64, itertools, time, struct
+import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
