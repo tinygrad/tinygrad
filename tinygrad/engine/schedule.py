@@ -37,7 +37,7 @@ tensor_uop_spec = PatternMatcher([
    (isinstance(mv.dtype, ImageDType) and x.dtype == mv.dtype.base and x.is_realized)),
 
   # Tensor variable bindings
-  (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
+  (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -69,13 +69,16 @@ tensor_uop_spec = PatternMatcher([
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
-  # BUFFER and VIEW specify shape and device for meta ops
+  # BUFFER and VIEW specify device and shape for meta ops
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat(GroupOp.Meta, name="uop"))),
    lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
 
+  # DEVICE and VIEW specify device and shape for BIND
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND))), lambda: True),
+
   # Tensor const has a ShapeTracker of shape=() and a device
-  (UPat(Ops.VIEW, name="view", arg=ShapeTracker.from_shape(()), src=(UPat(Ops.DEVICE), UPat({Ops.CONST, Ops.BIND}, name="const_uop"))),
-   lambda view,const_uop: view.dtype == const_uop.dtype),
+  (UPat(Ops.VIEW, name="view", arg=ShapeTracker.from_shape(()), src=(UPat(Ops.DEVICE), UPat(Ops.CONST, name="const"))),
+   lambda view,const: view.dtype == const.dtype),
 
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
   # TODO: this should be EMPTY(VIEW(BUFFER))
