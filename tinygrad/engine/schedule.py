@@ -126,6 +126,7 @@ class ScheduleContext:
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
+  late_views: dict[UOp, ShapeTracker] = field(default_factory=dict)  # this maps resized BUFFERs to a ShapeTracker to keep shapes the same
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 # TODO: delete this once CONST has a VIEW source
@@ -221,6 +222,7 @@ class ScheduleItemContext:
   ops_metadata: dict[UOp, Metadata]
   assigns: set[UOp]
   var_vals: dict[Variable, int]
+  late_views: dict[UOp, ShapeTracker]
   sinked: dict[UOp, UOp]
   sts: set[ShapeTracker] = field(default_factory=set)
   bufs: list[UOp] = field(default_factory=list)
@@ -262,7 +264,7 @@ multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: c
 
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # create the ast context
-  si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
+  si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, ctx.late_views, {x.buf_uop:x.src[2] for x in pre.src})
   create_ctx = add_metadata if len(si_ctx.assigns) == 0 else add_metadata+add_assign_adjacents
   sink = graph_rewrite(pre, create_ctx if len(si_ctx.sinked) == 1 else multioutput+create_ctx, si_ctx)
   # do movement ops
@@ -281,7 +283,11 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # can only schedule once
   for buf_uop in si_ctx.sinked:
-    for luop in si_ctx.tensor_uops[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
+    for luop in si_ctx.tensor_uops[buf_uop]:
+      # if we resize the buffer, we should VIEW it as the movement op we skipped
+      output_view = ctx.late_views.get(buf_uop, unwrap(luop.st))
+      assert output_view.shape == luop.shape, f"tensor expects {luop.shape}, scheduled {output_view.shape}"
+      luop.become(buf_uop.view(output_view))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))
@@ -583,7 +589,28 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
+# **** Stack movement ops on top of UOps with VIEW
+
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
+
+def cast_before_view(ctx:ScheduleContext, b:UOp, base:UOp, root:UOp, src:UOp, view:UOp):
+  if not getenv("CAST_BEFORE_VIEW", 1) or root.dtype.itemsize > src.dtype.itemsize: return None
+  new_op = src.cast(root.dtype)
+  # we should first resize the target BUFFER
+  target_buf = UOp.new_buffer(new_op.device, new_op.size, new_op.dtype)
+  # tensors refering to CAST(VIEW(x)) now refer to CAST(x), keep the movement op around in late_views
+  ctx.tensor_uops[target_buf] = ctx.tensor_uops[b]
+  del ctx.tensor_uops[b]
+  # the tensor becomes: target_buf.view(late_view) if we realize this buf
+  ctx.late_views[target_buf] = unwrap(view.st)
+  return UOp(Ops.VIEW, new_op.dtype, (target_buf, new_op), unwrap(new_op.st)).view(unwrap(view.st))
+
+rewrite_views = remove_movement_ops+PatternMatcher([
+  # CAST(VIEW(src)) -> VIEW(CAST(src))
+  (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, name="src", src=(UPat(Ops.BUFFER), UPat())).view(name="view"),)), cast_before_view),
+  # merge views TODO: why is BUFFER wrong?
+  (UPat.var("x").view(name="v1").view(name="v2"), lambda x,v1,v2: None if x.op is Ops.BUFFER else x.view(v1.st+v2.st)),
+])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
@@ -594,7 +621,8 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
+  big_graph = graph_rewrite(big_graph, rewrite_views, ctx)
+  big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
