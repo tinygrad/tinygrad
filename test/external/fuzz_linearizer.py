@@ -91,7 +91,7 @@ def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_de
 
 def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> Tuple[str, Any]: # (error msg, run state)
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.ast[0].vars()}
+  if var_vals is None: var_vals = {v: v.min for v in lin.vars}
 
   # TODO: images needs required_optimization
   try:
