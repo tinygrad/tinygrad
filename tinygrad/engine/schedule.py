@@ -573,6 +573,21 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
+def fix_image_buffer(ctx:ScheduleContext, root:UOp, b:UOp, base:UOp):
+  if not isinstance(b.dtype, ImageDType) or root.op is Ops.BUFFER: return None
+  if (prod(base.shape) != prod(b.dtype.shape) or not any(base.shape[x]%4 == 0 for x in unwrap(base.st).unit_stride_axes())):
+    if DEBUG >= 2: print(f"forcing image {b.dtype} with shape {base.shape} to {b.dtype.base}")
+    new_buffer = b.replace(dtype=b.dtype.base)
+    ctx.tensor_uops[new_buffer] = ctx.tensor_uops[b]
+    del ctx.tensor_uops[b]
+    return base.replace(src=(new_buffer, root))
+remove_image_dtype = PatternMatcher([
+  # "make things that can't be images not images"
+  (UPatScheduled(name="root"), fix_image_buffer),
+  # images can only exist on BUFFER uops, everything else is the base float
+  (UPat(set(Ops), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) and x.op is not Ops.BUFFER else None),
+])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
@@ -582,6 +597,8 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
+  # TOOD: how slow is this?
+  big_graph = graph_rewrite(big_graph, remove_image_dtype, ctx)
   big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # create the scheduler context
