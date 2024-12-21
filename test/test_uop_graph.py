@@ -736,7 +736,7 @@ class TestIdxUpcast(unittest.TestCase):
     alu = load.add(const)
     store = UOp(Ops.STORE, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, alu))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
-    # Render without errors indicate that all alus were casted properly
+    # Render without errors indicate that all alus were casted properly (passes spec)
     self.render_src(indexed)
     store_op = self.find_ops_in_ast(indexed, Ops.STORE)
     assert store_op.src[0].src[1].dtype is dtype_store
