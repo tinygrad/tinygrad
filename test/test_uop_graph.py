@@ -723,90 +723,60 @@ class TestIdxUpcast(unittest.TestCase):
     for u in ast.src:
       if (res:=(self.find_ops_in_ast(u, op))) is not None:
         return res
-  def e(self, st):
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st.to_uop(), UOp.const(dtypes.int8, 1))
+
+  def _assert(self, shape, dtype_store, offset=0):
+    mask = tuple((1, s) for s in shape)
+    st = ShapeTracker((View.create(shape=shape, offset=offset, mask=mask),)).to_uop()
+    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st))
+    const = UOp(Ops.WHERE, dtypes.float, src=(
+      UOp(Ops.VALID, dtypes.bool, src=(st,)),
+      UOp(Ops.CONST, dtypes.float, arg=1.0),
+      UOp(Ops.CONST, dtypes.float, arg=0.0)
+    ))
+    alu = load.add(const)
+    store = UOp(Ops.STORE, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, alu))
     indexed = rewrite_shapetracker_with_index(store, self.renderer)
-    return indexed
-  def r(self, st):
-    load = UOp(Ops.LOAD, dtypes.float, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st.to_uop()))
-    reduced = UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(load,))
-    indexed = rewrite_shapetracker_with_index(reduced, self.renderer)
-    return indexed
-
-  def assert_dtype(self, shape, dtype, offset=0):
-    st = ShapeTracker((View.create(shape=shape, offset=offset),))
-    elementwise_ast = self.e(st)
-    self.render_src(elementwise_ast)
-    index_op = self.find_ops_in_ast(elementwise_ast, Ops.INDEX)
-    assert index_op is not None
-    assert index_op.src[1].dtype == dtype
-
-    reduced_ast = self.r(st)
-    self.render_src(reduced_ast)
-    index_op = self.find_ops_in_ast(reduced_ast, Ops.INDEX)
-    assert index_op is not None and index_op.src[1].dtype == dtype
+    # Render without errors indicate that all alus were casted properly
+    self.render_src(indexed)
+    store_op = self.find_ops_in_ast(indexed, Ops.STORE)
+    assert store_op.src[0].src[1].dtype is dtype_store
+    load_op = self.find_ops_in_ast(indexed, Ops.LOAD)
+    assert load_op.src[0].src[1].dtype is dtype_store
+    return store_op, load_op
 
   # total 2**31: Use three dims so it doesn't exceed block limit
   # Symbolic has to subtract by 1 because var is inclusive
   def test_int32(self):
     dim1, dim2, dim3 = 2**12, 2**12, 2**7
-    self.assert_dtype((dim1, dim2, dim3), dtypes.int)
-    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int)
+    self._assert((dim1, dim2, dim3), dtypes.int)
+    self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int)
 
   def test_overflow(self):
     dim1, dim2, dim3 = 2**12, 2**12, 2**7+1
-    self.assert_dtype((dim1, dim2, dim3), dtypes.long)
-    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.long)
+    self._assert((dim1, dim2, dim3), dtypes.long, )
+    self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.long)
 
   # Negative index will be handled separately by mask, but still need to check negative overflow
   def test_int32_neg_lower_bound(self):
-    dim1, dim2, offset = 2, 3, -2**31
-    self.assert_dtype((dim1, dim2), dtypes.int, offset=offset)
-    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1)), dtypes.int, offset=offset)
+    dim1, dim2, offset = 16, 16, -2**31
+    self._assert((dim1, dim2), dtypes.int, offset=offset)
+    self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1)), dtypes.int, offset=offset)
 
   def test_overflow_neg_lower_bound(self):
-    dim1, dim2, offset = 2, 3, -2**31-1
-    self.assert_dtype((2, 3), dtypes.long, offset=-2**31-1)
-    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), 2 ** 7), dtypes.long, offset=offset)
+    dim1, dim2, offset = 16, 16, -2**31-1
+    self._assert((dim1, dim2), dtypes.long, offset=-2**31-1)
+    self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), 2 ** 7), dtypes.long, offset=offset)
 
   # Offset brings final value within int32, but calculation has to be done on int64
   # ((gidx0+((gidx1*129)+(gidx2*528384)))+-1073741824) where gidx.max = 128, gidx1.max = 4095, gidx2.max = 4095.
   # Intermediate sum is 2147487743, bigger than 2**31 (2147483647)
   def test_overflow_neg_offset_upper_bound(self):
     dim1, dim2, dim3, offset = 2**12, 2**12, 2**7+1, -2**30
-    self.assert_dtype((dim1, dim2, dim3), dtypes.int, offset=offset)
-    self.assert_dtype((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int, offset=offset)
-
-  def const_and_store_may_overflow(self, shape, mask, dtype):
-    # If either or both of these overflow, do upcast
-    st = ShapeTracker((View.create(shape=shape),)).to_uop()
-    st_const = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
-
-    const = UOp(Ops.WHERE, dtypes.float, src=(
-      UOp(Ops.VALID, dtypes.bool, src=(st_const,)),
-      UOp(Ops.CONST, dtypes.float, arg=1.0),
-      UOp(Ops.CONST, dtypes.float, arg=0.0)
-    ))
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, const)
-    indexed = rewrite_shapetracker_with_index(store, self.renderer)
-    index_op = self.find_ops_in_ast(indexed, Ops.INDEX)
-    assert index_op is not None and index_op.src[1].dtype is dtype
-    self.render_src(indexed)
-
-  def test_const_store_in_range(self):
-    self.const_and_store_may_overflow((256,), ((1, 256),), dtypes.int)
-  def test_store_overflow_const_in_range(self):
-    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((10, 20), (10, 20), (10, 20)), dtypes.long)
-  def test_store_overflow_const_overflow(self):
-    self.const_and_store_may_overflow((2**12, 2**12, 2**7+1), ((1, 2**12), (1, 2**12), (1, 2**7+1)), dtypes.long)
-
-  def test_load_overflow(self):
-    shape, mask = (2**12, 2**12, 2**7+1), ((0, 10), (0, 10), (0, 10))
-    st = ShapeTracker((View.create(shape=shape, mask=mask),)).to_uop()
-    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st))
-    store = UOp(Ops.STORE, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0), st, load))
-    indexed = rewrite_shapetracker_with_index(store, self.renderer)
-    self.render_src(indexed)
+    store, _ = self._assert((dim1, dim2, dim3), dtypes.int, offset=offset)
+    # This tests that the intermediate values were upcasted
+    assert store.src[0].src[1].op is Ops.CAST
+    assert store.src[0].src[1].src[0].dtype is dtypes.long
+    self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int, offset=offset)
 
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
