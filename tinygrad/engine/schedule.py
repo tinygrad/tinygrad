@@ -96,6 +96,19 @@ tensor_uop_spec = PatternMatcher([
    (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
 ])
 
+big_graph_spec = tensor_uop_spec+PatternMatcher([
+  # CONST ShapeTracker must be unmasked, masked VIEWs can only stack on top of the constant
+  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat(Ops.CONST))), lambda st: all(v.mask is None for v in st.st.views)),
+  # big graph wraps unrealized UOps around a VIEW(BUFFER, <uop>)
+  # this BUFFER is a key for keeping a reference back to the original tensor_uop
+  # while allowing the scheduler to apply transformations on it
+  # NOTE: the VIEW is the output ShapeTracker of the underlying UOp
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="buf"), UPat())),
+   lambda st,buf: st.size == buf.size and st.st.contiguous),
+  # movement ops can be applied on top of other uops
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.VIEW, src=(UPat(), UPat())))), lambda: True),
+])
+
 # **** ScheduleItem return type
 
 @dataclass(frozen=True)
@@ -596,6 +609,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
+  if not skip_check: type_verify(list(big_graph.toposort), extra_spec=big_graph_spec)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
   # group realizes into kernels
