@@ -2,9 +2,8 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-import sys
-from typing import Tuple, List, Optional, Any, Dict, TYPE_CHECKING
-import pickle, base64, itertools, time, struct
+from typing import Optional, Any, TYPE_CHECKING
+import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -27,18 +26,18 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[Ops, Optional[DType], List[int], Any]] = pickle.loads(lib)
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    self.uops: list[tuple[Ops, Optional[DType], list[int], Any]] = pickle.loads(lib)
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      ul: Dict[int, Any] = {}
-      dl: Dict[int, DType] = {}
-      pbufs: List[memoryview] = list(bufs)
-      pvals: List[int] = list(vals)
+      ul: dict[int, Any] = {}
+      dl: dict[int, DType] = {}
+      pbufs: list[memoryview] = list(bufs)
+      pvals: list[int] = list(vals)
       i = 0
-      loop_ends: Dict[int, int] = {}
+      loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF}
@@ -184,7 +183,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
-  def render(self, name:str, uops:List[UOp]) -> str:
+  def render(self, name:str, uops:list[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 

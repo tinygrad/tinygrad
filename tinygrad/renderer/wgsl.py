@@ -1,4 +1,3 @@
-from typing import List, Tuple, Optional
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
@@ -18,7 +17,7 @@ def packed_store(bidx:UOp, var:UOp):
   return UOp.store(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), ((buf & mask) | new_v.cast(dtypes.uint32)))
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
-def packed_load(root:UOp, bidx:UOp, dtype:DType, var:Optional[UOp]=None):
+def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):
   div_idx = bidx.src[1]//(4//dtype.itemsize)
   shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//dtype.itemsize))*UOp.const(dtypes.uint32, 8*dtype.itemsize)
   if var is not None: load = UOp.load(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), var, root.src[2], dtype=dtypes.uint32, arg=root.arg)
@@ -73,7 +72,7 @@ class WGSLRenderer(CStyleLanguage):
   def render_dtype(self, dt:DType, mutable=True) -> str: return "var"
   def render_load(self, x:str, dt:DType) -> str: return f"atomicLoad(&{x})" if dt.itemsize < 4 else x
   def buf_map(self, dt:DType) -> str: return "atomic<u32>" if dt.itemsize < 4 else self.type_map[dt.base]
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     local_size = [num for _, num in sorted([u.arg for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == 'l'], key=lambda x: x[0])]
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
