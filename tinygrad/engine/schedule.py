@@ -36,7 +36,7 @@ tensor_uop_spec = PatternMatcher([
    # is there a clean way to update its _mop children?
    (isinstance(mv.dtype, ImageDType) and x.dtype == mv.dtype.base and x.is_realized)),
 
-  # tensor variable bindings
+  # Tensor variable bindings
   (UPat(Ops.BIND, dtype=dtypes.int, src=(UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
@@ -543,9 +543,9 @@ do_realize = PatternMatcher([
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
-def generate_valid(ctx:ScheduleContext, const:UOp, st:UOp) -> UOp:
-  if const.op is Ops.BIND: ctx.var_vals.update([const.unbind()])
-  return UOp.const_with_shape(const.dtype.base, const if const.op is Ops.BIND else const.arg, unwrap(st.st).shape)
+def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
+  ctx.var_vals.update([bind.unbind()])
+  return UOp.const_with_shape(bind.dtype, bind, st.shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
@@ -558,7 +558,9 @@ def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
 
 break_sched = PatternMatcher([
   # consts are always fused and generated
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat({Ops.CONST, Ops.BIND}, name="const"))), generate_valid),
+  (UPat(Ops.VIEW, name="root", src=(UPat(), UPat.cvar())), lambda root: UOp.const_with_shape(root.dtype.base, root.const_arg, root.shape)),
+  # values from BIND append to this schedule's var_vals
+  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat(Ops.BIND, name="bind"))), unbind_variable),
   # view of realized buffer just loads
   (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, v.st.to_uop()))),
   # all other views either fold or realize with a store
