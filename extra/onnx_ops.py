@@ -109,7 +109,7 @@ def Slice(data:Tensor, starts:list[int], ends:list[int], axes:list[int]|None=Non
   for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
   return data[tuple(slices)]
 
-def Split(data:Tensor, split:None|list[int]=None, num_outputs:int=0, axis:int=0):
+def Split(data:Tensor, split:list[int]|None=None, num_outputs:int=0, axis:int=0):
   sz = data.shape[axis]
   if split is None: split = [sz // num_outputs + (1 if i < sz % num_outputs else 0) for i in range(num_outputs)]
   return data.split(split, axis)
