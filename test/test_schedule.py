@@ -2091,7 +2091,7 @@ class TestConst(unittest.TestCase):
 
   # ** part 3: Tensor variable bindings
 
-  @unittest.expectedFailure # TODO: should schedule assert if you try to realize a Variable?
+  #@unittest.expectedFailure # TODO: should schedule assert if you try to realize a Variable?
   def test_var_schedule(self):
     vv = UOp.variable("a", 0, 10).bind(1)
     a = Tensor(vv)
