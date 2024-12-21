@@ -139,7 +139,7 @@ def get_run_onnx(onnx_model: ModelProto):
         print("\tinputs:")
         print("\n".join(f"\t\t{x} - {t!r}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
 
-      # special case additional inps or opts
+      # provide additional arguments
       if n.op_type == "Split" and 'num_outputs' not in opt: opt['num_outputs'] = len(n.output)
       if n.op_type == "Gradient": opt['intermediate_tensors'] = model_tensors
 
