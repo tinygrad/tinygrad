@@ -2756,16 +2756,22 @@ class Tensor(SimpleMathTrait):
   def prelu(self, weight:Tensor, channel_dim:int|None=None):
     """
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
+
     NOTE: only when `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
-    If `channel_dim` is an integer, `channel_dim` specifies the channel dimension where the size of that dimension must equal the size of weight
-    If `channel_dim` is `None`, `channel_dim` is determined by the first dimension of target tensor that has the same size as weight
+      - If `channel_dim` is an integer, it specifies the channel dimension whose size must match the size of `weight`.
+      - If `channel_dim` is `None`, it is inferred by finding the first dimension of `self` that matches the size of `weight`.
 
     - Described: https://paperswithcode.com/method/prelu
     - Paper: https://arxiv.org/abs/1502.01852v1
     - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.prelu.html
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).prelu().numpy())
+    x = Tensor([[1.0, -2.0, 3.0, -4.0], [-1.0, 2.0, -3.0, 4.0]])
+    print(x.prelu(Tensor([0.1, 0.2, 0.3, 0.4])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    x = Tensor([[[[1.0, -1.0], [2.0, -2.0]], [[-0.5, 0.5], [-1.5, 1.5]]]])
+    print(x.prelu(Tensor([0.1, 0.2]), channel_dim=1).numpy())
     ```
     """
     if weight.ndim == 1 and weight.numel() > 1:
