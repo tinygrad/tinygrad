@@ -444,7 +444,7 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
 
 ops_folding = PatternMatcher([
   # op with size 0 is zero
-  (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  (UPatScheduled(), lambda b,to_store,base: base.const_like(0) if base.size == 0 else None),
   # DETACH is a NOOP here
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
   # elementwise const folding
@@ -577,10 +577,12 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 remove_movement_ops = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),
   # merge one src (unrealized) views (why doesn't this work?)
-  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(),), name="v1")), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
-  # merge const views (why doesn't this work?)
-  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST)), name="v1")), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
   # NOTE: we can't merge buffer views here because the buffer might be realized, and it's realized before the view
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat.var("x"),), name="v1")), name="v2"),
+   lambda x,v1,v2: None if x.op is Ops.BUFFER else v1.replace(arg=v1.arg+v2.arg)),
+  # merge unmasked const views (why doesn't this work?)
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST)), name="v1")), name="v2"),
+   lambda v1,v2: v1.replace(arg=v1.arg+v2.arg) if all(v.mask is None for v in v2.st.views) else None),
 ])
 
 @track_rewrites(named=True)
