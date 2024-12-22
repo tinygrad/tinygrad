@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING, Any, Callable
+from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -7,8 +7,7 @@ from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
-
-if TYPE_CHECKING: from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
