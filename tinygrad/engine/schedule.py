@@ -592,11 +592,13 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 
 remove_movement_ops = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),
-  # merge one src (unrealized) views (why doesn't this work?)
-  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(),), name="v1")), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
-  # merge const views (why doesn't this work?)
-  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST)), name="v1")), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
-  # NOTE: we can't merge buffer views here because the buffer might be realized, and it's realized before the view
+  # merge one src (unrealized) views
+  # NOTE: we can't merge realized buffer views here, because the buffer is realized before the view
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat.var("x"),), name="v1")), name="v2"),
+   lambda x,v1,v2: v1.replace(arg=v1.arg+v2.arg) if x.op is not Ops.BUFFER else None),
+  # merge unmasked const views
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST)), name="v1")), name="v2"),
+   lambda v1,v2: v1.replace(arg=v1.arg+v2.arg) if all(v.mask is None for v in v2.st.views) else None),
 ])
 
 @track_rewrites(named=True)
