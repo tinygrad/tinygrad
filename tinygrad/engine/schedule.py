@@ -540,7 +540,7 @@ def fold_img_cast(ctx:ScheduleContext, root:UOp, xb:UOp, view:UOp, b:UOp, to_cas
   if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op in GroupOp.Meta: return None
   if not isinstance(root.dtype, ImageDType): return None
   del ctx.realizes[b]
-  return to_cast.view(unwrap(view.st))
+  return to_cast.cast(root.dtype).view(unwrap(view.st))
 
 def init_big_graph(ctx:ScheduleContext, sink:UOp) -> UOp|None:
   new_src = tuple(x.base for x in sink.src if x.base.realized is None and not is_constant(x.base))
