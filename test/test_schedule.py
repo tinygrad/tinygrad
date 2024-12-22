@@ -1972,29 +1972,14 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
-@track_rewrites(named=True)
-def big_graph_rewrite(big_graph:UOp, ctx) -> UOp: return graph_rewrite(big_graph, do_realize, ctx)
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
-    x = UOp.const(dtypes.int, 0)
-    big_graph = big_graph_rewrite(x.sink(), ctx:=ScheduleContext())
-    self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(ctx.realizes), 0)
-
-  def test_sink_childless_const_alt(self):
-    x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
-    self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(ctx.realizes), 0)
+    x = Tensor(0)
+    check_schedule(x, 0)
 
   def test_sink_childless_const_alt_expanded(self):
-    # this is a real STORE of CONST (post expand)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    out = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 2, dtypes.int), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
-    big_graph = big_graph_rewrite(out.sink(), ctx:=ScheduleContext())
-    self.assertIs(big_graph, out.sink())
-    self.assertEqual(len(ctx.realizes), 1)
+    x = Tensor.zeros(4, 4).contiguous()
+    check_schedule(x, 1)
 
 tensor_const_pm = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
