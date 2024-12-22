@@ -253,8 +253,6 @@ to_si = PatternMatcher([
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
-  (UPat(set(Ops), name="root"),
-   lambda root: root.replace(dtype=root.dtype.base) if isinstance(root.dtype, ImageDType) and root.op is not Ops.BUFFER else None),
 ])
 
 add_metadata = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: None if (m:=ctx.ops_metadata.get(x)) is None else ctx.metadata.add(m)),])
@@ -460,7 +458,8 @@ def fix_image_buffer(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp):
   if not isinstance(dtype:=base.dtype, ImageDType): return None
   if prod(base.shape) == prod(dtype.shape) and any(base.shape[x]%4 == 0 for x in unwrap(base.st).unit_stride_axes()): return None
   b.become(b.replace(dtype=dtype.base))
-  return base.replace(dtype=dtype.base, src=(b, to_store))
+  r = base.replace(dtype=dtype.base, src=(b, to_store.cast(dtype.base)))
+  return r
 
 ops_folding = PatternMatcher([
   # op with size 0 is zero
@@ -602,6 +601,10 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
 remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
+remove_image_dtype = PatternMatcher([
+  (UPat(set(Ops), name="root"),
+   lambda root: root.replace(dtype=root.dtype.base) if isinstance(root.dtype, ImageDType) and root.op is not Ops.BUFFER else None),
+])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
@@ -612,7 +615,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   if not skip_check: type_verify(list(sink.toposort), extra_spec=scheduler_uop_spec+tensor_uop_spec)
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
-  sink = graph_rewrite(sink, merge_bufs, ctx)
+  sink = graph_rewrite(sink, remove_image_dtype+merge_bufs, ctx)
   if not skip_check: type_verify(list(sink.toposort), extra_spec=scheduler_uop_spec+tensor_uop_spec)
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
