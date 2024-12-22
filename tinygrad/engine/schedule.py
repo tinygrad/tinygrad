@@ -463,12 +463,12 @@ def fix_image_buffer(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp):
   return base.replace(dtype=dtype.base, src=(b, to_store))
 
 ops_folding = PatternMatcher([
-  # make things that can't be images not images
-  (UPatScheduled(), fix_image_buffer),
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # if the uop folded to a CONST we can delete the BUFFER
   (UPatScheduled(Ops.CONST, name="const"), lambda b,base,const: base.replace(src=(UOp(Ops.DEVICE, arg=base.device), const))),
+  # make things that can't be images not images
+  (UPatScheduled(), fix_image_buffer),
   # DETACH is a NOOP here
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
   # elementwise const folding
