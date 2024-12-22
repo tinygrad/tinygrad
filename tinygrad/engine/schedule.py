@@ -450,7 +450,19 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+rewrite_dtype = PatternMatcher([
+  #(UPat(tuple(Ops), name="x"), lambda ctx,x: x.replace(dtype=ctx) if x.dtype != ctx and x.op is not Ops.BUFFER else None),
+])
+
+def fix_image_buffer(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp):
+  if not isinstance(dtype:=base.dtype, ImageDType): return None
+  if prod(base.shape) == prod(dtype.shape) and any(base.shape[x]%4 == 0 for x in unwrap(base.st).unit_stride_axes()): return None
+  b.become(b.replace(dtype=dtype.base))
+  return base.replace(dtype=dtype.base, src=(b, to_store))
+
 ops_folding = PatternMatcher([
+  # make things that can't be images not images
+  (UPatScheduled(), fix_image_buffer),
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # if the uop folded to a CONST we can delete the BUFFER
@@ -522,8 +534,9 @@ def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> Non
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
 
-def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> UOp|None:
+def fold_img_cast(ctx:ScheduleContext, root:UOp, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> UOp|None:
   if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op in GroupOp.Meta: return None
+  if not isinstance(root.dtype, ImageDType): return None
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
@@ -540,7 +553,7 @@ do_realize = PatternMatcher([
   # realize before expand or unsafe pad ops
   (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
-  (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
+  (UPatScheduled(Ops.CAST, name="root", src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),)).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   # ASSIGN only needs the buffer
