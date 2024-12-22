@@ -527,9 +527,9 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(ctx:ScheduleContext, sink:UOp) -> UOp|None:
-  new_src = dedup(x.base for x in sink.src if is_scheduled(x.base))
+  new_src = dedup(x.base for x in sink.src if x.base.realized is None and not x.base.is_unrealized_const())
   for x in new_src: realize(ctx, x.buf_uop, x)
-  return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
+  return None if tuple(new_src) == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
   # always realize sinked ops
