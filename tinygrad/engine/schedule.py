@@ -97,7 +97,9 @@ tensor_uop_spec = PatternMatcher([
 ])
 
 scheduler_uop_spec = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())), lambda: True),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat(Ops.ASSIGN))), lambda st,b: st.size <= b.size),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat())), lambda st,b: st.size == b.size),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.CONST))), lambda st: all(v.mask is None for v in st.st.views)),
 ])
 
 # **** ScheduleItem return type
