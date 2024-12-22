@@ -107,9 +107,8 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min(dtype)
 
-# Lower and fold the index, then walk the tree bottom up to search for any node that needs casting
-# If a node overflows, its srcs need to be casted because they are the operands, the node itself will have dtype "replaced" b.c. it carries the result
-# If any of the node's srcs overflows, all of them need to be casted, afterwards the node itself is downcasted
+# If a node overflow, its srcs need to be checked to see if this overflows is a result of an ALU operation,
+# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`
 def upcast(u: UOp):
   srcs = [upcast(_src) for _src in u.src]
   ret = u.replace(src=tuple(srcs))
@@ -118,7 +117,8 @@ def upcast(u: UOp):
     srcs = [_src.cast(dtype) for _src in srcs]
     if overflow(u, u.dtype):
       ret = ret.replace(dtype=dtype, src=tuple(srcs))
-    elif any((overflow(src, u.dtype) for src in u.src)): # Check the original src, not the casted, so cast's vmin vmax don't get in the way
+    # Check the original src, new srcs has Ops.CAST whose vmin, vmax changes the real bounds
+    elif any((overflow(src, u.dtype) for src in u.src)):
       ret = ret.replace(dtype=dtype, src=tuple(srcs)).cast(u.dtype)
   return ret
 
