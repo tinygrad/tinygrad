@@ -549,7 +549,8 @@ do_realize = PatternMatcher([
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
 
 def generate_const(x:UOp, st:UOp):
-  assert all(v.mask is None for v in unwrap(st.st).views), f"ShapeTracker of {x.op} must be unmasked, got {st}"
+  # NOTE: masked VIEW stacks on top of the CONST, this is required for const folding correctness
+  assert all(v.mask is None for v in unwrap(st.st).views), f"ShapeTracker of CONST must be unmasked, got {st}"
   return UOp(Ops.VALID, dtypes.bool, (unwrap(st.st).to_uop(),)).where(x.replace(dtype=x.dtype.base), 0)
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
@@ -558,7 +559,7 @@ def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   assert st.size == b.size and unwrap(st.st).contiguous, f"ShapeTracker of realized {b} BUFFER must match the BUFFER size {st}"
-  # NOTE: if we're changing the BUFFER in this schedule, PRELOAD tells toposort to place this load before the ASSIGN
+  # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
   return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
