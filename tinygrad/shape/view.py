@@ -192,17 +192,11 @@ class View:
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
       for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
         if resolve(b <= t.vmin and t.vmax < e, False): continue
-        if not all_int([o, b, e]):
-          bad = True
-          continue
         if len(term) != 1:
           if not term and newe: newe[0] = 0
           else: bad = True
           continue
         d1, s1 = term[0]
-        if not all_int([s1, newe[d1]]):
-          bad = True
-          continue
         newb[d1] = max(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
         newe[d1] = min(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
 

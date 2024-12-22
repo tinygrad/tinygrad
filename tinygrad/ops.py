@@ -1169,9 +1169,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
-def max_var_const(x:UOp, c1:UOp, c2:UOp):
-  if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
-  if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
+# def max_var_const(x:UOp, c1:UOp, c2:UOp):
+#   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
+#   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
@@ -1237,7 +1237,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
-  ((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
+  #((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
