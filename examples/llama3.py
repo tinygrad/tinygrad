@@ -9,7 +9,7 @@ from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
 
 class Tokenizer:
-  pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
+  pat_str = tiktoken.TokenizerPat.llama()
   def __init__(self, model_path: str):
     mergeable_ranks = load_tiktoken_bpe(model_path)
     self.num_base_tokens = len(mergeable_ranks)
