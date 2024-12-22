@@ -111,16 +111,16 @@ def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`
 def upcast(u: UOp):
   srcs = [upcast(_src) for _src in u.src]
-  ret = u.replace(src=tuple(srcs))
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-    srcs = [_src.cast(dtype) for _src in srcs]
+    ret = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
     if overflow(u, u.dtype):
-      ret = ret.replace(dtype=dtype, src=tuple(srcs))
+      return ret
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax changes the real bounds
-    elif any((overflow(src, u.dtype) for src in u.src)):
-      ret = ret.replace(dtype=dtype, src=tuple(srcs)).cast(u.dtype)
-  return ret
+    if any((overflow(src, u.dtype) for src in u.src)):
+      # Optionally cast down
+      return ret.cast(u.dtype)
+  return u.replace(src=tuple(srcs))
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
