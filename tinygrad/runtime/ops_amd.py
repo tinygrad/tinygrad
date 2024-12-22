@@ -28,12 +28,13 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[int]=None, cpu_off=None, **kwargs):
-    cpu_off = cpu_off or (AMDDevice.signals_page.cpu_addr - AMDDevice.signals_page.va_addr if AMDDevice.driverless else 0)
-    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100, cpu_off=cpu_off)
+  def __init__(self, dev, base_addr:Optional[int]=None, cpu_off=None, **kwargs):
+    self.dev = dev
+    cpu_off = cpu_off or (self.dev.signals_page.cpu_addr - self.dev.signals_page.va_addr if AMDDevice.driverless else 0)
+    super().__init__(self.dev.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100, cpu_off=cpu_off)
 
   def __del__(self):
-    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
+    if isinstance(self.base_addr, int): self.dev.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -90,7 +91,7 @@ class AMDComputeQueue(HWQueue):
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000] if prg.enable_private_segment_sgpr else []
     else: user_regs = []
     if prg.enable_dispatch_ptr:
-      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
+      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.cpu_ptr + prg.kernargs_segment_size)
 
       self.bind_sints(*local_size, struct=dp, start_field='workgroup_size_x', fmt='H')
       self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], struct=dp, start_field='grid_size_x', fmt='I')
@@ -469,7 +470,7 @@ class VFIOIface:
 
   def free(self, mem):
     if mem.meta[2] is not None:
-      for dev in mem.meta[1][1:]: dev.dev_iface.mm.unmap_range(mem.va_addr, mem.size, free_paddrs=False)
+      for dev in mem.meta[1][1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size, free_paddrs=False)
       self.adev.mm.vfree(mem.meta[2])
 
   def map(self, mem):
@@ -523,8 +524,8 @@ class VFIOIface:
 class AMDDevice(HCQCompiled):
   driverless:bool = False
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
-  signals_page:Any = None
-  signals_pool:List[int] = []
+  # signals_page:Any = None
+  # signals_pool:List[int] = []
 
   def __init__(self, device:str=""):
     AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
@@ -537,10 +538,16 @@ class AMDDevice(HCQCompiled):
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
 
     # TODO: think of moving this out.
-    if AMDDevice.signals_page is None:
-      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, uncached=True, cpu_access=True)
-      AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-    else: self.dev_iface.map(AMDDevice.signals_page)
+    # if AMDDevice.signals_page is None:
+    #   AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, uncached=True, cpu_access=True)
+    #   AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
+    # else: self.dev_iface.map(AMDDevice.signals_page)
+
+    self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
+    self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
+    for dev in self.devices: 
+      self.dev_iface.map(dev.signals_page)
+      dev.dev_iface.map(self.signals_page)
 
     # Scratch setup
     max_cu_id = self.dev_iface.properties['simd_count'] // self.dev_iface.properties['simd_per_cu'] - 1
@@ -570,7 +577,7 @@ class AMDDevice(HCQCompiled):
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
     super().__init__(device, AMDDriverAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
-                     AMDSignal, AMDComputeQueue, AMDCopyQueue)
+                     functools.partial(AMDSignal, self), AMDComputeQueue, AMDCopyQueue)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)

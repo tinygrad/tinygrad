@@ -48,11 +48,9 @@ class AMPageTableEntry:
   def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
 
   def set_table(self, entry_id, pte:AMPageTableEntry, valid=True):
-    # if self.pm.paddr == 0x1700000 and entry_id == 0: input("hmm tbl")
     self.view[entry_id] = (pte.pm.paddr & 0x0000FFFFFFFFF000) | (am.AMDGPU_PTE_VALID if valid else 0)
 
   def set_page(self, entry_id, paddr, uncached=False, system=False, snooped=False, frag=0, valid=True):
-    # if self.pm.paddr == 0x1700000 and entry_id == 0: input("hmm pg")
     f = (am.AMDGPU_PTE_VALID if valid else 0) | am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE \
       | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if self.lv != am.AMDGPU_VM_PTB else 0) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
@@ -92,7 +90,7 @@ class AMMemoryManager:
 
       if free_pt and all(child_page_table.get_entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
         self.pfree(child_page_table.pm)
-        page_table.set_page(pte_idx, paddr=0, valid=False)
+        page_table.set_page(pte_idx, paddr=0x0, valid=False)
 
     # First pte is not full covered
     if vaddr % pte_covers != 0:
@@ -125,47 +123,41 @@ class AMMemoryManager:
     if AM_DEBUG >= 2: print(f"Mapping {vaddr=:#x} -> {paddr} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
-    for va, off, pte_st_idx, n_ptes, pte_covers, page_table, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
-      if paddr is None: lpaddr, off = self.pa_allocator.alloc(n_ptes * pte_covers), 0
-      else: lpaddr = paddr
+    for va, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
+      lpaddr, off = (self.pa_allocator.alloc(n_ptes * pte_covers), 0) if paddr is None else (paddr, off)
 
       # print("here with", pte_st_idx, n_ptes)
       for pte_idx in range(n_ptes):
-        assert page_table.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, "Entry already set"
-        page_table.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
+        assert pt.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, "Entry already set"
+        pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
         off += pte_covers
 
-      if AM_DEBUG >= 3: print(f"\tnptes={n_ptes:#x} incr={pte_covers:#x} upd_flags={page_table.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
+      if AM_DEBUG >= 3: print(f"\tnptes={n_ptes:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
 
     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
     if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
-    # print(f"Unmapping {vaddr=:#x} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
-    for va, off, pte_st_idx, n_ptes, pte_covers, page_table, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
-      entry = page_table.get_entry(pte_st_idx)
+    for va, off, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
+      entry = pt.get_entry(pte_st_idx)
       if not(entry & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
 
       for pte_idx in range(n_ptes):
-        assert page_table.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, "Entry must be set"
-        page_table.set_page(pte_st_idx + pte_idx, paddr=0x0, valid=False)
+        assert pt.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, "Entry must be set"
+        pt.set_page(pte_st_idx + pte_idx, paddr=0x0, valid=False)
 
   def map_from(self, vaddr:int, size:int, from_adev):
     if AM_DEBUG >= 2: print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.pcidev}")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
-    for va, off, pte_st_idx, n_ptes, pte_covers, page_table, _ in self.frags_walker(from_adev.mm.root_page_table, vaddr, size, from_entry=True, creat_pt=False):
-      # print("hm", hex(va + AMMemoryManager.va_allocator.base), hex(off), hex(n_ptes * pte_covers))
-      entry = page_table.get_entry(pte_st_idx)
-      uncached = entry & am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) == am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC)
-      snooped = entry & am.AMDGPU_PTE_SNOOPED == am.AMDGPU_PTE_SNOOPED
+    for va, _, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(from_adev.mm.root_page_table, vaddr, size, from_entry=True, creat_pt=False):
+      entry = pt.get_entry(pte_st_idx)
       paddr = (entry & 0x0000FFFFFFFFF000) if entry & am.AMDGPU_PTE_SYSTEM else (entry & 0x0000FFFFFFFFF000) + from_adev.pcidev.regions[0].base_addr
-      self.map_range(va + AMMemoryManager.va_allocator.base, n_ptes * pte_covers, paddr=paddr, uncached=uncached, system=True, snooped=snooped)
-
-    # print(f"Mapping done from {from_adev.pcidev} {vaddr=:#x} {size=:#x}")
+      self.map_range(va + AMMemoryManager.va_allocator.base, n_ptes * pte_covers, paddr=paddr, system=True,
+                     uncached=bool(entry & am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC)), snooped=bool(entry & am.AMDGPU_PTE_SNOOPED))
 
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
@@ -213,13 +205,8 @@ class AMDev:
       self.smu.mode1_reset()
       time.sleep(0.5)
 
-    self.soc21.init()
-    self.gmc.init()
-    self.ih.init()
-    self.psp.init()
-    self.smu.init()
-    self.gfx.init()
-    self.sdma.init()
+    # Initialize all blocks
+    for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__.get(f"{ip}_HWIP")][inst][seg]
  

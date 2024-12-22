@@ -3,7 +3,7 @@ import ctypes, time
 from typing import Literal
 from tinygrad.runtime.support.pci import pci_set_master
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
-from tinygrad.helpers import to_mv, lo32, hi32
+from tinygrad.helpers import to_mv, data64
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -297,15 +297,11 @@ class AM_PSP(AM_IP):
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
     sos_components_load_order = [
-      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE),
-      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
-      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV),
-      (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
-      (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV),
-      (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
-      (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV),
-      (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV),
-    ]
+      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
+      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
+      (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
+      (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
+
     for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
     while not self.is_sos_alive(): time.sleep(0.01)
 
@@ -363,16 +359,14 @@ class AM_PSP(AM_IP):
 
     ctypes.memset(ring_entry_addr, 0, ctypes.sizeof(am.struct_psp_gfx_rb_frame))
     write_loc = am.struct_psp_gfx_rb_frame.from_address(ring_entry_addr)
-    write_loc.cmd_buf_addr_hi = hi32(self.cmd_pm.mc_addr())
-    write_loc.cmd_buf_addr_lo = lo32(self.cmd_pm.mc_addr())
-    write_loc.fence_addr_hi = hi32(self.fence_pm.mc_addr())
-    write_loc.fence_addr_lo = lo32(self.fence_pm.mc_addr())
+    write_loc.cmd_buf_addr_hi, write_loc.cmd_buf_addr_lo = data64(self.cmd_pm.mc_addr())
+    write_loc.fence_addr_hi, write_loc.fence_addr_lo = data64(self.fence_pm.mc_addr())
     write_loc.fence_value = prev_wptr
 
     # Move the wptr
     self.adev.regMP0_SMN_C2PMSG_67.write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
 
-    while self.fence_pm.cpu_view().cast('I')[0] != prev_wptr: pass #self.adev.wreg(self.adev.reg_off("HDP", 0, 0x00d1, 0x0), 1)
+    while self.fence_pm.cpu_view().cast('I')[0] != prev_wptr: pass
     time.sleep(0.05)
 
     resp = am.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
@@ -391,26 +385,22 @@ class AM_PSP(AM_IP):
 
     self._prep_msg1(fw_bytes)
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = lo32(self.msg1_pm.mc_addr())
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi = hi32(self.msg1_pm.mc_addr())
+    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_pm.mc_addr())
     cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
     cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
     return self._ring_submit()
 
   def _tmr_load_cmd(self):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = lo32(self.tmr_pm.mc_addr())
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi = hi32(self.tmr_pm.mc_addr())
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = lo32(self.tmr_pm.paddr)
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi = hi32(self.tmr_pm.paddr)
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.tmr_pm.mc_addr())
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_pm.paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_pm.size
     return self._ring_submit()
 
   def _load_toc_cmd(self, toc_size):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_TOC)
-    cmd.cmd.cmd_load_toc.toc_phy_addr_lo = lo32(self.msg1_pm.mc_addr())
-    cmd.cmd.cmd_load_toc.toc_phy_addr_hi = hi32(self.msg1_pm.mc_addr())
+    cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.msg1_pm.mc_addr())
     cmd.cmd.cmd_load_toc.toc_size = toc_size
     return self._ring_submit()
 
