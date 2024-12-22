@@ -1,6 +1,5 @@
-from __future__ import annotations
 import os, pathlib, struct, ctypes, tempfile, functools, decimal
-from typing import List, Any, Union, Tuple, cast
+from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -59,6 +58,28 @@ def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg(cbuf, "GPUEnd
 def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
   raise error_constructor(from_ns_str(msg(error, "localizedDescription", restype=objc_instance)))
+
+class MetalDevice(Compiled):
+  def __init__(self, device:str):
+    self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
+    self.mtl_queue = msg(self.sysdevice, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
+    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
+    self.mtl_buffers_in_flight: list[Any] = []
+    self.timeline_signal = msg(self.sysdevice, "newSharedEvent", restype=objc_instance)
+    self.timeline_value = 0
+
+    Compiled.profile_events += [ProfileDeviceEvent(device)]
+
+    from tinygrad.runtime.graph.metal import MetalGraph
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
+                     functools.partial(MetalProgram, self), MetalGraph)
+
+  def synchronize(self):
+    for cbuf in self.mtl_buffers_in_flight:
+      wait_check(cbuf)
+      st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
+      if PROFILE: Compiled.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
+    self.mtl_buffers_in_flight.clear()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
@@ -125,7 +146,7 @@ class MetalProgram:
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()), restype=objc_instance)
     error_check(error_pipeline_creation)
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
     if prod(local_size) > cast(int, max_total_threads):
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
@@ -183,25 +204,3 @@ class MetalAllocator(LRUAllocator):
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "CPU -> METAL")
   def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> CPU")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
-
-class MetalDevice(Compiled):
-  def __init__(self, device:str):
-    self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = msg(self.sysdevice, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
-    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-    self.mtl_buffers_in_flight: List[Any] = []
-    self.timeline_signal = msg(self.sysdevice, "newSharedEvent", restype=objc_instance)
-    self.timeline_value = 0
-
-    Compiled.profile_events += [ProfileDeviceEvent(device)]
-
-    from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph)
-
-  def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight:
-      wait_check(cbuf)
-      st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
-      if PROFILE: Compiled.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
-    self.mtl_buffers_in_flight.clear()
