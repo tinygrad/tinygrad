@@ -96,6 +96,10 @@ tensor_uop_spec = PatternMatcher([
    (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
 ])
 
+scheduler_uop_spec = PatternMatcher([
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())), lambda: True),
+])
+
 # **** ScheduleItem return type
 
 @dataclass(frozen=True)
@@ -589,9 +593,11 @@ remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda 
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
-  if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
+  sink = UOp.sink(*outs)
+  if not skip_check: type_verify(list(sink.toposort), extra_spec=tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
-  sink = to_uop(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
+  sink = to_uop(sink, ctx:=ScheduleContext(), cache={})
+  if not skip_check: type_verify(list(sink.toposort), extra_spec=scheduler_uop_spec+tensor_uop_spec)
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
   sink = graph_rewrite(sink, merge_bufs, ctx)
