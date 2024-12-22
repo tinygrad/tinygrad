@@ -611,6 +611,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
   sink = graph_rewrite(sink, merge_bufs, ctx)
+  if not skip_check: type_verify(list(sink.toposort), extra_spec=scheduler_uop_spec+tensor_uop_spec)
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels
