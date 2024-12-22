@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any, Optional, cast
+from typing import Any, Optional, cast
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, subprocess, select, struct
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -77,7 +77,7 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
@@ -144,7 +144,7 @@ class AMDComputeQueue(HWQueue):
 
     self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
                          len(self._q) | amd_gpu.INDIRECT_BUFFER_VALID]
-    self._q = hw_view # type: ignore
+    self._q = hw_view
     return self
 
   def _submit(self, dev:AMDDevice):
@@ -382,7 +382,7 @@ class KFDIface:
 class VFIOIface:
   vfio_fd:int = -1
   iommu_set:bool = False
-  gpus:List[Any] = []
+  gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
     self.dev = dev
@@ -498,7 +498,7 @@ class AMDDevice(HCQCompiled):
   driverless:bool = False
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signals_pool:List[int] = []
+  signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
     AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
@@ -515,12 +515,6 @@ class AMDDevice(HCQCompiled):
       AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
       AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
     else: self.dev_iface.map(AMDDevice.signals_page)
-
-    # self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
-    # self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
-    # for dev in self.devices: 
-    #   self.dev_iface.map(dev.signals_page)
-    #   dev.dev_iface.map(self.signals_page)
 
     # Scratch setup
     max_cu_id = self.dev_iface.properties['simd_count'] // self.dev_iface.properties['simd_per_cu'] - 1

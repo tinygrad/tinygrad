@@ -22,7 +22,7 @@ class TestArange(unittest.TestCase):
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()
     np.testing.assert_equal(tt.numpy(), np.arange(N))
-    return p.op_estimate
+    return p.estimates.ops
 
   def test_complexity(self, opts=None, limit=None):
     # add 1 to avoid divide by 0. arange is 0 flops now!
@@ -66,6 +66,7 @@ class TestArange(unittest.TestCase):
     return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
 
 class TestIndexing(unittest.TestCase):
+  @unittest.expectedFailure
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1

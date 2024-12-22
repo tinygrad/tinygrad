@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YOLOv8 tinygrad WebGPU</title>
-    <script src="./net.js"></script>
+    <script type="module">
+        import yolov8 from "./net.js"
+        window.yolov8 = yolov8;
+    </script>
     <style>
         body {
             text-align: center;
@@ -213,7 +216,7 @@
                     wgpuError.style.display = "block";
                     loadingContainer.style.display = "none";
                 }
-                net = await loadNet(device);
+                net = await yolov8.load(device, "./net.safetensors");
                 loadingContainer.style.display = "none";
             }
             let start = performance.now();
