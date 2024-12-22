@@ -392,7 +392,6 @@ class Tensor(SimpleMathTrait):
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
     if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
-    if y.op is Ops.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
     raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Set, Union, Tuple, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -217,7 +217,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 class UOpMetaClass(type):
-  ucache:dict[Tuple, weakref.ReferenceType[UOp]] = {}
+  ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -269,8 +269,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache={})
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], Tuple]:
-    return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
+  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
 
@@ -777,7 +776,7 @@ class UPatAny(UPat):
     matches = [x.match(uop, store.copy()) for x in self.src[0]]
     return flatten([x for x in matches if x is not None])
 
-def deconstruct_function(fxn:Callable) -> Tuple:
+def deconstruct_function(fxn:Callable) -> tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
     if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
@@ -790,7 +789,7 @@ class PatternMatcher:
   def __init__(self, patterns:list[tuple[UPat, Callable]]):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, Set, bool]]] = {}
+    self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
@@ -1125,7 +1124,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   # return None if valid is always False, otherwise the simplified uop (might be the same as input)
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
-  bounds:DefaultDict[UOp, list[Optional[ConstType]]] = defaultdict(lambda: [None, None])
+  bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
   for stmt in split_uop(valid, Ops.AND):
     try: expr, is_upper, c = parse_valid(stmt)
     except ValueError: return uop  # give up if we cannot parse the valid
@@ -1169,9 +1168,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
-def max_var_const(x:UOp, c1:UOp, c2:UOp):
-  if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
-  if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
+# def max_var_const(x:UOp, c1:UOp, c2:UOp):
+#   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
+#   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
@@ -1237,7 +1236,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
-  ((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
+  #((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
