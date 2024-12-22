@@ -437,10 +437,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     if op is Ops.CONST:
-      # Tensor const is a CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
+      # Tensor const is a VIEW(DEVICE, CONST) -> RESHAPE -> EXPAND
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
-      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
-                 ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
+      return UOp(Ops.VIEW, dtype, (UOp(Ops.DEVICE, arg=device), UOp.const(dtype, unwrap(arg))),
+                 ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # TOOD: Tensor variable bindings need device and shape from sources
     if op is Ops.BIND:
       assert isinstance(arg, UOp) and arg.op is Ops.BIND and shape == (), f"trying to create BIND with {arg=} {shape=}"
@@ -458,8 +458,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
     return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  # TODO: CONST is just CONST, delete this
-  def is_unrealized_const(self): return self.base.op is Ops.CONST
+  def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
     return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
