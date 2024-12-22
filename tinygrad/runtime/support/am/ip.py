@@ -205,11 +205,8 @@ class AM_GFX(AM_IP):
 class AM_IH(AM_IP):
   AMDGPU_NAVI10_DOORBELL_IH = 0x178
 
-  def __init__(self, adev):
-    super().__init__(adev)
-
-    self.rings = [(self.adev.mm.valloc(262144, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
-    self.rptr = 0
+  # def __init__(self, adev):
+  #   super().__init__(adev)
 
   def interrupt_handler(self):
     addr_vm, rwptr_vm, suf, ring_id = self.rings[0]
@@ -232,7 +229,8 @@ class AM_IH(AM_IP):
   def enable_ring(self, addr_vm, rwptr_vm, suf, ring_id):
     self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.va_addr >> 8)
 
-    self.adev.reg(f"regIH_RB_CNTL{suf}").write(0xC0310120 if ring_id == 0 else 0xC0100320)
+    self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(addr_vm.size//4).bit_length(),
+      mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
     if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.va_addr)
 
@@ -242,6 +240,9 @@ class AM_IH(AM_IP):
     self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
 
   def init(self):
+    self.rings = [(self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
+    self.rptr = 0
+
     for ring in self.rings: self.enable_ring(*ring)
 
     self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)

@@ -28,10 +28,9 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, dev, base_addr:Optional[int]=None, cpu_off=None, **kwargs):
+  def __init__(self, dev, base_addr:Optional[int]=None, **kwargs):
     self.dev = dev
-    cpu_off = cpu_off or (self.dev.signals_page.cpu_addr - self.dev.signals_page.va_addr if AMDDevice.driverless else 0)
-    super().__init__(self.dev.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100, cpu_off=cpu_off)
+    super().__init__(self.dev.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
   def __del__(self):
     if isinstance(self.base_addr, int): self.dev.signals_pool.append(self.base_addr)
@@ -91,14 +90,14 @@ class AMDComputeQueue(HWQueue):
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000] if prg.enable_private_segment_sgpr else []
     else: user_regs = []
     if prg.enable_dispatch_ptr:
-      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.cpu_ptr + prg.kernargs_segment_size)
+      dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
 
       self.bind_sints(*local_size, struct=dp, start_field='workgroup_size_x', fmt='H')
       self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], struct=dp, start_field='grid_size_x', fmt='I')
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
       user_regs += [*data64_le(dp_addr)]
 
-    user_regs += [*data64_le(args_state.gpu_ptr)]
+    user_regs += [*data64_le(args_state.ptr)]
 
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2)
@@ -141,7 +140,7 @@ class AMDComputeQueue(HWQueue):
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
-    hw_view = to_mv(self.hw_page.cpu_addr, self.hw_page.size).cast("I")
+    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
@@ -230,7 +229,7 @@ class AMDProgram(HCQProgram):
     self.name, self.lib = name, lib
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    ctypes.memmove(self.lib_gpu.cpu_addr, mv_address(image), image.nbytes)
+    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
     self.group_segment_size = image[entry_point:entry_point+4].cast("I")[0]
@@ -241,7 +240,7 @@ class AMDProgram(HCQProgram):
     if lds_size > (self.dev.dev_iface.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
     if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
 
-    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.cpu_addr + entry_point) # NOTE: this is wrong, it's not this object
+    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
@@ -332,7 +331,7 @@ class KFDIface:
     assert addr != 0xffffffffffffffff
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
-                                                  flags=flags, mmap_offset=buf, cpu_addr=addr)
+                                                  flags=flags, mmap_offset=buf)
     except OSError as e:
       if e.errno == errno.EINVAL and (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) and cpu_access:
         raise MemoryError("Cannot allocate host-visible VRAM. Ensure the resizable BAR option is enabled on your system.") from e
@@ -351,7 +350,7 @@ class KFDIface:
       c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
-    if mem.cpu_addr: libc.munmap(mem.cpu_addr, mem.size)
+    if mem.va_addr: libc.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, mem.meta.handle)
 
   def map(self, mem):
@@ -404,8 +403,6 @@ class VFIOIface:
     self.pcidev = VFIOIface.gpus[dev_id]
     self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
 
-    print(self.pcibus)
-
     # if not os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"):
     if os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       with open(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", 'w') as f: f.write(self.pcibus)
@@ -436,6 +433,8 @@ class VFIOIface:
       # vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
     else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
 
+    self.fds = {bar: os.open(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+
     self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
 
@@ -443,30 +442,24 @@ class VFIOIface:
     self.properties = {'simd_count': 192, 'simd_per_cu': 2, 'max_waves_per_simd': 16, 'gfx_target_version': 110000, 'max_slots_scratch_cu': 32,
                        'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
-  def _map_pci_range(self, bar):
-    if not getenv("VFIO", 1):
-      libpciaccess.pci_device_map_range(ctypes.byref(self.pcidev), self.pcidev.regions[bar].base_addr, size:=self.pcidev.regions[bar].size,
-      libpciaccess.PCI_DEV_MAP_FLAG_WRITABLE, ctypes.byref(pcimem:=ctypes.c_void_p()))
-      return to_mv(pcimem, size)
-
-    vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
-    return to_mv(libc.mmap(0, reg.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.vfio_dev, reg.offset), reg.size)
-
-  # def _map_pci_range(self, bar):
-  #   libpciaccess.pci_device_map_range(ctypes.byref(self.pcidev), self.pcidev.regions[bar].base_addr, size:=self.pcidev.regions[bar].size,
-  #     libpciaccess.PCI_DEV_MAP_FLAG_WRITABLE, ctypes.byref(pcimem:=ctypes.c_void_p()))
-  #   return to_mv(pcimem, size)
+  def _map_pci_range(self, bar, off=0, addr=0, size=None):
+    if getenv("VFIO", 1):
+      vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
+      fd, sz, off = self.vfio_dev, size or reg.size, reg.offset + off
+    else: fd, sz, off = self.fds[bar], size or self.pcidev.regions[bar].size, off
+    return to_mv(libc.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), fd, off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host:
-      va = libc.mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED, -1, 0)
       vaddr = self.adev.mm.alloc_vaddr(size, align=mmap.PAGESIZE)
+      va = libc.mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, -1, 0)
       for off in range(0, size, mmap.PAGESIZE):
         self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=read_pagemap(va + off), system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, cpu_addr=va, meta=(self.dev, [self.dev], None))
+      return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
     vm = self.adev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)
-    return HCQBuffer(vm.va_addr, size, cpu_addr=vm.cpu_addr, meta=(self.dev, [self.dev], vm))
+    if cpu_access: self._map_pci_range(bar=0, off=vm.paddr, addr=vm.va_addr, size=vm.size)
+    return HCQBuffer(vm.va_addr, size, meta=(self.dev, [self.dev], vm))
 
   def free(self, mem):
     if mem.meta[2] is not None:
@@ -476,7 +469,6 @@ class VFIOIface:
   def map(self, mem):
     if mem.meta[0] == self.dev or self.dev in mem.meta[1]: return
     mem.meta[1].append(self.dev)
-    # print("Map", hex(mem.va_addr), hex(mem.size), mem.meta[1])
     self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
@@ -506,15 +498,14 @@ class VFIOIface:
         cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_buffer.size//4).bit_length()-2))
 
     # Copy mqd into memory
-    ctypes.memmove(mqd.cpu_addr, ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
+    ctypes.memmove(mqd.va_addr, ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
     self.adev.gmc.flush_hdp()
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA: self.adev.sdma.load_mqd(mqd_struct, pipe=0, queue=0)
     else: self.adev.gfx.load_mqd(mqd_struct, pipe=0, queue=0)
 
-    return AMDQueueDesc(ring=to_mv(ring.cpu_addr, ring.size).cast("I"),
-                        read_ptr=to_mv(gart.cpu_addr, 8).cast("Q"), write_ptr=to_mv(gart.cpu_addr+0x10, 8).cast("Q"),
-                        doorbell=to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"))
+    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"), doorbell=to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"),
+                        read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
 
   def sleep(self, timeout):
     if getenv("VFIO", 1):
@@ -524,8 +515,8 @@ class VFIOIface:
 class AMDDevice(HCQCompiled):
   driverless:bool = False
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
-  # signals_page:Any = None
-  # signals_pool:List[int] = []
+  signals_page:Any = None
+  signals_pool:List[int] = []
 
   def __init__(self, device:str=""):
     AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
@@ -538,16 +529,16 @@ class AMDDevice(HCQCompiled):
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
 
     # TODO: think of moving this out.
-    # if AMDDevice.signals_page is None:
-    #   AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, uncached=True, cpu_access=True)
-    #   AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-    # else: self.dev_iface.map(AMDDevice.signals_page)
+    if AMDDevice.signals_page is None:
+      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
+      AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
+    else: self.dev_iface.map(AMDDevice.signals_page)
 
-    self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
-    self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
-    for dev in self.devices: 
-      self.dev_iface.map(dev.signals_page)
-      dev.dev_iface.map(self.signals_page)
+    # self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
+    # self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
+    # for dev in self.devices: 
+    #   self.dev_iface.map(dev.signals_page)
+    #   dev.dev_iface.map(self.signals_page)
 
     # Scratch setup
     max_cu_id = self.dev_iface.properties['simd_count'] // self.dev_iface.properties['simd_per_cu'] - 1

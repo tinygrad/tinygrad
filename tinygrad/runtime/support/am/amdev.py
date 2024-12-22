@@ -64,14 +64,12 @@ class AMMemoryManager:
 
   def __init__(self, adev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
-    self.pa_allocator = TLSFAllocator(vram_size) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=am.AMDGPU_VM_PDB1)
 
   def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False, creat_pt=True) -> Generator[Tuple[int, int, int, int], None, None]:
     pte_covers = 1 << ((9 * (3-page_table.lv)) + 12)
     assert size // pte_covers < 512, "Size must be less than 512 ptes"
-
-    # print("Walker", page_table, hex(vaddr), hex(size))
 
     def _move_cursor(sz):
       nonlocal vaddr, offset, size
@@ -128,7 +126,7 @@ class AMMemoryManager:
 
       # print("here with", pte_st_idx, n_ptes)
       for pte_idx in range(n_ptes):
-        assert pt.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, "Entry already set"
+        assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"
         pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
         off += pte_covers
 
