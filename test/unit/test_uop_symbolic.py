@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import unittest, pickle
-from typing import Tuple
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
@@ -9,7 +8,7 @@ from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
 
-def render(self) -> Tuple[str, ConstType, ConstType]:
+def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
   uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink()))
