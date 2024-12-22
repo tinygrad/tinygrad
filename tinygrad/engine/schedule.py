@@ -96,9 +96,14 @@ tensor_uop_spec = PatternMatcher([
    (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
 ])
 
-scheduler_uop_spec = PatternMatcher([
+buffer_view_spec = PatternMatcher([
+  # ASSIGN can use a shrunk ShapeTracker to change a subset of the target BUFFER
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat(Ops.ASSIGN))), lambda st,b: st.size <= b.size),
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat())), lambda st,b: st.size == b.size),
+  # for everything else, ShapeTracker is the output shape
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat())), lambda st,b: st.size == b.size and st.contiguous),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"))), lambda st,b: st.size == b.size and st.contiguous),
+  # CONST ShapeTrackers must be unmasked. Masked VIEWs stack on top of the CONST UOp
+  # NOTE: const folding rules enforce this
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.CONST))), lambda st: all(v.mask is None for v in st.st.views)),
 ])
 
@@ -610,13 +615,14 @@ remove_image_dtype = PatternMatcher([
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   sink = UOp.sink(*outs)
   if not skip_check: type_verify(list(sink.toposort), extra_spec=tensor_uop_spec)
+  # first, we bufferize all tensor uops
   # to_uop is removing (many) of the movement ops
   sink = to_uop(sink, ctx:=ScheduleContext(), cache={})
-  if not skip_check: type_verify(list(sink.toposort), extra_spec=scheduler_uop_spec+tensor_uop_spec)
+  if not skip_check: type_verify(list(sink.toposort), extra_spec=buffer_view_spec+tensor_uop_spec)
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
   sink = graph_rewrite(sink, remove_image_dtype+merge_bufs, ctx)
-  if not skip_check: type_verify(list(sink.toposort), extra_spec=scheduler_uop_spec+tensor_uop_spec)
+  if not skip_check: type_verify(list(sink.toposort), extra_spec=buffer_view_spec+tensor_uop_spec)
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels

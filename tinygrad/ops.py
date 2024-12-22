@@ -221,19 +221,7 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
-    # NOTE: ohis will soon be set by Tensor once we remove function.py
-    c2 = UPat(Ops.VIEW, dtypes.float, src=(
-      UPat(Ops.BUFFER, dtypes.float, arg=(7, 81), src=(
-        x1:=UPat(Ops.DEVICE, dtypes.void, arg='GPU', src=()),)),
-      UPat(Ops.CAST, dtypes.imagef((9, 3, 4)), arg=None, src=(
-        UPat(Ops.VIEW, dtypes.float, src=(
-          UPat(Ops.BUFFER, dtypes.float, arg=(1, 81), src=(
-             x1,)),
-          UPat(Ops.COPY, dtypes.float, arg=('GPU', False), src=(
-            UPat(Ops.VIEW, dtypes.float, src=(
-              UPat(Ops.BUFFER, dtypes.float, arg=(0, 81), src=(
-                UPat(Ops.DEVICE, dtypes.void, arg='NPY', src=()),)),)),)),)),)),))
-    if len(c2.match(created, {})) != 0: raise Exception(created.src[1])
+    # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     return created
 
@@ -819,8 +807,7 @@ class PatternMatcher:
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
       for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None:
-          return ret
+        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
 
 # *** tracking pattern matcher ***
@@ -939,7 +926,7 @@ spec = PatternMatcher([
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
+  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
@@ -1006,7 +993,8 @@ def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
   spec_pm = spec if extra_spec is None else spec+extra_spec
   for i,u in enumerate(uops):
     if not spec_pm.rewrite(u):
-      raise RuntimeError(f"{u}")
+      print_uops(uops)
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
 # *** most of symbolic lives here now ***
 
