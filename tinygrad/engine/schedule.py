@@ -134,6 +134,7 @@ def is_constant(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2 and u.src[1]
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
+  if buf.op is Ops.SINK: return UOp.sink(*[to_uop(x, ctx, cache) for x in buf.src])
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
@@ -525,8 +526,9 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
-def init_big_graph(sink:UOp) -> UOp|None:
-  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base))
+def init_big_graph(ctx:ScheduleContext, sink:UOp) -> UOp|None:
+  new_src = tuple(x.base for x in sink.src if x.base.realized is None and not is_constant(x.base))
+  for x in new_src: realize(ctx, x.buf_uop, x)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
@@ -588,19 +590,16 @@ remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not x.base.is_unrealized_const())) == 0: return [], {}
-  # create the big graph
-  ctx = ScheduleContext()
-  cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
-  big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
+  sink = to_uop(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
+  # const folding and fusion
+  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
+  sink = graph_rewrite(sink, merge_bufs, ctx)
   # create the scheduler context
-  graph_rewrite(big_graph, create_ctx, ctx)
+  graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
-  graph_rewrite(big_graph, break_sched, ctx)
+  graph_rewrite(sink, break_sched, ctx)
   # preschedule realize groups
   prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
