@@ -107,7 +107,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min(dtype)
 
-# If a node overflow, its srcs need to be checked to see if this overflows is a result of an ALU operation,
+# If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`
 def upcast(u: UOp):
   srcs = [upcast(_src) for _src in u.src]
