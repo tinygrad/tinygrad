@@ -550,7 +550,7 @@ do_realize = PatternMatcher([
 
 def generate_const(x:UOp, st:UOp):
   assert all(v.mask is None for v in unwrap(st.st).views), f"ShapeTracker of {x.op} must be unmasked, got {st}"
-  return UOp(Ops.VALID, dtypes.bool, (unwrap(st.st).to_uop(),)).where(UOp.const(st.dtype.base, x), 0)
+  return UOp(Ops.VALID, dtypes.bool, (unwrap(st.st).to_uop(),)).where(x.replace(dtype=x.dtype.base), 0)
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
   ctx.var_vals.update([bind.unbind()])
@@ -562,12 +562,10 @@ def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
-  assert st.st is not None and st.size == b.size and st.st.contiguous \
-      and (x.st is None or x.shape == st.shape), f"ShapeTracker of unrealized {b} BUFFER must match {x.shape} {st.shape}"
   if (m:=ctx.tensor_uops[b][0].metadata) is not None: ctx.ops_metadata[x] = m
   if b not in ctx.realizes: return x # collapse BUFFER
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
-  return UOp(Ops.LOAD, x.dtype, (b, st.st.to_uop()))
+  return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
   # CONST is always fused and generated
