@@ -1,4 +1,4 @@
-from typing import List, Optional, cast, Generator
+from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
@@ -169,7 +169,7 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, Non
 
 # **************** main run function ****************
 
-capturing: List = []  # put classes with an add method in here
+capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
   for ei in lower_schedule(schedule):
