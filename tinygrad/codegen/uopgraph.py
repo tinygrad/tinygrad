@@ -316,7 +316,7 @@ sym = symbolic_flat+PatternMatcher([
       if any(x.op in {Ops.SINK, Ops.UNROLL} for x in root.src) else None),
   # stable sigmoid
   (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), lambda x: sigmoid_like(x, x.const_like(1))),
-  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()*UPat.var("y")), sigmoid_like),
+  ((UPat.var("x")*UPat.var("y"))*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), sigmoid_like),
   (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), lambda x: sigmoid_like(x, (x+1).reciprocal())),
 ])
 
