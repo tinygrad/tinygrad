@@ -493,7 +493,7 @@ class PCIIface:
     if PCIIface.vfio and len(self.irq_poller.poll(timeout)): os.read(self.irq_fd, 1024)
 
 class AMDDevice(HCQCompiled):
-  driverless:bool = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
+  driverless:bool = not os.path.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
   signals_page:Any = None
   signals_pool:list[int] = []
 

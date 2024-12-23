@@ -26,7 +26,7 @@ class TestTLSFAllocator(unittest.TestCase):
   def test_merge_blocks(self):
     addr1 = self.allocator.alloc(32)
     addr2 = self.allocator.alloc(32)
-    addr3 = self.allocator.alloc(32)
+    self.allocator.alloc(32)
 
     self.allocator.free(addr1)
     self.allocator.free(addr2)

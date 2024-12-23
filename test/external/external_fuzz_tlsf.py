@@ -54,7 +54,7 @@ class AllocatorFuzzer:
     # Verify pattern before freeing
     if not self.verify_memory(ptr, size, pattern):
       raise RuntimeError(f"Memory corruption detected at {ptr:x}!")
-  
+
     print(f"Freeing {size} bytes at {ptr:x}, pattern verified: {pattern:02x}")
     self.alloc_payload -= size
     self.alloctor.free(ptr)
