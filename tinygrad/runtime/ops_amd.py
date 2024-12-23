@@ -293,7 +293,7 @@ class KFDIface:
 
   def __init__(self, dev, device_id):
     self.dev = dev
-    
+
     if KFDIface.kfd == -1:
       KFDIface.kfd = os.open("/dev/kfd", os.O_RDWR)
       gpus = [g.parent for g in pathlib.Path("/sys/devices/virtual/kfd/kfd/topology/nodes").glob("*/gpu_id") if KFDIface.is_usable_gpu(g)]
@@ -379,63 +379,61 @@ class KFDIface:
 
   def sleep(self, tm:int): kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
 
-class VFIOIface:
+class PCIIface:
+  vfio:bool = getenv("VFIO", 1) and os.path.exists("/dev/vfio/vfio")
   vfio_fd:int = -1
-  iommu_set:bool = False
   gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
     self.dev = dev
 
-    if VFIOIface.vfio_fd == -1:
-      subprocess.run(['modprobe', 'vfio_pci'], capture_output=True, text=True, check=True)
-      with open("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", 'w') as f: f.write("1")
-
-      VFIOIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
-      assert vfio.VFIO_CHECK_EXTENSION(VFIOIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU), "VFIO does not support IOMMU"
-
+    if first_dev:=len(PCIIface.gpus) == 0:
       libpciaccess.pci_system_init()
       pci_iter = libpciaccess.pci_id_match_iterator_create(None)
       while pcidev:=libpciaccess.pci_device_next(pci_iter):
-        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c: VFIOIface.gpus.append(pcidev.contents)
+        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c: PCIIface.gpus.append(pcidev.contents)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-      VFIOIface.gpus = [VFIOIface.gpus[x] for x in visible_devices] if visible_devices else VFIOIface.gpus
+      PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
 
-    self.pcidev = VFIOIface.gpus[dev_id]
+    self.pcidev = PCIIface.gpus[dev_id]
     self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
 
+    # Unbind the device from the kernel driver
     if os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      with open(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", 'w') as f: f.write(self.pcibus)
-    with open(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", 'w') as f: f.write("15")
-    
+      pathlib.Path(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind").write_text(self.pcibus)
+    pathlib.Path(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize").write_text("15")
+
+    # Probe device
     libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
 
-    if getenv("VFIO", 1):
-      with open(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", 'w') as f: f.write("vfio-pci")
-      with open(f"/sys/bus/pci/drivers_probe", 'w') as f: f.write(self.pcibus)
+    if PCIIface.vfio and PCIIface.vfio_fd == -1:
+      pathlib.Path(f"/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
+      PCIIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
+      if not vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU): PCIIface.vfio = False
+
+    if PCIIface.vfio:
+      pathlib.Path(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write_text("vfio-pci")
+      pathlib.Path(f"/sys/bus/pci/drivers_probe").write_text(self.pcibus)
 
       iommu_group = os.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
-
       self.vfio_group = os.open(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(VFIOIface.vfio_fd))
+      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd))
 
-      if not VFIOIface.iommu_set:
-        vfio.VFIO_SET_IOMMU(VFIOIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-        VFIOIface.iommu_set = True
-      self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, (ctypes.c_char * (len(self.pcibus) + 1))(*bytearray(self.pcibus.encode() + b'\0')))
+      if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+      self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, (ctypes.c_char * (len(self.pcibus)+1))(*bytearray(self.pcibus.encode() + b'\0')))
 
       self.irq_fd = os.eventfd(0, 0)
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd, select.POLLIN)
 
-      # irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-      #   argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd))
-      # vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
+      irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
+        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd))
+      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
     else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
 
-    self.fds = {bar: os.open(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+    self.bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
 
     self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
@@ -445,10 +443,10 @@ class VFIOIface:
                        'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
-    if getenv("VFIO", 1):
+    if PCIIface.vfio:
       vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
       fd, sz, off = self.vfio_dev, size or reg.size, reg.offset + off
-    else: fd, sz, off = self.fds[bar], size or self.pcidev.regions[bar].size, off
+    else: fd, sz, off = self.bar_fds[bar], size or self.pcidev.regions[bar].size, off
     return to_mv(libc.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), fd, off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
@@ -490,20 +488,18 @@ class VFIOIface:
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
 
   def sleep(self, timeout):
-    if getenv("VFIO", 1):
+    if PCIIface.vfio:
       x = self.irq_poller.poll(timeout)
       if len(x): os.read(self.irq_fd, 1024)
 
 class AMDDevice(HCQCompiled):
-  driverless:bool = False
+  driverless:bool = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
   signals_page:Any = None
   signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
-    AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
-
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.dev_iface = VFIOIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
 
     self.target = int(self.dev_iface.properties['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
