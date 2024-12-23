@@ -1307,7 +1307,12 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
-merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+merge_views = PatternMatcher([
+  (UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st)),
+  # merge VALID early here (+fold if you can!)
+  (UPat(Ops.WHERE, src=(UPat(Ops.VALID, src=(UPat.var("st"),)), UPat.var("x"), UPat())).view(name="view"),
+   lambda st,view,x: x if all(v.mask is None for v in (st.st+view.st).views) else x.valid(st.st+view.st)),
+])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([

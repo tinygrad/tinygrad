@@ -5,7 +5,7 @@ from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_
 from tinygrad.ops import identity_element, buffers, exec_alu, type_verify
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
-from tinygrad.dtype import ConstType, DType, ImageDType, dtypes
+from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
@@ -573,10 +573,10 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
   if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
-    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+    if is_scheduled(x): ctx.children.setdefault(x.buf_uop, {})[buf_uop] = None
   # BUFFER_VIEW overrides the underlying buffer
   if op.op is Ops.BUFFER_VIEW:
-    buffers[buf_uop] = (x:=op.src[0]).base.buf_uop.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+    buffers[buf_uop] = (x:=op.src[0]).buf_uop.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
@@ -603,6 +603,9 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   sink = graph_rewrite(sink, merge_bufs+merge_views, ctx)
   unmerged_views = [x for x in sink.toposort if x.op is Ops.VIEW and any(y.op is Ops.VIEW for y in x.src)]
   assert len(unmerged_views) == 0, f"found {len(unmerged_views)} unmerged views in sink {unmerged_views if DEBUG >= 3 else ''}"
+  # no more base!
+  for x in sink.toposort:
+    assert x is x.base, f"expected base to be base {x}"
   # these uops shouldn't exist after the scheduler rewrite pass
   unacceptable = [x for x in sink.toposort if x.op in {*GroupOp.Movement, Ops.DETACH}]
   assert not unacceptable, f"found {len(unacceptable)} unacceptable uops in sink {unacceptable[0]}"

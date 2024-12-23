@@ -53,9 +53,19 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]
   ret:tuple[list[T], list[T]] = ([], [])
   for s in itr: (ret[0] if fxn(s) else ret[1]).append(s)
   return ret
-def unwrap(x:Optional[T]) -> T:
-  assert x is not None
-  return x
+def unwrap(x: Optional[T]) -> T:
+  if x is not None: return x
+  # debuggable unwrap (source: gpt4)
+  err_msg = f"called unwrap on a {x} value"
+  if (frm:=inspect.currentframe()) is not None and (fb:=frm.f_back) is not None:
+    # find that unwrap (fragile)
+    with contextlib.suppress(Exception):
+      if inspect.getframeinfo(fb).code_context is not None:
+        src_line = inspect.getframeinfo(fb).code_context[0].strip()
+        arg = src_line[src_line.find("(") + 1 : src_line.rfind(")")]
+        # Evaluate the argument in the caller's context to access the instance
+        err_msg += f": {repr(eval(arg.split('.')[0], fb.f_globals, fb.f_locals))}"
+  raise AssertionError(err_msg)
 def get_single_element(x:list[T]) -> T:
   assert len(x) == 1, f"list {x} must only have 1 element"
   return x[0]
