@@ -1,9 +1,7 @@
 import random
-import struct
-import ctypes
 from typing import Dict, Optional
 
-from tinygrad.runtime.support.am.mm import TLSFAllocator
+from tinygrad.runtime.support.allocator import TLSFAllocator
 
 class AllocatorFuzzer:
   def __init__(self, total_size):

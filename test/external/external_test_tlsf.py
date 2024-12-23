@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.runtime.support.am.mm import TLSFAllocator
+from tinygrad.runtime.support.allocator import TLSFAllocator
 
 class TestTLSFAllocator(unittest.TestCase):
   def setUp(self):

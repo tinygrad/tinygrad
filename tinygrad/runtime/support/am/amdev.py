@@ -1,17 +1,17 @@
 from __future__ import annotations
-import os, ctypes, collections, time
+import os, ctypes, collections, time, dataclasses
 from typing import Tuple, Dict, Set, Optional, Generator, List
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
-from tinygrad.runtime.support.am.mm import TLSFAllocator
+from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 from tinygrad.runtime.support.hcq import BumpAllocator
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
+@dataclasses.dataclass(frozen=True)
 class AMRegister:
-  def __init__(self, adev, reg_off:int, reg_fields:Dict[str, Tuple[int, int]]):
-    self.adev, self.reg_off, self.reg_fields = adev, reg_off, reg_fields
+  adev:AMDev; reg_off:int; reg_fields:Dict[str, Tuple[int, int]] # noqa: E702
 
   def _parse_kwargs(self, **kwargs):
     mask, values = 0xffffffff, 0
@@ -105,9 +105,8 @@ class AMPhysicalMemoryBlock:
   def cpu_addr(self): return mv_address(self.adev.vram) + self.paddr
   def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
 
-class AMVirtualMapping:
-  def __init__(self, va_addr:int, size:int, cpu_addr:Optional[int], paddr:Optional[int]):
-    self.va_addr, self.size, self.cpu_addr, self.paddr = va_addr, size, cpu_addr, paddr
+@dataclasses.dataclass(frozen=True)
+class AMVirtualMapping: va_addr:int; size:int; cpu_addr:Optional[int]=None; paddr:Optional[int]=None # noqa: E702
 
 class AMPageTableEntry:
   def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
@@ -189,7 +188,6 @@ class AMMemoryManager:
     for va, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
       lpaddr, off = (self.pa_allocator.alloc(n_ptes * pte_covers), 0) if paddr is None else (paddr, off)
 
-      # print("here with", pte_st_idx, n_ptes)
       for pte_idx in range(n_ptes):
         assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"
         pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
@@ -263,10 +261,7 @@ class AMDev:
     self.gfx = AM_GFX(self)
     self.sdma = AM_SDMA(self)
 
-    if self.psp.is_sos_alive():
-      if AM_DEBUG >= 2: print("sOS is alive, issue mode1 reset...")
-      self.smu.mode1_reset()
-      time.sleep(0.5)
+    if self.psp.is_sos_alive(): self.smu.mode1_reset()
 
     # Initialize all blocks
     for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()

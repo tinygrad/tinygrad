@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, time
-from typing import Literal
+import ctypes, time, dataclasses
+from typing import Literal, Any
 from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32
@@ -109,7 +109,9 @@ class AM_SMU(AM_IP):
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
 
-  def mode1_reset(self): self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
+  def mode1_reset(self):
+    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
+    time.sleep(0.5)
 
   def _smu_cmn_poll_stat(self): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1)
   def _smu_cmn_send_msg(self, msg, param=0):
@@ -208,27 +210,24 @@ class AM_GFX(AM_IP):
 
 class AM_IH(AM_IP):
   def interrupt_handler(self):
-    addr_vm, rwptr_vm, suf, ring_id = self.rings[0]
-    ring_view = to_mv(addr_vm.cpu_addr(), addr_vm.size).cast('I')
+    ring_vm, rwptr_vm, suf, _ = self.rings[0]
     wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
 
-    self.rptr = wptr
     if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
-    self.adev.regIH_RB_RPTR.write(self.rptr % self.ring_vm.size)
+    self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
     # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[am.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def init(self):
-    # TODO: Clean this up
-    self.rings = [(self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
-    self.rptr = 0
+    self.rings = [(self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "", 0),
+                  (self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "_RING1", 1)]
 
-    for addr_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.va_addr >> 8)
+    for ring_vm, rwptr_vm, suf, ring_id in self.rings:
+      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.va_addr >> 8)
 
-      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(addr_vm.size//4).bit_length(),
+      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(ring_vm.size//4).bit_length(),
         mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
       if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.va_addr)
@@ -247,7 +246,7 @@ class AM_IH(AM_IP):
     libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | 0x4, 0x4)
 
     # toggle interrupts
-    for addr_vm, rwptr_vm, suf, ring_id in self.rings:
+    for _, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
 class AM_SDMA(AM_IP):
@@ -338,7 +337,7 @@ class AM_PSP(AM_IP):
     self.adev.regMP0_SMN_C2PMSG_64.write(am.PSP_RING_TYPE__KM << 16)
 
     # There might be handshake issue with hardware which needs delay
-    time.sleep(100 / 1000)
+    time.sleep(0.1)
 
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x8000FFFF, value=0x80000000)
   
