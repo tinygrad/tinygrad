@@ -452,7 +452,7 @@ ops_folding = PatternMatcher([
   # if the uop folded to a CONST we can delete the BUFFER
   (UPatScheduled(Ops.CONST, name="const"), lambda b,base,const: base.const_like(const.const_arg)),
   # DETACH is a NOOP here
-  (UPatScheduled(Ops.DETACH, name="detach"), lambda detach,**kwargs: detach.src[0]),
+  (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
   # elementwise const folding
   (UPat(GroupOp.ALU, name="alu"), simplify_alu),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
@@ -492,7 +492,7 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   # early become
   for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
-  return v1
+  return v1.view(v2.st)
 
 merge_bufs = PatternMatcher([
   # merge base
@@ -524,7 +524,8 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(ctx:ScheduleContext, sink:UOp) -> UOp|None:
-  new_src = tuple(x.base for x in sink.src if x.base.realized is None and not is_constant(x.base))
+  # TODO: is there a cleaner way to express this?
+  new_src = tuple(x.base for x in sink.src if x.base.realized is None and any(y.op is Ops.BUFFER for y in x.src))
   for x in new_src: realize(ctx, x.buf_uop, x)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
@@ -584,10 +585,16 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
-remove_movement_ops = merge_views+PatternMatcher([
-  # pad on CONST masks it with a VALID
-  (UPat(Ops.PAD, name="pad", src=(UPat(src=(UPat(), UPat.cvar("const"))))),
+# TODO: replace this with UPat.cvar once it's CONST(VIEW(DEVICE))
+const = UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat.cvar("const")))
+
+remove_movement_ops = PatternMatcher([
+  # masked CONST must become VALID
+  (UPat(Ops.PAD, name="pad", src=(const,)),
    lambda const,pad: UOp(Ops.VALID, dtypes.bool, (unwrap(pad.st).to_uop(),)).where(const.replace(dtype=const.dtype.base), 0)),
+  (UPat(Ops.VIEW, name="view", src=(const,)), lambda const,view: None if all(v.mask is None for v in view.st.views) else
+   UOp(Ops.VALID, dtypes.bool, (unwrap(view.st).to_uop(),)).where(const.replace(dtype=const.dtype.base), 0)),
+  (UPat(Ops.VIEW, name="view", src=(UPat(), const,)), lambda const,view: view.const_like(const.const_arg)),
   # other movement ops stack as a VIEW, merge_views uses this VIEW to change the underlying ShapeTracker in an additive way
   (UPat(GroupOp.Movement, name="mov", src=(UPat(Ops.BUFFER, name="buf").view(),)), lambda buf,mov: buf.view(unwrap(mov.st))),
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov: x.view(unwrap(mov.st))),
@@ -599,10 +606,13 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   # to_uop is removing (many) of the movement ops
   sink = to_uop(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
   # merge views, const folding and fusion
-  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
-  sink = graph_rewrite(sink, merge_views+merge_bufs, ctx)
-  unmerged_views = [x for x in sink.toposort if x.op is Ops.VIEW and any(y.op is Ops.VIEW for y in x.src) or x.op in GroupOp.Movement]
-  assert len(unmerged_views) == 0, f"found {len(unmerged_views)} unmerged views in sink"
+  sink = graph_rewrite(sink, remove_movement_ops+merge_views+ops_folding+do_realize, ctx)
+  sink = graph_rewrite(sink, merge_bufs+merge_views, ctx)
+  unmerged_views = [x for x in sink.toposort if x.op is Ops.VIEW and any(y.op is Ops.VIEW for y in x.src)]
+  assert len(unmerged_views) == 0, f"found {len(unmerged_views)} unmerged views in sink {unmerged_views if DEBUG >= 3 else ''}"
+  # these uops shouldn't exist after the scheduler rewrite pass
+  unacceptable = [x for x in sink.toposort if x.op in {*GroupOp.Movement, Ops.DETACH}]
+  assert not unacceptable, f"found {len(unacceptable)} unacceptable uops in sink {unacceptable[0]}"
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels
