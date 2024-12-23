@@ -15,13 +15,13 @@ ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class BumpAllocator:
-  def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, start, wrap
+  def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.start_off, self.wrap = size, 0, start, wrap
   def alloc(self, size:int, alignment:int=1) -> int:
     if round_up(self.ptr, alignment) + size > self.size:
       if not self.wrap: raise RuntimeError("Out of memory")
       self.ptr = 0
     self.ptr = (res:=round_up(self.ptr, alignment)) + size
-    return res + self.base
+    return res + self.start_off
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
@@ -176,7 +176,7 @@ class HCQSignal(Generic[DeviceType]):
 
     if isinstance(base_addr, int):
       self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
-      if value is not None: self.value_mv[0] = value
+      self.value_mv[0] = value
 
   @property
   def value(self) -> int: return self.value_mv[0]
@@ -201,7 +201,7 @@ class HCQSignal(Generic[DeviceType]):
     Optional function which can implement sleep functionality for the signal.
     """
 
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 10000)):
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
     Waits the signal is greater than or equal to a specific value.
 
@@ -396,7 +396,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.device}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(dest.va_addr + dst_off, batch_info[1] + src_off, copy_size) \
+                                  .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
                                   .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
         self.b_timeline[batch_info[1]] = self.dev.timeline_value
         self.dev.timeline_value += 1

@@ -351,7 +351,7 @@ class KFDIface:
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     if mem.va_addr: libc.munmap(mem.va_addr, mem.size)
-    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, mem.meta.handle)
+    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
   def map(self, mem):
     if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return
@@ -448,7 +448,7 @@ class PCIIface:
     if PCIIface.vfio:
       vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
       fd, sz, off = self.vfio_dev, size or reg.size, reg.offset + off
-    else: fd, sz, off = self.bar_fds[bar], size or self.pcidev.regions[bar].size, off
+    else: fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
     return to_mv(libc.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), fd, off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
