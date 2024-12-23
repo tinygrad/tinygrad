@@ -44,11 +44,15 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
 if (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
 
+fp8s = [0.1, 0.5, 1]
+
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
   bfloat16 = strat.floats(width=16, allow_subnormal=False)
+  fp8e4m3 = strat.sampled_from(fp8s + list(map(lambda x: -x, fp8s)))
+  fp8e5m2 = strat.sampled_from(fp8s + list(map(lambda x: -x, fp8s)))
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -65,7 +69,8 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  if dtype in (dtypes.fp8e4m3, dtypes.fp8e5m2): np.testing.assert_allclose(tensor_value, numpy_value, atol=0.5, rtol=1e-2)
+  elif dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -77,7 +82,8 @@ def universal_test_unary(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in (*dtypes_float, dtypes.bfloat16):
+  if dtype in (dtypes.fp8e4m3, dtypes.fp8e5m2): np.testing.assert_allclose(tensor_value, numpy_value, atol=2, rtol=1e-2)
+  elif dtype in (*dtypes_float, dtypes.bfloat16):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
@@ -115,6 +121,20 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
+  @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
+  def test_fp8e4m3(self, a, b, op): universal_test(a, b, dtypes.fp8e4m3, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
+  @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
+  def test_fp8e5m2(self, a, b, op): universal_test(a, b, dtypes.fp8e5m2, op)
+
+  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
+  def test_fp8e4m3_unary(self, a, op): universal_test_unary(a, dtypes.fp8e4m3, op)
+
+  @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
+  def test_fp8e5m2_unary(self, a, op): universal_test_unary(a, dtypes.fp8e5m2, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)

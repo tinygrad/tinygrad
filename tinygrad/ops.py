@@ -1006,6 +1006,88 @@ def cast_float_to_bf16(x: UOp) -> UOp:
   x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
+def cast_half_to_fp8_e4m3(x: UOp) -> UOp:
+    assert x.dtype == dtypes.half, "cast half -> fp8 e4m3 must start with half"
+    x = x.bitcast(dtypes.uint16)
+
+    # Extract sign, exponent, and mantissa from FP16
+    sign = (x >> 15) & 0x1
+    exponent = (x >> 10) & 0x1F
+    mantissa = x & 0x3FF
+
+    # Adjust exponent for FP8 E4M3 format
+    if exponent == 0:
+        # Subnormal number in FP16
+        exponent = 0
+    else:
+        exponent = (exponent - 15 + 7) & 0xF  # Adjust bias and limit to 4 bits
+
+    # Adjust mantissa for FP8 E4M3 format
+    mantissa = (mantissa >> 7) & 0x7  # Keep only the top 3 bits
+
+    # Combine sign, exponent, and mantissa into FP8 E4M3 format
+    result = (sign << 7) | (exponent << 3) | mantissa
+
+    return result.cast(dtypes.uint8).bitcast(dtypes.fp8e4m3)
+
+def cast_half_to_fp8_e5m2(x: UOp) -> UOp:
+    assert x.dtype == dtypes.half, "cast half -> fp8 e5m2 must start with half"
+    x = x.bitcast(dtypes.uint16)
+
+    # Extract sign, exponent, and mantissa from FP16
+    sign = (x >> 15) & 0x1
+    exponent = (x >> 10) & 0x1F
+    mantissa = x & 0x3FF
+
+    # Adjust exponent for FP8 E5M2 format
+    if exponent == 0:
+        # Subnormal number in FP16
+        exponent = 0
+    else:
+        exponent = (exponent - 15 + 15) & 0x1F  # Adjust bias and limit to 5 bits
+
+    # Adjust mantissa for FP8 E5M2 format
+    mantissa = (mantissa >> 8) & 0x3  # Keep only the top 2 bits
+
+    # Combine sign, exponent, and mantissa into FP8 E5M2 format
+    result = (sign << 7) | (exponent << 2) | mantissa
+
+    return result.cast(dtypes.uint8).bitcast(dtypes.fp8e5m2)
+
+
+from hypothesis.strategies import integers
+import numpy as np
+
+def fp8_strategy(e_bits=4, m_bits=3):
+    max_exponent = (1 << e_bits) - 1
+    max_mantissa = (1 << m_bits) - 1
+    sign_bit = 1  # Single sign bit
+
+    # Generate all possible bit patterns for fp8
+    max_value = (1 << (sign_bit + e_bits + m_bits)) - 1
+    return integers(min_value=0, max_value=max_value).map(fp8_from_bits)
+
+def fp8_from_bits(bits, e_bits=4, m_bits=3):
+    """
+    Convert a bit pattern to a floating-point number in fp8 format.
+    """
+    sign = (-1) ** ((bits >> (e_bits + m_bits)) & 1)
+    exponent = (bits >> m_bits) & ((1 << e_bits) - 1)
+    mantissa = bits & ((1 << m_bits) - 1)
+    
+    if exponent == 0:
+        # Subnormal numbers
+        return sign * (mantissa / (1 << m_bits)) * (2 ** -(2 ** (e_bits - 1) - 1))
+    elif exponent == (1 << e_bits) - 1:
+        # Special values: Infinity or NaN
+        return float('inf') if mantissa == 0 else float('nan')
+    else:
+        # Normalized numbers
+        return sign * (1 + mantissa / (1 << m_bits)) * (2 ** (exponent - (2 ** (e_bits - 1) - 1)))
+
+# Usage
+# fp8 = fp8_strategy()
+
 # *** most of symbolic lives here now ***
 
 def split_uop(x:UOp, sep:Ops):

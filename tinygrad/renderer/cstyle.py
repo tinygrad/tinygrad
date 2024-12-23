@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, cast_float_to_bf16
+from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, cast_float_to_bf16, cast_half_to_fp8_e4m3
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -37,6 +37,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, (dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}f')})"),
   (UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}u')})"),
   (UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
+  (UPat(Ops.CONST, (dtypes.fp8e4m3, dtypes.fp8e5m2), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
   # default const render
   (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.arg)),
   # new load/store
@@ -318,7 +319,31 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
+
+  extra_matcher = PatternMatcher([
+    # cast float8 alus to float16
+    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e4m3), UPat.var("y", dtype=dtypes.fp8e4m3))),
+      lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.half, src=(b, x.cast(dtypes.half), y.cast(dtypes.half))).cast(dtypes.fp8e4m3)),
+    (UPat(GroupOp.ALU, dtype=dtypes.fp8e4m3, name="x"),
+      lambda x: UOp(x.op, dtypes.half, tuple(vv.cast(dtypes.half) for vv in x.src), x.arg).cast(dtypes.fp8e4m3)),
+    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.fp8e4m3), UPat.var("y", dtype=dtypes.fp8e4m3))),
+      lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.half), y.cast(dtypes.half)), alu.arg)),
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e4m3, name="x"),
+      lambda x: (UOp(x.op, dtypes.half, tuple(vv.cast(dtypes.half) for vv in x.src), x.arg).cast(dtypes.fp8e4m3))),
+
+    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
+      lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.half, src=(b,x.cast(dtypes.half), y.cast(dtypes.half))).cast(dtypes.fp8e5m2)),
+    (UPat(GroupOp.ALU, dtype=dtypes.fp8e5m2, name="x"),
+      lambda x: UOp(x.op, dtypes.half, tuple(vv.cast(dtypes.half) for vv in x.src), x.arg).cast(dtypes.fp8e5m2)),
+    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
+      lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.half), y.cast(dtypes.half)), alu.arg)),
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e5m2, name="x"),
+      lambda x: (UOp(x.op, dtypes.half, tuple(vv.cast(dtypes.half) for vv in x.src), x.arg).cast(dtypes.fp8e5m2))),
+
+    (UPat(Ops.CAST, dtypes.fp8e4m3, UPat.var("x", dtypes.fp8e5m2)), lambda x: (x.cast(dtypes.half).cast(dtypes.fp8e4m3))),
+    (UPat(Ops.CAST, dtypes.fp8e5m2, UPat.var("x", dtypes.fp8e4m3)), lambda x: (x.cast(dtypes.half).cast(dtypes.fp8e5m2))),
+    ]) + extra_pm
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -330,11 +355,14 @@ class CUDARenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
     used_dtypes = uops_to_dtypes(uops)
+    if any(dt.scalar() in [dtypes.fp8e4m3, dtypes.fp8e5m2] for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+
+    # yyyyyyyy???????????
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
