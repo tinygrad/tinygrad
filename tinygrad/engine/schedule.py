@@ -448,11 +448,11 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
 
 ops_folding = PatternMatcher([
   # op with size 0 is zero
-  (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  (UPatScheduled(), lambda b,to_store,base: base.const_like(0) if base.size == 0 else None),
   # if the uop folded to a CONST we can delete the BUFFER
-  (UPatScheduled(Ops.CONST, name="const"), lambda b,base,const: base.replace(src=(UOp(Ops.DEVICE, arg=base.device), const))),
+  (UPatScheduled(Ops.CONST, name="const"), lambda b,base,const: base.const_like(const.const_arg)),
   # DETACH is a NOOP here
-  (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
+  (UPatScheduled(Ops.DETACH, name="detach"), lambda detach,**kwargs: detach.src[0]),
   # elementwise const folding
   (UPat(GroupOp.ALU, name="alu"), simplify_alu),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
@@ -588,7 +588,7 @@ remove_movement_ops = merge_views+PatternMatcher([
   # pad on CONST masks it with a VALID
   (UPat(Ops.PAD, name="pad", src=(UPat(src=(UPat(), UPat.cvar("const"))))),
    lambda const,pad: UOp(Ops.VALID, dtypes.bool, (unwrap(pad.st).to_uop(),)).where(const.replace(dtype=const.dtype.base), 0)),
-  # otherwise movement ops stack as a VIEW, merge_views uses this VIEW to change the underlying ShapeTracker in an additive way
+  # other movement ops stack as a VIEW, merge_views uses this VIEW to change the underlying ShapeTracker in an additive way
   (UPat(GroupOp.Movement, name="mov", src=(UPat(Ops.BUFFER, name="buf").view(),)), lambda buf,mov: buf.view(unwrap(mov.st))),
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov: x.view(unwrap(mov.st))),
 ])
