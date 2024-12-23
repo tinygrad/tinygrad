@@ -39,7 +39,7 @@ class AM_GMC(AM_IP):
     # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
-    if ip == "MM": x = self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
+    if ip == "MM": self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
 
     self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
       invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
@@ -95,9 +95,9 @@ class AM_GMC(AM_IP):
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
-      st, addr = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32').read()
-      addr = (addr | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32').read()) << 32) << 12
-      if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {addr:#x}")
+      st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32').read()
+      va = (va | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32').read()) << 32) << 12
+      if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
 
 class AM_SMU(AM_IP):
   def init(self):
@@ -137,7 +137,8 @@ class AM_GFX(AM_IP):
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
     for i in range(0, 16):
       self._grbm_select(vmid=i)
-      self.adev.regSH_MEM_CONFIG.write(address_mode=am.SH_MEM_ADDRESS_MODE_64, alignment_mode=am.SH_MEM_ALIGNMENT_MODE_UNALIGNED, initial_inst_prefetch=3)
+      self.adev.regSH_MEM_CONFIG.write(address_mode=am.SH_MEM_ADDRESS_MODE_64, alignment_mode=am.SH_MEM_ALIGNMENT_MODE_UNALIGNED,
+                                       initial_inst_prefetch=3)
 
       # Configure apertures:
       # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)

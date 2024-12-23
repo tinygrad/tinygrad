@@ -55,7 +55,8 @@ class TLSFAllocator:
     for l1 in range(self.lv1(size), len(self.storage)):
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
-          assert (nsize:=self.blocks[self.storage[l1][l2][0]][0]) >= size, "block must be larger"
+          nsize = self.blocks[self.storage[l1][l2][0]][0]
+          assert nsize >= size, "block must be larger"
 
           start = self.storage[l1][l2][0]
           if (new_start:=round_up(start, align)) != start:

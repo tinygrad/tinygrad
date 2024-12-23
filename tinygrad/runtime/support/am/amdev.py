@@ -203,7 +203,7 @@ class AMMemoryManager:
     vaddr = vaddr - AMMemoryManager.va_allocator.base
     for va, off, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
       entry = pt.get_entry(pte_st_idx)
-      if not(entry & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
+      if not (entry & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
 
       for pte_idx in range(n_ptes):
         assert pt.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, "Entry must be set"
@@ -324,7 +324,7 @@ class AMDev:
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
-          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id: self.regs_offset[hw_ip][ip.instance_number] = [x for x in ba]
+          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id: self.regs_offset[hw_ip][ip.instance_number] = list(ba)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 

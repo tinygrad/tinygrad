@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Any, Optional, cast
-import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, subprocess, select, struct
+from typing import Any, Optional
+import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, select, struct
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, from_mv, lo32, hi32
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
@@ -236,7 +236,7 @@ class AMDProgram(HCQProgram):
     self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.dev.dev_iface.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
+    if lds_size > (self.dev.dev_iface.properties['lds_size_in_kb']*1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
     if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
@@ -410,14 +410,14 @@ class PCIIface:
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio and PCIIface.vfio_fd == -1:
-      pathlib.Path(f"/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
+      pathlib.Path("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
       PCIIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
       if not vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU): PCIIface.vfio = False
 
     # Init vfio for the device
     if PCIIface.vfio:
       pathlib.Path(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write_text("vfio-pci")
-      pathlib.Path(f"/sys/bus/pci/drivers_probe").write_text(self.pcibus)
+      pathlib.Path("/sys/bus/pci/drivers_probe").write_text(self.pcibus)
 
       iommu_group = os.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
       self.vfio_group = os.open(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
