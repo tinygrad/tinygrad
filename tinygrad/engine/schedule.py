@@ -478,7 +478,7 @@ ops_folding = PatternMatcher([
 # ** buffer merging
 
 def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
-  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
+  if unwrap(v1.st) != unwrap(v2.st): return v1.view(v2.st)
   # if b2 is realized also realize b1
   if b2 in ctx.realizes:
     ctx.realizes[b1] = b1
@@ -507,9 +507,9 @@ merge_bufs = PatternMatcher([
 
 def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
 
-def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+def realize_view(ctx:ScheduleContext, src:UOp, b:UOp, base:UOp) -> None:
   if src.st is None: return None
-  st = unwrap(view.st)
+  st = unwrap(base.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
     return None if can_pad(src, ctx.realizes, set()) else realize(ctx, b, src)
@@ -534,7 +534,7 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled(name="src").view(name="view"), realize_view),
+  (UPatScheduled(name="src"), realize_view),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
@@ -600,7 +600,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   sink = to_uop(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
   # merge views, const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
-  sink = graph_rewrite(sink, merge_bufs, ctx)
+  sink = graph_rewrite(sink, merge_views+merge_bufs, ctx)
   unmerged_views = [x for x in sink.toposort if x.op is Ops.VIEW and any(y.op is Ops.VIEW for y in x.src) or x.op in GroupOp.Movement]
   assert len(unmerged_views) == 0, f"found {len(unmerged_views)} unmerged views in sink"
   # create the scheduler context
