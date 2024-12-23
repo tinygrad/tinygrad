@@ -184,7 +184,7 @@ class AMMemoryManager:
     if AM_DEBUG >= 2: print(f"Mapping {vaddr=:#x} -> {paddr} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
-    for va, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
+    for _, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
       lpaddr, off = (self.pa_allocator.alloc(n_ptes * pte_covers), 0) if paddr is None else (paddr, off)
 
       for pte_idx in range(n_ptes):
@@ -201,7 +201,7 @@ class AMMemoryManager:
     if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
-    for va, off, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
+    for _, _, pte_st_idx, n_ptes, _, pt, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
       entry = pt.get_entry(pte_st_idx)
       if not (entry & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
 
@@ -320,7 +320,7 @@ class AMDev:
       dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
 
       ip_offset = ctypes.addressof(bhdr) + ctypes.sizeof(dhdr) + ihdr.die_info[num_die].die_offset
-      for num_ip in range(dhdr.num_ips):
+      for _ in range(dhdr.num_ips):
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
