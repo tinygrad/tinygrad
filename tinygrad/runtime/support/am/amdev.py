@@ -1,11 +1,10 @@
 from __future__ import annotations
-import os, ctypes, collections, time, dataclasses
+import ctypes, collections, time, dataclasses
 from typing import Tuple, Dict, Set, Optional, Generator, List
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
-from tinygrad.runtime.support.hcq import BumpAllocator
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -45,7 +44,7 @@ class AMFirmware:
       fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
       ucode_start_offset = fw_bin_desc.offset_bytes + sos_hdr.header.ucode_array_offset_bytes
       self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
-    
+
     # Load other fw
     self.ucode_start: Dict[str, int] = {}
     self.descs: List[Tuple[int, memoryview]] = []
@@ -267,9 +266,9 @@ class AMDev:
     for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__.get(f"{ip}_HWIP")][inst][seg]
- 
+
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
-  
+
   def rreg(self, reg:int) -> int:
     val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"Reading register {reg:#x} with value {val:#x}")

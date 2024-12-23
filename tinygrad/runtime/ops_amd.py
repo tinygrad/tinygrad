@@ -408,11 +408,13 @@ class PCIIface:
     # Probe device
     libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
 
+    # Try to init vfio. Use it if success.
     if PCIIface.vfio and PCIIface.vfio_fd == -1:
       pathlib.Path(f"/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
       PCIIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
       if not vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU): PCIIface.vfio = False
 
+    # Init vfio for the device
     if PCIIface.vfio:
       pathlib.Path(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write_text("vfio-pci")
       pathlib.Path(f"/sys/bus/pci/drivers_probe").write_text(self.pcibus)
@@ -488,9 +490,7 @@ class PCIIface:
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
 
   def sleep(self, timeout):
-    if PCIIface.vfio:
-      x = self.irq_poller.poll(timeout)
-      if len(x): os.read(self.irq_fd, 1024)
+    if PCIIface.vfio and len(self.irq_poller.poll(timeout)): os.read(self.irq_fd, 1024)
 
 class AMDDevice(HCQCompiled):
   driverless:bool = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))

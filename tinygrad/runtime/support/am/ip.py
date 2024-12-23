@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, time, dataclasses
-from typing import Literal, Any
+import ctypes, time
+from typing import Literal
 from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32
@@ -96,8 +96,7 @@ class AM_GMC(AM_IP):
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
       st, addr = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32').read()
-      addr |= (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32').read()) << 32
-      addr <<= 12
+      addr = (addr | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32').read()) << 32) << 12
       if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {addr:#x}")
 
 class AM_SMU(AM_IP):
@@ -340,7 +339,7 @@ class AM_PSP(AM_IP):
     time.sleep(0.1)
 
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x8000FFFF, value=0x80000000)
-  
+
   def _ring_submit(self):
     prev_wptr = self.adev.regMP0_SMN_C2PMSG_67.read()
     ring_entry_addr = self.ring_pm.cpu_addr() + prev_wptr * 4
@@ -362,7 +361,7 @@ class AM_PSP(AM_IP):
 
     return resp
 
-  def _prep_ring_cmd(self, hdr): 
+  def _prep_ring_cmd(self, hdr):
     ctypes.memset(self.cmd_pm.cpu_addr(), 0, 0x1000)
     cmd = am.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
     cmd.cmd_id = hdr
