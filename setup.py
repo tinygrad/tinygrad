@@ -58,7 +58,8 @@ setup(name='tinygrad',
             "hypothesis",
             "nibabel",
             "bottle",
-            "ggml-python"
+            "ggml-python",
+            "pycocotools"
         ],
         'webgpu': ["wgpu"],
         'docs': [
