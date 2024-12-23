@@ -403,11 +403,6 @@ class UPatScheduled(UPat):
 
 # ** this is schedule level const folding
 
-def _as_const(u:UOp, val:ConstType) -> UOp:
-  assert is_scheduled(u), f"must be scheduled to fold {u}"
-  st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
-  return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
-
 def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
@@ -478,7 +473,7 @@ ops_folding = PatternMatcher([
 # ** buffer merging
 
 def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
-  if unwrap(v1.st) != unwrap(v2.st): return v1.view(v2.st)
+  if unwrap(v1.st) != unwrap(v2.st): return v1.view(unwrap(v2.st))
   # if b2 is realized also realize b1
   if b2 in ctx.realizes:
     ctx.realizes[b1] = b1
@@ -492,7 +487,7 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   # early become
   for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
-  return v1.view(v2.st)
+  return v1.view(unwrap(v2.st))
 
 merge_bufs = PatternMatcher([
   # merge base
@@ -563,7 +558,9 @@ def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape if x.st is None else x.st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
+def bruh(): raise Exception("buh")
 break_sched = PatternMatcher([
+  (UPat(GroupOp.Movement), bruh),
   # CONST is always fused and generated
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.CONST, name="x"))), generate_const),
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.BIND, name="bind"))), unbind_variable),
@@ -590,10 +587,8 @@ const = UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat.cvar("const")))
 
 remove_movement_ops = PatternMatcher([
   # masked CONST must become VALID
-  (UPat(Ops.PAD, name="pad", src=(const,)),
-   lambda const,pad: UOp(Ops.VALID, dtypes.bool, (unwrap(pad.st).to_uop(),)).where(const.replace(dtype=const.dtype.base), 0)),
-  (UPat(Ops.VIEW, name="view", src=(const,)), lambda const,view: None if all(v.mask is None for v in view.st.views) else
-   UOp(Ops.VALID, dtypes.bool, (unwrap(view.st).to_uop(),)).where(const.replace(dtype=const.dtype.base), 0)),
+  (UPat(Ops.PAD, name="pad", src=(const,)), lambda const,pad: const.valid(pad.st)),
+  (UPat(Ops.VIEW, name="view", src=(const,)), lambda const,view: None if all(v.mask is None for v in view.st.views) else const.valid(view.st)),
   (UPat(Ops.VIEW, name="view", src=(UPat(), const,)), lambda const,view: view.const_like(const.const_arg)),
   # other movement ops stack as a VIEW, merge_views uses this VIEW to change the underlying ShapeTracker in an additive way
   (UPat(GroupOp.Movement, name="mov", src=(UPat(Ops.BUFFER, name="buf").view(),)), lambda buf,mov: buf.view(unwrap(mov.st))),
@@ -613,6 +608,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   # these uops shouldn't exist after the scheduler rewrite pass
   unacceptable = [x for x in sink.toposort if x.op in {*GroupOp.Movement, Ops.DETACH}]
   assert not unacceptable, f"found {len(unacceptable)} unacceptable uops in sink {unacceptable[0]}"
+  for x in list(sink.toposort)[:-1]: x.st
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels
