@@ -202,5 +202,21 @@ class TestMergeViews(unittest.TestCase):
     self.assertIsNotNone(v)
     self.assertEqual(v, View(shape=(1, 1, 1), strides=(0, 0, 0), offset=0, mask=((0, 0), (0, 0), (0, 0)), contiguous=False))
 
+  def test_empty_shape_view1(self):
+    # test_stack_slice
+    v0 = View(shape=(3, 5), strides=(0, 1), offset=0, mask=((0, 1), (0, 5)), contiguous=False)
+    v1 = View(shape=(), strides=(), offset=0, mask=None, contiguous=True)
+    v = v0 + v1
+    self.assertIsNotNone(v)
+    self.assertEqual(v, View(shape=(), strides=(), offset=0, mask=None, contiguous=True))
+
+  def test_empty_shape_view2(self):
+    # test_std_mean
+    v0 = View(shape=(2,), strides=(0,), offset=0, mask=((1, 2),), contiguous=False)
+    v1 = View(shape=(), strides=(), offset=0, mask=None, contiguous=True)
+    v = v0 + v1
+    # TODO: why is this different?
+    self.assertIsNone(v)
+
 if __name__ == '__main__':
   unittest.main()
