@@ -585,15 +585,17 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
-remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
+remove_movement_ops = merge_views+PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
   sink = to_uop(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
-  # const folding and fusion
+  # merge views, const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
+  unmerged_views = [x for x in sink.toposort if x.op is Ops.VIEW and any(y.op is Ops.VIEW for y in x.src) or x.op in GroupOp.Movement]
+  assert len(unmerged_views) == 0, f"found {len(unmerged_views)} unmerged views in sink"
   sink = graph_rewrite(sink, merge_bufs, ctx)
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
