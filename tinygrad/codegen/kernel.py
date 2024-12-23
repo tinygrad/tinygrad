@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Optional, cast, Final, DefaultDict, Callable, Sequence
+from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
@@ -564,7 +564,7 @@ class Kernel:
 
   # **** kernel outputs ****
 
-  kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
+  kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING, Any, DefaultDict, Callable
+from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -7,8 +7,7 @@ from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
-
-if TYPE_CHECKING: from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
@@ -19,7 +18,7 @@ def fold_expanded(ex, buf):
   is_load, is_image = new_srcs[0].op is Ops.LOAD, isinstance(buf.dtype, ImageDType)
 
   # first, extract all the relevant offsets
-  offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
+  offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
     idx = s.src[0].src[1]
     if s.dtype.count != 1 or (is_image and idx.dtype.count == 2): continue
