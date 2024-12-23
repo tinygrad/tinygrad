@@ -147,7 +147,7 @@ class RegressionHead:
     self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
     if box_coder is None:
-      box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0))
+      box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0), apply_to_remove=False)
     self.box_coder = box_coder
 
   def __call__(self, x:Tensor, bboxes:Optional[Tensor] = None, matches:Optional[Tensor] = None, anchors:Optional[Tensor] = None):
