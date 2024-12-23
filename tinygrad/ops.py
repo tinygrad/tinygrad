@@ -169,11 +169,10 @@ class GroupOp:
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
-  Associative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.XOR, Ops.AND, Ops.OR}
-  CommAssoc = set.intersection(Commutative, Associative)
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
-  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR}
+  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
+  CommAssoc = set.intersection(Commutative, Associative)
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
@@ -1180,11 +1179,6 @@ def simplify_valid(valid:UOp) -> UOp|None:
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
-def order_commutative(x: UOp):
-  if (a:=x.src[0]).op is x.op: return None
-  if (b:=x.src[1]).op is x.op: return x.replace(src=(b, a))
-  if a.order(x.op) > b.order(x.op): return x.replace(src=(b, a))
-
 symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -1244,7 +1238,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
-   lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # ALU min==max -> CONST (slow!)
   (UPat(GroupOp.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
