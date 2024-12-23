@@ -273,8 +273,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache={})
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]:
-    if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op, self.src[1].arg)
+  def tuplize(self:UOp) -> tuple:
+    if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op.value, self.src[1].arg)
     reverse_src = self.op is Ops.IDIV and self.src[1].op in (Ops.CONST, Ops.VCONST)
     return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in (self.src[::-1] if reverse_src else self.src)))
 
