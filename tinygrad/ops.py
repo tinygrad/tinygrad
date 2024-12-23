@@ -92,7 +92,7 @@ class MathTrait(SimpleMathTrait):
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
 
-# the order of these Ops controls the order of the toposort
+# the order of these Ops controls the order of the toposort and ADD/MUL/MAX chains
 class Ops(FastEnum):
   # uops that aren't rendered
   SINK = auto(); CONTIGUOUS = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
@@ -137,7 +137,9 @@ class Ops(FastEnum):
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
 
+  # this is here becasue it needs to be at the top of a reduce chain
   DEFINE_ACC = auto()
+
   # assignment ops
   ASSIGN = auto()
   BIND = auto()
