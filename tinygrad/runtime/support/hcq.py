@@ -431,5 +431,3 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
                                    .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                    .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
       dest_dev.timeline_value += 1
-
-  def map(self, buf:HCQBuffer): pass
