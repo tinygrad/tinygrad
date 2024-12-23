@@ -15,7 +15,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 from extra.onnx import get_run_onnx   # TODO: port to main tinygrad
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
-OUTPUT = "/tmp/openpilot.pkl"
+OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 def compile(onnx_file):
   onnx_model = onnx.load(onnx_file)
@@ -27,7 +27,8 @@ def compile(onnx_file):
 
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
-  if getenv("FLOAT16", 0) == 0: input_types = {k:(np.float32 if v==np.float16 else v) for k,v in input_types.items()}
+  # Float inputs and outputs to tinyjits for openpilot are always float32
+  input_types = {k:(np.float32 if v==np.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
@@ -50,16 +51,20 @@ def compile(onnx_file):
 
   # checks from compile2
   kernel_count = 0
+  read_image_count = 0
   gated_read_image_count = 0
   for ei in run_onnx_jit.captured.jit_cache:
     if isinstance(ei.prg, CompiledRunner):
       kernel_count += 1
+      read_image_count += ei.prg.p.src.count("read_image")
       gated_read_image_count += ei.prg.p.src.count("?read_image")
-  print(f"kernel_count: {kernel_count}  gated_read_image_count: {gated_read_image_count}")
-  assert kernel_count <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+  print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
+  if (allowed_kernel_count:=getenv("ALLOWED_KERNEL_COUNT", -1)) != -1:
+    assert kernel_count <= allowed_kernel_count, f"too many kernels! {kernel_count=}, {allowed_kernel_count=}"
+  if (allowed_read_image:=getenv("ALLOWED_READ_IMAGE", -1)) != -1:
+    assert read_image_count == allowed_read_image, f"different read_image! {read_image_count=}, {allowed_read_image=}"
   if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
-    assert gated_read_image_count <= allowed_gated_read_image, \
-      f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
+    assert gated_read_image_count <= allowed_gated_read_image, f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)

@@ -1,4 +1,3 @@
-from typing import List, Union, Tuple, Dict
 from collections import defaultdict
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.device import Device, Buffer
@@ -7,7 +6,7 @@ from tinygrad.ops import Ops
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]]], noopt_buffers=None, debug_prefix="") -> Dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noopt_buffers=None, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
@@ -18,7 +17,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 
   # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
   # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
-  free_segs: Dict[Tuple, List[Tuple[int, int, Buffer]]] = defaultdict(list) # Dict[buffer key, Tuple[start, end, buffer to reuse on the seg]]
+  free_segs: dict[tuple, list[tuple[int, int, Buffer]]] = defaultdict(list) # dict[buffer key, tuple[start, end, buffer to reuse on the seg]]
   def find_replace_buffer(buf, st, en):
     key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
 
@@ -44,7 +43,7 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
           f"{len(ak)} -> {len(av)} bufs")
   return assigned
 
-def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
+def memory_planner(schedule:list[ScheduleItem]) -> list[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([si.bufs for si in schedule],
                                       noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs})

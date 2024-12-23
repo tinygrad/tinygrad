@@ -4,7 +4,7 @@ import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, to_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import given, settings, strategies as strat
@@ -52,9 +52,6 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
     # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
     a = (a > 65504).where(65504, a)
-  if CI and Device.DEFAULT == "CLANG" and (target_dtype, a.dtype) in [(dtypes.double, dtypes.half), (dtypes.half, dtypes.double)]:
-    # TODO: cast between double and half are broken https://github.com/tinygrad/tinygrad/issues/4084
-    return
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
@@ -359,7 +356,7 @@ class TestEqStrDType(unittest.TestCase):
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
-    self.assertEqual(str(dtypes.float32.ptr()), "dtypes.float.ptr()")
+    self.assertEqual(str(dtypes.float32.ptr(16)), "dtypes.float.ptr(16)")
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
@@ -646,8 +643,7 @@ class TestAutoCastType(unittest.TestCase):
   def test_broadcast_scalar(self, dt):
     assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
     assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
-    if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
-      assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
+    assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
@@ -854,6 +850,19 @@ class TestDtypeUsage(unittest.TestCase):
       if is_dtype_supported(d):
         t = Tensor([[1, 2], [3, 4]], dtype=d)
         (t*t).max().item()
+
+class TestToDtype(unittest.TestCase):
+  def test_dtype_to_dtype(self):
+    dtype = dtypes.int32
+    res = to_dtype(dtype)
+    self.assertIsInstance(res, DType)
+    self.assertEqual(res, dtypes.int32)
+
+  def test_str_to_dtype(self):
+    dtype = "int32"
+    res = to_dtype(dtype)
+    self.assertIsInstance(res, DType)
+    self.assertEqual(res, dtypes.int32)
 
 if __name__ == '__main__':
   unittest.main()

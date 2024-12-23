@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import os, multiprocessing, logging, pickle, sqlite3, difflib, functools
+from collections import defaultdict
+import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
 from typing import Callable, List, Set, Tuple, Union, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.engine.schedule import ScheduleContext, full_ast_rewrite
+from tinygrad.engine.schedule import ScheduleContext, schedule_uop
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
@@ -25,11 +26,13 @@ ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in
 if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
+class ProcessReplayWarning(Warning): pass
 
 # *** recreators
 
 def recreate_sched(ast:UOp, assigns:Set[UOp]) -> UOp:
-  return full_ast_rewrite(ast, ScheduleContext(assigns=assigns))[0]
+  # NOTE: process replay isn't meant to actually schedule anything
+  return schedule_uop(ast, ScheduleContext(assigns=assigns, tensor_uops=defaultdict(list))).ast
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
@@ -45,24 +48,29 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
   cur.execute(f"SELECT val FROM '{name}_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   additions, deletions, changed = 0, 0, 0
   for row in cur.fetchall():
+    if changed > MAX_DIFF_PCT:
+      warnings.warn(f"detected changes in over {MAX_DIFF_PCT}% of {name}s. skipping further diff generation.")
+      early_stop.set()
+      break
     # try unpickle
     try: args = pickle.loads(row[0])
     except Exception as e:
-      logging.warning(f"FAILED TO UNPICKLE OBJECTS {e}")
-      if ASSERT_DIFF: return True
+      changed += 1
+      warnings.warn(f"FAILED TO UNPICKLE OBJECTS {e}", ProcessReplayWarning)
       continue
     # try recreate
     try:
       with Context(**{k:v for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
       if good is None: continue
     except Exception as e:
-      logging.warning(f"FAILED TO RECREATE KERNEL {e}")
+      changed += 1
+      warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
       for x in args[:-1]: logging.info(x)
-      if ASSERT_DIFF: return True
       continue
     # diff kernels
     try: assert args[-1] == good
     except AssertionError:
+      changed += 1
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       for x in args[:-1]: logging.info(x)
       print_diff(good, args[-1])
@@ -70,10 +78,6 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       additions += len([x for x in changes if x.startswith("+")])
       deletions += len([x for x in changes if x.startswith("-")])
       if ASSERT_DIFF: return additions, deletions
-      if changed > MAX_DIFF_PCT:
-        logging.warning(f"detected changes in over {MAX_DIFF_PCT}% of {name}s. skipping further diff generation.")
-        early_stop.set()
-        break
   conn.commit()
   cur.close()
   return additions, deletions
@@ -85,7 +89,7 @@ def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{name}_{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
-    logging.warning(f"{name}_{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    warnings.warn(f"{name}_{TABLE_NAME} isn't accessible in master, did DB_VERSION change?", ProcessReplayWarning)
     return None
   conn.commit()
   cur.close()
@@ -100,7 +104,7 @@ def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
     logging.info(f"{sum(changed)} kernels changed")
     if sum(insertion) != 0: logging.info(colored(f"{sum(insertion)} insertions(+)", "green"))
     if sum(deletions) != 0: logging.info(colored(f"{sum(deletions)} deletions(-)", "red"))
-    if any(changed) and ASSERT_DIFF: raise AssertionError("process replay detected changes")
+    if any(changed): warnings.warn("process replay detected changes", ProcessReplayWarning)
 
 # *** main loop
 
@@ -109,6 +113,7 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
+  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
     try: _pmap(name, fxn)

@@ -7,7 +7,7 @@ from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.ops import UOp, Ops, GroupOp
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.ops import Variable
@@ -40,8 +40,8 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   np_c = np_a @ np_b
-  if dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
-  elif dtype_out == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
+  if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
+  elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
@@ -1009,11 +1009,12 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
-      a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-      k = Kernel(create_schedule([a.lazydata])[-1].ast)
-      k.linearize()
-      local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
-      assert local[0].dtype == acc_dtype
+      if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
+        a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
+        k = Kernel(create_schedule([a.lazydata])[-1].ast)
+        k.linearize()
+        local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
+        assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
@@ -1031,12 +1032,13 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float, dtypes.float16, dtypes.float16),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
-      a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
-      helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
-      helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
-      helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, acc_dtype=acc_dtype), expected_dtype)
-      d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
-      helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
+      if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype) and is_dtype_supported(expected_dtype):
+        a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
+        helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, acc_dtype=acc_dtype), expected_dtype)
+        d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
+        helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
@@ -1714,6 +1716,8 @@ class TestHandCodedOpts(unittest.TestCase):
     with Context(WINO=1):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
       out = Tensor.conv2d(x,w, padding=1)
+      out.mean().backward()
+
       upcasts = []
       wino_schedule = create_schedule([out.lazydata])
       # collect upcasts of tile transform kernels
@@ -1728,7 +1732,6 @@ class TestHandCodedOpts(unittest.TestCase):
       # this test case's inputs are too small, so one of the 4-stacks became a local, which is fine i guess
       assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
 
-      out.mean().backward()
       backward_schedule = create_schedule([x.grad.lazydata, w.grad.lazydata])
       for si in backward_schedule:
         k = Kernel(si.ast)
@@ -2019,7 +2022,8 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
+    if (CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]) or Device.DEFAULT == "WEBGPU":
+      self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -2119,6 +2123,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "max dimensions exceeded on WebGPU")
   def test_padto_where(self):
     Tensor.manual_seed(0)
     N = 17 * 17
@@ -2128,6 +2133,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "max dimensions exceeded on WebGPU")
   def test_padto_where_multioutput(self):
     Tensor.manual_seed(0)
     N = 17 * 17
