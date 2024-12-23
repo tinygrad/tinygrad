@@ -1,12 +1,11 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, heapq
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
-from heapq import merge
 from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -261,27 +260,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
-
-  class UOpOrder:
-    def __init__(self, uop: UOp, order=None) -> None: self.uop, self.order = uop, order
-    def __lt__(self, other: UOp.UOpOrder):
-      const_s, const_o = 0,0
-      if self.order is Ops.ADD:
-        if self.uop.op in (Ops.MUL, Ops.ADD) and self.uop.src[1].op is Ops.CONST:
-          const_s = self.uop.src[1].arg
-          self.uop = self.uop.src[0]
-        if other.uop.op in (Ops.MUL, Ops.ADD) and other.uop.src[1].op is Ops.CONST:
-          const_o = other.uop.src[1].arg
-          other.uop = other.uop.src[0]
-      if self.uop is other.uop: return const_s < const_o
-      for s, o in zip((self.uop.op.value, self.uop.arg, self.uop.dtype), (other.uop.op.value, other.uop.arg, other.uop.dtype)):
-        if s != o: return s < o
-      step = -1 if self.uop.op is Ops.IDIV else 1
-      for s, o in zip(self.uop.src[::step], other.uop.src[::step]):
-        if s is not o: return s.order(self.order) < o.order(self.order)
-      return False
-
-  def order(self, order) -> UOp.UOpOrder: return UOp.UOpOrder(self, order)
 
   @property
   def toposort(self) -> dict[UOp, None]:
@@ -1245,19 +1223,20 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), order_commutative),
+  # Commutative ordering, if its a chain, move the chain to the left
+  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
+      (x.src[1].op is x.op or (x.src[0].tuplize > x.src[1].tuplize)) else None),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
-  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
-  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)), # (x+x*c)-> x*(c+1)
+  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
-  ((UPat.var("y")+UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2), # (x+x)-> x*2
+  ((UPat.var("y")+UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
@@ -1290,10 +1269,10 @@ symbolic = symbolic_simple+PatternMatcher([
    lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
   # swap terms if they are out of order (a+c)+b -> (a+b)+c
   (UPat(GroupOp.CommAssoc, name='x', src=(UPat(GroupOp.CommAssoc, name="chain"), UPat(name="b"))), lambda x,chain,b:
-    chain.src[0].alu(x.op, b).alu(x.op, chain.src[1]) if x.op is chain.op and chain.src[1].order(x.op) > b.order(x.op) else None),
+    chain.src[0].alu(x.op, b).alu(x.op, chain.src[1]) if x.op is chain.op and chain.src[1].tuplize > b.tuplize else None),
   # merge two commutative+associative chains, generelization of (a+c)+(b+d) -> a+b+c+d
-  *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op:
-    functools.reduce(lambda t,s: t.alu(op,s), merge(split_uop(a, op), split_uop(b, op), key=lambda k: k.order(op)))) for op in GroupOp.CommAssoc),
+  *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op: functools.reduce(
+      lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.tuplize))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
   (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")))), fold_unrolled_divs),
