@@ -384,9 +384,16 @@ def train_retinanet():
 
   @Tensor.train()
   def _train_step(model, optim, lr_scheduler, x, **kwargs):
-    # optim.zero_grad()
+    optim.zero_grad()
 
-    y_hat = model(normalize(x, GPUS), **kwargs)
+    loss = model(normalize(x, GPUS), **kwargs)
+    loss = sum([l for l in loss.values()])
+
+    loss.backward()
+    optim.step()
+    # lr_scheduler.step()
+
+    return loss.realize()
 
   # ** hyperparameters **
   # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
@@ -411,11 +418,11 @@ def train_retinanet():
   for p in params: p.realize().to_(GPUS)
 
   # ** optimizer **
-  # optim = Adam(params, lr=LR)
-  optim = None
+  optim = Adam(params, lr=LR)
 
   # ** dataset **
   anchors = generate_anchors((800, 800), batch_size=BS)
+  batched_anchors = Tensor.stack(*[Tensor(a, requires_grad=False) for a in anchors]).shard(GPUS, axis=0)
 
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
   val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
@@ -426,17 +433,22 @@ def train_retinanet():
     it = iter(tqdm(train_dataloader, total=(train_dataset_len:=len(train_dataset.imgs.keys())) // BS, desc=f"epoch {e}"))
     i, proc = 0, _data_get(it)
 
-    if e < LR_WARMUP_EPOCHS:
-      start_iter, warmup_iters = e * train_dataset_len, LR_WARMUP_EPOCHS * train_dataset_len
-      lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, LR_WARMUP_FACTOR)
-    else: lr_scheduler = None
+    # if e < LR_WARMUP_EPOCHS:
+    #   start_iter, warmup_iters = e * train_dataset_len, LR_WARMUP_EPOCHS * train_dataset_len
+    #   lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, LR_WARMUP_FACTOR)
+    # else: lr_scheduler = None
+    lr_scheduler = None
 
     prev_cookies = []
     st = time.perf_counter()
 
     while proc is not None:
+      GlobalCounters.reset()
+
       x, y_bboxes, y_labels, matches, proc = proc
-      _train_step(model, None, lr_scheduler, x, labels=y_labels, matches=matches, anchors=Tensor.stack(*[Tensor(a) for a in anchors]).shard(GPUS, axis=0), bboxes=y_bboxes) # TODO: enable once full model has been integrated
+      loss = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=batched_anchors, bboxes=y_bboxes)
+
+      pt = time.perf_counter()
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
@@ -446,9 +458,18 @@ def train_retinanet():
     
       dt = time.perf_counter()
 
-      tqdm.write(f"{i:5} {(dt - st) * 1000.0:6.2f} ms fetch data")
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.item()
 
-      st = dt
+      cl = time.perf_counter()
+
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
+
+      st = cl
       prev_cookies.append(proc)
       proc, next_proc = next_proc, None  # return old cookie
       i += 1
