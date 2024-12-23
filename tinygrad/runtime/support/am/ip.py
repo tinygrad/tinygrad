@@ -54,14 +54,13 @@ class AM_GMC(AM_IP):
       self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
 
   def enable_vm_addressing(self, page_table, ip:Literal["MM", "GC"], vmid):
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.pm.paddr | 1)
     self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=(3 - page_table.lv))
 
   def init_hub(self, ip:Literal["MM", "GC"]):
     # Init system apertures
-    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT0_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
-    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT0_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
-
     self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0)
     self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24) # disable AGP
     self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0)
@@ -103,7 +102,6 @@ class AM_GMC(AM_IP):
 
 class AM_SMU(AM_IP):
   def init(self):
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_RunDcBtc, 0, poll=True)
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
 
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetWorkloadMask, 0x24, poll=True)
@@ -146,9 +144,6 @@ class AM_GFX(AM_IP):
       self.adev.regSH_MEM_BASES.write(shared_base=0x1, private_base=0x2)
     self._grbm_select()
 
-    self.adev.regS2A_DOORBELL_ENTRY_0_CTRL.write(s2a_doorbell_port0_awaddr_31_28_value=3, s2a_doorbell_port0_awid=3, s2a_doorbell_port0_enable=1)
-    self.adev.regS2A_DOORBELL_ENTRY_3_CTRL.write(s2a_doorbell_port3_awaddr_31_28_value=3, s2a_doorbell_port3_awid=6, s2a_doorbell_port3_enable=1)
-
     # Configure MEC doorbell range
     self.adev.regCP_MEC_DOORBELL_RANGE_LOWER.write(0x0)
     self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x450)
@@ -157,7 +152,7 @@ class AM_GFX(AM_IP):
     self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0,
                                          mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
 
-    # NOTE: Wait for MEC to be ready. The kernel does udelay as well.
+    # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.5)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
@@ -172,7 +167,7 @@ class AM_GFX(AM_IP):
       cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell*2, doorbell_en=1),
       cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=1, queue_size=(ring_size//4).bit_length()-2),
       cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
-      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1),
+      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1), cp_hqd_vmid=0,
       cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_size//4).bit_length()-2))
 
@@ -214,23 +209,16 @@ class AM_GFX(AM_IP):
 class AM_IH(AM_IP):
   def interrupt_handler(self):
     addr_vm, rwptr_vm, suf, ring_id = self.rings[0]
-    ring_view = to_mv(addr_vm.cpu_addr(), 262144).cast('I')
+    ring_view = to_mv(addr_vm.cpu_addr(), addr_vm.size).cast('I')
     wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
 
-    while (self.rptr % self.ring_vm.size) < (wptr % self.ring_vm.size):
-      ring_index = (self.rptr % self.ring_vm.size) // 4
-      iv_entry = am.struct_amdgpu_iv_entry(client_id=ring_view[ring_index + 0] & 0xff, src_id=(ring_view[ring_index + 0] >> 8) & 0xff,
-        ring_id=(ring_view[ring_index + 0] >> 16) & 0xff, vmid=(ring_view[ring_index + 0] >> 24) & 0xf, vmid_src=(ring_view[ring_index + 0] >> 31),
-        timestamp=ring_view[ring_index + 1] | ((ring_view[ring_index + 2] & 0xffff) << 32), timestamp_src=(ring_view[ring_index + 2] >> 31),
-        pasid=ring_view[ring_index + 3] & 0xffff, node_id=(ring_view[ring_index + 3] >> 16) & 0xff)
-
-      # print(iv_entry.client_id, iv_entry.timestamp, am.soc21_ih_clientid__enumvalues.get(iv_entry.client_id, "UNK CLIENT"))
-      self.rptr += 32
-
-    self.adev.regIH_RB_CNTL.update(wptr_overflow_clear=1)
-    self.adev.regIH_RB_CNTL.update(wptr_overflow_clear=0)
+    self.rptr = wptr
+    if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
+      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
     self.adev.regIH_RB_RPTR.write(self.rptr % self.ring_vm.size)
-    to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[am.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
+    # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[am.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def init(self):
     # TODO: Clean this up
@@ -285,7 +273,6 @@ class AM_SDMA(AM_IP):
     self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
     self.adev.regSDMA0_UTCL1_PAGE.write(0x10cec20)
     self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
-    self.adev.regS2A_DOORBELL_ENTRY_2_CTRL.write(0x3051001d)
 
 class AM_PSP(AM_IP):
   def __init__(self, adev):
