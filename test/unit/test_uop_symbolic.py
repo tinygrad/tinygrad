@@ -112,6 +112,7 @@ class TestSymbolic(unittest.TestCase):
   def test_add_self_in_chain(self):
     a,b,c = Variable("a", 0, 8), Variable("b", 0, 8), Variable("c", 0, 8)
     self.helper_test_variable((a+b)+(c+a), 0, 4*8, "(((a*2)+b)+c)")
+    self.helper_test_variable((a+b)+(c+b), 0, 4*8, "((a+(b*2))+c)")
     self.helper_test_variable(a*10+b+c+a, 0, 13*8, "(((a*11)+b)+c)")
 
   def test_sub_self(self):
