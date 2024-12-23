@@ -558,9 +558,7 @@ def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape if x.st is None else x.st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
-def bruh(): raise Exception("buh")
 break_sched = PatternMatcher([
-  (UPat(GroupOp.Movement), bruh),
   # CONST is always fused and generated
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.CONST, name="x"))), generate_const),
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.BIND, name="bind"))), unbind_variable),
