@@ -1285,10 +1285,10 @@ symbolic = symbolic_simple+PatternMatcher([
   ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
    lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
   # swap terms if they are out of order (a+c)+b -> (a+b)+c
-  (UPat(GroupOp.CommAssoc, dtypes.ints, name='x', src=(UPat(GroupOp.CommAssoc, name="chain"), UPat(name="b"))), lambda x,chain,b:
+  (UPat(GroupOp.CommAssoc, name='x', src=(UPat(GroupOp.CommAssoc, name="chain"), UPat(name="b"))), lambda x,chain,b:
     chain.src[0].alu(x.op, b).alu(x.op, chain.src[1]) if x.op is chain.op and chain.src[1].order(x.op) > b.order(x.op) else None),
   # merge two commutative+associative chains, generelization of (a+c)+(b+d) -> a+b+c+d
-  *((UPat(op, dtypes.ints, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op:
+  *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op:
     functools.reduce(lambda t,s: t.alu(op,s), merge(split_uop(a, op), split_uop(b, op), key=lambda k: k.order(op)))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
