@@ -2,6 +2,7 @@ from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
@@ -430,6 +431,14 @@ class TestUOpStr(unittest.TestCase):
   def test_vectorized_str(self):
     vec = UOp(Ops.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
+
+  def test_device_arg(self):
+    device = UOp(Ops.DEVICE, arg="GPU")
+    assert str(eval(str(device))) == str(device)
+
+  def test_reduceop_arg(self):
+    sum_uop = Tensor.empty(32, 32).sum().lazydata
+    assert str(eval(str(sum_uop))) == str(sum_uop)
 
 @unittest.skip("uop no longer has order like this")
 class TestIndexingOrdering(unittest.TestCase):

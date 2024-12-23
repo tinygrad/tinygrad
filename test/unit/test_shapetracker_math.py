@@ -1,5 +1,4 @@
 import unittest
-from typing import List
 from tinygrad.helpers import prod
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -7,7 +6,7 @@ from tinygrad import Variable
 from test.unit.test_shapetracker import shapetracker_getitem
 
 class MultiShapeTracker:
-  def __init__(self, sts:List[ShapeTracker]): self.sts = sts
+  def __init__(self, sts:list[ShapeTracker]): self.sts = sts
   @property
   def shape(self): return self.sts[0].shape
   def reshape(self, arg): self.sts = [x.reshape(arg) for x in self.sts]

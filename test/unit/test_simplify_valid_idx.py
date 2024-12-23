@@ -1,5 +1,4 @@
 import unittest, itertools
-from typing import Tuple
 
 from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes
@@ -11,7 +10,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
     UOp.const(dtypes.float, 0.0)
   ))
 
-def get_load_image_uop(image_shape:Tuple[int, ...], valid:UOp, idx:Tuple[UOp, UOp]):
+def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
     UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.int.vec(2), idx), valid),
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)

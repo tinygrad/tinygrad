@@ -62,10 +62,7 @@ tensor_uop_spec = PatternMatcher([
    # target must be a realized device buffer
    (target.op is Ops.BUFFER or target.is_realized) and
    # dtype
-   (assign.dtype == target.dtype == new_val.dtype) and
-   # arg (TODO: replace this ShapeTracker arg with a VIEW on the target BUFFER)
-   # NOTE: this ShapeTracker must not change shape, but it's free to swizzle the STORE st
-   (assign.arg is None or (isinstance(assign.arg, ShapeTracker) and not assign.arg.contiguous and assign.arg.shape == assign.shape))),
+   (assign.dtype == target.dtype == new_val.dtype)),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
@@ -134,6 +131,7 @@ def is_constant(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2 and u.src[1]
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
+  if buf.op is Ops.SINK: return UOp.sink(*[to_uop(x, ctx, cache) for x in buf.src])
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
@@ -200,9 +198,9 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
-  # ASSIGN with offset swizzles STORE
-  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
-   lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)).view(a.arg))),
+  # STORE(.., ASSIGN(VIEW, ..)) -> STORE(.., ASSIGN(..)).view()
+  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat.assign(UPat.var("target"), UPat.var("val")))),
+   lambda b,target,st,val: None if target.st is None else apply_swizzle(UOp.store(b, st, UOp.assign(target.base.buf_uop, val)).view(target.st))),
   # REDUCE(src.view(contiguous=False)) -> REDUCE(src.view(contiguous=True)).view()
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
   # REDUCE(src.view()) -> REDUCE(src).view()
@@ -525,8 +523,9 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
-def init_big_graph(sink:UOp) -> UOp|None:
-  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base))
+def init_big_graph(ctx:ScheduleContext, sink:UOp) -> UOp|None:
+  new_src = tuple(x.base for x in sink.src if x.base.realized is None and not is_constant(x.base))
+  for x in new_src: realize(ctx, x.buf_uop, x)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
@@ -540,34 +539,37 @@ do_realize = PatternMatcher([
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  # ASSIGN only needs the buffer
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="x"), lambda dest,src,x: x.replace(src=(dest.base.buf_uop, src))),
 ])
 
-# ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
+# **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
+
+def generate_const(x:UOp, st:UOp):
+  # NOTE: masked VIEW stacks on top of the CONST, this is required for const folding correctness
+  assert all(v.mask is None for v in unwrap(st.st).views), f"ShapeTracker of CONST must be unmasked, got {st}"
+  return UOp(Ops.VALID, dtypes.bool, (unwrap(st.st).to_uop(),)).where(x.replace(dtype=x.dtype.base), 0)
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
   ctx.var_vals.update([bind.unbind()])
-  return UOp.const_with_shape(bind.dtype, bind, st.shape)
+  return generate_const(UOp.const(bind.dtype, bind), st)
 
-def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
-  return UOp(Ops.LOAD, base.dtype, (b, unwrap(base.st).to_uop()))
+def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
+  assert st.size == b.size and unwrap(st.st).contiguous, f"ShapeTracker of realized {b} BUFFER must match the BUFFER size {st}"
+  # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
+  return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
-def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
-  # TODO: metadata post merge
-  if (m:=ctx.tensor_uops[b][0].metadata) is not None: ctx.ops_metadata[to_store] = m
-  return to_store
+def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
+  if (m:=ctx.tensor_uops[b][0].metadata) is not None: ctx.ops_metadata[x] = m
+  if b not in ctx.realizes: return x # collapse BUFFER
+  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
+  return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
-  # consts are always fused and generated
-  (UPat(Ops.VIEW, name="root", src=(UPat(), UPat.cvar())), lambda root: UOp.const_with_shape(root.dtype.base, root.const_arg, root.shape)),
-  # values from BIND append to this schedule's var_vals
-  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat(Ops.BIND, name="bind"))), unbind_variable),
-  # view of realized buffer just loads
-  (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, v.st.to_uop()))),
-  # all other views either fold or realize with a store
-  (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
+  # CONST is always fused and generated
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.CONST, name="x"))), generate_const),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.BIND, name="bind"))), unbind_variable),
+  # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),
 ])
 
 # **** Schedule context builder
@@ -588,19 +590,16 @@ remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not x.base.is_unrealized_const())) == 0: return [], {}
-  # create the big graph
-  ctx = ScheduleContext()
-  cache: dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
-  big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
+  sink = to_uop(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
+  # const folding and fusion
+  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
+  sink = graph_rewrite(sink, merge_bufs, ctx)
   # create the scheduler context
-  graph_rewrite(big_graph, create_ctx, ctx)
+  graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
-  graph_rewrite(big_graph, break_sched, ctx)
+  graph_rewrite(sink, break_sched, ctx)
   # preschedule realize groups
   prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
