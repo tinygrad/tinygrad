@@ -4,11 +4,10 @@ import math
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
-from examples.mlperf.helpers import generate_anchors
+from examples.mlperf.helpers import generate_anchors, BoxCoder
 from examples.mlperf.initializers import Conv2dNormal, Conv2dKaimingUniform
 from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
 from extra.models.resnet import ResNet
-from extra.models.mask_rcnn import BoxCoder
 import numpy as np
 
 def nms(boxes, scores, thresh=0.5):

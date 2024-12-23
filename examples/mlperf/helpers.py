@@ -337,7 +337,7 @@ class BoxCoder(object):
     boxes = boxes.cast(rel_codes.dtype)
     rel_codes = rel_codes
 
-    TO_REMOVE = 1  # TODO remove
+    TO_REMOVE = self.apply_to_remove  # TODO remove
     widths = boxes[:, 2] - boxes[:, 0] + TO_REMOVE
     heights = boxes[:, 3] - boxes[:, 1] + TO_REMOVE
     ctr_x = boxes[:, 0] + 0.5 * widths
