@@ -2687,6 +2687,38 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
+class TestHalfToFp8(unittest.TestCase):
+  def test_cast_half_to_fp8_e4m3(self):
+    x = Tensor([1.0], dtype=dtypes.half)
+    expected = Tensor([1.0], dtype=dtypes.fp8e4m3)
+    result = cast_half_to_fp8_e4m3(x)
+    np.testing.assert_array_equal(result.numpy(), expected.numpy())
+
+    # # Test with another half precision value
+    # x = Tensor([0xC000], dtype=dtypes.half)  # -2.0 in half precision
+    # expected = Tensor([0xF8], dtype=dtypes.fp8e4m3)  # Expected fp8 e4m3 value
+    # result = cast_half_to_fp8_e4m3(x)
+    # np.testing.assert_array_equal(result.numpy(), expected.numpy())
+
+    # # Test with zero
+    # x = Tensor([0x0000], dtype=dtypes.half)  # 0.0 in half precision
+    # expected = Tensor([0x00], dtype=dtypes.fp8e4m3)  # Expected fp8 e4m3 value
+    # result = cast_half_to_fp8_e4m3(x)
+    # np.testing.assert_array_equal(result.numpy(), expected.numpy())
+
+    # # Test with maximum half precision value
+    # x = Tensor([0x7BFF], dtype=dtypes.half)  # Maximum half precision value
+    # expected = Tensor([0x7F], dtype=dtypes.fp8e4m3)  # Expected fp8 e4m3 value
+    # result = cast_half_to_fp8_e4m3(x)
+    # np.testing.assert_array_equal(result.numpy(), expected.numpy())
+
+    # # Test with minimum half precision value
+    # x = Tensor([0xFBFF], dtype=dtypes.half)  # Minimum half precision value
+    # expected = Tensor([0xFF], dtype=dtypes.fp8e4m3)  # Expected fp8 e4m3 value
+    # result = cast_half_to_fp8_e4m3(x)
+    # np.testing.assert_array_equal(result.numpy(), expected.numpy())
+
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)

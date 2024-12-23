@@ -39,7 +39,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.fp8e4m3:0.5, dtypes.fp8e5m2:0.5}.get(target_dtype, tol_target_dtype))
+    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, tol_target_dtype))
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
@@ -56,7 +56,6 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
-  if target_dtype in (dtypes.fp8e4m3, dtypes.fp8e5m2): raise unittest.SkipTest("no test for fp8s bitcast yet")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
 
 class TestDType(unittest.TestCase):
@@ -98,7 +97,6 @@ class TestDType(unittest.TestCase):
   ))
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    elif self.DTYPE in (dtypes.fp8e4m3, dtypes.fp8e5m2): raise unittest.SkipTest("no fp8s in bitcast")
     list(map(
       lambda dtype:
         _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
@@ -208,16 +206,25 @@ class TestBFloat16DTypeCast(unittest.TestCase):
 @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8e4m3 not supported")
 @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "fp8e5m2 not supported")
 class TestFp8sDType(unittest.TestCase):
-  def test_fp8s(self):
-    t = Tensor([10000, -1, 402, -10000, 20, 1.27]).cast(dtypes.fp8e4m3)
+  def test_half_to_fp8_conversion(self):
+    t = Tensor([10000, -1, 402, -10000, 20, 1.27, 0.0, float('inf')]).cast(dtypes.fp8e4m3)
     t.realize()
-    back = t.cast(dtypes.float32)
-    np.testing.assert_equal(tuple(back.numpy().tolist()), (448., -1, 416, -448, 20, 1.25))
+    back = t.cast(dtypes.half)
+    np.testing.assert_equal(tuple(back.numpy().tolist()), (448., -1, 416, -448, 20, 1.25, 0.0, 448., ))
 
-    t = Tensor([10000, -1, 402, -10000, 20, 1.27]).cast(dtypes.fp8e5m2)
+    t = Tensor([10000, -1, 402, -10000, 20, 1.27, 0.0, float('inf')]).cast(dtypes.fp8e5m2)
     t.realize()
-    back = t.cast(dtypes.float32)
-    np.testing.assert_equal(tuple(back.numpy().tolist()), (10240., -1, 384, -10240, 20, 1.25))
+    back = t.cast(dtypes.half)
+    np.testing.assert_equal(tuple(back.numpy().tolist()), (10240., -1, 384, -10240, 20, 1.25, 0.0, 57344., ))
+
+  def test_fp8_to_half_conversion(self):
+    t = Tensor([448, -1, 416, -448, 20, 1.25, 0.0, 448.], dtype=dtypes.fp8e4m3)
+    converted = t.cast(dtypes.half)
+    np.testing.assert_equal(converted.numpy(), t.numpy())
+
+    t = Tensor([10240, -1, 384, -10240, 20, 1.25, 0.0, 10240.], dtype=dtypes.fp8e5m2)
+    converted = t.cast(dtypes.half)
+    np.testing.assert_equal(converted.numpy(), t.numpy())
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
