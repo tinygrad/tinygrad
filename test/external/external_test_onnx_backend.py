@@ -164,6 +164,11 @@ backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
+# special pytorch implementation (cannot find metadata in modelproto indicating it's from `OnnxBackendPyTorchConvertedModelTest`)
+backend_test.exclude('test_PReLU_1d_multiparam_cpu')
+backend_test.exclude('test_PReLU_2d_multiparam_cpu')
+backend_test.exclude('test_PReLU_3d_multiparam_cpu')
+
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')

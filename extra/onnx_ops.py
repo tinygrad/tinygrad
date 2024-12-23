@@ -47,6 +47,7 @@ def Constant(sparse_value:Optional[Tensor]=None, value:Optional[Tensor]=None, va
 
 def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
 def Gelu(x:Tensor, approximate:Optional[str]=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
+def PRelu(X:Tensor, slope:Tensor): return (X > 0).where(X, X * slope)
 def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
