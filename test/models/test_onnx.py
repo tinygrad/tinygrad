@@ -97,7 +97,7 @@ class TestOnnxModel(unittest.TestCase):
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     Tensor.no_grad = False
     print(tinygrad_out, torch_out)
-    np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
+    np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
 
   @unittest.skip("slow")
   def test_efficientnet(self):

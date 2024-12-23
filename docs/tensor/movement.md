@@ -10,6 +10,7 @@
 
 ## Movement (high level)
 
+::: tinygrad.Tensor.__getitem__
 ::: tinygrad.Tensor.gather
 ::: tinygrad.Tensor.cat
 ::: tinygrad.Tensor.stack

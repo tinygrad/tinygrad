@@ -1908,9 +1908,6 @@ class TestOps(unittest.TestCase):
             helper_test_op([(1,1,n), (1,1,k)],
               lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
-            helper_test_op([(1,1,n), (1,1,k)],
-              lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
-              lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
 
   def _test_conv2d(self, bs=1, cin=1, cout=6):
     for H in [1,2,3]:
