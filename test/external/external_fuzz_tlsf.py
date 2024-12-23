@@ -22,11 +22,11 @@ class AllocatorFuzzer:
     for i in range(min(size, 32)):
       self.mv[ptr + i] = pattern
       self.mv[ptr + (size - 1 - i)] = pattern
-    
+
   def verify_memory(self, ptr: int, size: int, pattern: int) -> bool:
     for i in range(min(size, 32)):
-      assert(self.mv[ptr + i] == pattern)
-      assert(self.mv[ptr + (size - 1 - i)] == pattern)
+      assert self.mv[ptr + i] == pattern
+      assert self.mv[ptr + (size - 1 - i)] == pattern
     return True
 
   def random_alloc(self) -> Optional[int]:
@@ -44,7 +44,7 @@ class AllocatorFuzzer:
     self.alloc_payload += size
     print(f"Allocated {size} bytes at {ptr:x}, pattern: {pattern:02x}")
     return ptr
-    
+
   def random_free(self) -> bool:
     if not self.allocations: return False
 
