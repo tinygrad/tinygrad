@@ -275,10 +275,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]:
-      if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op, self.src[1].arg)
-      elif self.op is Ops.IDIV and self.src[1].op in (Ops.CONST, Ops.VCONST):
-          return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src[::-1]))
-      return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
+    if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op, self.src[1].arg)
+    elif self.op is Ops.IDIV and self.src[1].op in (Ops.CONST, Ops.VCONST):
+      return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src[::-1]))
+    return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
 
@@ -1254,7 +1254,7 @@ symbolic = symbolic_simple+PatternMatcher([
   #((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
-     lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
+    lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
   ((UPat.cvar("c0") + UPat.var("x")) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
   ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # ** lt **
