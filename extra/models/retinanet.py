@@ -147,7 +147,7 @@ class ClassificationHead:
       return self._compute_loss(out, labels, matches)
 
     return out.sigmoid()
-  
+
   def _compute_loss(self, x:Tensor, labels:Tensor, matches:Tensor) -> Tensor:
     labels = ((labels + 1) * (fg_idxs := matches >= 0) - 1).one_hot(num_classes=x.shape[-1])
     valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
@@ -173,7 +173,7 @@ class RegressionHead:
       return self._compute_loss(out, bboxes, matches, anchors)
 
     return out
-    
+
   def _compute_loss(self, x:Tensor, bboxes:Tensor, matches:Tensor, anchors:Tensor) -> Tensor:
     mask = (fg_idxs := matches >= 0).reshape(matches.shape[0], -1, 1)
     x = mask.where(x, 0)
