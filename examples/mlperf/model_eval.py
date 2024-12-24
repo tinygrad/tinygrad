@@ -81,18 +81,11 @@ def eval_unet3d():
 
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
+  from extra.datasets.openimages import normalize
   from extra.models.resnet import ResNeXt50_32X4D
   from extra.models.retinanet import RetinaNet
   mdl = RetinaNet(ResNeXt50_32X4D())
   mdl.load_from_pretrained()
-
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  def input_fixup(x):
-    x = x.permute([0,3,1,2]) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x
 
   from extra.datasets.openimages import download_dataset, iterate, BASEDIR
   from pycocotools.coco import COCO
@@ -103,7 +96,7 @@ def eval_retinanet():
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
   from tinygrad.engine.jit import TinyJit
-  mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
+  mdlrun = TinyJit(lambda x: mdl(normalize(x)).realize())
 
   n, bs = 0, 8
   st = time.perf_counter()
@@ -114,7 +107,7 @@ def eval_retinanet():
       outs = mdlrun(dat).numpy()
     else:
       mdlrun._jit_cache = []
-      outs =  mdl(input_fixup(dat)).numpy()
+      outs =  mdl(normalize(dat)).numpy()
     et = time.perf_counter()
     predictions = mdl.postprocess_detections(outs, input_size=dat.shape[1:3], orig_image_sizes=[t["image_size"] for t in targets])
     ext = time.perf_counter()

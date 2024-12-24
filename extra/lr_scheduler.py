@@ -1,5 +1,5 @@
 import math
-from typing import List
+from typing import List, Callable
 from tinygrad.nn.optim import Optimizer
 from tinygrad.tensor import Tensor
 
@@ -90,3 +90,13 @@ class OneCycleLR(LR_Scheduler):
       self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)),
       self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
     ).cast(self.optimizer.lr.dtype)
+
+class LambdaLR(LR_Scheduler):
+  def __init__(self, optimizer: Optimizer, lr_lambda: Callable[[int],float]):
+    super().__init__(optimizer)
+    self.lr_lambda = lr_lambda
+    self.initial_lr = self.optimizer.lr.numpy()[0]
+
+  def get_lr(self) -> Tensor:
+    lr = self.initial_lr * float(self.lr_lambda(self.epoch_counter.numpy()[0]))
+    return Tensor([lr], device=self.optimizer.device, dtype=self.optimizer.lr.dtype)

@@ -1,11 +1,11 @@
-import os, time, math, functools
+import os, time, math, functools, random
 from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -343,8 +343,136 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
-  # TODO: Retinanet
-  pass
+  from examples.mlperf.dataloader import batch_load_retinanet
+  from examples.mlperf.helpers import generate_anchors
+  from examples.mlperf.initializers import FrozenBatchNorm2d
+  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
+  from extra.models.retinanet import RetinaNet
+  from extra.models import resnet
+  from extra.lr_scheduler import LambdaLR
+  from pycocotools.coco import COCO
+  from tinygrad.helpers import get_child
+  
+  import numpy as np
+
+  NUM_CLASSES = len(MLPERF_CLASSES)
+  BASE_DIR = getenv("BASE_DIR", BASEDIR)
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+
+  for x in GPUS: Device[x]
+
+  def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
+    model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
+    for model_layer in model_layers:
+      for loaded_key in loaded_keys:
+        if model_layer in loaded_key:
+          layer:Tensor = get_child(backbone, loaded_key)
+          layer.requires_grad = False
+
+  def _data_get(it):
+    x, y_bboxes, y_labels, matches, cookie = next(it)
+    return x.shard(GPUS, axis=0).realize(), y_bboxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), cookie
+  
+  def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
+    # TODO: refactor this a bit more so we don't have to recreate it, unlike what MLPerf script is doing
+    def _lr_lambda(e):
+      e = e + start_iter
+      if e >= warmup_iters: return 1.0
+      alpha = float(e) / warmup_iters
+      return warmup_factor * (1 - alpha) + alpha
+    return LambdaLR(optim, _lr_lambda)
+
+  @Tensor.train()
+  def _train_step(model, optim, lr_scheduler, x, **kwargs):
+    optim.zero_grad()
+
+    loss = model(normalize(x, GPUS), **kwargs)
+    loss = sum([l for l in loss.values()])
+
+    loss.backward()
+    optim.step()
+    # lr_scheduler.step()
+
+    return loss.realize()
+
+  # ** hyperparameters **
+  # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
+  LR = 1e-4
+  LR_WARMUP_EPOCHS = 1
+  LR_WARMUP_FACTOR = 1e-3
+  SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
+  BS = getenv("BS", 128)
+  NUM_EPOCHS = getenv("EPOCHS", 4)
+
+  # ** model initializers **
+  resnet.BatchNorm = FrozenBatchNorm2d
+
+  # ** model setup **
+  backbone = resnet.ResNeXt50_32X4D(num_classes=None)
+  loaded_keys = backbone.load_from_pretrained()
+  _freeze_backbone_layers(backbone, 3, loaded_keys)
+
+  model = RetinaNet(backbone, num_classes=NUM_CLASSES)
+  params = get_parameters(model)
+
+  for p in params: p.realize().to_(GPUS)
+
+  # ** optimizer **
+  optim = Adam(params, lr=LR)
+
+  # ** dataset **
+  anchors = generate_anchors((800, 800), batch_size=BS)
+  batched_anchors = Tensor.stack(*[Tensor(a, requires_grad=False) for a in anchors]).shard(GPUS, axis=0)
+
+  train_dataset = COCO(download_dataset(BASE_DIR, "train"))
+  val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
+
+  # ** training loop **
+  for e in range(1, NUM_EPOCHS + 1):
+    train_dataloader = batch_load_retinanet(train_dataset, False, anchors[0], Path(BASE_DIR), batch_size=BS, seed=SEED)
+    it = iter(tqdm(train_dataloader, total=(train_dataset_len:=len(train_dataset.imgs.keys())) // BS, desc=f"epoch {e}"))
+    i, proc = 0, _data_get(it)
+
+    # if e < LR_WARMUP_EPOCHS:
+    #   start_iter, warmup_iters = e * train_dataset_len, LR_WARMUP_EPOCHS * train_dataset_len
+    #   lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, LR_WARMUP_FACTOR)
+    # else: lr_scheduler = None
+    lr_scheduler = None
+
+    prev_cookies = []
+    st = time.perf_counter()
+
+    while proc is not None:
+      GlobalCounters.reset()
+
+      x, y_bboxes, y_labels, matches, proc = proc
+      loss = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=batched_anchors, bboxes=y_bboxes)
+
+      pt = time.perf_counter()
+
+      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+      try:
+        next_proc = _data_get(it)
+      except StopIteration:
+        next_proc = None
+    
+      dt = time.perf_counter()
+
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.item()
+
+      cl = time.perf_counter()
+
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
+
+      st = cl
+      prev_cookies.append(proc)
+      proc, next_proc = next_proc, None  # return old cookie
+      i += 1
 
 def train_unet3d():
   """

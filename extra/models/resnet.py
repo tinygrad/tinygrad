@@ -136,7 +136,11 @@ class ResNet:
     }
 
     self.url = model_urls[(self.num, self.groups, self.base_width)]
+    loaded_keys = []
     for k, dat in torch_load(fetch(self.url)).items():
+      if 'fc.' in k and self.fc is None:
+        continue
+
       obj: Tensor = get_child(self, k)
 
       if 'fc.' in k and obj.shape != dat.shape:
@@ -145,6 +149,8 @@ class ResNet:
 
       if 'bn' not in k and 'downsample' not in k: assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat.to(obj.device).reshape(obj.shape))
+      loaded_keys.append(k)
+    return loaded_keys
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
 ResNet34 = lambda num_classes=1000: ResNet(34, num_classes=num_classes)
