@@ -6,7 +6,8 @@ from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, symbolic_simple
+from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid
+from tinygrad.codegen.uopgraph import sym
 
 def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min(dtype)
 
@@ -32,7 +33,7 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
       idxs.append((idx//acc)%d)
       acc *= d
     idx, valid = view.to_indexed_uops(idxs[::-1], valid)
-  return upcast(graph_rewrite(idx, symbolic_simple, {})), upcast(graph_rewrite(valid, symbolic_simple, {}))
+  return upcast(graph_rewrite(idx, sym, {})), upcast(graph_rewrite(valid, sym, {}))
 
 @functools.lru_cache(None)
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
