@@ -53,10 +53,11 @@ class BLAKE3:
       lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
       states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
       chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
+      chain_vals = chain_vals.pad((None, (0, chain_vals.shape[-1])))
     return chain_vals.realize()
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
-    assert padded_input_size % 1024 == 0 and padded_input_size & (padded_input_size - 1) == 0, "padded_input_size must be a power of two divisible by 1024"
+    assert padded_input_size % 1024 == 0, "padded_input_size must be divisible by 1024"
     data = tensor.flatten().pad(((0, (padded_input_size // tensor.element_size()) - tensor.shape[0],),), value=0)
     data = data.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
@@ -68,8 +69,35 @@ class BLAKE3:
     n_steps = Variable(min_val=0, max_val=log2(padded_input_size), name="n_steps").bind(ceil(log2(max(n_chunks, 1))))
     return data, info, n_steps
 
-  def hash(self, tensor: Tensor, padded_input_size: int = 1024**3) -> str:
+  def hash(self, tensor: Tensor, padded_input_size: int = 1024**2 * 512) -> str:
     data, info, n_tree_steps = self.tensor_to_blake_input(tensor, padded_input_size)
     chain_vals = self.init_chain_vals(data, info)
     chain_vals = self.tree_hash(chain_vals, n_tree_steps)
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
+
+if __name__ == "__main__":
+  import time
+  import sys
+
+  arg = sys.argv[1]
+  arg_bytes = int(arg) * 1024 ** 2
+  padded_input_size = ceildiv(arg_bytes, 1024) * 1024
+  def benchmark_size(size_bytes):
+      print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
+      data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
+      size = data.numel() * data.element_size()
+
+      start = time.time()
+      BLAKE3().hash(data, padded_input_size=padded_input_size)
+      end = time.time()
+
+      elapsed = end - start
+      throughput = size / elapsed / 1e6  # MB/s
+      print(f"Time: {elapsed:.2f}s")
+      print(f"Throughput: {throughput:.1f} MB/s")
+
+  size_mb = float(sys.argv[1])
+  size = int(size_mb * 1024 * 1024)
+
+  for i in range(5):
+      benchmark_size(size)
