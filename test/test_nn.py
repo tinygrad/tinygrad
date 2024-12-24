@@ -14,7 +14,6 @@ from tinygrad.device import is_dtype_supported
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
     # create in tinygrad
     input_tensor = Tensor.randn(6, 5) # not square to test that mean scaling uses the correct dimension
@@ -326,13 +325,13 @@ class TestNN(unittest.TestCase):
       # forward
       x = Tensor.randn(BS, C, H, W, requires_grad=True)
       z = layer(x)
+      z.sum().backward()
+
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-
-      # backward
-      z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
@@ -352,13 +351,13 @@ class TestNN(unittest.TestCase):
       # forward
       x = Tensor.randn(N, C, H, W, requires_grad=True)
       z = layer(x)
+      z.sum().backward()
+
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-
-      # backward
-      z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
@@ -378,13 +377,13 @@ class TestNN(unittest.TestCase):
       # forward
       x = Tensor.randn(N, C, H, W, requires_grad=True)
       z = layer(x)
+      z.sum().backward()
+
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x.permute(0,2,3,1)).permute(0,3,1,2)
-      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-
-      # backward
-      z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
@@ -404,13 +403,13 @@ class TestNN(unittest.TestCase):
       # forward
       x = Tensor.randn(N, C, H, W, requires_grad=True)
       z = layer(x)
+      z.sum().backward()
+
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-
-      # backward
-      z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
@@ -430,13 +429,13 @@ class TestNN(unittest.TestCase):
       # forward
       x = Tensor.randn(N, C, D, H, W, requires_grad=True)
       z = layer(x)
+      z.sum().backward()
+
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-
-      # backward
-      z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
@@ -465,13 +464,13 @@ class TestNN(unittest.TestCase):
       # forward
       x = Tensor.randn(B, T, embed_size, requires_grad=True)
       z = layer(x)
+      z.sum().backward()
+
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-
-      # backward
-      z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
+
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
 
@@ -552,22 +551,93 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
-  def test_load_state_dict_sharded(self):
+  def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
 
     layer = Conv2d(3, 5, kernel_size=3)
-    layer.weight.shard_(devices, -1)
+    layer.weight.shard_(devices, 3)
     layer.bias.shard_(devices, None)
     state_dict = {
-      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, -1),
+      'weight': Tensor.randn(5, 3, 3, 3),
+      'bias': Tensor.randn(5),
+    }
+    load_state_dict(layer, state_dict)
+
+    # sharded model shards the state_dict
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, 3)
+    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, None)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_dict(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, 3),
+      'bias': Tensor.randn(5).shard(devices, None),
+    }
+    load_state_dict(layer, state_dict)
+
+    # NOTE: model is not sharded, still not sharded after load_state_dict
+    self.assertEqual(layer.weight.device, Device.DEFAULT)
+    self.assertEqual(layer.bias.device, Device.DEFAULT)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_model_dict_same_axis(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, 3)
+    layer.bias.shard_(devices, None)
+
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, 3),
       'bias': Tensor.randn(5).shard(devices, None),
     }
     load_state_dict(layer, state_dict)
 
     self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, 3)
     self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, None)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_model_dict_different_axis(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, 3)
+    layer.bias.shard_(devices, None)
+
+    # different shard axis
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, None),
+      'bias': Tensor.randn(5).shard(devices, 0),
+    }
+    load_state_dict(layer, state_dict)
+
+    # NOTE: model and state_dict shard differently, use the state_dict sharding  # TODO: revisit this?
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, None)
+    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, 0)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  def test_load_state_dict_shape_mismatch(self):
+    d1, d2 = 2, 4
+    layer = Linear(d1, d1, bias=False)
+    state_dict = {'weight': Tensor.randn(d2, d2)}
+    with self.assertRaisesRegex(ValueError, r'Shape mismatch in layer `weight`: Expected shape \(2, 2\), but found \(4, 4\) in state dict.'):
+      load_state_dict(layer, state_dict)
 
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)

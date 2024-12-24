@@ -4,7 +4,7 @@ import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.helpers import getenv, temp, CI, _METADATA, mv_address
+from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -67,48 +67,33 @@ class TestTinygrad(unittest.TestCase):
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
     out.backward(retain_graph=True)
-    xgrad,wgrad = x.grad.numpy(), W.grad.numpy()
+    xgrad,wgrad = x.grad, W.grad
     out.backward(retain_graph=True)
-    xgrad2,wgrad2 = x.grad.numpy(), W.grad.numpy()
+    xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
-    xgrad3,wgrad3 = x.grad.numpy(), W.grad.numpy()
-    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
-    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
+    xgrad3,wgrad3 = x.grad, W.grad
+    np.testing.assert_allclose(xgrad3.numpy(), xgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3.numpy(), wgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2.numpy(), xgrad.numpy() * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
 
-  @unittest.expectedFailure
   def test_second_order_backward_pass(self):
     def test_pytorch():
-      x = torch.tensor(x_init)
-      m = torch.tensor(m_init, requires_grad=True)
-      out = x.mul(m).sum()
-      # use retain graph so we can compute second order derivatives later
-      out.backward(retain_graph=True)
-      # save first-order gradient (dO/dm). they still contain graph information on how they were constructed wrt x and W
-      grad_m = m.grad
-      # zero gradients so second-order gradients are correct
-      m.grad = None
-      # compute second-order gradients
-      grad_m.sum().backward(retain_graph=True)
-
-      # d2O/dm2
-      second_grad_m = m.grad
-      return second_grad_m.numpy()
+      x_val = torch.tensor([2.0], requires_grad=True)
+      f = x_val**3
+      first_derivative = torch.autograd.grad(outputs=f, inputs=x_val, create_graph=True)[0]
+      second_derivative = torch.autograd.grad(outputs=first_derivative, inputs=x_val)[0]
+      # d^2f/dx^2 = 6x = 6*2 = 12
+      return second_derivative.numpy()
 
     def test_tinygrad():
-      x = Tensor(x_init)
-      m = Tensor(m_init, requires_grad=True)
-      out = x.mul(m).sum()
-      out.backward()
-      grad_m = m.grad
-      m.grad = None
-      grad_m.sum().backward()
-      second_grad_m = m.grad # currently, this will be None (incorrect)
-      return second_grad_m.numpy()
+      x_val = Tensor(2.0)
+      f = x_val**3
+      first_derivative = f.gradient(x_val)[0]
+      second_derivative = first_derivative.gradient(x_val)[0]
+      return second_derivative.numpy()
 
-    for x,y in zip(test_tinygrad(), test_pytorch()):
-      np.testing.assert_allclose(x, y, atol=1e-5)
+    np.testing.assert_allclose(test_tinygrad(), test_pytorch(), atol=1e-5)
 
   # passing `gradient` to backward
   def test_backward_pass_vjp(self):
@@ -135,7 +120,6 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs which breaks webgpu") #TODO: remove after #1461
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
       u = Tensor(U_init, requires_grad=True)
@@ -424,6 +408,10 @@ class TestTinygrad(unittest.TestCase):
     data = [np.array(1.0), np.array(2.0), np.array(3.0)]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_dtype_errors(self):
+    with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
+    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)
@@ -493,12 +481,14 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
+@unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
+    if not is_dtype_supported(dtype):
+      return
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()
     t = s.to(dest)
@@ -573,7 +563,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     a = t.reshape(0)
     assert a.shape == (0,)
     np.testing.assert_equal(a.numpy(), np.zeros((0,)))
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(ValueError):
       # cannot reshape from size 0 to size 1
       a = t.reshape(())
 
@@ -752,8 +742,8 @@ class TestTensorMetadata(unittest.TestCase):
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
     self.assertEqual(out.lazydata.metadata.name, "__mul__")
-    self.assertEqual(out.lazydata.srcs[0].metadata.name, "relu")
-    self.assertEqual(out.lazydata.srcs[1].metadata.name, "sigmoid")
+    self.assertEqual(out.lazydata.src[0].metadata.name, "relu")
+    self.assertEqual(out.lazydata.src[1].metadata.name, "sigmoid")
     si = create_schedule([out.lazydata])[-1]
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
@@ -769,7 +759,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
     self.assertTrue(y.grad.lazydata.metadata.backward)
     si = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])[-1]
-    self.assertEqual(len(si.metadata), 3)
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
     self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)

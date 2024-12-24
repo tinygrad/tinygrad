@@ -8,7 +8,7 @@ with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.9.2',
+      version='0.10.0',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -29,7 +29,7 @@ setup(name='tinygrad',
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [
             "pylint",
-            "mypy==1.11.2",
+            "mypy==1.13.0",
             "typing-extensions",
             "pre-commit",
             "ruff",
@@ -39,6 +39,7 @@ setup(name='tinygrad',
         'testing': [
             "numpy",
             "torch",
+            "jax",
             "pillow",
             "pytest",
             "pytest-xdist",
@@ -59,6 +60,7 @@ setup(name='tinygrad',
             "bottle",
             "ggml-python"
         ],
+        'webgpu': ["wgpu"],
         'docs': [
             "mkdocs",
             "mkdocs-material",

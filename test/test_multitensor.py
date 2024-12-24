@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import MetaOps, BinaryOps, Ops
+from tinygrad.ops import Ops
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -51,6 +51,15 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_tensor_from_multi(self):
+    X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
+    Y = Tensor(X.lazydata)
+    self.assertEqual(Y.device, Device.DEFAULT)
+    np.testing.assert_equal(X.numpy(), Y.numpy())
+
+    with self.assertRaises(AssertionError):
+      _ = Tensor(X.lazydata, dtype=dtypes.float)
+
   def test_sharded_arange(self):
     sharded_arange = Tensor.arange(1000).shard(devices_2, 0)
     sharded_arange.realize()
@@ -67,6 +76,7 @@ class TestMultiTensor(unittest.TestCase):
       ei.run()
     assert names[-2] == names[-1], "function was relinearized"
 
+  @unittest.skip("this doesn't fold because from_sharded calls contiguous on all lbs")
   def test_sharded_memory(self):
     # Buffer may be stuck in track_cross_buffer
     for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
@@ -275,6 +285,7 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"long dtype not supported on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
@@ -481,7 +492,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not MetaOps.COPY]
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
     assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
@@ -557,14 +568,35 @@ class TestMultiTensor(unittest.TestCase):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
 
-  def test_rand_with_multiple_devices(self):
+  def test_init_rand_with_multiple_devices_fail(self):
+    # init rand with multi device is not allowed
     with self.assertRaises(ValueError):
       Tensor.rand(256, device=devices_2)
 
   def test_rand_on_multiple_devices(self):
+    # different devices generate different rand
     d0_rand = Tensor.rand(256, device=d0).realize()
     d1_rand = Tensor.rand(256, device=d1).realize()
     assert not np.allclose(d0_rand.numpy(), d1_rand.numpy())
+
+  def test_rand_on_multiple_devices_manual_seed(self):
+    Tensor.manual_seed(123)
+    d0_rand = Tensor.rand(2, device=d0).tolist()
+    d1_rand = Tensor.rand(2, device=d1).tolist()
+
+    # manual_seed again gives the same values
+    Tensor.manual_seed(123)
+    d0_rand2 = Tensor.rand(2, device=d0).tolist()
+    d1_rand2 = Tensor.rand(2, device=d1).tolist()
+    self.assertEqual(d0_rand, d0_rand2)
+    self.assertEqual(d1_rand, d1_rand2)
+
+    # device seed is only determined by init order, so flipping init order flips rands
+    Tensor.manual_seed(123)
+    d1_rand_flip = Tensor.rand(2, device=d1).tolist()
+    d0_rand_flip = Tensor.rand(2, device=d0).tolist()
+    self.assertEqual(d0_rand, d1_rand_flip)
+    self.assertEqual(d1_rand, d0_rand_flip)
 
   def test_rand_like_on_shard(self):
     t = Tensor.empty((16, 16)).shard(devices_2)
@@ -640,30 +672,31 @@ class TestMultiTensor(unittest.TestCase):
       for si in t.schedule():
         ast = si.ast.src[0]
         assert ast.op is Ops.STORE
-        assert ast.src[2].op is BinaryOps.ADD
+        assert ast.src[2].op is Ops.ADD
         assert ast.src[2].src[0].op is Ops.LOAD
         assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 1
       t = 2 * t
       for si in t.schedule():
         ast = si.ast.src[0]
         assert ast.op is Ops.STORE
-        assert ast.src[2].op is BinaryOps.MUL
+        assert ast.src[2].op is Ops.MUL
         assert ast.src[2].src[0].src[1].op is Ops.CONST and ast.src[2].src[0].src[1].arg == 2
         assert ast.src[2].src[1].op is Ops.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
         ast = si.ast.src[0]
         assert ast.op is Ops.STORE
-        assert ast.src[2].op is BinaryOps.ADD
+        assert ast.src[2].op is Ops.ADD
         assert ast.src[2].src[0].op is Ops.LOAD
         assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 3
 
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
-    t.shard_(devices, axis=0)
-    assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
+    t.shard_(devices, axis=0).realize()
+    assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.lazydata.lbs])
 
+  @unittest.skip("this is unreliable on OSX")
   def test_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=None)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())

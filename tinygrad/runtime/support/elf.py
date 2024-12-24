@@ -1,12 +1,10 @@
-from __future__ import annotations
-from typing import Tuple, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
-def elf_loader(blob:bytes, force_section_align:int=1) -> Tuple[memoryview, List[ElfSection], Any]:
+def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[ElfSection], list[tuple]]:
   def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
   header = libc.Elf64_Ehdr.from_buffer_copy(blob)
