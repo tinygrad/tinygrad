@@ -12,7 +12,7 @@ def ioctls_from_header():
   # hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
   # pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
   # matches = re.findall(pattern, hdrpy, re.MULTILINE)
-  hdr = (pathlib.Path(__file__).parent.parent.parent / "hip_gpu_driver" / "kfd_ioctl.h").read_text().replace("\\\n", "")
+  hdr = (pathlib.Path(__file__).parent.parent.parent.parent / "extra" / "hip_gpu_driver" / "kfd_ioctl.h").read_text().replace("\\\n", "")
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
   return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
