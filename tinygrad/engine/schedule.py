@@ -581,13 +581,13 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
 # TODO: replace this with UPat.cvar once it's CONST(VIEW(DEVICE))
-const = UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat.cvar("const")))
+const = UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat.var("const")))
 
 remove_movement_ops = PatternMatcher([
   # masked CONST must become VALID
   (UPat(Ops.PAD, name="pad", src=(const,)), lambda const,pad: const.valid(pad.st)),
   (UPat(Ops.VIEW, name="view", src=(const,)), lambda const,view: None if all(v.mask is None for v in view.st.views) else const.valid(view.st)),
-  (UPat(Ops.VIEW, name="view", src=(UPat(), const,)), lambda const,view: view.const_like(const.const_arg)),
+  (UPat(Ops.VIEW, name="v1", src=(UPat(), UPat(Ops.VIEW, name="v2", src=(UPat(Ops.DEVICE), UPat())),)), lambda v1,v2: v2.replace(arg=v2.st+v1.st)),
   # other movement ops stack as a VIEW, merge_views uses this VIEW to change the underlying ShapeTracker in an additive way
   (UPat(GroupOp.Movement, name="mov", src=(UPat(Ops.BUFFER, name="buf").view(),)), lambda buf,mov: buf.view(unwrap(mov.st))),
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov: x.view(unwrap(mov.st))),
