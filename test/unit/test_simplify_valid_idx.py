@@ -57,7 +57,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.check(load,
       "0",
-      "(((lidx0+(gidx0*4))<19)!=True)")
+      "((((gidx0*4)+lidx0)<19)!=True)")
 
   def test_simplify_within_valid1(self):
     ridx0 = Range(0, 4)
@@ -257,9 +257,9 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.check(load,
-               "((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
-               "(((idx0+((idx1*512)+(ridx1*64)))+832)%1024)",
-               "((((idx2*2)+ridx0)+(((idx1+((ridx1+5)//8))+1)//2))+-4)")
+               "(((((idx1*8)+ridx1)<3)!=True)&(((idx2*2)+ridx0)<11))",
+               "(((((idx1*512)+(ridx1*64))+idx0)+832)%1024)",
+               "(((((idx1+((ridx1+5)//8))+1)//2)+((idx2*2)+ridx0))+-4)")
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
@@ -297,16 +297,16 @@ class TestImageSimplification(unittest.TestCase):
 
     # TODO: can this be simplified further?
     load = get_load_image_uop(shape, alu9, (((alu8+(alu2*8))%64),(alu2//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+8)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0//32)+((idx0%8)*32))+8)%64)", "((idx0%8)//2)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu3*8))%64),(alu3//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+16)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0//32)+((idx0%8)*32))+16)%64)", "((idx0%8)//2)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu4*8))%64),(alu4//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+24)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0//32)+((idx0%8)*32))+24)%64)", "((idx0%8)//2)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu5*8))%64),(alu5//8)))
-    self.check(load, "(idx0<256)", "((((idx0%8)*32)+(idx0//32))%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "(((idx0//32)+((idx0%8)*32))%64)", "((idx0%8)//2)")
 
   def test_simplify5(self):
     # openpilot 0.9.7, chunk replacement to simplify
