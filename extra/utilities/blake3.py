@@ -83,21 +83,21 @@ if __name__ == "__main__":
   arg_bytes = int(arg) * 1024 ** 2
   padded_input_size = ceildiv(arg_bytes, 1024) * 1024
   def benchmark_size(size_bytes):
-      print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
-      data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
-      size = data.numel() * data.element_size()
+    print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
+    data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
+    size = data.numel() * data.element_size()
 
-      start = time.time()
-      BLAKE3().hash(data, padded_input_size=padded_input_size)
-      end = time.time()
+    start = time.time()
+    BLAKE3().hash(data, padded_input_size=padded_input_size)
+    end = time.time()
 
-      elapsed = end - start
-      throughput = size / elapsed / 1e6  # MB/s
-      print(f"Time: {elapsed:.2f}s")
-      print(f"Throughput: {throughput:.1f} MB/s")
+    elapsed = end - start
+    throughput = size / elapsed / 1e6  # MB/s
+    print(f"Time: {elapsed:.2f}s")
+    print(f"Throughput: {throughput:.1f} MB/s")
 
   size_mb = float(sys.argv[1])
   size = int(size_mb * 1024 * 1024)
 
   for i in range(5):
-      benchmark_size(size)
+    benchmark_size(size)
