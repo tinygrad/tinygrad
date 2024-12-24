@@ -238,7 +238,7 @@ class TestSchedule(unittest.TestCase):
     sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to different device Buffers
-    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+    self.assertIsNot(a.lazydata.base.realized, b.lazydata.base.realized)
 
   def test_no_dedup_empty(self):
     a = Tensor.empty((4,))

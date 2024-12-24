@@ -349,6 +349,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.dtype == dtype: return self # TODO: move this to the scheduler
     if bitcast: return self.bitcast(dtype, allow_buffer_view)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
+    # TODO: this is wrong in test_gemm_fp16 grad: "if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}""
+    # what if you fold the VIEW late and realize the base CAST? how do you know to update the children?
+    """
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
       # TODO: move this to the scheduler
@@ -360,6 +363,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         mop = mop.src[0]
       for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
       return ret
+    """
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType, allow_buffer_view=True):
     if self.can_view() and allow_buffer_view:
@@ -391,6 +395,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
+  def valid(self, st:ShapeTracker):
+    assert self.op is Ops.CONST and any(v.mask is not None for v in st.views), f"VALID can only be created to mask a CONST {self.op} {st}"
+    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self, 0)
   @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
   def _reduce_op(self, op:Ops, axis:tuple[int, ...]):
@@ -482,13 +489,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
     return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
-  def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
-    ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-    # instant folding rules
-    if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
-    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
-    return ret
+  def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
@@ -1306,7 +1307,12 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
-merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+merge_views = PatternMatcher([
+  (UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st)),
+  # merge VALID early here (+fold if you can!)
+  (UPat(Ops.WHERE, src=(UPat(Ops.VALID, src=(UPat.var("st"),)), UPat.var("x"), UPat())).view(name="view"),
+   lambda st,view,x: x if all(v.mask is None for v in (st.st+view.st).views) else x.valid(st.st+view.st)),
+])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
