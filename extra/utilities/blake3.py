@@ -72,7 +72,7 @@ class BLAKE3:
   def hash(self, tensor: Tensor, padded_input_size: int = 1024**2 * 512) -> str:
     data, info, n_tree_steps = self.tensor_to_blake_input(tensor, padded_input_size)
     chain_vals = self.init_chain_vals(data, info)
-    chain_vals = self.tree_hash(chain_vals, n_tree_steps)
+    chain_vals = self.tree_hash(chain_vals, n_tree_steps) if n_tree_steps.val > 0 else chain_vals
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
 
 if __name__ == "__main__":
