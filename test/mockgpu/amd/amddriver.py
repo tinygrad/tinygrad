@@ -1,9 +1,8 @@
-import pathlib, re, ctypes, mmap, collections, struct, functools, os, copy
+import pathlib, re, ctypes, mmap, collections, functools, copy
 import tinygrad.runtime.autogen.kfd as kfd
-from typing import Optional, Any
 from tinygrad.helpers import from_mv
-from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
-from extra.mockgpu.amd.amdgpu import AMDGPU, gpu_props
+from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
+from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
