@@ -40,7 +40,7 @@ class BLAKE3:
     end_block = (states * (info < self.DEFAULT_LEN)).sum(0)
     return (states[-1, :] | end_block)[:8].realize()
 
-  @classmethod
+  @classmethod # JIT doesn't like making n_tree_steps for the loop a Variable, this is a workaround
   def create_jitted_tree_hash(cls, n_tree_steps: int) -> Tensor:
     def tree_hash(self, chain_vals: Tensor) -> Tensor:
       for _ in range(n_tree_steps):
@@ -78,9 +78,7 @@ class BLAKE3:
     chain_vals = self.tree_hashes[n_tree_steps.val](self, chain_vals) if n_tree_steps.val > 0 else chain_vals
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
 
-# JIT doesn't like making n_tree_steps a Variable, so we precompute the tree hashes
-_tree_hashes = {i: BLAKE3.create_jitted_tree_hash(i) for i in range(1, 54)}
-BLAKE3.tree_hashes = _tree_hashes
+BLAKE3.tree_hashes = {n_tree_steps: BLAKE3.create_jitted_tree_hash(n_tree_steps) for n_tree_steps in range(1, 54)}
 
 if __name__ == "__main__":
   import time
