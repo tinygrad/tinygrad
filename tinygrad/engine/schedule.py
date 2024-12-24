@@ -184,11 +184,13 @@ def elementwise_view_right(root:UOp) -> UOp|None:
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
   # push the swizzle from src to root
   output_swizzle = swizzles[0]
-  new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
+  new_st, new_input_st = ShapeTracker.from_shape(output_swizzle.shape), ShapeTracker.from_shape(output_swizzle.base.shape)
+  # push the permute from src to root if the shape is the same
+  if new_st.shape == new_input_st.shape: new_st = new_input_st = unwrap(output_swizzle.st)
   ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # update the ASSIGN offset to match the new shape
   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
-  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(output_swizzle.shape))
+  return ret if ret.op is Ops.STORE else ret.view(new_st)
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
