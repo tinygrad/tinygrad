@@ -617,9 +617,8 @@ class TestOps(unittest.TestCase):
 
     np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
     np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
-    # TODO: fix non-precise int pow
-    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
-    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
+    np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
+    np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
 
     # pow to a const int
     helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
