@@ -35,6 +35,7 @@ class SimpleMathTrait:
   def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
   def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
+  def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
@@ -45,6 +46,7 @@ class SimpleMathTrait:
   def __mul__(self, x): return self.mul(x)
   def __truediv__(self, x): return self.div(x)
   def __floordiv__(self, x): return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
+  def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
@@ -57,6 +59,7 @@ class SimpleMathTrait:
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
+  def __rmod__(self, x): return self.mod(x, True)
 
   def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
   def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
@@ -76,10 +79,6 @@ class MathTrait(SimpleMathTrait):
   def __rshift__(self, x): return self.rshift(x)
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
-
-  # not in Tensor
-  def __mod__(self, x): return self.alu(Ops.MOD, self.ufix(x))
-  def __rmod__(self, x): return self.ufix(x).alu(Ops.MOD, self)
 
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
@@ -598,7 +597,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
-      if self.op is Ops.MOD and s1_vmin > 0: return 0, s1_vmax-1
+      if self.op is Ops.MOD and s1_vmin > 0:
+        return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), s1_vmax-1)
       if self.op is Ops.IDIV:
         if s1_vmin == s1_vmax:  # min/max are equal in a CONST
           if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
