@@ -775,6 +775,13 @@ class TestIdxUpcast(unittest.TestCase):
     self._assert((dim1, dim2, dim3), dtypes.int, offset=offset)
     self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int, offset=offset)
 
+  def test_symbolic_fold(self):
+    st = ShapeTracker(views=(View(shape=(2097153, 4194303), strides=(0, 0), offset=0, mask=((0, 2097153), (2097151, 4194303)), contiguous=False),
+                             View(shape=(2097152, 2097152), strides=(1, 4194304), offset=0, mask=None, contiguous=False)))
+    _, valid = st.to_indexed_uops()
+    cmplt = self.find_ops_in_ast(valid, Ops.CMPLT)
+    assert all((_src.dtype is dtypes.int for _src in cmplt.src))
+
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Upcasted indexing fail on webgpu because of no int64 support")
 class TestIndexingOverflowWEBGPU(unittest.TestCase):
