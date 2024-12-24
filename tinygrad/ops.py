@@ -1176,6 +1176,10 @@ def simplify_valid(valid:UOp) -> UOp|None:
 #   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.tuplize > chain.src[1].tuplize: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
 symbolic_simple = PatternMatcher([
@@ -1237,7 +1241,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
-    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+   lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # ALU min==max -> CONST (slow!)
   (UPat(GroupOp.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
@@ -1247,7 +1251,7 @@ symbolic = symbolic_simple+PatternMatcher([
   #((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
-    lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
+     lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
   ((UPat.cvar("c0") + UPat.var("x")) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
   ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # ** lt **
@@ -1261,11 +1265,11 @@ symbolic = symbolic_simple+PatternMatcher([
   ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
    lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
   # swap terms if they are out of order (a+c)+b -> (a+b)+c
-  (UPat(GroupOp.CommAssoc, name='x', src=(UPat(GroupOp.CommAssoc, name="chain"), UPat(name="b"))), lambda x,chain,b:
-    chain.src[0].alu(x.op, b).alu(x.op, chain.src[1]) if x.op is chain.op and chain.src[1].tuplize > b.tuplize else None),
+  *((UPat(op, src=(UPat(op, name="chain"), UPat(name="b"))),
+    lambda chain,b: chain_insert(chain,b,chain.op) if b.tuplize < chain.src[1].tuplize else None) for op in GroupOp.CommAssoc),
   # merge two commutative+associative chains, generelization of (a+c)+(b+d) -> a+b+c+d
   *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op: functools.reduce(
-      lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.tuplize))) for op in GroupOp.CommAssoc),
+    lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.tuplize))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
   (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")))), fold_unrolled_divs),
