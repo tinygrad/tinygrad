@@ -3100,10 +3100,10 @@ class Tensor(SimpleMathTrait):
     Divides `self` by `x`.
     Equivalent to `self // x`.
     Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division.
+    `idiv` performs integer division (truncate towards zero).
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).idiv(Tensor([2, 3, 4])).numpy())
+    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
     return F.IDiv.apply(*self._broadcasted(x, reverse))
