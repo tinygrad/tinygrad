@@ -144,12 +144,12 @@ MODEL_PARAMS = {
     "files": 8
   }
 }
-def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None, load_weights=True):
+def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None, max_context=8192, load_weights=True):
   # build model
   if quantize == "int8": linear = Int8Linear
   elif quantize == "nf4": linear = NF4Linear(64)
   else: linear = nn.Linear
-  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
+  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=max_context, jit=True)
 
   if not load_weights: return model
   # load weights
