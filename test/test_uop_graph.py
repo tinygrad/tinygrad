@@ -770,7 +770,6 @@ class TestIdxUpcast(unittest.TestCase):
   # Offset brings final value within int32, but calculation has to be done on int64
   # ((gidx0+((gidx1*129)+(gidx2*528384)))+-1073741824) where gidx.max = 128, gidx1.max = 4095, gidx2.max = 4095.
   # Intermediate sum is 2147487743, bigger than 2**31 (2147483647)
-  @unittest.skip("Cast back is an optimization to be implemented")
   def test_overflow_neg_offset_upper_bound(self):
     dim1, dim2, dim3, offset = 2**12, 2**12, 2**7+1, -2**30
     store, _ = self._assert((dim1, dim2, dim3), dtypes.int, offset=offset)
