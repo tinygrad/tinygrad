@@ -9,16 +9,17 @@ class BLAKE3:
   PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
+    def rotr(x: Tensor, n: int) -> Tensor: return (x << (32 - n)) | (x >> n)
     for i in range(7):
       for j, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
         mx, my = data[j * 2], data[j * 2 + 1]
         for m in (mx, my):
-          states[a] = (states[a] + states[b] + m)
-          states[d] = ((states[d] ^ states[a]) << (32 - (16 if m is mx else 8))) | ((states[d] ^ states[a]) >> (16 if m is mx else 8))
-          states[c] = states[c] + states[d]
-          states[b] = ((states[b] ^ states[c]) << (32 - (12 if m is mx else 7))) | ((states[b] ^ states[c]) >> (12 if m is mx else 7))
+          states[a] = (states[a] + states[b] + m).cast(dtypes.uint32)
+          states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8).cast(dtypes.uint32)
+          states[c] = (states[c] + states[d]).cast(dtypes.uint32)
+          states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7).cast(dtypes.uint32)
       if i < 6: data = data[self.PERMUTATIONS]
-    return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:]).realize()
+    return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
   @TinyJit
   def init_chain_vals(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
@@ -39,22 +40,24 @@ class BLAKE3:
     end_block = (states * (info < self.DEFAULT_LEN)).sum(0)
     return (states[-1, :] | end_block)[:8].realize()
 
-  @TinyJit
-  def tree_hash(self, chain_vals: Tensor, n_tree_steps: Variable) -> Tensor:
-    for _ in range(n_tree_steps.val):
-      stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
-      stacked_mask = stacked.any(1)
-      final_step = (stacked_mask.sum() <= 2)
-      pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
-      paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
-      flags = final_step.where(12, Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32))
-      iv = self.IV.reshape(8, 1).expand(8, paired.shape[-1])
-      counts = Tensor.zeros((2, paired.shape[-1]), dtype=dtypes.uint32)
-      lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
-      states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
-      chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
-      chain_vals = chain_vals.pad((None, (0, chain_vals.shape[-1])))
-    return chain_vals.realize()
+  @classmethod
+  def create_jitted_tree_hash(cls, n_tree_steps: int) -> Tensor:
+    def tree_hash(self, chain_vals: Tensor) -> Tensor:
+      for _ in range(n_tree_steps):
+        stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
+        stacked_mask = stacked.any(1)
+        final_step = chain_vals[0, :3].prod().cast(dtypes.bool).neg()
+        pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
+        paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
+        flags = final_step.where(12, Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32))
+        iv = self.IV.reshape(8, 1).expand(8, paired.shape[-1])
+        counts = Tensor.zeros((2, paired.shape[-1]), dtype=dtypes.uint32)
+        lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
+        states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
+        chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
+        chain_vals = chain_vals.pad((None, (0, chain_vals.shape[1])))
+      return chain_vals.realize()
+    return TinyJit(tree_hash)
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
     assert padded_input_size % 1024 == 0, "padded_input_size must be divisible by 1024"
@@ -72,8 +75,12 @@ class BLAKE3:
   def hash(self, tensor: Tensor, padded_input_size: int = 1024**2 * 512) -> str:
     data, info, n_tree_steps = self.tensor_to_blake_input(tensor, padded_input_size)
     chain_vals = self.init_chain_vals(data, info)
-    chain_vals = self.tree_hash(chain_vals, n_tree_steps) if n_tree_steps.val > 0 else chain_vals
+    chain_vals = self.tree_hashes[n_tree_steps.val](self, chain_vals) if n_tree_steps.val > 0 else chain_vals
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
+
+# JIT doesn't like making n_tree_steps a Variable, so we precompute the tree hashes
+_tree_hashes = {i: BLAKE3.create_jitted_tree_hash(i) for i in range(1, 54)}
+BLAKE3.tree_hashes = _tree_hashes
 
 if __name__ == "__main__":
   import time
