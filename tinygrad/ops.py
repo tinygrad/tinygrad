@@ -323,11 +323,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret.arg
   @property
   def const_arg(self) -> ConstType:
-    match self.base.op:
-      case Ops.CONST: ret = self.base.arg
-      case Ops.VIEW: ret = self.base.src[1].const_arg
-      case op: raise AssertionError(f"const_arg called on {op}")
-    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
+    assert self.base.op is Ops.CONST, f"const_arg called on {self.base}"
+    if not isinstance(ret:=self.base.arg, get_args(ConstType)): raise AssertionError(f"const_arg trying to return {ret}")
     return ret
   @property
   def axis_arg(self) -> tuple[int, ...]:
