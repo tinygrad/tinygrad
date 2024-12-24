@@ -1,5 +1,5 @@
 import ctypes, time
-from extra.mockgpu.gpu import VirtGPU
+from test.mockgpu.gpu import VirtGPU
 from tinygrad.helpers import to_mv, init_c_struct_t, mv_address
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 
@@ -25,7 +25,8 @@ def _try_dlopen_remu():
     try:
       remu = ctypes.CDLL(path)
       remu.run_asm.restype = ctypes.c_int32
-      remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+      remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
     except OSError: pass
     else: return remu
   print("Could not find libremu.so")
@@ -55,7 +56,7 @@ def create_sdma_packets():
   return type("SDMA_PKTS", (object, ), structs)
 sdma_pkts = create_sdma_packets()
 
-class AMDQueue():
+class AMDQueue:
   def __init__(self, base, size, rptr, wptr):
     self.queue, self.size = to_mv(base, size).cast("I"), size
     self.rptr = to_mv(rptr, 8).cast("Q")
@@ -98,14 +99,14 @@ class PM4Executor(AMDQueue):
     mem_event_type = (self._next_dword() >> 0) & 0xff
     selectors = self._next_dword()
     mem_data_sel = (selectors >> 29) & 0b111
-    int_sel = (selectors >> 24) & 0b11
-    mem_dst_sel = (selectors >> 16) & 0b1
+    # int_sel = (selectors >> 24) & 0b11
+    # mem_dst_sel = (selectors >> 16) & 0b1
     addr_lo = self._next_dword()
     addr_hi = self._next_dword()
     val_lo = self._next_dword()
     val_hi = self._next_dword()
     val = val_lo + (val_hi << 32)
-    ev = self._next_dword()
+    _ = self._next_dword() # ev
 
     ptr = to_mv(addr_lo + (addr_hi << 32), 8)
     if mem_data_sel == 1 or mem_data_sel == 2: ptr.cast('Q')[0] = val
@@ -120,24 +121,22 @@ class PM4Executor(AMDQueue):
     addr_lo = self._next_dword()
     addr_hi = self._next_dword()
     val = self._next_dword()
-    mask = self._next_dword()
-    timeout = self._next_dword()
+    _ = self._next_dword() # mask
+    _ = self._next_dword() # timeout
 
     mem_function = (info >> 0) & 0b111
     mem_space = (info >> 4) & 0b1
-    mem_op = (info >> 6) & 0b1
-    mem_engine = (info >> 8) & 0b1
+    _ = (info >> 6) & 0b1 # memop
+    _ = (info >> 8) & 0b1 # mem_engine
 
-    if mem_space == 0: read_op = lambda: val
-    elif mem_space == 1: read_op = lambda: to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
+    if mem_space == 0: mval = val
+    elif mem_space == 1: mval = to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
 
-    if mem_function == WAIT_REG_MEM_FUNCTION_GEQ: cmp = lambda x,y: x >= y
-    elif mem_function == WAIT_REG_MEM_FUNCTION_EQ: cmp = lambda x,y: x == y
+    if mem_function == WAIT_REG_MEM_FUNCTION_GEQ: can_cont = bool(mval >= val)
+    elif mem_function == WAIT_REG_MEM_FUNCTION_EQ: can_cont = bool(mval == val)
     else: raise RuntimeError(f"Do not support {mem_function=}")
 
-    mval = read_op()
-    can_cont = cmp(mval, val)
-    if not can_cont: self.rptr[0] = self.rptr[0] - 7 # revert packet, need to wait again
+    if not can_cont: self.rptr[0] = self.rptr[0] - 7 # revert this packet, need to wait again
     return can_cont
 
   def _exec_set_sh_reg(self, n):
@@ -149,7 +148,7 @@ class PM4Executor(AMDQueue):
   def _exec_dispatch_direct(self, n):
     assert n == 3
     gl = [self._next_dword() for _ in range(3)]
-    flags = self._next_dword()
+    _ = self._next_dword() # flags
 
     prg_addr = (self.gpu.regs[regCOMPUTE_PGM_LO] + (self.gpu.regs[regCOMPUTE_PGM_LO + 1] << 32)) << 8
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
@@ -211,16 +210,15 @@ class SDMAExecutor(AMDQueue):
   def _execute_poll_regmem(self):
     struct = sdma_pkts.poll_regmem.from_address(self.base + self.rptr[0] % self.size)
 
-    if struct.mem_poll == 0: read_op = lambda: struct.value
-    elif struct.mem_poll == 1: read_op = lambda: to_mv(struct.addr, 4).cast('I')[0]
+    if struct.mem_poll == 0: mval = struct.value & struct.mask
+    elif struct.mem_poll == 1: mval = to_mv(struct.addr, 4).cast('I')[0] & struct.mask
 
-    if struct.func == WAIT_REG_MEM_FUNCTION_GEQ: cmp = lambda x,y: x >= y
-    elif struct.func == WAIT_REG_MEM_FUNCTION_EQ: cmp = lambda x,y: x == y
-    elif struct.func == WAIT_REG_MEM_FUNCTION_ALWAYS: cmp = lambda x,y: True
+    if struct.func == WAIT_REG_MEM_FUNCTION_GEQ: can_cont = bool(mval >= struct.value)
+    elif struct.func == WAIT_REG_MEM_FUNCTION_EQ: can_cont = bool(mval == struct.value)
+    elif struct.func == WAIT_REG_MEM_FUNCTION_ALWAYS: can_cont = True
     else: raise RuntimeError(f"Do not support {struct.func=}")
 
-    mval = read_op() & struct.mask
-    if not cmp(mval, struct.value): return False
+    if not can_cont: return False
 
     self.rptr[0] += ctypes.sizeof(struct)
     return True

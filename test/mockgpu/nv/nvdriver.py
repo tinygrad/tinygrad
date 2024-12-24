@@ -1,9 +1,9 @@
-import pathlib, re, ctypes, mmap, collections, struct, functools, os, copy
+import ctypes, mmap, collections, functools
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
-from typing import Optional, Any
+from typing import Any
 from tinygrad.helpers import to_mv
-from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
-from extra.mockgpu.nv.nvgpu import NVGPU
+from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
+from test.mockgpu.nv.nvgpu import NVGPU
 
 MAP_FIXED = 0x10
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -45,7 +45,8 @@ class NVDevFileDesc(VirtFileDesc):
   def ioctl(self, fd, request, argp): return self.driver.dev_ioctl(self.gpu, request, argp)
   def mmap(self, start, sz, prot, flags, fd, offset):
     start = libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
-    if self._mapping_userland: self.driver.track_address(start, start+sz, lambda mv,off: None, lambda mv, off: self.driver._gpu_mmio_write(mv, off, self.gpu))
+    if self._mapping_userland:
+      self.driver.track_address(start, start+sz, lambda mv,off: None, lambda mv, off: self.driver._gpu_mmio_write(mv, off, self.gpu))
     return start
 
 class NVDriver(VirtDriver):
@@ -88,7 +89,7 @@ class NVDriver(VirtDriver):
 
   def rm_alloc(self, argp):
     struct = nv_gpu.NVOS21_PARAMETERS.from_address(argp)
-    params_ptr = struct.pAllocParms if struct.pAllocParms else None
+    params_ptr = struct.pAllocParms
     if struct.hClass == nv_gpu.NV01_ROOT_CLIENT: self.root_handle = struct.hObjectNew = self._alloc_handle()
     elif struct.hClass == nv_gpu.NV01_DEVICE_0:
       params:Any = nv_gpu.NV0080_ALLOC_PARAMETERS.from_address(params_ptr)
@@ -137,7 +138,7 @@ class NVDriver(VirtDriver):
 
   def rm_control(self, argp):
     struct = nv_gpu.NVOS54_PARAMETERS.from_address(argp)
-    params_ptr = struct.params if struct.params else None
+    params_ptr = struct.params
     if struct.cmd == nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2:
       params:Any = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS.from_address(params_ptr)
       params.deviceInstance = params.gpuId # emulate them to be the same
@@ -171,7 +172,7 @@ class NVDriver(VirtDriver):
       assert struct.hObject in self.object_by_handle and isinstance(self.object_by_handle[struct.hObject], NVSubDevice)
       gpu = self.object_by_handle[struct.hObject].device
       params = nv_gpu.NV2080_CTRL_GPU_GET_GID_INFO_PARAMS.from_address(params_ptr)
-      if params.flags != nv_gpu.NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY: raise RuntimeError(f"Unknown format")
+      if params.flags != nv_gpu.NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY: raise RuntimeError("Unknown format")
       bts = gpu.gpu_uuid(sz=params.length)
       for i in range(params.length): params.data[i] = bts[i]
     elif struct.cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
@@ -243,5 +244,5 @@ class NVDriver(VirtDriver):
       any_progress = False
       for gpu in self.gpus.values():
         for q in gpu.queues:
-          if (prev_rptr:=q.ctrl.GPGet) != q.ctrl.GPPut:
+          if q.ctrl.GPGet != q.ctrl.GPPut:
             any_progress |= q.execute()
