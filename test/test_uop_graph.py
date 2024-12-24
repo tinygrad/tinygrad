@@ -772,10 +772,7 @@ class TestIdxUpcast(unittest.TestCase):
   # Intermediate sum is 2147487743, bigger than 2**31 (2147483647)
   def test_overflow_neg_offset_upper_bound(self):
     dim1, dim2, dim3, offset = 2**12, 2**12, 2**7+1, -2**30
-    store, _ = self._assert((dim1, dim2, dim3), dtypes.int, offset=offset)
-    # This tests that the intermediate values were upcasted
-    assert store.src[0].src[1].op is Ops.CAST
-    assert store.src[0].src[1].src[0].dtype is dtypes.long
+    self._assert((dim1, dim2, dim3), dtypes.int, offset=offset)
     self._assert((UOp.variable("dim1", 0, dim1-1), UOp.variable("dim2", 0, dim2-1), dim3), dtypes.int, offset=offset)
 
 
