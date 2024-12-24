@@ -1,5 +1,5 @@
 import ctypes, time
-from extra.mockgpu.gpu import VirtGPU
+from test.mockgpu.gpu import VirtGPU
 from tinygrad.helpers import to_mv, init_c_struct_t, mv_address
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu
 
