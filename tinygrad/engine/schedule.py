@@ -375,7 +375,7 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
       group = {tr: None}
       ctx.realizes[tr] = tr
     reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r_uop.arg[0] is Ops.ADD and r_uop.src[0].base.is_unrealized_const(): reduce_of_const.append(r)
+    if FUSE_ARANGE and r_uop.arg[0] is Ops.ADD and r_uop.src[0].base.op is Ops.CONST: reduce_of_const.append(r)
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
@@ -458,7 +458,7 @@ ops_folding = PatternMatcher([
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
-  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda x:x if x.is_unrealized_const() else None),
+  (UPat(Ops.COPY, src=(UPat.cvar("x"),)), lambda x: x),
   # no double COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
   # no COPY to same device, except clone (arg is True)
