@@ -1,6 +1,6 @@
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins, atexit
-from extra.mockgpu.nv.nvdriver import NVDriver
-from extra.mockgpu.amd.amddriver import AMDDriver
+from test.mockgpu.nv.nvdriver import NVDriver
+from test.mockgpu.amd.amddriver import AMDDriver
 from tinygrad.helpers import from_mv, to_mv
 start = time.perf_counter()
 

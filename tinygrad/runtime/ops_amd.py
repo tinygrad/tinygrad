@@ -12,7 +12,7 @@ from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
-if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
+if getenv("MOCKGPU"): import test.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def is_usable_gpu(gpu_id):
   with contextlib.suppress(OSError): return int(pathlib.Path(gpu_id).read_text()) != 0
