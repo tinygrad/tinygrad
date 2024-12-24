@@ -1,8 +1,7 @@
-from __future__ import annotations
-import os, pathlib, struct, ctypes, tempfile, functools
-from typing import List, Any, Union, Tuple, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, _cache_dir, T, init_c_struct_t
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
+import os, pathlib, struct, ctypes, tempfile, functools, decimal
+from typing import Any, Union, cast
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
@@ -44,6 +43,7 @@ def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) 
   return sender(ptr, sel(selector), *args)
 
 def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode(), restype=objc_instance)
+def from_ns_str(s): return bytes(msg(s, "UTF8String", restype=ctypes.c_char_p)).decode()
 
 def to_struct(*t: int, _type: type = ctypes.c_ulong): return init_c_struct_t(tuple([(f"field{i}", _type) for i in range(len(t))]))(*t)
 
@@ -51,12 +51,35 @@ def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   error_check(msg(cbuf, "error", restype=objc_instance))
 
-def elapsed_time(cbuf: objc_id):
-  return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
+def cmdbuf_label(cbuf: objc_id) -> str: return from_ns_str(msg(cbuf, "label", restype=objc_id))
+def cmdbuf_st_time(cbuf: objc_id) -> float: return cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
+def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double))
 
 def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
-  raise error_constructor(bytes(msg(msg(error, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
+  raise error_constructor(from_ns_str(msg(error, "localizedDescription", restype=objc_instance)))
+
+class MetalDevice(Compiled):
+  def __init__(self, device:str):
+    self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
+    self.mtl_queue = msg(self.sysdevice, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
+    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
+    self.mtl_buffers_in_flight: list[Any] = []
+    self.timeline_signal = msg(self.sysdevice, "newSharedEvent", restype=objc_instance)
+    self.timeline_value = 0
+
+    Compiled.profile_events += [ProfileDeviceEvent(device)]
+
+    from tinygrad.runtime.graph.metal import MetalGraph
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
+                     functools.partial(MetalProgram, self), MetalGraph)
+
+  def synchronize(self):
+    for cbuf in self.mtl_buffers_in_flight:
+      wait_check(cbuf)
+      st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
+      if PROFILE: Compiled.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
+    self.mtl_buffers_in_flight.clear()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
@@ -84,7 +107,7 @@ class MetalCompiler(Compiler):
         ret = CompileError(errorMessage.decode())
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
-    params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{os.path.join(_cache_dir, "tinygrad")}"'
+    params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{cache_dir}"'
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
     request = struct.pack('<QQ', len(src_padded), len(params_padded)) + src_padded + params_padded
@@ -123,7 +146,7 @@ class MetalProgram:
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()), restype=objc_instance)
     error_check(error_pipeline_creation)
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
     if prod(local_size) > cast(int, max_total_threads):
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
@@ -136,11 +159,12 @@ class MetalProgram:
     for i,a in enumerate(vals, start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
     msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_size), to_struct(*local_size))
     msg(encoder, "endEncoding")
+    msg(command_buffer, "setLabel:", to_ns_str(self.name))
     msg(command_buffer, "commit")
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
-      return elapsed_time(command_buffer)
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
+      return cmdbuf_en_time(command_buffer) - cmdbuf_st_time(command_buffer)
 
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
@@ -172,27 +196,11 @@ class MetalAllocator(LRUAllocator):
       src_dev.timeline_value += 1
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
+  def _cp_mv(self, dst, src, prof_desc):
+    with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(cast(int, msg(src.buf, "contents", restype=objc_id).value), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
-  def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "CPU -> METAL")
+  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> CPU")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
-
-class MetalDevice(Compiled):
-  def __init__(self, device:str):
-    self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = msg(self.sysdevice, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
-    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-    self.mtl_buffers_in_flight: List[Any] = []
-    self.mv_in_metal: List[memoryview] = []
-    self.timeline_signal = msg(self.sysdevice, "newSharedEvent", restype=objc_instance)
-    self.timeline_value = 0
-
-    from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph)
-  def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
-    self.mv_in_metal.clear()
-    self.mtl_buffers_in_flight.clear()

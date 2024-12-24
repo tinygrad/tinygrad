@@ -1,11 +1,10 @@
-from typing import Optional, List
 import ctypes, subprocess, pathlib, tempfile
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import cpu_time_execution, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None, objdump_tool='objdump'):
+  def __init__(self, cachekey="compile_clang", args:list[str]|None=None, objdump_tool='objdump'):
     self.args = ['-march=native'] if args is None else args
     self.objdump_tool = objdump_tool
     super().__init__(cachekey)
