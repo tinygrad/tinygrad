@@ -507,7 +507,7 @@ class AMDDevice(HCQCompiled):
 
     # TODO: think of moving this out.
     if AMDDevice.signals_page is None:
-      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
+      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=AMDDevice.driverless, uncached=True, cpu_access=True)
       AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
     else: self.dev_iface.map(AMDDevice.signals_page)
 

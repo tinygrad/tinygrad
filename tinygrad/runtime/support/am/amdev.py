@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses
+import ctypes, collections, time, dataclasses, pathlib
 from typing import Tuple, Dict, Set, Optional, Generator, List
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
@@ -37,7 +37,7 @@ class AMFirmware:
     # Load SOS firmware
     self.sos_fw = {}
 
-    blob, sos_hdr = self.load_fw("/lib/firmware/amdgpu/psp_13_0_0_sos.bin", am.struct_psp_firmware_header_v2_0)
+    blob, sos_hdr = self.load_fw("psp_13_0_0_sos.bin", am.struct_psp_firmware_header_v2_0)
     fw_bin = sos_hdr.psp_fw_bin
 
     for fw_i in range(sos_hdr.psp_fw_bin_count):
@@ -49,17 +49,17 @@ class AMFirmware:
     self.ucode_start: Dict[str, int] = {}
     self.descs: List[Tuple[int, memoryview]] = []
 
-    blob, hdr = self.load_fw("/lib/firmware/amdgpu/smu_13_0_0.bin", am.struct_smc_firmware_header_v1_0)
+    blob, hdr = self.load_fw("smu_13_0_0.bin", am.struct_smc_firmware_header_v1_0)
     self.smu_psp_desc = self.desc(am.GFX_FW_TYPE_SMU, blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes)
 
     # SDMA firmware
-    blob, hdr = self.load_fw("/lib/firmware/amdgpu/sdma_6_0_0.bin", am.struct_sdma_firmware_header_v2_0)
+    blob, hdr = self.load_fw("sdma_6_0_0.bin", am.struct_sdma_firmware_header_v2_0)
     self.descs += [self.desc(am.GFX_FW_TYPE_SDMA_UCODE_TH0, blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes)]
     self.descs += [self.desc(am.GFX_FW_TYPE_SDMA_UCODE_TH1, blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
-      blob, hdr = self.load_fw(f"/lib/firmware/amdgpu/gc_11_0_0_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
+      blob, hdr = self.load_fw(f"gc_11_0_0_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
 
       # Code part
       self.descs += [self.desc(getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'), blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes)]
@@ -70,12 +70,12 @@ class AMFirmware:
       self.ucode_start[fw_name] = hdr.ucode_start_addr_lo | (hdr.ucode_start_addr_hi << 32)
 
     # IMU firmware
-    blob, hdr = self.load_fw("/lib/firmware/amdgpu/gc_11_0_0_imu.bin", am.struct_imu_firmware_header_v1_0)
+    blob, hdr = self.load_fw("gc_11_0_0_imu.bin", am.struct_imu_firmware_header_v1_0)
     imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
     self.descs += [self.desc(am.GFX_FW_TYPE_IMU_I, blob, imu_i_off, imu_i_sz), self.desc(am.GFX_FW_TYPE_IMU_D, blob, imu_i_off + imu_i_sz, imu_d_sz)]
 
     # RLC firmware
-    blob, hdr0, hdr1, hdr2, hdr3 = self.load_fw("/lib/firmware/amdgpu/gc_11_0_0_rlc.bin", am.struct_rlc_firmware_header_v2_0,
+    blob, hdr0, hdr1, hdr2, hdr3 = self.load_fw("gc_11_0_0_rlc.bin", am.struct_rlc_firmware_header_v2_0,
       am.struct_rlc_firmware_header_v2_1, am.struct_rlc_firmware_header_v2_2, am.struct_rlc_firmware_header_v2_3)
 
     for mem in ['GPM', 'SRM']:
@@ -92,8 +92,9 @@ class AMFirmware:
 
     self.descs += [self.desc(am.GFX_FW_TYPE_RLC_G, blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes)]
 
-  def load_fw(self, path:str, *headers):
-    with open(path, "rb") as f: blob = memoryview(bytearray(f.read()))
+  def load_fw(self, fname:str, *headers):
+    fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
+    blob = memoryview(bytearray(fpath.read_bytes()))
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
   def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> Tuple[int, memoryview]: return (typ, blob[offset:offset+size])
