@@ -1992,8 +1992,6 @@ class TestBigGraph(unittest.TestCase):
     sink = tensor_rewrite(a)
     assert UPat.cvar().match(sink, {})
 
-  # failure: View doesn't support __lt__, UOp.tuplize needs it.
-  @unittest.expectedFailure
   def test_masked_const_elementwise(self):
     a = Tensor.eye(10)@Tensor.eye(10)
     sink = tensor_rewrite(a)
