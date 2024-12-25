@@ -105,11 +105,20 @@ class Ops(FastEnum):
   # movement ops!
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
+  # reduce
+  REDUCE_AXIS = auto()
+
+  # helper ops
+  GEP = auto(); VECTORIZE = auto() # noqa: E702
+
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # load/store before math
   LOAD = auto(); STORE = auto() # noqa: E702
+
+  # early INDEX
+  INDEX = auto()
 
   # math ops
   WMMA = auto()
@@ -126,15 +135,6 @@ class Ops(FastEnum):
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
-
-  # reduce
-  REDUCE_AXIS = auto()
-
-  # helper ops
-  GEP = auto(); VECTORIZE = auto() # noqa: E702
-
-  # early INDEX
-  INDEX = auto()
 
   # assignment ops
   ASSIGN = auto()
