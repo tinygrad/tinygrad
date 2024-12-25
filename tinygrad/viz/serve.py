@@ -8,6 +8,7 @@ from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, wo
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
+from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -62,18 +63,18 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
   assert isinstance(x, UOp)
   graph: dict[int, tuple[str, str, list[int], str, str]] = {}
-  excluded = set()
-  for u in x.toposort:
-    if u.op in {Ops.CONST, Ops.DEVICE}:
-      excluded.add(u)
-      continue
+  excluded: set[UOp] = set()
+  for u in (toposort:=x.toposort):
+    if u.op in {Ops.CONST, Ops.DEVICE}: excluded.update((u,) + u.src)
+  for u in toposort:
+    if u in excluded: continue
     argst = str(u.arg)
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{v.shape} / {v.strides}"+(f" / {v.offset}" if v.offset is not None else "") for v in unwrap(u.st).views]))
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x in excluded:
-        if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
+        if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph

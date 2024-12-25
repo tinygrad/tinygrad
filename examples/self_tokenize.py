@@ -15,13 +15,13 @@ def read_code(base_path):
       if 'tinygrad/runtime/autogen' in path.replace('\\', '/'): continue
       fullpath = os.path.join(path, name)
       code = pathlib.Path(fullpath).read_text()
-      ret += [(fullpath.split("tinygrad/", 1)[1], code)]
+      ret.append(("### " + fullpath.split("tinygrad/", 1)[1], code))
   return ret
 
 def write_code_to_file(filename, code_list):
   """Writes the combined code to a specified file."""
   with open(filename, 'w') as f:
-    f.write('\x00'.join(flatten(code_list)))
+    f.write('\n'.join(flatten(code_list)))
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Analyze and optionally save tinygrad code.")
