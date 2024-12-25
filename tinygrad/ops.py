@@ -266,7 +266,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       nodes[u] = None
       cache.add(u)
       return nodes
-    return _toposort(self, cache={})
+    return _toposort(self, cache=set())
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
