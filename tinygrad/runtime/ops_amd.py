@@ -12,7 +12,7 @@ from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
-if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
+if getenv("MOCKGPU"): import test.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def is_usable_gpu(gpu_id):
   with contextlib.suppress(OSError): return int(pathlib.Path(gpu_id).read_text()) != 0
@@ -238,8 +238,8 @@ class AMDProgram(HCQProgram):
     self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.dev.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
-    if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
+    if lds_size > (self.dev.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
+    if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requested: private_segment_size")
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32

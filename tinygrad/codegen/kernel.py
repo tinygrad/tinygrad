@@ -46,7 +46,7 @@ class TensorCoreOptions:
   axes: tuple[int, ...] # the location of the original N and M axes if still in the shape
   axes_exist: tuple[bool, ...] # true if the original N and M axes are still in the shape
   axis_pads: tuple[tuple[int, int], ...]
-  def fix_axes(self, removed_axis:int): # adjust the TC axes if necesssary when a dimension is removed
+  def fix_axes(self, removed_axis:int): # adjust the TC axes if necessary when a dimension is removed
     axes, axes_exist = list(self.axes), list(self.axes_exist)
     for tc_dim in [i for i in range(2) if axes_exist[i]]:
       if removed_axis < axes[tc_dim]: axes[tc_dim] -= 1

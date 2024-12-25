@@ -43,7 +43,7 @@ class QCOMSignal(HCQSignal):
     if isinstance(self.base_addr, int): QCOMDevice.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
-    # Sleep only for only timeline signals. Do it immidiately to free cpu.
+    # Sleep only for only timeline signals. Do it immediately to free cpu.
     if self.timeline_for_device is not None:
       kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.timeline_for_device.fd, context_id=self.timeline_for_device.ctx,
                                                   timestamp=self.timeline_for_device.last_cmd, timeout=0xffffffff)
@@ -335,7 +335,7 @@ class QCOMDevice(HCQCompiled):
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
 
     self.cmd_buf = self._gpu_alloc(16 << 20)
-    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, start=cast(int, self.cmd_buf.va_addr), wrap=True)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, base=cast(int, self.cmd_buf.va_addr), wrap=True)
 
     self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
 
