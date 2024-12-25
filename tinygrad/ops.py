@@ -259,12 +259,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def toposort(self) -> dict[UOp, None]:
     def _toposort(u:UOp, cache:dict[UOp, dict[UOp, None]]):
-      if (cret:=cache.get(u)) is not None: return cret
+      if (cret:=cache.get(u)) is not None: return {}
       nodes: dict[UOp, None] = {}
       # NOTE: this is a lot faster than the comprehension in parents
       for parent in u.src: nodes.update(_toposort(parent, cache))
       nodes[u] = None
-      cache[u] = nodes
+      cache[u] = 1
       return nodes
     return _toposort(self, cache={})
 
