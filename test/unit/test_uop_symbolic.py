@@ -90,11 +90,16 @@ class TestSymbolic(unittest.TestCase):
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
+    self.helper_test_variable(b+a*2+a*3, 0, 8*6, "(b+(a*5))")
 
   def test_factorize_no_mul(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+    self.helper_test_variable((a+b)+a*3, 0, 8*5, "(b+(a*4))")
+    self.helper_test_variable((a*3+b)+b*3, 0, 8*7, "((a*3)+(b*4))")
 
   def test_neg(self):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
@@ -107,7 +112,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_self(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
+    self.helper_test_variable((a+b)+b, 0, 24, "(a+(b*2))")
 
   def test_sub_self(self):
     a = Variable("a", 0, 8)
