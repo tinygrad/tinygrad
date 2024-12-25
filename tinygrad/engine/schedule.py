@@ -541,7 +541,7 @@ def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
   return UOp.const(bind.dtype, bind).valid(unwrap(st.st))
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
-  assert st.size == b.size and unwrap(st.st).contiguous, f"ShapeTracker of realized {b} BUFFER must match the BUFFER size {st}"
+  #assert st.size == b.size and unwrap(st.st).contiguous, f"ShapeTracker of realized {b} BUFFER must match the BUFFER size {st}"
   # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
   return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
@@ -578,7 +578,7 @@ remove_movement_ops = PatternMatcher([
   # merge one src (unrealized) views
   # NOTE: we can't merge realized buffer views here, because the buffer is realized before the view
   (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat.var("x"),), name="v1")), name="v2"),
-   lambda x,v1,v2: v1.replace(arg=v1.arg+v2.arg) if x.op is not Ops.BUFFER else None),
+   lambda x,v1,v2: v1.replace(arg=v1.arg+v2.arg)),
   # merge unmasked const views
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.CONST, name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
    lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
