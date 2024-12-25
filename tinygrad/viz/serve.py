@@ -63,11 +63,11 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
   assert isinstance(x, UOp)
   graph: dict[int, tuple[str, str, list[int], str, str]] = {}
-  excluded = set()
-  for u in x.toposort:
-    if u.op in {Ops.CONST, Ops.DEVICE}:
-      excluded.add(u)
-      continue
+  excluded: set[UOp] = set()
+  for u in (toposort:=x.toposort):
+    if u.op in {Ops.CONST, Ops.DEVICE}: excluded.update((u,) + u.src)
+  for u in toposort:
+    if u in excluded: continue
     argst = str(u.arg)
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{v.shape} / {v.strides}"+(f" / {v.offset}" if v.offset is not None else "") for v in unwrap(u.st).views]))
