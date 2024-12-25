@@ -264,7 +264,7 @@ class HCQProgram(Generic[DeviceType]):
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(kernargs_ptr or self.dev.kernargs_alloctor.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
+    return self.args_state_t(kernargs_ptr or self.dev.kernargs_allocator.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
@@ -315,7 +315,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
-    self.kernargs_alloctor:BumpAllocator = BumpAllocator(self.kernargs_page.size, base=cast(int, self.kernargs_page.va_addr), wrap=True)
+    self.kernargs_allocator:BumpAllocator = BumpAllocator(self.kernargs_page.size, base=cast(int, self.kernargs_page.va_addr), wrap=True)
     self.devices.append(self)
 
   def synchronize(self):

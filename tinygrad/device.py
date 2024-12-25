@@ -170,9 +170,9 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  # overriden in LRUAllocator
+  # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
-    assert size > 0, f"alloc size must be positve, getting {size}"
+    assert size > 0, f"alloc size must be positive, getting {size}"
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 
@@ -271,7 +271,7 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
 
 if PROFILE:
   @atexit.register
-  def finlize_profile():
+  def finalize_profile():
     devs = [Device[d] for d in Device._opened_devices]
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()

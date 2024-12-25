@@ -329,7 +329,7 @@ class Tensor(SimpleMathTrait):
 
   def clone(self) -> Tensor:
     """
-    Creates a clone of this tensor allocating a seperate buffer for the data.
+    Creates a clone of this tensor allocating a separate buffer for the data.
     """
     ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.clone()
@@ -1139,7 +1139,7 @@ class Tensor(SimpleMathTrait):
       if any(abs(st) != 1 for st in strides):
         strides = tuple(abs(s) for s in strides)
         # pad shape to multiple of stride
-        if not all_int(x.shape): raise RuntimeError("symbolic shape not supprted")
+        if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
         x = x.pad(tuple((0, round_up(s, st) - s) for s, st in zip(x.shape, strides)))
         x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
@@ -3100,10 +3100,10 @@ class Tensor(SimpleMathTrait):
     Divides `self` by `x`.
     Equivalent to `self // x`.
     Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division.
+    `idiv` performs integer division (truncate towards zero).
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).idiv(Tensor([2, 3, 4])).numpy())
+    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
     return F.IDiv.apply(*self._broadcasted(x, reverse))
