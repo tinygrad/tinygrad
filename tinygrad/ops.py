@@ -990,12 +990,19 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
+class TypeVerifyContext:
+  def __init__(self, pm):
+    self.pm: PatternMatcher = pm
+    self.visisted: set[UOp] = set()
+  def rewrite(self, n:UOp) -> None:
+    if n in self.visisted: return None
+    for x in n.src: self.rewrite(x)
+    self.visisted.add(n)
+    if not self.pm.rewrite(n):
+      raise RuntimeError(f"UOp verification failed on {n.op} {n.dtype} {len(n.src)} {[x.op for x in n.src]} {n.arg}{' '+repr(n) if DEBUG>=3 else ''}")
+
 def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
-  spec_pm = spec if extra_spec is None else spec+extra_spec
-  for i,u in enumerate(uops):
-    if not spec_pm.rewrite(u):
-      print_uops(uops)
-      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
+  return TypeVerifyContext(spec if extra_spec is None else spec+extra_spec).rewrite(UOp.sink(*uops))
 
 # *** most of symbolic lives here now ***
 
