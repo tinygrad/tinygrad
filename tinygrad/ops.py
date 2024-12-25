@@ -269,7 +269,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache={})
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
+  def tuplize(self:UOp) -> tuple:
+    if self.op in GroupOp.Binary and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op.value, self.src[1].arg)
+    return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
 
@@ -1213,8 +1215,9 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # Commutative ordering, if its a chain, move the chain to the left
+  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
+      (x.src[1].op is x.op or (x.src[0].tuplize > x.src[1].tuplize)) else None),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** boolean algebra **
