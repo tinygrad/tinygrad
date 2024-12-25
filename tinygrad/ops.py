@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, heapq
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -91,7 +91,7 @@ class MathTrait(SimpleMathTrait):
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
 
-# the order of these Ops controls the order of the toposort
+# the order of these Ops controls the order of the toposort and ADD/MUL/MAX chains
 class Ops(FastEnum):
   # uops that aren't rendered
   SINK = auto(); CONTIGUOUS = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
@@ -108,8 +108,8 @@ class Ops(FastEnum):
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
-  DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
+  DEFINE_VAR = auto(); DEFINE_LOCAL = auto() # noqa: E702
 
   # reduce
   REDUCE_AXIS = auto()
@@ -135,6 +135,9 @@ class Ops(FastEnum):
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
+
+  # this is here becasue it needs to be at the top of a reduce chain
+  DEFINE_ACC = auto()
 
   # assignment ops
   ASSIGN = auto()
@@ -168,7 +171,8 @@ class GroupOp:
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
-  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR}
+  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
+  CommAssoc = set.intersection(Commutative, Associative)
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
@@ -269,7 +273,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache=set())
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
+  def tuplize(self:UOp) -> tuple:
+    if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op.value, self.src[1].arg)
+    reverse_src = self.op is Ops.IDIV and self.src[1].op in (Ops.CONST, Ops.VCONST)
+    return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in (self.src[::-1] if reverse_src else self.src)))
 
   # *** uop shape stuff ***
 
@@ -1069,26 +1076,23 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
     return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
   return None
 
-def fold_unrolled_divs(divs:UOp):
+def fold_unrolled_divs(chain, x, denominator):
   # div pattern in unrolled arange
-  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, denominator, seen_const, ans = list(split_uop(divs, Ops.ADD)), None, [], None
-  for u in add_chain:
-    if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if denominator is None: denominator = u.src[1].arg
-    if denominator != u.src[1].arg: return None
-    # assumed CONST is the last of an ADD
-    if (s0:=u.src[0]).op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
-      seen_const.append(s0.src[1].arg)
-      s0 = s0.src[0]
-    else: seen_const.append(0)
-    if ans is None: ans = s0
-    if ans is not s0: return None
-  if denominator is None: return None
-  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
-  for i in range(denominator-len(seen_const)):
-    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
+  # example: x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
+  offset = 0
+  # TODO: this might start a bad loop
+  for c in range(denominator.arg-1,-1,-1):
+    # check if (x+c)//d would have been folded
+    if (q:=(x.vmin+c)//denominator.arg)==(x.vmax+c)//denominator.arg:
+      offset -= q
+      continue
+    if chain is None: return None
+    chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
+    # assumed the chain is sorted and CONST is the last of an ADD
+    if u is None or u.op is not Ops.IDIV or u.src[1] is not denominator: return None
+    if ((n:=u.src[0]).op is not Ops.ADD or n.src[0] is not x or n.src[1].op is not Ops.CONST or n.src[1].arg != c) and \
+      (c!=0 or n is not x): return None
+  return chain+x-offset if chain is not None else x-offset
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
@@ -1173,6 +1177,10 @@ def simplify_valid(valid:UOp) -> UOp|None:
 #   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.tuplize > chain.src[1].tuplize: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
 symbolic_simple = PatternMatcher([
@@ -1213,16 +1221,20 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # Commutative ordering, if its a chain, move the chain to the left
+  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
+      (x.src[1].op is x.op or (x.src[0].tuplize > x.src[1].tuplize)) else None),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
+  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
+  ((UPat.var("y")+UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
@@ -1253,12 +1265,15 @@ symbolic = symbolic_simple+PatternMatcher([
   # x//c0<c1 for positive int c0
   ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
    lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
-  # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(Ops.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
-  (UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+  # swap terms if they are out of order (a+c)+b -> (a+b)+c
+  *((UPat(op, src=(UPat(op, name="chain"), UPat(name="b"))),
+    lambda chain,b: chain_insert(chain,b,chain.op) if b.tuplize < chain.src[1].tuplize else None) for op in GroupOp.CommAssoc),
+  # merge two commutative+associative chains, generelization of (a+c)+(b+d) -> a+b+c+d
+  *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op: functools.reduce(
+    lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.tuplize))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
+  (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")))), fold_unrolled_divs),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
