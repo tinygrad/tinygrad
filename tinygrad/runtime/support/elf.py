@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from tinygrad.helpers import getbits
 import tinygrad.runtime.autogen.libc as libc
 
 @dataclass(frozen=True)
@@ -34,3 +35,20 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
     relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs
+
+def relocs_to_patches(relocs) -> list[tuple[int, int]]:
+  patches = []
+  for ploc,tgt,r_type,r_addend in relocs:
+    # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
+    if r_type == libc.R_X86_64_PC32: patch = tgt+r_addend-ploc
+    # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
+    # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
+    elif r_type == libc.R_AARCH64_ADR_PREL_PG_HI21:
+      rel_pg = ((tgt+r_addend) & ~0xFFF) - (ploc & ~0xFFF)
+      patch = (getbits(rel_pg, 12, 13) << 29) | (getbits(rel_pg, 14, 31) << 5)
+    elif r_type == libc.R_AARCH64_LDST16_ABS_LO12_NC: patch = getbits(tgt+r_addend, 1, 11) << 10
+    elif r_type == libc.R_AARCH64_LDST64_ABS_LO12_NC: patch = getbits(tgt+r_addend, 3, 11) << 10
+    elif r_type == libc.R_AARCH64_LDST128_ABS_LO12_NC: patch = getbits(tgt+r_addend, 4, 11) << 10
+    else: raise NotImplementedError(f"Encountered unknown relocation type {r_type:#x}")
+    patches.append((ploc, patch))
+  return patches
