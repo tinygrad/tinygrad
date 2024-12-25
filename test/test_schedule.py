@@ -13,10 +13,10 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops, to_uop
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -1977,6 +1977,7 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
+def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic)
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = Tensor(0)
@@ -1985,6 +1986,40 @@ class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const_alt_expanded(self):
     x = Tensor.zeros(4, 4).contiguous()
     check_schedule(x, 1)
+
+  def test_all_const_uops(self):
+    a = Tensor(4)*Tensor(2)
+    sink = tensor_rewrite(a)
+    assert UPat.cvar().match(sink, {})
+
+  # failure: View doesn't support __lt__, UOp.tuplize needs it.
+  @unittest.expectedFailure
+  def test_masked_const_elementwise(self):
+    a = Tensor.eye(10)@Tensor.eye(10)
+    sink = tensor_rewrite(a)
+    assert UPat(Ops.REDUCE_AXIS, src=(UPat.cvar().view()*UPat.cvar().view(),)).match(sink, {})
+
+  def test_elementwise_ops(self):
+    a = Tensor.empty(4, 4, dtype=dtypes.int)
+    sink = tensor_rewrite(a*0)
+    assert UPat(Ops.CONST, arg=0).match(sink, {})
+    self.assertIs(tensor_rewrite(a*1), a.lazydata)
+    self.assertIs(tensor_rewrite(a+0), a.lazydata)
+    self.assertIs(tensor_rewrite(a//1), a.lazydata)
+
+  def test_cast_folding(self):
+    a = Tensor(1.0).cast(dtypes.int)
+    sink = tensor_rewrite(a)
+    assert UPat.cvar(dtype=dtypes.int).match(sink, {})
+
+  # failure: the scheduler must not change image to its base dtype before const folding
+  @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+  @unittest.expectedFailure
+  def test_float_to_image_cast_stays(self):
+    a = Tensor.empty(4).cast(dtypes.imagef((1,1,4)))
+    sink = to_uop(a.lazydata, ScheduleContext(), {})
+    sink = graph_rewrite(sink, symbolic)
+    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, dtypes.imagef((1, 1, 4))), UPat(Ops.CAST, src=(UPat.var(dtype=dtypes.float),)))).match(sink, {})
 
 tensor_const_pm = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
