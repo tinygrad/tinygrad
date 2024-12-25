@@ -43,7 +43,7 @@ class QCOMSignal(HCQSignal):
     if isinstance(self.base_addr, int): QCOMDevice.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
-    # Sleep only for only timeline signals. Do it immidiately to free cpu.
+    # Sleep only for only timeline signals. Do it immediately to free cpu.
     if self.timeline_for_device is not None:
       kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.timeline_for_device.fd, context_id=self.timeline_for_device.ctx,
                                                   timestamp=self.timeline_for_device.last_cmd, timeout=0xffffffff)

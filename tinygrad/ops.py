@@ -44,7 +44,7 @@ class SimpleMathTrait:
   def __sub__(self, x): return self.sub(x)
   def __mul__(self, x): return self.mul(x)
   def __truediv__(self, x): return self.div(x)
-  def __floordiv__(self, x): return self.idiv(x)
+  def __floordiv__(self, x): return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
@@ -325,7 +325,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_arg(self) -> ConstType:
     match self.base.op:
       case Ops.CONST: ret = self.base.arg
-      case Ops.VIEW: ret = self.base.src[1].const_arg
       case op: raise AssertionError(f"const_arg called on {op}")
     assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
     return ret
@@ -391,6 +390,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
+  def valid(self, st:ShapeTracker):
+    assert self.op in {Ops.CONST, Ops.DEFINE_VAR}, f"can only create VALID from a constant, got {self.op}"
+    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self, 0)
   @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
   def _reduce_op(self, op:Ops, axis:tuple[int, ...]):
@@ -420,7 +422,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self, allow_buffer_view=True):
-    if not unwrap(self.st).contiguous or self.size != self.base.size or self.is_unrealized_const():
+    if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
       if allow_buffer_view and self.can_view(): return self.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
       return self.alu(Ops.CONTIGUOUS)
     forced_realize.add(self.base)
@@ -436,10 +438,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     if op is Ops.CONST:
-      # Tensor const is a VIEW(DEVICE, CONST) -> RESHAPE -> EXPAND
+      # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
-      return UOp(Ops.VIEW, dtype, (UOp(Ops.DEVICE, arg=device), UOp.const(dtype, unwrap(arg))),
-                 ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
+                 ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
     # TOOD: Tensor variable bindings need device and shape from sources
     if op is Ops.BIND:
       assert isinstance(arg, UOp) and arg.op is Ops.BIND and shape == (), f"trying to create BIND with {arg=} {shape=}"
@@ -450,17 +452,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # no COPY
     if self.device == device and not clone: return self
     # TODO: hack const metaop early here, fix this in multi
-    if self.is_unrealized_const(): return UOp.metaop(Ops.CONST, (), self.dtype, device, self.const_arg).view(unwrap(self.st))
+    if self.base.op is Ops.CONST: return UOp.metaop(Ops.CONST, (), self.dtype, device, self.const_arg).view(unwrap(self.st))
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
     return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
-  def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
+  def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
-    return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
+    return (self.st is not None and self._device is not None and self.st.consecutive and self.base.op is not Ops.CONST and
             not isinstance(self.dtype, ImageDType) and self.device.split(":")[0] in view_supported_devices)
   @property
   def lbs(self): return [self]
