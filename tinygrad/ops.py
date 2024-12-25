@@ -130,11 +130,11 @@ class Ops(FastEnum):
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
 
-  # TernaryOps
-  WHERE = auto(); MULACC = auto() # noqa: E702
-
   # helper ops
   GEP = auto(); VECTORIZE = auto() # noqa: E702
+
+  # TernaryOps
+  WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
   ASSIGN = auto()
