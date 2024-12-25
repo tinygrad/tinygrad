@@ -185,28 +185,33 @@ def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsi
 # (padding_top, padding_left, ..., padding_bottom, padding_right, ...) -> (padding_left, padding_right, padding_top, padding_bottom, ...)
 def _onnx_pads_to_tiny_pads(pads): return flatten(reversed([(pB,pA) for pB, pA in zip(pads, pads[len(pads)//2:])]))
 
+AUTO_PAD_OPTIONS = Literal["NOTSET", "SAME_UPPER", "SAME_LOWER", "VALID"]
 # (padding_height, padding_width) -> (padding_top, padding_left, padding_bottom, padding_right)
-def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
+def _auto_pad(pads, auto_pad: AUTO_PAD_OPTIONS):
   if auto_pad == "SAME_UPPER": return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))]
   return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
-def Pad(x: Tensor, pads: Tensor|tuple[int, ...], constant_value: Tensor|None=None, axes: Tensor|None=None, mode="constant", value=0):
-  pads, value, axes = to_python_const(pads), to_python_const(constant_value) or value or 0, to_python_const(axes) or list(range(x.ndim))
+def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[int]|None=None,
+        mode:Literal["constant", "reflect", "edge", "wrap"]="constant", value=0):
+  value = constant_value or value
+  axes = axes or list(range(x.ndim))
   real_pads = [0] * (x.ndim*2)
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
-  return x.pad(padding=_onnx_pads_to_tiny_pads(to_python_const(real_pads)), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
+  return x.pad(padding=_onnx_pads_to_tiny_pads(real_pads), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
-def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad):
+def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
   i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
   if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
   o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
   return _onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))
 
-def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, count_include_pad=False, dilations=1, pads=0, strides=1):
+def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
+                dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
   pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
   return X.avg_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
 
-def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilations=1, pads=0, storage_order=0, strides=1):
+def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
+            storage_order:int=0, strides:list[int]|int=1):
   pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
   ret = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode)
   # tests expect indices with int64 dtype
@@ -214,14 +219,16 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilatio
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
-def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
+def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
+         kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
   pads = _resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad)
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads)
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=tuple(pads))
 
 # src: https://github.com/onnx/onnx/blob/main/docs/Operators.md#ConvTranspose
 # another src: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
-def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
-                  output_shape=None, output_padding=0, strides=1):
+def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
+                  kernel_shape:list[int]|None=None, pads:list[int]|None=None, output_shape:list[int]|None=None, output_padding:list[int]|int=0,
+                  strides:list[int]|int=1):
   input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
   strides, dilations, output_padding = (make_tuple(x, len(input_shape)) for x in (strides, dilations, output_padding))
   if output_shape is not None: # we pad according to output_shape
@@ -234,10 +241,8 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad="NOTSET", d
   pads = _onnx_pads_to_tiny_pads(pads)
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
 
-# TODO: maybe add this to Tensor.py
-# TODO: this also might be wrong
-def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor|None=None, kernel_shape=None, pads=(0,0,0,0), strides=None):
-  outshape = to_python_const(outshape)
+def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=None, pads:list[int]|int=0, strides:list[int]|int=1):
+  pads, strides = (make_tuple(x, len(xI.shape)) for x in (pads, strides))
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   ret = (xI.reshape(-1, 1)._one_hot_along_dim(prod(out_sh)) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
   if outshape is not None and outshape != ret.shape: pads = _auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")
