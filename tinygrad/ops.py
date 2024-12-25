@@ -44,7 +44,7 @@ class SimpleMathTrait:
   def __sub__(self, x): return self.sub(x)
   def __mul__(self, x): return self.mul(x)
   def __truediv__(self, x): return self.div(x)
-  def __floordiv__(self, x): return self.idiv(x)
+  def __floordiv__(self, x): return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
@@ -269,11 +269,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache={})
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]:
-    # TODO: TypeError: '<' not supported between instances of 'View' and 'View' if you comment this out
-    # can this be fixed in view.py?
-    if self.op is Ops.VIEW: return (self.op.value, None, self.dtype, tuple(x.tuplize for x in self.src))
-    return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
+  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
 
