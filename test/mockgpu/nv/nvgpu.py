@@ -1,7 +1,7 @@
 import ctypes, ctypes.util, time
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from enum import Enum, auto
-from extra.mockgpu.gpu import VirtGPU
+from test.mockgpu.gpu import VirtGPU
 from tinygrad.helpers import to_mv, init_c_struct_t
 
 def make_qmd_struct_type():
@@ -77,7 +77,7 @@ class GPFIFO:
   def execute_buf(self) -> bool:
     while self.buf_ptr < self.buf_sz:
       init_off = self.buf_ptr
-      typ, size, subc, mthd = self._next_header()
+      _, size, _, mthd = self._next_header()
       cmd_end_off = self.buf_ptr + size
 
       while self.buf_ptr < cmd_end_off:
@@ -151,7 +151,7 @@ class GPFIFO:
     assert lanes == 1, f"unsupported lanes > 1 in _exec_nvc6c0_dma: {lanes}"
     flags = self._next_dword()
     assert flags == 0x41, f"unsupported flags in _exec_nvc6c0_dma: {flags}"
-    typ, dsize, subc, mthd = self._next_header()
+    typ, dsize, _, mthd = self._next_header()
     assert typ == 6 and mthd == nv_gpu.NVC6C0_LOAD_INLINE_DATA, f"Expected inline data not found after nvc6c0_dma, {typ=} {mthd=}"
     copy_data = [self._next_dword() for _ in range(dsize)]
     assert len(copy_data) * 4 == sz, f"different copy sizes in _exec_nvc6c0_dma: {len(copy_data) * 4} != {sz}"

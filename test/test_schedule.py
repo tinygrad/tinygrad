@@ -1987,7 +1987,7 @@ class TestBigGraph(unittest.TestCase):
     check_schedule(x, 1)
 
 tensor_const_pm = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.CONST, src=()))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
 ])
 class TestConst(unittest.TestCase):
@@ -2006,15 +2006,12 @@ class TestConst(unittest.TestCase):
 
   def test_uop_methods(self):
     a = Tensor(1)
-    self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
 
     a = Tensor.ones((4, 4))
-    self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
 
     a = Tensor.ones((4, 4)).pad((1, 1),)
-    self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
 
   def test_const_schedule(self):
