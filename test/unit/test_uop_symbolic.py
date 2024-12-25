@@ -361,7 +361,8 @@ class TestSymbolic(unittest.TestCase):
                               ("((((((gidx0//5)+lidx2)//5)+lidx1)//2)+(((gidx2*32)+(gidx1*8))+(lidx0*16)))",
                                "((((gidx1*8)+(gidx2*32))+(lidx0*16))+((lidx1+((lidx2+(gidx0//5))//5))//2))",
                                "((((((gidx0//5)+lidx2)//5)+lidx1)//2)+(((gidx1*8)+(gidx2*32))+(lidx0*16)))",
-                               "(((gidx2*32)+((gidx1*8)+(lidx0*16)))+((lidx1+(((gidx0//5)+lidx2)//5))//2))"))
+                               "(((gidx2*32)+((gidx1*8)+(lidx0*16)))+((lidx1+(((gidx0//5)+lidx2)//5))//2))",
+                               "((((gidx1*8)+(gidx2*32))+(lidx0*16))+((lidx1+(((gidx0//5)+lidx2)//5))//2))"))
 
   def test_sum_div_complex2(self):
     gidx0 = Variable("gidx0", 0, 7)
