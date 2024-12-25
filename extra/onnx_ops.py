@@ -190,7 +190,7 @@ def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   if auto_pad == "SAME_UPPER": return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))]
   return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Optional[Tensor]=None, axes: Optional[Tensor]=None, mode="constant", value=0):
+def Pad(x: Tensor, pads: Tensor|tuple[int, ...], constant_value: Tensor|None=None, axes: Tensor|None=None, mode="constant", value=0):
   pads, value, axes = to_python_const(pads), to_python_const(constant_value) or value or 0, to_python_const(axes) or list(range(x.ndim))
   real_pads = [0] * (x.ndim*2)
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
@@ -214,13 +214,13 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilatio
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
-def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
+def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
   pads = _resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad)
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads)
 
 # src: https://github.com/onnx/onnx/blob/main/docs/Operators.md#ConvTranspose
 # another src: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
-def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
+def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
                   output_shape=None, output_padding=0, strides=1):
   input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
   strides, dilations, output_padding = (make_tuple(x, len(input_shape)) for x in (strides, dilations, output_padding))
@@ -236,7 +236,7 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
 
 # TODO: maybe add this to Tensor.py
 # TODO: this also might be wrong
-def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=(0,0,0,0), strides=None):
+def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor|None=None, kernel_shape=None, pads=(0,0,0,0), strides=None):
   outshape = to_python_const(outshape)
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   ret = (xI.reshape(-1, 1)._one_hot_along_dim(prod(out_sh)) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
