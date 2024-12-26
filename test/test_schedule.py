@@ -2013,9 +2013,7 @@ class TestBigGraph(unittest.TestCase):
     sink = tensor_rewrite(a)
     assert UPat.cvar(dtype=dtypes.int).match(sink, {})
 
-  # failure: the scheduler must not change image to its base dtype before const folding
   @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
-  @unittest.expectedFailure
   def test_float_to_image_cast_stays(self):
     a = Tensor.empty(4).cast(dtypes.imagef((1,1,4)))
     sink = to_uop(a.lazydata, ScheduleContext(), {})
