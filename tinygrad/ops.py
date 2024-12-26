@@ -276,15 +276,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
-  def st(self) -> Optional[ShapeTracker]:
+  def st(self) -> ShapeTracker|None:
+    # these uops define ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
-    # buffer ops can have a non contiguous shapetracker
-    if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
+    # otherwise we derive the st from sources
     if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
-    # all other ops have a contiguous shapetracker
+    # st_arg on buffer uops defines the ShapeTracker, it's allowed to be non contiguous
+    if self.op in GroupOp.Buffer: return self.st_arg
+    # all other uops have a contiguous ShapeTracker
     from tinygrad.shape.shapetracker import ShapeTracker
+    # only reduceop is allowed to change shape
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
@@ -292,7 +295,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[-1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg[1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -338,14 +341,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
-    if self._device is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
-    return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
+    # constants can optionally have a DEVICE source
+    return UOp.const(self.dtype, b) if self._device is None else UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True):
-    if self.dtype == dtype: return self # TODO: move this to the scheduler
     if bitcast: return self.bitcast(dtype, allow_buffer_view)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
@@ -431,10 +433,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** from LazyBuffer ***
 
   @staticmethod
-  def const_with_shape(dtype:DType, val:ConstLike, shape:tuple[sint,...]) -> UOp:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
-  @staticmethod
   def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     if op is Ops.CONST:
@@ -507,8 +505,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType) -> UOp:
-    return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
+  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
