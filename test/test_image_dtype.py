@@ -42,16 +42,8 @@ class TestImageDType(unittest.TestCase):
   def test_image_and_back(self):
     data = Tensor.randn(9*27*4).realize()
     tst = data.numpy()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    assert isinstance(it.lazydata.base.realized.dtype, ImageDType)
-    np.testing.assert_equal(tst, it.numpy())
-
-  def test_image_cast_and_back_collapses(self):
-    data = Tensor.randn(9*27*4).realize()
-    tst = data.numpy()
     it = data.cast(dtypes.imagef((9,27,4))).realize()
-    # the underlying UOp is identical
-    self.assertIs(it.lazydata.base.realized, data.lazydata.base.realized)
+    assert isinstance(it.lazydata.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
   def test_image_and_back_wrong_shape(self):
@@ -67,8 +59,7 @@ class TestImageDType(unittest.TestCase):
     np.testing.assert_equal(imgv[0:2], it[0:2].numpy())
 
   def test_mul_stays_image(self):
-    # NOTE: contiguous is needed otherwise this folds
-    it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).contiguous().realize()
+    it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).realize()
     out = (it*2).realize()
     assert isinstance(out.lazydata.base.realized.dtype, ImageDType)
 
@@ -97,15 +88,15 @@ class TestImageDType(unittest.TestCase):
 
   def test_no_lru_alloc(self):
     data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
     b1 = it.lazydata.base.realized._buf
     del it
-    it = data.cast(dtypes.imagef((10,27,4))).contiguous().realize()
+    it = data.cast(dtypes.imagef((10,27,4))).realize()
     assert it.lazydata.base.realized._buf != b1
 
   def test_no_lru_alloc_dtype(self):
     data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
     b1 = it.lazydata.base.realized._buf
     del it
     it = data.cast(dtypes.imageh((9,27,4))).realize()
