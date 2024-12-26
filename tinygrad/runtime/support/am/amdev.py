@@ -265,6 +265,7 @@ class AMDev:
 
     # Initialize all blocks
     for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
+    self.gfx.set_clockgating_state()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__.get(f"{ip}_HWIP")][inst][seg]
 

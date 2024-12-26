@@ -187,6 +187,21 @@ class AM_GFX(AM_IP):
 
     self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
+  def set_clockgating_state(self):
+    self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1)
+    self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
+
+    self.adev.regRLC_CGCG_CGLS_CTRL.update(cgcg_gfx_idle_threshold=0x36, cgcg_en=1, cgls_rep_compansat_delay=0xf, cgls_en=1)
+
+    self.adev.regCP_RB_WPTR_POLL_CNTL.update(poll_frequency=0x100, idle_poll_count=0x90)
+    self.adev.regCP_INT_CNTL.update(cntx_busy_int_enable=1, cntx_empty_int_enable=1, cmp_busy_int_enable=1, gfx_idle_int_enable=1)
+    self.adev.regSDMA0_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
+
+    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=0, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
+      grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0)
+
+    self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1)
+
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0): self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue)
 
   def _wait_for_rlc_autoload(self):
