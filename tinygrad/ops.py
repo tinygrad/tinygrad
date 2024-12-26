@@ -258,15 +258,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def toposort(self) -> dict[UOp, None]:
-    def _toposort(u:UOp, cache:dict[UOp, dict[UOp, None]]):
-      if (cret:=cache.get(u)) is not None: return cret
+    def _toposort(u:UOp, cache:set[UOp]):
+      if u in cache: return {}
       nodes: dict[UOp, None] = {}
       # NOTE: this is a lot faster than the comprehension in parents
       for parent in u.src: nodes.update(_toposort(parent, cache))
       nodes[u] = None
-      cache[u] = nodes
+      cache.add(u)
       return nodes
-    return _toposort(self, cache={})
+    return _toposort(self, cache=set())
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
@@ -1215,14 +1215,15 @@ symbolic_simple = PatternMatcher([
 symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping **
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-  # group like
-  ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
+  ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
+  ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
