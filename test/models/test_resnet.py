@@ -9,7 +9,7 @@ class TestResnet(unittest.TestCase):
     model = resnet.ResNeXt50_32X4D()
     model.load_from_pretrained()
 
-  def test_mode_load_no_fc(self):
+  def test_model_load_no_fc_layer(self):
     model = resnet.ResNet18(num_classes=None)
     model.load_from_pretrained()
 
