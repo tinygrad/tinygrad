@@ -17,6 +17,5 @@ class TestResnet(unittest.TestCase):
     model.load_from_pretrained()
 
 
-
 if __name__ == '__main__':
   unittest.main()
