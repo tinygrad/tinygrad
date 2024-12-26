@@ -129,7 +129,7 @@ class LLVMRenderer(Renderer):
         # generate the phi nodes for the assigns
         if u.op is Ops.RANGE:
           for x in acc_to_assign:
-            if u in x.src:  # if this range is relevent for this acc
+            if u in x.src:  # if this range is relevant for this acc
               vc += 1
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
               r[x] = f"%acc{vc}"
