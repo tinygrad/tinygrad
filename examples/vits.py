@@ -4,7 +4,7 @@ from phonemizer.backend import EspeakBackend
 from phonemizer.punctuation import Punctuation
 from functools import reduce
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import torch_load
@@ -42,10 +42,10 @@ class Synthesizer:
     if pad_length > -1:
       # Pad flow forward inputs to enable JIT
       assert pad_length > row_len, "pad length is too small"
-      y_mask = y_mask.pad(((0, 0), (0, 0), (0, pad_length - row_len)), 0).cast(z_p.dtype)
+      y_mask = y_mask.pad(((0, 0), (0, 0), (0, pad_length - row_len))).cast(z_p.dtype)
       # New y_mask tensor to remove sts mask
       y_mask = Tensor(y_mask.numpy(), device=y_mask.device, dtype=y_mask.dtype, requires_grad=y_mask.requires_grad)
-      z_p = z_p.squeeze(0).pad(((0, 0), (0, pad_length - z_p.shape[2])), 1).unsqueeze(0)
+      z_p = z_p.squeeze(0).pad(((0, 0), (0, pad_length - z_p.shape[2])), value=1).unsqueeze(0)
     z = self.flow.forward(z_p.realize(), y_mask.realize(), g=g.realize(), reverse=True)
     result_length = reduce(lambda x, y: x * y, self.dec.upsample_rates, row_len)
     o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)[:, :, :result_length]
@@ -420,7 +420,7 @@ def piecewise_rational_quadratic_transform(inputs, un_normalized_widths, un_norm
   return spline_fn(inputs=inputs, un_normalized_widths=un_normalized_widths, un_normalized_heights=un_normalized_heights, un_normalized_derivatives=un_normalized_derivatives, inverse=inverse, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative, **spline_kwargs)
 def unconstrained_rational_quadratic_spline(inputs, un_normalized_widths, un_normalized_heights, un_normalized_derivatives, inverse=False, tails='linear', tail_bound=1., min_bin_width=DEFAULT_MIN_BIN_WIDTH, min_bin_height=DEFAULT_MIN_BIN_HEIGHT, min_derivative=DEFAULT_MIN_DERIVATIVE):
   if not tails == 'linear': raise RuntimeError('{} tails are not implemented.'.format(tails))
-  constant = np.log(np.exp(1 - min_derivative) - 1)
+  constant = np.log(np.exp(1 - min_derivative) - 1).item()
   un_normalized_derivatives = cat_lr(un_normalized_derivatives, constant, constant)
   output, log_abs_det = rational_quadratic_spline(inputs=inputs.squeeze(dim=0).squeeze(dim=0), unnormalized_widths=un_normalized_widths.squeeze(dim=0).squeeze(dim=0), unnormalized_heights=un_normalized_heights.squeeze(dim=0).squeeze(dim=0), unnormalized_derivatives=un_normalized_derivatives.squeeze(dim=0).squeeze(dim=0), inverse=inverse, left=-tail_bound, right=tail_bound, bottom=-tail_bound, top=tail_bound, min_bin_width=min_bin_width, min_bin_height=min_bin_height, min_derivative=min_derivative)
   return output.unsqueeze(dim=0).unsqueeze(dim=0), log_abs_det.unsqueeze(dim=0).unsqueeze(dim=0)
@@ -487,7 +487,11 @@ def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert 
     slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
     slices.append(slice_range)
     start += size
-  return [tensor._slice(s) for s in slices]
+  return [slice(tensor, s) for s in slices]
+def slice(self: Tensor, arg:Sequence[tuple[int, int]|None]) -> Tensor:
+  arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
+  padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
+  return self.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 def gather(x, indices, axis):
   indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(0, axis)
   permute_args = list(range(x.ndim))
