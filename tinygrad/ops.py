@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
-from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
+from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate, WeakImageDType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG
 if TYPE_CHECKING:
@@ -494,6 +494,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
+    if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) \
+                                               or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+      # if the Image can't be realized, we cast to a WeakImageDType
+      base = self.dtype.base
+      alt_ret = self.cast(WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, imagedtype=self.dtype))
+      return UOp(op, alt_ret.dtype, (alt_ret,), arg)
+    elif isinstance(self.dtype, WeakImageDType) and (prod(self.shape) == prod(self.dtype.shape) \
+                                                     and any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+      alt_ret = self.cast(self.dtype.imagedtype)
+      return UOp(op, alt_ret.dtype, (alt_ret,), arg)
     return ret
 
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
