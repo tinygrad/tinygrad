@@ -578,7 +578,7 @@ remove_movement_ops = PatternMatcher([
   # merge one src (unrealized) views
   # NOTE: we can't merge realized buffer views here, because the buffer is realized before the view
   (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat.var("x"),), name="v1")), name="v2"),
-   lambda x,v1,v2: v1.replace(arg=v1.arg+v2.arg)),
+   lambda x,v1,v2: v1.replace(arg=ShapeTracker.from_shape(v1.shape)+v2.arg)),
   # merge unmasked const views
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.CONST, name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
    lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
