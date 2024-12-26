@@ -70,10 +70,8 @@ class ImageDType(PtrDType):
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 @dataclass(frozen=True, eq=False)
-class WeakImageDType(DType):
-  imagedtype: ImageDType
-  @property
-  def shape(self): return self.imagedtype.shape
+class WeakImageDType(ImageDType):
+  imagedtype: Optional[ImageDType] = None
   def __repr__(self): return "W"+self.imagedtype.__repr__()
 
 class dtypes:

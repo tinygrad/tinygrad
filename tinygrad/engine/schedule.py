@@ -31,7 +31,7 @@ tensor_uop_spec = PatternMatcher([
   # movement ops
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
    # naturally correct
-   (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
+   (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or True or
    # TODO: "make things that can't be images not images" can override the source dtype
    # is there a clean way to update its _mop children?
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),

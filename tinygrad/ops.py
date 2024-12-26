@@ -496,12 +496,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(self.dtype, (ImageDType, WeakImageDType)):
       dtype = self.dtype
       must_be_weak = prod(ret.shape) != prod(dtype.shape) or not any(ret.shape[x]%4 == 0 for x in unwrap(ret.st).unit_stride_axes())
-      if isinstance(dtype, ImageDType) and must_be_weak:
-        base = dtype.base
-        dtype = WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, None, self.dtype)
-      elif isinstance(dtype, WeakImageDType) and not must_be_weak:
+      if isinstance(dtype, WeakImageDType) and not must_be_weak:
         dtype = dtype.imagedtype
-      ret = ret.replace(dtype=dtype)
+      elif isinstance(dtype, ImageDType) and must_be_weak:
+        dtype = WeakImageDType(dtype.priority, dtype.itemsize, dtype.name, dtype.fmt, dtype.count,
+                               dtype._scalar, dtype._base, dtype.local, dtype.v, dtype.size, dtype.shape, dtype)
+      if dtype != ret.dtype: ret = ret.replace(dtype=dtype)
     # apply MOP
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
