@@ -1151,8 +1151,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    # update: even though the add is initially first in order, "COMMUTATIVE flipping" makes it the second one
-    self.assertIs(schedule[1].ast.src[0].src[2].op, Ops.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1409,6 +1408,8 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(out, 3))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
       self.assertIsInstance(out.dtype, ImageDType)
+      self.assertIsNotNone(out.lazydata.base.realized)
+      self.assertIsInstance(out.lazydata.base.realized.dtype, ImageDType)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]

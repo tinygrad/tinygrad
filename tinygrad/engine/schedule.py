@@ -2,7 +2,7 @@ import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, symbolic, type_verify
+from tinygrad.ops import identity_element, buffers, symbolic_simple, type_verify
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
 from tinygrad.dtype import DType, ImageDType, dtypes
@@ -424,7 +424,7 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
-ops_folding = symbolic+PatternMatcher([
+ops_folding = symbolic_simple+PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: base.const_like(0) if base.size == 0 else None),
   # if the uop folded to a CONST we can delete the BUFFER
