@@ -4,7 +4,7 @@ from phonemizer.backend import EspeakBackend
 from phonemizer.punctuation import Punctuation
 from functools import reduce
 from pathlib import Path
-from typing import List, Sequence
+from typing import List
 from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import torch_load
