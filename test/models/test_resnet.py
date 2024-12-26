@@ -9,6 +9,14 @@ class TestResnet(unittest.TestCase):
     model = resnet.ResNeXt50_32X4D()
     model.load_from_pretrained()
 
+  def test_mode_load_no_fc(self):
+    model = resnet.ResNet18(num_classes=None)
+    model.load_from_pretrained()
+
+    model = resnet.ResNeXt50_32X4D(num_classes=None)
+    model.load_from_pretrained()
+
+
 
 if __name__ == '__main__':
   unittest.main()
