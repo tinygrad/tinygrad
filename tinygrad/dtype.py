@@ -72,6 +72,7 @@ class ImageDType(PtrDType):
 @dataclass(frozen=True, eq=False)
 class WeakImageDType(DType):
   imagedtype: ImageDType
+  def __repr__(self): return "W"+self.imagedtype.__repr__()
 
 class dtypes:
   @staticmethod
@@ -169,7 +170,8 @@ def _get_recursive_parents(dtype:DType) -> set[DType]:
   return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
 @functools.lru_cache(None)
 def least_upper_dtype(*ds:DType) -> DType:
-  return min(set.intersection(*[_get_recursive_parents(d) for d in ds])) if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
+  if (images:=[d for d in ds if isinstance(d, (WeakImageDType, ImageDType))]): return images[0]
+  return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void"))}

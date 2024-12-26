@@ -492,18 +492,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
 
   def _mop(self, op:Ops, arg):
-    ret = UOp(op, self.dtype, (self,), arg)
-    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
+    selfc = self
     if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) \
-                                               or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+                                               or not any(self.shape[x]%4 == 0 for x in unwrap(self.st).unit_stride_axes())):
       # if the Image can't be realized, we cast to a WeakImageDType
       base = self.dtype.base
-      alt_ret = self.cast(WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, imagedtype=self.dtype))
-      return UOp(op, alt_ret.dtype, (alt_ret,), arg)
-    elif isinstance(self.dtype, WeakImageDType) and (prod(self.shape) == prod(self.dtype.shape) \
-                                                     and any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
-      alt_ret = self.cast(self.dtype.imagedtype)
-      return UOp(op, alt_ret.dtype, (alt_ret,), arg)
+      selfc = self.cast(WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, None, self.dtype))
+    elif isinstance(self.dtype, WeakImageDType) and (prod(self.shape) == prod(self.dtype.imagedtype.shape) \
+                                                    and any(self.shape[x]%4 == 0 for x in unwrap(self.st).unit_stride_axes())):
+      selfc = self.cast(self.dtype.imagedtype)
+    # apply MOP
+    ret = UOp(op, selfc.dtype, (selfc,), arg)
+    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
