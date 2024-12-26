@@ -1,9 +1,10 @@
 import unittest
 import numpy as np
-from tinygrad import Device, dtypes, Tensor, Context
+from tinygrad import Device, dtypes, Tensor, Context, nn
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
-from tinygrad.helpers import prod, unwrap
+from tinygrad.helpers import IMAGE, all_same, prod, unwrap
+from tinygrad.ops import Ops
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageCopy(unittest.TestCase):
@@ -127,6 +128,63 @@ class TestImageDType(unittest.TestCase):
           lst = s.outputs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
+
+@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+class TestImageRealization(unittest.TestCase):
+  def setUp(self):
+    self.old_image = IMAGE.value
+    IMAGE.value = 2
+  def tearDown(self):
+    IMAGE.value = self.old_image
+
+  def test_dtype_override(self):
+    # this is, "make things that can't be images not images"
+    a = Tensor.ones(9, 9).contiguous().cast(dtypes.imagef((3, 12, 4))).contiguous()
+    # before realize, it's an image
+    self.assertIsInstance(a.lazydata.dtype, ImageDType)
+    # after realize, it becomes a float32
+    # this is because we can't lower its ShapeTracker to index?
+    a = a.realize()
+    self.assertEqual(a.lazydata.dtype, dtypes.float)
+
+  @unittest.expectedFailure
+  def test_dtype_overriden_alu(self):
+    # make something that can't be image
+    a = Tensor.ones(9, 9).contiguous().cast(dtypes.imagef((3, 12, 4))).contiguous()
+    # give it an ALU child
+    add = a+2
+    # realize the parent, it becomes a float32 BUFFER
+    a.realize()
+    # the child's dtype is still imagef, so the ADD becomes (float32)+(imagef)
+    self.assertIsInstance(add.dtype, ImageDType)
+    operand_dtypes = [x.dtype for x in add.lazydata.src]
+    assert all_same(operand_dtypes), f"expected dtypes to be the same for {add.lazydata}"
+
+  @unittest.expectedFailure
+  def test_linear_grad_dtype(self):
+    class TinyNet:
+      def __init__(self):
+        self.l1 = nn.Linear(784, 128)
+        self.l2 = nn.Linear(128, 10)
+      def __call__(self, x):
+        return self.l2(self.l1(x).relu()).relu()
+    with Tensor.train():
+      model = TinyNet()
+      # why is this needed?
+      for param in nn.state.get_state_dict(model).values():
+        if param.requires_grad is None: param.requires_grad = True
+      # realize the loss, some BUFFERs change dtype
+      X = Tensor.empty(32, 784)
+      Y = Tensor.empty(32, 10)
+      out = model(X)
+      loss = (out*Y).mean()
+      loss.backward()
+      loss.realize()
+      # then, try to realize the gradients
+      grad_uop = model.l1.weight.grad.lazydata.base
+      for x in grad_uop.toposort:
+        operand_dtypes = [y.dtype for y in (x.src if x.op is not Ops.WHERE else x.src[1:])]
+        assert all_same(operand_dtypes), f"expected dtypes to match for {x.op}, {operand_dtypes}"
 
 if __name__ == '__main__':
   unittest.main()
