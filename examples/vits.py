@@ -114,7 +114,7 @@ class StochasticDurationPredictor:
     flows = flows[:-2] + [flows[-1]] # remove a useless vflow
     z = Tensor.randn(x.shape[0], 2, x.shape[2], dtype=x.dtype).to(device=x.device) * noise_scale
     for flow in flows: z = flow.forward(z, x_mask, g=x, reverse=reverse)
-    z0, z1 = split(z, [1, 1], 1)
+    z0, z1 = z.split([1, 1], 1)
     return z0.realize()
 
 class DurationPredictor:
@@ -147,7 +147,7 @@ class TextEncoder:
     x = x.transpose(1, -1)  # [b, t, h] -transpose-> [b, h, t]
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)
     x = self.encoder.forward(x * x_mask, x_mask)
-    m, logs = split(self.proj(x) * x_mask, self.out_channels, dim=1)
+    m, logs = (self.proj(x) * x_mask).split(self.out_channels, dim=1)
     return x.realize(), m.realize(), logs.realize(), x_mask.realize()
 
 class ResidualCouplingBlock:
@@ -282,7 +282,7 @@ class ConvFlow:
     self.convs = DDSConv(filter_channels, kernel_size, n_layers, p_dropout=0.)
     self.proj = nn.Conv1d(filter_channels, self.half_channels * (num_bins * 3 - 1), 1)
   def forward(self, x, x_mask, g=None, reverse=False):
-    x0, x1 = split(x, [self.half_channels] * 2, 1)
+    x0, x1 = x.split([self.half_channels] * 2, 1)
     h = self.proj(self.convs.forward(self.pre(x0), x_mask, g=g)) * x_mask
     b, c, t = x0.shape
     h = h.reshape(b, c, -1, t).permute(0, 1, 3, 2) # [b, cx?, t] -> [b, c, t, ?]
@@ -302,10 +302,10 @@ class ResidualCouplingLayer:
     self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=p_dropout, gin_channels=gin_channels)
     self.post = nn.Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
   def forward(self, x, x_mask, g=None, reverse=False):
-    x0, x1 = split(x, [self.half_channels] * 2, 1)
+    x0, x1 = x.split([self.half_channels] * 2, 1)
     stats = self.post(self.enc.forward(self.pre(x0) * x_mask, x_mask, g=g)) * x_mask
     if not self.mean_only:
-      m, logs = split(stats, [self.half_channels] * 2, 1)
+      m, logs = stats.split([self.half_channels] * 2, 1)
     else:
       m = stats
       logs = Tensor.zeros_like(m)
@@ -478,17 +478,7 @@ def get_shape(tensor):
   return tuple(shape)
 def convert_pad_shape(pad_shape): return tuple(tuple(x) for x in pad_shape)
 def get_padding(kernel_size, dilation=1): return int((kernel_size*dilation - dilation)/2)
-def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert it to a tuple of size split_sizes elements
-  if isinstance(split_sizes, int): split_sizes = (split_sizes,) * (tensor.shape[dim] // split_sizes)
-  assert sum(split_sizes) == tensor.shape[
-    dim], "Sum of split_sizes must equal the dimension size of tensor along the given dimension."
-  start, slices = 0, []
-  for size in split_sizes:
-    slice_range = [(start, start + size) if j == dim else (0,s) for j, s in enumerate(tensor.shape)]
-    padding = tuple([(max(0, -p[0]), max(0, p[1]-tensor.shape[i])) for i,p in enumerate(slice_range)])
-    slices.append(tensor.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(slice_range)])))
-    start += size
-  return slices
+
 def gather(x, indices, axis):
   indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(0, axis)
   permute_args = list(range(x.ndim))
