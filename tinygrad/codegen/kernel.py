@@ -595,11 +595,11 @@ class Kernel:
           wd, tcd = self.global_dims, self.first_upcast
           tcd_reduce_len, tcd_upcast_len = len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
           def get_upcast_axes(buf): return tuple((tcd+tcd_reduce_len+tcd_upcast_len - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
-          def get_tc_swizzle_st(shape, wd_pattern, tcd_pattern):
-            offset = (tcd - (wd + len(wd_pattern)))
+          def get_tc_swizzle_st(shape, wd_swizzle, tcd_swizzle):
+            offset = (tcd - (wd + len(wd_swizzle)))
             permaxis = list(range(wd)) \
-              + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) \
-              + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(shape)))
+              + [wd + x + (offset if x >= len(wd_swizzle) else 0) for x in wd_swizzle]  + list(range(wd + len(wd_swizzle), tcd)) \
+              + [wd + x + (offset if x >= len(wd_swizzle) else 0) for x in tcd_swizzle] + list(range(tcd + len(tcd_swizzle), len(shape)))
             return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -616,7 +616,7 @@ class Kernel:
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-            tc_upcast_axes= (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
+            tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, (2**len(tc.get_local_axes())), tc_upcast_axes, tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.upcast_size[2]), src=(
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.upcast_size[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
