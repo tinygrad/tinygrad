@@ -492,17 +492,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
 
   def _mop(self, op:Ops, arg):
-    selfc = self
+    dtype = self.dtype
     if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) \
                                                or not any(self.shape[x]%4 == 0 for x in unwrap(self.st).unit_stride_axes())):
       # if the Image can't be realized, we cast to a WeakImageDType
       base = self.dtype.base
-      selfc = self.cast(WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, None, self.dtype))
+      dtype = WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, None, self.dtype)
     elif isinstance(self.dtype, WeakImageDType) and (prod(self.shape) == prod(self.dtype.imagedtype.shape) \
                                                     and any(self.shape[x]%4 == 0 for x in unwrap(self.st).unit_stride_axes())):
-      selfc = self.cast(self.dtype.imagedtype)
+      dtype = self.dtype.imagedtype
     # apply MOP
-    ret = UOp(op, selfc.dtype, (selfc,), arg)
+    ret = UOp(op, dtype, (self,), arg)
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
