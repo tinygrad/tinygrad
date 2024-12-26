@@ -913,6 +913,17 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp
 
 # ***** uop type spec *****
 
+def all_same_dtype(*src:UOp) -> bool:
+  # normal case, for normal dtypes
+  if all_same([x.dtype for x in src]): return True
+  # otherwise, we expect it only if it's a realized parent Buffer that changes from Image to float
+  for x in src:
+    # either it's an ImageDType operand
+    # or it's a realized BUFFER that used to be image, but it couldn't be
+    if not (isinstance(x.dtype, ImageDType) or \
+        (x.is_realized and dtypes.is_float(x.dtype))): return False
+  return True
+
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
@@ -956,11 +967,11 @@ spec = PatternMatcher([
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y"))), lambda x,y: x.dtype.base == y.dtype.base),
+  (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y"))), lambda x,y: all_same_dtype(x, y)),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat(name="x"), UPat(name="y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat(Ops.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
-  (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
+  (UPat(GroupOp.ALU, name="x"), lambda x: all_same_dtype(x.src)),
 
   (UPat(Ops.ASSIGN, src=(UPat((Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
