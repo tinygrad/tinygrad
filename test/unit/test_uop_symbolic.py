@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import unittest, pickle
-from typing import Tuple
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
@@ -9,7 +8,7 @@ from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
 
-def render(self) -> Tuple[str, ConstType, ConstType]:
+def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
   uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink()))
@@ -91,11 +90,16 @@ class TestSymbolic(unittest.TestCase):
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
+    self.helper_test_variable(b+a*2+a*3, 0, 8*6, "(b+(a*5))")
 
   def test_factorize_no_mul(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+    self.helper_test_variable((a+b)+a*3, 0, 8*5, "(b+(a*4))")
+    self.helper_test_variable((a*3+b)+b*3, 0, 8*7, "((a*3)+(b*4))")
 
   def test_neg(self):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
@@ -108,7 +112,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_self(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
+    self.helper_test_variable((a+b)+b, 0, 24, "(a+(b*2))")
 
   def test_sub_self(self):
     a = Variable("a", 0, 8)

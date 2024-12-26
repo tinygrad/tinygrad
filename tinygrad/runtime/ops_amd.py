@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any, Optional, cast
+from typing import Any, Optional, cast
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
-if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
+if getenv("MOCKGPU"): import test.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def is_usable_gpu(gpu_id):
   with contextlib.suppress(OSError): return int(pathlib.Path(gpu_id).read_text()) != 0
@@ -79,7 +79,7 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
@@ -146,7 +146,7 @@ class AMDComputeQueue(HWQueue):
 
     self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
                          len(self._q) | amd_gpu.INDIRECT_BUFFER_VALID]
-    self._q = hw_view # type: ignore
+    self._q = hw_view
     return self
 
   def _submit(self, dev:AMDDevice):
@@ -238,8 +238,8 @@ class AMDProgram(HCQProgram):
     self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.dev.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
-    if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
+    if lds_size > (self.dev.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
+    if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requested: private_segment_size")
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
@@ -288,8 +288,8 @@ class AMDDevice(HCQCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signals_pool:List[int] = []
-  gpus:List[pathlib.Path] = []
+  signals_pool:list[int] = []
+  gpus:list[pathlib.Path] = []
 
   def _gpu_map(self, mem:HCQBuffer):
     if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return

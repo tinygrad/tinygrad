@@ -1,9 +1,8 @@
-import pathlib, re, ctypes, mmap, collections, struct, functools, os, copy
+import pathlib, re, ctypes, mmap, collections, functools, copy
 import tinygrad.runtime.autogen.kfd as kfd
-from typing import Optional, Any
 from tinygrad.helpers import from_mv
-from extra.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
-from extra.mockgpu.amd.amdgpu import AMDGPU, gpu_props
+from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
+from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
@@ -13,7 +12,7 @@ def ioctls_from_header():
   # hdrpy = (pathlib.Path(__file__).parent.parent.parent.parent / "tinygrad" / "runtime" / "autogen" / "kfd.py").read_text()
   # pattern = r'# (AMDKFD_IOC_[A-Z0-9_]+)\s=\s_(IOW?R?).*\(( 0x[0-9a-fA-F]+) ,\s+struct\s([A-Za-z0-9_]+)\s+\)'
   # matches = re.findall(pattern, hdrpy, re.MULTILINE)
-  hdr = (pathlib.Path(__file__).parent.parent.parent / "hip_gpu_driver" / "kfd_ioctl.h").read_text().replace("\\\n", "")
+  hdr = (pathlib.Path(__file__).parent.parent.parent.parent / "extra" / "hip_gpu_driver" / "kfd_ioctl.h").read_text().replace("\\\n", "")
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
   return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
