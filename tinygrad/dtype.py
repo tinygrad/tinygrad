@@ -72,6 +72,8 @@ class ImageDType(PtrDType):
 @dataclass(frozen=True, eq=False)
 class WeakImageDType(DType):
   imagedtype: ImageDType
+  @property
+  def shape(self): return self.imagedtype.shape
   def __repr__(self): return "W"+self.imagedtype.__repr__()
 
 class dtypes:

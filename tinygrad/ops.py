@@ -492,17 +492,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
 
   def _mop(self, op:Ops, arg):
-    dtype = self.dtype
-    if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) \
-                                               or not any(self.shape[x]%4 == 0 for x in unwrap(self.st).unit_stride_axes())):
-      # if the Image can't be realized, we cast to a WeakImageDType
-      base = self.dtype.base
-      dtype = WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, None, self.dtype)
-    elif isinstance(self.dtype, WeakImageDType) and (prod(self.shape) == prod(self.dtype.imagedtype.shape) \
-                                                    and any(self.shape[x]%4 == 0 for x in unwrap(self.st).unit_stride_axes())):
-      dtype = self.dtype.imagedtype
+    ret = UOp(op, self.dtype, (self,), arg)
+    if isinstance(self.dtype, (ImageDType, WeakImageDType)):
+      dtype = self.dtype
+      must_be_weak = prod(ret.shape) != prod(dtype.shape) or not any(ret.shape[x]%4 == 0 for x in unwrap(ret.st).unit_stride_axes())
+      if isinstance(dtype, ImageDType) and must_be_weak:
+        base = dtype.base
+        dtype = WeakImageDType(base.priority, base.itemsize, base.name, base.fmt, base.count, None, self.dtype)
+      elif isinstance(dtype, WeakImageDType) and not must_be_weak:
+        dtype = dtype.imagedtype
+      ret = ret.replace(dtype=dtype)
     # apply MOP
-    ret = UOp(op, dtype, (self,), arg)
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
