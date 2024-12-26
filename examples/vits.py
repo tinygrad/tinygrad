@@ -484,14 +484,11 @@ def split(tensor, split_sizes, dim=0):  # if split_sizes is an integer, convert 
     dim], "Sum of split_sizes must equal the dimension size of tensor along the given dimension."
   start, slices = 0, []
   for size in split_sizes:
-    slice_range = [(start, start + size) if j == dim else None for j in range(len(tensor.shape))]
-    slices.append(slice_range)
+    slice_range = [(start, start + size) if j == dim else (0,s) for j, s in enumerate(tensor.shape)]
+    padding = tuple([(max(0, -p[0]), max(0, p[1]-tensor.shape[i])) for i,p in enumerate(slice_range)])
+    slices.append(tensor.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(slice_range)])))
     start += size
-  return [slice(tensor, s) for s in slices]
-def slice(self: Tensor, arg:Sequence[tuple[int, int]|None]) -> Tensor:
-  arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
-  padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
-  return self.pad(padding).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
+  return slices
 def gather(x, indices, axis):
   indices = (indices < 0).where(indices + x.shape[axis], indices).transpose(0, axis)
   permute_args = list(range(x.ndim))
