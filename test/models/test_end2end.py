@@ -87,27 +87,6 @@ class TestEnd2End(unittest.TestCase):
         return self.l2(self.l1(x).relu()).log_softmax(-1)
     compare_tiny_torch(LinTiny(), LinTorch(), self.X, self.Y)
 
-  def test_linear_mnist2(self):
-    class LinTiny:
-      def __init__(self, bias=False):
-        self.l1 = Linear(784, 128, bias=bias)
-        self.l2 = Linear(128, 10, bias=bias)
-      def __call__(self, x):
-        return self.l2(self.l1(x).relu()).log_softmax(-1)
-    with Tensor.train():
-      model = LinTiny()
-      # this is needed otherwise grad is None
-      for k,v in get_state_dict(model).items():
-        if v.requires_grad is None: v.requires_grad = True
-      out = model(self.X)
-      loss = (out * self.Y).mean()
-      loss.backward()
-      loss.realize()
-      # then, try to realize the gradients
-      for k,v in get_state_dict(model).items():
-        print(k, v.grad)
-        v.grad.realize()
-
   def test_bn_mnist(self):
     class LinTiny:
       def __init__(self):
