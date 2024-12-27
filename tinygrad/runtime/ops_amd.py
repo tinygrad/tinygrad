@@ -510,6 +510,13 @@ class PCIIface:
   def sleep(self, timeout):
     if PCIIface.vfio and len(self.irq_poller.poll(timeout)): os.read(self.irq_fd, 1024)
 
+  def on_device_hang(self):
+    self.adev.gmc.on_interrupt():
+    for i, d in enumerate(self.dev.devices):
+      print(f"{i} comp: r: {d.compute_queue.read_ptr[0]} w: {d.compute_queue.write_ptr[0]}")
+      print(f"{i} copy: r: {d.copy_queue.read_ptr[0]} w: {d.copy_queue.write_ptr[0]}")
+    raise RuntimeError("Device hang detected")
+
 class AMDDevice(HCQCompiled):
   driverless:bool = not os.path.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
   # signals_page:Any = None
