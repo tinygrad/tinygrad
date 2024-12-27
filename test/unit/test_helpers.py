@@ -59,10 +59,14 @@ class TestContextVars(unittest.TestCase):
   def test_nested_context(self):
     with Context(VARIABLE=1):
       with Context(VARIABLE=2):
-        with Context(VARIABLE=3):
+        MORE = ContextVar("MORE", 2)
+        with Context(VARIABLE=3, MORE=3):
           self.assertEqual(VARIABLE.value, 3)
+          self.assertEqual(MORE.value, 3)
         self.assertEqual(VARIABLE.value, 2)
+        self.assertEqual(MORE.value, 2)
       self.assertEqual(VARIABLE.value, 1)
+      self.assertEqual(MORE.value, 2)  # TODO: should this raise?
     self.assertEqual(VARIABLE.value, 0)
 
   def test_decorator(self):
