@@ -3,10 +3,21 @@ from typing import Optional
 from tinygrad.helpers import round_up
 
 class TLSFAllocator:
+  """
+  The allocator is based on the Two-Level Segregated Fit (TLSF) algorithm. The allocator maintains 2 level of buckets:
+    * 1st level is determined by the most significant bit of the size.
+    * 2nd level splits the covered memory of 1st level into @lv2_cnt entries.
+
+  For each allocation request, the allocator searches for the smallest block that can fit the requested size.
+  For each deallocation request, the allocator merges the block with its neighbors if they are free.
+  """
+
   def __init__(self, size:int, base:int=0, block_size:int=16, lv2_cnt:int=16):
     self.size, self.base, self.block_size, self.l2_cnt = size, base, block_size, lv2_cnt.bit_length()
     self.storage = [collections.defaultdict(list) for _ in range(size.bit_length() + 1)]
-    self.blocks = {0: (size, None, None, True)}  # size, next, prev (off size), is_free
+
+    # self.blocks is more like a linked list, where each entry is a contigous block.
+    self.blocks = {0: (size, None, None, True)} # size, next, prev, is_free
     self._insert_block(0, size)
 
   def lv1(self, size): return size.bit_length()
@@ -44,29 +55,37 @@ class TLSFAllocator:
     if self.blocks.get(nxt) is not None: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start, self.blocks[nxt][3])
 
   def _merge_block(self, start:int):
+    # Go left while blocks are free. Then merge all them right.
     while (x:=self.blocks[start][2]) is not None and self.blocks[x][3] is True: start = x
     self._merge_right(start)
 
-  def alloc(self, o_size:int, align:int=1) -> int:
-    o_size = max(self.block_size, o_size)
-    size = max(self.block_size, o_size + align - 1)
+  def alloc(self, req_size:int, align:int=1) -> int:
+    req_size = max(self.block_size, req_size) # at least block size.
+    size = max(self.block_size, req_size + align - 1)
+
+    # Round up the allocation size to the next bucket, so any entry there can fit the requested size.
     size = round_up(size, (1 << size.bit_length() - self.l2_cnt))
 
+    # Search for the smallest block that can fit the requested size. Start with the it's bucket and go up until any block is found.
     for l1 in range(self.lv1(size), len(self.storage)):
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
           nsize = self.blocks[self.storage[l1][l2][0]][0]
           assert nsize >= size, "block must be larger"
 
+          # Block start address.
           start = self.storage[l1][l2][0]
+
+          # If request contains alignment, split the block into two parts.
           if (new_start:=round_up(start, align)) != start:
             self._split_block(start, nsize, new_start - start)
             start, nsize = new_start, self.blocks[new_start][0]
 
-          if nsize > o_size: self._split_block(start, nsize, o_size)
-          self._remove_block(start, o_size)
+          # If the block is larger than the requested size, split it into two parts.
+          if nsize > req_size: self._split_block(start, nsize, req_size)
+          self._remove_block(start, req_size) # Mark the block as allocated.
           return start + self.base
-    raise MemoryError(f"Can't allocate {o_size} bytes")
+    raise MemoryError(f"Can't allocate {req_size} bytes")
 
   def free(self, start:int):
     self._insert_block(start - self.base, self.blocks[start - self.base][0])._merge_block(start - self.base)

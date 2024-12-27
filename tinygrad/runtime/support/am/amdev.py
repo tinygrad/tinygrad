@@ -132,6 +132,10 @@ class AMMemoryManager:
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=am.AMDGPU_VM_PDB1)
 
   def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False, creat_pt=True) -> Generator[Tuple[int, int, int, int], None, None]:
+    """
+    The function traverses the page table structure, yielding the largest entries that cover the requested virtual address range.
+    """
+
     pte_covers = 1 << ((9 * (3-page_table.lv)) + 12)
     assert size // pte_covers < 512, "Size must be less than 512 ptes"
 
@@ -167,7 +171,11 @@ class AMMemoryManager:
     if size > 0: yield from _level_down(vaddr, size)
 
   def frags_walker(self, page_table, vaddr, size, from_entry=False, free_pt=False, creat_pt=True):
-    # To optimize TLB entries count, need to map pages as contigous entries. Determine size of each chunks.
+    """
+    The TLB hardware has a feature to optimize the number of entries when mapping contiguous regions.
+    The function yields the largest possible fragments to cover the requested area.
+    """
+
     for va, off, pte_st_idx, n_ptes, pte_covers, pt in self.page_table_walker(page_table, vaddr, size, free_pt=free_pt, creat_pt=creat_pt):
       inner_off = 0
       while n_ptes > 0:
@@ -186,14 +194,22 @@ class AMMemoryManager:
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
     for _, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
-      lpaddr, off = (self.pa_allocator.alloc(n_ptes * pte_covers), 0) if paddr is None else (paddr, off)
+      while n_ptes > 0:
+        def _try_alloc(pte_cnt):
+          # Try to allocate contiguous physical memory.
+          try: return self.pa_allocator.alloc(pte_cnt * pte_covers), pte_cnt
+          except MemoryError:
+            if pte_cnt > 1: return _try_alloc(pte_cnt // 2)
+            else: raise MemoryError("Failed to allocate physical memory")
+        (lpaddr, upd_pte), off = (_try_alloc(n_ptes), 0) if paddr is None else ((paddr, n_ptes), off)
 
-      for pte_idx in range(n_ptes):
-        assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"
-        pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
-        off += pte_covers
+        for pte_idx in range(upd_pte):
+          assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"
+          pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
+          off += pte_covers
 
-      if AM_DEBUG >= 3: print(f"\tnptes={n_ptes:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
+        if AM_DEBUG >= 3: print(f"\tnptes={upd_pte:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
+        n_ptes, pte_st_idx = n_ptes - upd_pte, pte_st_idx + upd_pte
 
     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
