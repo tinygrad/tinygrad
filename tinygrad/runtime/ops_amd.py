@@ -233,7 +233,7 @@ class AMDProgram(HCQProgram):
     self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.dev.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
+    if lds_size > (self.dev.dev_iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
     if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requested: private_segment_size")
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
@@ -280,6 +280,7 @@ class AMDQueueDesc:
 class KFDIface:
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
+  gpus:list[pathlib.Path] = []
 
   def _is_usable_gpu(self, gpu_id):
     with contextlib.suppress(OSError): return int(pathlib.Path(gpu_id).read_text()) != 0
@@ -298,8 +299,8 @@ class KFDIface:
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
     with open(f"{KFDIface.gpus[device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
-    with open(f"{KFDIface.gpus[device_id]}/properties", "r") as f: self.dev.properties = {line.split()[0]: int(line.split()[1]) for line in f}
-    self.drm_fd = os.open(f"/dev/dri/renderD{self.dev.properties['drm_render_minor']}", os.O_RDWR)
+    with open(f"{KFDIface.gpus[device_id]}/properties", "r") as f: self.props = {line.split()[0]: int(line.split()[1]) for line in f}
+    self.drm_fd = os.open(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
 
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd, gpu_id=self.gpu_id)
 
@@ -401,7 +402,7 @@ class AMDDevice(HCQCompiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = KFDIface(self, self.device_id)
 
-    self.target = int(self.properties['gfx_target_version'])
+    self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
 
@@ -411,15 +412,15 @@ class AMDDevice(HCQCompiled):
     else: self.dev_iface.map(AMDDevice.signals_page)
 
     # Scratch setup
-    max_cu_id = self.properties['simd_count'] // self.properties['simd_per_cu'] - 1
-    max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
+    max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
+    max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
     self.max_private_segment_size = 4096
     # <gfx103 requires alignment of 1024, >=gfx11 requires 256
     wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256 if self.target >= 110000 else 1024)
-    self.scratch_len = (max_cu_id + 1) * self.properties['max_slots_scratch_cu'] * wave_scratch_len
+    self.scratch_len = (max_cu_id + 1) * self.dev_iface.props['max_slots_scratch_cu'] * wave_scratch_len
     self.scratch = self.dev_iface.alloc(self.scratch_len)
     self.has_scratch_base_registers = self.target >= 110000
-    engines = self.properties['array_count'] // self.properties['simd_arrays_per_engine']
+    engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
     waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
     # >=gfx11 wavesize is per SE
     wavesize = self.scratch_len // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
