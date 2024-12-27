@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
+from google.protobuf.json_format import MessageToDict
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -58,10 +59,11 @@ def attribute_parse(onnx_attribute: AttributeProto):
 def buffer_parse(inp: TensorProto) -> Tensor:
   if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
     return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
-  if len(inp.raw_data) > 0:
+  if inp.HasField("raw_data"):
     return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
                   dtype=dtype_parse(inp.data_type), requires_grad=False)
-  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
+  field_names = [field.name for field,_ in inp.ListFields()]
+  raise NotImplementedError(f"buffer with field names {field_names} is not supported")
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
@@ -123,10 +125,18 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
+    # TODO this debug msg isn't that good
+    if debug >= 3:
+      def resolve_location(t:TensorProto): return "external" if t.HasField("data_location") and t.data_location == TensorProto.EXTERNAL else "internal"
+      print("Model initialization data:")
+      print("\n".join(f"\t{resolve_location(i)} {i.name} - {model_tensors[i.name]}" for i in onnx_model.graph.initializer))
 
+    if debug >= 1: print("Model input:")
     for name, value_info in model_expected_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       model_tensors[name] = prepare_input(inputs[name], value_info)
+      if debug >= 1: print(f"\t{name} - {model_tensors[name]}")
+      if debug >= 3: print(f"\t\tfrom: {MessageToDict(value_info.type)}")
 
     for num,n in enumerate(onnx_model.graph.node):
       inp_tensors = [model_tensors.get(x) for x in n.input]
@@ -134,7 +144,7 @@ def get_run_onnx(onnx_model: ModelProto):
       inp = [to_python_const(t) if i in required_consts else t for i,t in enumerate(inp_tensors)]
       opt = model_attributes[num]
 
-      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp_tensors]} opt {opt}")
+      if debug >= 1: print(f"Node {num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp_tensors]} opt {opt}")
       if debug >= 3:
         print("\tinputs:")
         print("\n".join(f"\t\t{x} - {t!r}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
@@ -163,7 +173,8 @@ def get_run_onnx(onnx_model: ModelProto):
       if len(n.output) > len(ret): raise RuntimeError(f"expected output size must be less than {len(ret)}, it's {n.output}")
       for i in range(len(n.output)): model_tensors[n.output[i]] = ret[i]
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
-
       if num == ONNXLIMIT: return {name:model_tensors[name] for name in n.output}
-    return {x.name:model_tensors[x.name] for x in onnx_model.graph.output}
+    out = {x.name:model_tensors[x.name] for x in onnx_model.graph.output}
+    if debug >= 1: print("Model output:\n" + "\n".join(f"\t{name} - {x}" for name, x in  out.items()))
+    return out
   return run_onnx

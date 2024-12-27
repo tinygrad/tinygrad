@@ -178,6 +178,7 @@ def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon
   axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
   mean = x.mean(axis=axes, keepdim=True)
   return x.layernorm(axes, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axes, keepdim=True).add(epsilon).rsqrt()
+SimplifiedLayerNormalization = functools.partial(LayerNormalization, bias=Tensor(0))
 
 def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
@@ -347,16 +348,14 @@ def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, si
   X = X.permute(*perm)
 
   if sizes is not None:
-    assert scales is None
     if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
       scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
       scales = [scale_fxn([sizes[i] / input_shape[i] for i in range(X.ndim-2) if i+2 in axes])] * 2
       sizes = [int((scales[0] * input_shape[i]) + 0.5) if i+2 in axes else input_shape[i] for i in range(X.ndim-2)]
     else: scales = [sizes[-2] / cast(int, X.size(-2)), sizes[-1] / cast(int, X.size(-1))]
   else:
-    assert scales is not None
     sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
-  regions = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) else [[0.0, 0.0]] * (X.ndim-2)
+  regions = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) and roi else [[0.0, 0.0]] * (X.ndim-2)
 
   # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
   # in Tensor.interpolate, we use indexes without any transformation
@@ -390,7 +389,7 @@ def OneHot(indices:Tensor, depth:float|int, values:Tensor, axis:int=-1):
   # Scalar or Rank 1 tensor containing exactly one element
   depth = int(depth)
   indices = (indices < 0).where(indices+depth, indices)
-  return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
+  return indices.unsqueeze(axis)._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
 def Compress(inp:Tensor, condition:list[bool], axis:int|None=None):
   if axis is None:
