@@ -1,11 +1,6 @@
 import unittest
 from tinygrad import dtypes
-from tinygrad.ops import UOp, symbolic, RewriteContext
-
-def graph_rewrite_map(node, pm):
-  ctx = RewriteContext(pm)
-  rewritten_sink = ctx.rewrite(node)
-  return rewritten_sink, ctx.replace
+from tinygrad.ops import UOp, symbolic, graph_rewrite_map
 
 class TestRewriteMap(unittest.TestCase):
   def test_add_zero(self):
@@ -106,26 +101,23 @@ class TestRewriteMap(unittest.TestCase):
     """
     Build a multi-variable expression with multiple intermediates:
 
-    Let x, y, z be variables, plus 0 and 1 as constants:
-
       x_var = UOp.variable('x', 1, 10)
       y_var = UOp.variable('y', -5, 5)
-      z_var = UOp.variable('z', 0, 5)  # or any range you like
+      z_var = UOp.variable('z', 0, 5)
       zero_node = UOp.const(dtypes.int, 0)
       one_node = UOp.const(dtypes.int, 1)
 
-    Then create a series of sub-expressions:
+      yz_sum       = y_var + z_var
+      yz_sum_zero  = yz_sum + zero_node   -> rewrites to yz_sum
+      yz_neg       = -yz_sum_zero        -> -(y+z)
+      yz_dneg      = -yz_neg             -> y+z    (double neg gone)
+      x_plus_yz    = x_var + yz_dneg     -> x + (y+z)
+      double_neg_x = -(-x_plus_yz)       -> x + (y+z)
+      final_expr   = double_neg_x * one_node -> x + (y+z)
 
-      1) yz_sum       = y_var + z_var
-      2) yz_sum_zero  = yz_sum + zero_node       -> rewrites to yz_sum
-      3) yz_neg       = -yz_sum_zero             -> -(y+z)
-      4) yz_dneg      = -yz_neg                  -> y+z    (double neg gone)
-      5) x_plus_yz    = x_var + yz_dneg          -> x + (y+z)
-      6) double_neg_x = -(-x_plus_yz)            -> x + (y+z)
-      7) final_expr   = double_neg_x * one_node  -> x + (y+z)
-
-    We expect the final result to be (x + (y+z)). More importantly, we check
-    each intermediate node's final rewrite.
+    We expect the final result to be (x + (y+z)).
+    Each original node should map to the final node that replaces it,
+    which might be structurally equivalent but not the same reference.
     """
     x_var = UOp.variable('x', 1, 10)
     y_var = UOp.variable('y', -5, 5)
@@ -133,50 +125,50 @@ class TestRewriteMap(unittest.TestCase):
     zero_node = UOp.const(dtypes.int, 0)
     one_node = UOp.const(dtypes.int, 1)
 
-    # Build sub-expressions step by step:
-    yz_sum = y_var + z_var            # (y + z)
-    yz_sum_zero = yz_sum + zero_node  # (y + z) + 0
-    yz_neg = -yz_sum_zero             # -(y+z)
-    yz_dneg = -yz_neg                 # neg(neg(y+z)) => (y+z)
-    x_plus_yz = x_var + yz_dneg       # x + (y+z)
-    double_neg_x = -(-x_plus_yz)      # neg(neg(x+(y+z))) => x + (y+z)
-    final_expr = double_neg_x * one_node  # (x+(y+z)) * 1 => x + (y+z)
+    # Build sub-expressions
+    yz_sum = y_var + z_var              # (y + z)
+    yz_sum_zero = yz_sum + zero_node    # (y + z) + 0
+    yz_neg = -yz_sum_zero               # -(y+z)
+    yz_dneg = -yz_neg                   # -(-(y+z)) -> (y+z)
+    x_plus_yz = x_var + yz_dneg         # x + (y+z)
+    double_neg_x = -(-x_plus_yz)        # neg(neg(x+(y+z))) -> x+(y+z)
+    final_expr = double_neg_x * one_node  # (x+(y+z)) * 1 -> x+(y+z)
 
     rewritten_sink, node_map = graph_rewrite_map(final_expr, symbolic)
 
-    # The final root should be x + (y + z):
+    # Final root should be x + (y + z)
     expected = x_var + (y_var + z_var)
     self.assertEqual(rewritten_sink, expected)
 
-    # Now check each original sub-expression in the node_map:
-    #
-    # (y + z) itself has no further zero or double-neg rewrites, so yz_sum stays yz_sum:
+    # (y + z) is unchanged
     self.assertEqual(node_map[yz_sum], yz_sum)
 
-    # (y+z) + 0 => just (y+z)
+    # (y+z) + 0 => (y+z)
     self.assertEqual(node_map[yz_sum_zero], yz_sum)
 
-    # -(y+z) remains -(y+z) until we double-negate it:
-    #self.assertEqual(node_map[yz_neg], yz_neg)
+    # -(y+z) remains -(y+z), but might be a new UOp with updated children
+    # Compare structurally to -(y_var + z_var).
+    self.assertEqual(node_map[yz_neg], -yz_sum)
 
     # -(-(y+z)) => (y+z)
     self.assertEqual(node_map[yz_dneg], yz_sum)
 
-    # x + (y+z) remains that expression (unless you have a further rewrite):
-    #self.assertEqual(node_map[x_plus_yz], x_plus_yz)
+    # x + (y+z) => might get recreated if yz_dneg was changed, so compare to x + yz_sum
+    self.assertEqual(node_map[x_plus_yz], x_var + yz_sum)
 
     # -(-(x+(y+z))) => x + (y+z)
-    #self.assertEqual(node_map[double_neg_x], x_plus_yz)
+    self.assertEqual(node_map[double_neg_x], x_var + yz_sum)
 
-    # (x+(y+z)) * 1 => x + (y+z)
-    #self.assertEqual(node_map[final_expr], x_plus_yz)
+    # (x+(y+z)) * 1 => x+(y+z)
+    self.assertEqual(node_map[final_expr], x_var + yz_sum)
 
-    # Unchanged atomic nodes map to themselves:
+    # Unchanged atomic nodes map to themselves
     self.assertEqual(node_map[x_var], x_var)
     self.assertEqual(node_map[y_var], y_var)
     self.assertEqual(node_map[z_var], z_var)
     self.assertEqual(node_map[zero_node], zero_node)
     self.assertEqual(node_map[one_node], one_node)
+
 
 if __name__ == "__main__":
   unittest.main()
