@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
+from tinygrad.helpers import CI, DEBUG, all_same, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
@@ -528,11 +528,18 @@ class TestShapeSpec(unittest.TestCase):
     ast = a.contiguous().schedule()[0].ast
     valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
     valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
-    self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
+    valid, x, y = valid_ternary.src
     # the mask is in the first source
-    self.assertIsNotNone(valid_ternary.src[0].st.views[-1].mask)
+    self.assertIsNotNone(valid.st.views[-1].mask)
+    # the constant operands do not have a ShapeTracker
+    self.assertIsNone(x.st)
+    self.assertIsNone(y.st)
+    # the WHERE outputs a contiguous (3, 3)
+    self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
+    # what is the ShapeTracker of the const operands?
 
-  # assigning to the entire chunk of memory
+  # when assigning to the entire chunk of memory
+  # the shapetracker the same
   def test_assign_simple(self):
     a = Tensor.ones((4,)).contiguous().realize()
     assign = a.assign(Tensor.zeros((4,)))
@@ -540,14 +547,25 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(assign.lazydata.st, ShapeTracker.from_shape((4,)))
     self.assertEqual(a.tolist(), [0., 0., 0., 0.])
 
+  def test_permuted_assign(self):
+    Tensor.manual_seed(0)
+    a = Tensor.arange(8).reshape(2, 4, 1).contiguous().realize()
+    b = Tensor.arange(8).reshape(4, 2, 1).contiguous().realize()
+    assign = a.permute((1, 0, 2)).assign(b)
+    self.assertEqual(assign.lazydata.src[0].st, ShapeTracker.from_shape((2, 4, 1)).permute((1, 0, 2)))
+    assign.realize()
+    self.assertEqual(a.reshape(8).tolist(), [0, 2, 4, 6, 1, 3, 5, 7])
+
   # setitem is a partial assign
   def test_setitem(self):
     a = Tensor.ones((4,)).contiguous().realize()
     assign = a.shrink(((1, 2),)).assign(Tensor.zeros((1,)))
-    self.assertEqual(assign.lazydata.st, ShapeTracker.from_shape((1,)))
-    # but the underlying BUFFER of the assign has a size 4?
+    # the underlying BUFFER of the assign has a size=4
     self.assertEqual(assign.lazydata.buf_uop.size, 4)
-    self.assertEqual(assign.lazydata.size, 1) # ?
+    # the partial assign has a size=1
+    self.assertEqual(assign.lazydata.size, 1)
+    # the ASSIGN views the buffer with a shrunk st
+    self.assertEqual(assign.lazydata.src[0].st, ShapeTracker.from_shape((4,)).shrink(((1, 2),)))
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
