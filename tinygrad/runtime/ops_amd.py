@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, cast
+from typing import Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
