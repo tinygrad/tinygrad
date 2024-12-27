@@ -532,7 +532,26 @@ class TestShapeSpec(unittest.TestCase):
     # the mask is in the first source
     self.assertIsNotNone(valid_ternary.src[0].st.views[-1].mask)
 
-  # currently this is None
+  # assigning to the entire chunk of memory
+  def test_assign_simple(self):
+    a = Tensor.ones((4,)).contiguous().realize()
+    assign = a.assign(Tensor.zeros((4,)))
+    assign.realize()
+    self.assertEqual(assign.lazydata.st, ShapeTracker.from_shape((4,)))
+    self.assertEqual(a.tolist(), [0., 0., 0., 0.])
+
+  # setitem is a partial assign
+  def test_setitem(self):
+    a = Tensor.ones((4,)).contiguous().realize()
+    assign = a.shrink(((1, 2),)).assign(Tensor.zeros((1,)))
+    self.assertEqual(assign.lazydata.st, ShapeTracker.from_shape((1,)))
+    # but the underlying BUFFER of the assign has a size 4?
+    self.assertEqual(assign.lazydata.buf_uop.size, 4)
+    self.assertEqual(assign.lazydata.size, 1) # ?
+    assign.realize()
+    self.assertEqual(a.tolist(), [1, 0, 1, 1])
+
+  # currently this is None, it shouldn't be
   @unittest.expectedFailure
   def test_const_st(self):
     a = UOp.const(dtypes.int, 0)

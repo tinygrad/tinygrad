@@ -282,7 +282,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # buffer ops define a ShapeTracker from the VIEW parent
     # NOTE: this can be non contiguous
-    if self.op in GroupOp.Buffer: return self.src[0 if self.op is Ops.VALID else 1].st
+    if self.op in GroupOp.Buffer:
+      # if it's already lowered to index, it's shapeless
+      if len(view_src:=[x for x in self.src if x.op is Ops.VIEW]) == 0: return None
+      assert len(view_src) == 1, f"found more than one VIEW in {self.op} parents"
+      return view_src[0].st
     # all other ops have a contiguous ShapeTracker
     from tinygrad.shape.shapetracker import ShapeTracker
     match self.op:
