@@ -27,11 +27,12 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[int]=None, **kwargs):
-    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
+  def __init__(self, dev, base_addr:Optional[int]=None, **kwargs):
+    self.dev = dev
+    super().__init__(self.dev.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
   def __del__(self):
-    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
+    if isinstance(self.base_addr, int): self.dev.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -511,8 +512,8 @@ class PCIIface:
 
 class AMDDevice(HCQCompiled):
   driverless:bool = not os.path.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
-  signals_page:Any = None
-  signals_pool:list[int] = []
+  # signals_page:Any = None
+  # signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -522,10 +523,15 @@ class AMDDevice(HCQCompiled):
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
 
-    if AMDDevice.signals_page is None:
-      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=AMDDevice.driverless, uncached=True, cpu_access=True)
-      AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-    else: self.dev_iface.map(AMDDevice.signals_page)
+    self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
+    self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
+    for d in self.devices: d.dev_iface.map(self.signals_page)
+    for d in self.devices: self.dev_iface.map(d.signals_page)
+
+    # if AMDDevice.signals_page is None:
+    #   AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=AMDDevice.driverless, uncached=True, cpu_access=True)
+    #   AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
+    # else: self.dev_iface.map(AMDDevice.signals_page)
 
     # Scratch setup
     max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
@@ -555,7 +561,7 @@ class AMDDevice(HCQCompiled):
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
-                     AMDSignal, AMDComputeQueue, AMDCopyQueue)
+                     functools.partial(AMDSignal, self), AMDComputeQueue, AMDCopyQueue)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
