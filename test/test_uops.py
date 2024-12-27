@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, all_same, getenv, Context, Timing
+from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
@@ -538,11 +538,12 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
     # what is the ShapeTracker of the const operands?
 
-  # when assigning to the entire chunk of memory
-  # the shapetracker the same
+  # assigning to the entire chunk of memory, the ASSIGN views target BUFFER with a ShapeTracker to match src[1]'s shape.
   def test_assign_simple(self):
     a = Tensor.ones((4,)).contiguous().realize()
     assign = a.assign(Tensor.zeros((4,)))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat()))
+    assert assign_pattern.match(assign.lazydata, {})
     assign.realize()
     self.assertEqual(assign.lazydata.st, ShapeTracker.from_shape((4,)))
     self.assertEqual(a.tolist(), [0., 0., 0., 0.])
@@ -560,12 +561,14 @@ class TestShapeSpec(unittest.TestCase):
   def test_setitem(self):
     a = Tensor.ones((4,)).contiguous().realize()
     assign = a.shrink(((1, 2),)).assign(Tensor.zeros((1,)))
-    # the underlying BUFFER of the assign has a size=4
-    self.assertEqual(assign.lazydata.buf_uop.size, 4)
-    # the partial assign has a size=1
+    # the ASSIGN UOp has size=1
     self.assertEqual(assign.lazydata.size, 1)
     # the ASSIGN views the buffer with a shrunk st
     self.assertEqual(assign.lazydata.src[0].st, ShapeTracker.from_shape((4,)).shrink(((1, 2),)))
+    # the underlying BUFFER has a size=4
+    self.assertEqual(assign.lazydata.buf_uop.size, 4)
+    # NOTE: output shape is different from the BUFFER shape
+    self.assertNotEqual(assign.lazydata.shape, a.lazydata.shape)
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
