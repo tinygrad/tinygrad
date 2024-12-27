@@ -481,7 +481,7 @@ class PCIIface:
           self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=pt_entry * mmap.PAGESIZE, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
-    vm = self.adev.mm.valloc(size:=round_up(size, 2 << 20), uncached=uncached, contigous=cpu_access)
+    vm = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
     if cpu_access: self._map_pci_range(bar=0, off=vm.paddr, addr=vm.va_addr, size=vm.size)
     return HCQBuffer(vm.va_addr, size, meta=(self.dev, [self.dev], vm))
 
