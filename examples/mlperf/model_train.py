@@ -1,5 +1,6 @@
 import os, time, math, functools, random
 from pathlib import Path
+from typing import Tuple, Dict
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
@@ -386,14 +387,14 @@ def train_retinanet():
   def _train_step(model, optim, lr_scheduler, x, **kwargs):
     optim.zero_grad()
 
-    loss = model(normalize(x, GPUS), **kwargs)
-    loss = sum([l for l in loss.values()])
+    losses = model(normalize(x, GPUS), **kwargs)
+    loss = sum([l for l in losses.values()])
 
     loss.backward()
     optim.step()
     # lr_scheduler.step()
 
-    return loss.realize()
+    return loss.realize(), losses
 
   # ** hyperparameters **
   # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
@@ -446,7 +447,7 @@ def train_retinanet():
       GlobalCounters.reset()
 
       x, y_bboxes, y_labels, matches, proc = proc
-      loss = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=batched_anchors, bboxes=y_bboxes)
+      loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=batched_anchors, bboxes=y_bboxes)
 
       pt = time.perf_counter()
 
@@ -465,8 +466,8 @@ def train_retinanet():
 
       tqdm.write(
         f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optim.lr.numpy()[0]:.6f} LR, "
-        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {losses['classification_loss'].item():5.2f} classification loss, {losses['regression_loss'].item():5.2f} regression loss, "
+        f"{optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
       )
 
       st = cl

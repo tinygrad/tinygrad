@@ -176,9 +176,8 @@ class RegressionHead:
 
   def _compute_loss(self, x:Tensor, bboxes:Tensor, matches:Tensor, anchors:Tensor) -> Tensor:
     mask = (fg_idxs := matches >= 0).reshape(matches.shape[0], -1, 1)
-    x = mask.where(x, 0)
-    tgt = mask.where(self.box_coder.encode(bboxes, anchors), 0)
-    loss = l1_loss(x, tgt).sum(-1).sum(-1)
+    tgt = self.box_coder.encode(bboxes, anchors)
+    loss = mask.where(l1_loss(x, tgt), 0).sum(-1).sum(-1)
     loss = (loss / fg_idxs.sum(-1)).sum() / matches.shape[0]
     return loss
 
@@ -191,7 +190,7 @@ class RetinaHead:
     if Tensor.training:
       return {
         "classification_loss": self.classification_head(x, labels=kwargs["labels"], matches=kwargs["matches"]),
-        "bbox_regression": self.regression_head(x, bboxes=kwargs["bboxes"], matches=kwargs["matches"], anchors=kwargs["anchors"])
+        "regression_loss": self.regression_head(x, bboxes=kwargs["bboxes"], matches=kwargs["matches"], anchors=kwargs["anchors"])
       }
     else:
       pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
