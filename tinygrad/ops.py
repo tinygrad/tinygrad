@@ -422,7 +422,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
-  def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
+  def assign(self, x:UOp):
+    if self.st is not None:
+      assert x.st is not None
+      buffer_shape = (self.buf_uop.size,)
+      if x.shape != buffer_shape:
+        #raise RuntimeError(f"{x.shape} trying to assign into ({self.buf_uop.size},)")
+        inverse_view = x.st.invert(buffer_shape)
+        assert inverse_view is not None, f"couldn't invert {x.st} into {buffer_shape}"
+        x = x.view(inverse_view)
+      return UOp(Ops.ASSIGN, self.dtype, (self.buf_uop, x)).reshape(self.shape)
+    return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self, allow_buffer_view=True):
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
       if allow_buffer_view and self.can_view(): return self.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))

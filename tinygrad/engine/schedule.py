@@ -61,7 +61,11 @@ tensor_uop_spec = PatternMatcher([
    lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
   # ASSIGN changes the value of an existing buffer
-  (UPat(Ops.ASSIGN, name="assign", src=(UPat(Ops.BUFFER), UPat.var("new_val"))), lambda assign,new_val: assign.dtype == new_val.dtype),
+  (UPat(Ops.ASSIGN, name="assign", src=(UPat(Ops.BUFFER, name="target"), UPat.var("new_val"))), lambda assign,target,new_val:
+   # the shape must match the target buffer's size
+   (new_val.shape == assign.shape == (target.size,)) and
+   # dtype
+   (assign.dtype == target.dtype == new_val.dtype)),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
