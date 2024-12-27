@@ -91,7 +91,7 @@ class ContextVar:
   value: int
   key: str
   def __init__(self, key, default_value):
-    assert key not in ContextVar._cache, f"attempt to recreate ContextVar {key}"
+    if key in ContextVar._cache: raise RuntimeError(f"attempt to recreate ContextVar {key}")
     ContextVar._cache[key] = self
     self.value, self.key = getenv(key, default_value), key
   def __bool__(self): return bool(self.value)
