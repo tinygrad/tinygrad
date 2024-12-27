@@ -10,7 +10,7 @@ from typing import List, Optional, Union, cast
 
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
@@ -1405,8 +1405,11 @@ class TestSchedule(unittest.TestCase):
       x = Tensor.randn((9, 9)).realize()
       y = Tensor.randn((9, 9)).realize()
       out = x@y
-      run_schedule(check_schedule(out, 4))
+      run_schedule(check_schedule(out, 3))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
+      self.assertIsInstance(out.dtype, ImageDType)
+      self.assertIsNotNone(out.lazydata.base.realized)
+      self.assertIsInstance(out.lazydata.base.realized.dtype, ImageDType)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]
@@ -1927,7 +1930,7 @@ class TestSwizzle(unittest.TestCase):
     base = ShapeTracker.from_shape((32, 16, 1))
     start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
     r = start.expand((32, 16, 16)).r(Ops.ADD, (2,))
-    add = r.reshape((16, 32, 1)) + UOp.const_with_shape(r.dtype, 0, (16, 32, 1))
+    add = r.reshape((16, 32, 1)) + UOp.const(r.dtype, 0)
     self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
     to_store = add.permute((1, 0, 2)).contiguous()
     to_store = graph_rewrite(to_store, remove_movement_ops)
@@ -1938,6 +1941,8 @@ class TestSwizzle(unittest.TestCase):
     self.assertEqual(swizzle_cnt(ret), 1)
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
+# TODO: we only need valid on ast consts if it's masked, can fold this early to UOp.const
+zero_pm = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat(Ops.CONST, arg=0), UPat.cvar()))
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
     # start with non CONST Ops
@@ -1945,8 +1950,7 @@ class TestView(unittest.TestCase):
     # all masked out, degrades to const 0
     b = a.pad(((0, 10), None))[10:]
     sched = check_schedule(b.contiguous(), 1)
-    # TODO: this VALID can clean up, where do we need st?
-    self.assertIs(store_val(sched[-1]), UOp.const_with_shape(b.dtype, 0, b.lazydata.st.shape))
+    assert zero_pm.match(store_val(sched[-1]), {})
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
@@ -1957,7 +1961,7 @@ class TestView(unittest.TestCase):
     assert b.shape == (10, 10)
     sched = check_schedule(b.contiguous(), 1)
     self.assertEqual(sched[-1].ast.full_shape, (10, 10))
-    self.assertIs(store_val(sched[-1]), UOp.const_with_shape(b.dtype, 0, b.lazydata.st.shape))
+    assert zero_pm.match(store_val(sched[-1]), {})
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
