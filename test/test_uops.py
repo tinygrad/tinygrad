@@ -503,5 +503,45 @@ class TestUopsObject(unittest.TestCase):
     with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
     assert len(ret) == 10000
 
+
+class TestShapeSpec(unittest.TestCase):
+  def test_alu_shape(self):
+    a = Tensor.empty(4, 2, 1).permute((1, 2, 0)).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape((4, 2, 1)).permute((1, 2, 0)))
+    alu = a*2
+    self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
+
+  def test_reduceop_st(self):
+    a = Tensor.empty(4, 4)
+    r = a.sum(axis=1)
+    self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
+
+  def test_tensor_const_st(self):
+    a = Tensor(1).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape(()))
+
+    a = Tensor.ones((4, 4)).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
+
+  def test_masked_const(self):
+    a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
+    ast = a.contiguous().schedule()[0].ast
+    valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
+    valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
+    self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
+    # the mask is in the first source
+    self.assertIsNotNone(valid_ternary.src[0].st.views[-1].mask)
+
+  # currently this is None
+  @unittest.expectedFailure
+  def test_const_st(self):
+    a = UOp.const(dtypes.int, 0)
+    self.assertEqual(a.st, ShapeTracker.from_shape(()))
+
+  @unittest.expectedFailure
+  def test_buffer_st(self):
+    a = UOp.new_buffer(Device.DEFAULT, 10, dtypes.float)
+    self.assertEqual(a.st, ShapeTracker.from_shape((10,)))
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
