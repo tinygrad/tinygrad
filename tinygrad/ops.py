@@ -907,7 +907,7 @@ class RewriteContext:
 def _handle_viz(sink, bottom_up):
   if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
     with Context(PICKLE_BUFFERS=0):
-      tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
+      tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(2)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   _handle_viz(sink, bottom_up)
