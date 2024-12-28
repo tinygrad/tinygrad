@@ -55,13 +55,13 @@ def get_input(inp:onnx.ValueInfoProto, model_config:dict, preprocessor_config:di
   # get shape
   shape = []
   for x in inp.type.tensor_type.shape.dim:
-    if not x.HasField("dim_value"):
-      if x.dim_param == "height": shape.append(_get_size(preprocessor_config, "height"))
-      elif x.dim_param == "width": shape.append(_get_size(preprocessor_config, "width"))
-      elif x.dim_param == "num_channels": shape.append(model_config.get("in_channels", 3))
-      elif x.dim_param == "sequence_length": shape.append(20) # kinda random sequence length maybe use max_position_embeddings?
-      else: shape.append(1)
-    else: shape.append(x.dim_value)
+    match (x.HasField("dim_value"), x.dim_param):
+      case (True, _): shape.append(x.dim_value)
+      case (False, "height"): shape.append(_get_size(preprocessor_config, "height"))
+      case (False, "width"): shape.append(_get_size(preprocessor_config, "width"))
+      case (False, "num_channels"): shape.append(model_config.get("in_channels", 3))
+      case (False, "sequence_length"): shape.append(20)  # kinda random sequence length maybe use max_position_embeddings?
+      case (False, _): shape.append(1)
   shape = tuple(shape)
 
   # get dtype
@@ -82,8 +82,8 @@ def benchmark_model(model_id: str):
   model_fp, model_url = download_onnx_model(model_id, root_url)
   base_url, file_name = model_url.rsplit('/', 1)
 
+  if model_fp is None: raise Exception(f"failed to download from https://huggingface.co/{model_id}")
   onnx_model = onnx.load(model_fp, load_external_data=False)
-  if not onnx_model: raise Exception(f"failed to download from https://huggingface.co/{model_id}")
   if check_require_external_data(onnx_model):
     file_name_root = file_name.split(".")[0]
     data_url = base_url + '/' + f'{file_name_root}.onnx_data'
@@ -115,7 +115,7 @@ def benchmark_model(model_id: str):
   if model_id in {"FacebookAI/xlm-roberta-large", "BAAI/bge-m3", "intfloat/multilingual-e5-large", "BAAI/bge-reranker-large",
                   "FacebookAI/xlm-roberta-large-finetuned-conll03-english", "MoritzLaurer/bge-m3-zeroshot-v2.0", "jinaai/jina-embeddings-v3"
                   "oliverguhr/fullstop-punctuation-multilang-large", "oliverguhr/fullstop-punctuation-multilang-large",
-                  "intfloat/multilingual-e5-large-instruct", "bigscience/bloom-560m", "jinaai/jina-embeddings-v3"
+                  "intfloat/multilingual-e5-large-instruct", "bigscience/bloom-560m", "jinaai/jina-embeddings-v3",
                   "openai-community/gpt2-large"}: return
   ort_sess = ort.InferenceSession(onnx_model.SerializeToString(deterministic=True), ort_options, ["CPUExecutionProvider"])
   ort_out = ort_sess.run(output_names, np_inputs)
