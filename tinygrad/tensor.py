@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib, weakref
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, becomes_map, graph_rewrite_map, _substitute
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
@@ -105,6 +105,11 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, .
 
 ReductionStr = Literal["mean", "sum", "none"]
 
+tensor_map: weakref.WeakValueDictionary[UOp, Tensor] = weakref.WeakValueDictionary()
+def update_tensor_map(t:Tensor):
+  # TODO: multi
+  tensor_map[t.lazydata] = t
+
 class Tensor(SimpleMathTrait):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
@@ -170,6 +175,7 @@ class Tensor(SimpleMathTrait):
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
+    update_tensor_map(self)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -216,7 +222,14 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
+    scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
+    schedule, var_vals = create_schedule_with_vars(scheduled_uops)
+    sink = UOp.sink(*scheduled_uops)
+    _, uop_map = graph_rewrite_map(sink, _substitute, becomes_map, bottom_up=True)
+    for k,v in uop_map.items():
+      if (tt:=tensor_map.get(k)) is not None:
+        tt.lazydata = v
+        tensor_map[v] = tt
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -238,6 +251,7 @@ class Tensor(SimpleMathTrait):
     assert not x.requires_grad and getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
+    update_tensor_map(self)
     return self
 
   def assign(self, x) -> Tensor:
@@ -257,6 +271,7 @@ class Tensor(SimpleMathTrait):
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized: return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
+    update_tensor_map(self)
     return self
 
   def detach(self) -> Tensor:
