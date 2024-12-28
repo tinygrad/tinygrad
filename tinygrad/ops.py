@@ -285,6 +285,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
+      case Ops.BUFFER: shape = (self.size,)
       # only reduce ops are allowed to change shape
       case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
@@ -482,7 +483,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
   def view(self, new_st:ShapeTracker) -> UOp:
     if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
@@ -535,7 +536,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Optional[Buffer]:
-    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return buffers[self.src[0]]
+    if self.base.op is Ops.BUFFER: return buffers.get(self.base)
     return None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
