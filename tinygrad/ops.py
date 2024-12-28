@@ -283,6 +283,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # buffer ops return the ShapeTracker from sources
     if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
     src_sts = [x.st for x in self.src if x.st is not None]
+    # BUFFER_VIEW is allowed to change shape if the itemsizes are different
+    if self.op is Ops.BUFFER_VIEW and not all_same([x.dtype.itemsize for x in self.src]):
+      return self.src[0].st
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       # only reduce ops are allowed to change shape
