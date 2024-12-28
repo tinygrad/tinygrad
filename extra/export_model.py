@@ -30,7 +30,7 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
-def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
+def jit_model(model, *args, two_argsets_provided=False) -> Tuple[TinyJit,Dict[int,str]]:
   assert hasattr(model, "forward") or callable(model), "model needs a forward function"
   @TinyJit
   def run(*x):
@@ -40,7 +40,9 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     return [o.realize() for o in out]
 
   # twice to run the JIT
-  for _ in range(2): the_output = run(*args)
+  for i in range(2): 
+    sub_args = args[int(i/2*len(args)): int((i+1)/2*len(args))] if two_argsets_provided else args
+    the_output = run(*sub_args)
   special_names = {}
 
   # hack to put the inputs back
