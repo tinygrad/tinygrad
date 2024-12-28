@@ -24,6 +24,7 @@ def split_safetensor(fn):
       last_offset = offset
 
   net_bytes = bytes(open(fn, 'rb').read())
+  part_end_offsets.append(len(net_bytes))
   cur_pos = 0
 
   for i, end_pos in enumerate(part_end_offsets):
@@ -158,6 +159,10 @@ if __name__=="__main__":
     prg += compile_step(model, step)
     base_url="."
 
+  # Since last safe_save, we added cache_kv, tok_embeddings.arange, maybe more
+  # TODO: remove all the safe_save calls, and streamline original quantized weights --> partStartOffsets
+  state_dict = get_state_dict(model)
+  safe_save(state_dict, f32_fn)
   partStartOffsets = split_safetensor(f32_fn)
   #os.remove(f32_fn)
 
@@ -172,7 +177,6 @@ if __name__=="__main__":
   const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
     let selectedPart = 0;
     let counter = 0;
-    // let partStartOffsets = [1131408336, 2227518416, 3308987856, 4265298864];
     let partStartOffsets = [{", ".join(str(i) for i in partStartOffsets)}];
     let correctedOffsets = tensorMetadata.data_offsets;
     let prev_offset = 0;
