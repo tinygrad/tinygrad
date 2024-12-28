@@ -1,5 +1,42 @@
+
+// modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
+const loadPart = async (part) => {
+    const response = await fetch(part);
+    // const contentLength = response.headers.get('content-length');
+    // const total = parseInt(contentLength, 10);
+
+    const res = new Response(new ReadableStream({
+        async start(controller) {
+            const reader = response.body.getReader();
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                //progressCallback(part, value.byteLength, total);
+                controller.enqueue(value);
+            }
+                    
+            controller.close();
+        },
+    }));
+        
+    return res.arrayBuffer();
+};
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
+    // model
+    buffers: [],
+
+    async init() {
+      try {
+        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7"];
+        this.buffers = await Promise.all(netKeys.map(key => loadPart(`${window.MODEL_BASE_URL}/${key}.safetensors`)));
+        console.log("Buffers loaded successfully:", this.buffers);
+      } catch (error) {
+        console.error("Error loading buffers:", error);
+      }
+    },
+
     // current state
     cstate: {
       time: null,
