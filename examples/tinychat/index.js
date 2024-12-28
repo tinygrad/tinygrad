@@ -1,4 +1,17 @@
 
+// copied from examples/webgpu/stable_diffusion/index.html
+const getDevice = async () => {
+  const adapter = await navigator.gpu.requestAdapter();
+  const requiredLimits = {};
+  const maxBufferSizeInSDModel = 1073741824;
+  requiredLimits.maxStorageBufferBindingSize = maxBufferSizeInSDModel;
+  requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
+            
+  return await adapter.requestDevice({
+    requiredLimits
+  });
+};
+
 // modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
 const loadPart = async (part) => {
     const response = await fetch(part);
@@ -25,15 +38,38 @@ const loadPart = async (part) => {
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
     // model
-    buffers: [],
+    nets: {},
 
     async init() {
       try {
-        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7"];
-        this.buffers = await Promise.all(netKeys.map(key => loadPart(`${window.MODEL_BASE_URL}/${key}.safetensors`)));
-        console.log("Buffers loaded successfully:", this.buffers);
+        const device = await getDevice();
+        console.log("WebGPU device initialized")
+
+        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7", "net_part8", "net_part9"];
+        let safetensorParts = await Promise.all(netKeys.map(key => loadPart(`${window.MODEL_BASE_URL}/${key}.safetensors`)));
+        for (let i = 0; i < safetensorParts.length; i++) {safetensorParts[i] = new Uint8Array(safetensorParts[i]);}
+        console.log("Model parts loaded successfully:", safetensorParts);
+
+        let models = ["transformer"];
+        this.nets = await Promise.all([
+                transformer().setup(device, safetensorParts),
+            ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
+        console.log("Transformer setup without exceptions");
+
+        let start_pos = new Float32Array(3.0)
+        let TEMPERATURE = new Float32Array(0.95);
+        let TOP_K = new Float32Array(0.0);
+        let TOP_P = new Float32Array(0.0);
+        let ALPHA_F = new Float32Array(0.0);
+        let ALPHA_P = new Float32Array(0.0);
+        let tok = new Float32Array([[1234]]);
+        let next_tok = await this.nets["transformer"](tok, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
+        console.log(next_tok);
+        tok = new Float32Array([[next_tok[0]]]);
+        next_tok = await this.nets["transformer"](tok, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
+        console.log(next_tok);
       } catch (error) {
-        console.error("Error loading buffers:", error);
+        console.error("Error initializing model:", error);
       }
     },
 
