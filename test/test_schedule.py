@@ -2130,5 +2130,31 @@ class TestConst(unittest.TestCase):
     run_schedule(sched, var_vals)
     self.assertEqual(a.tolist(), 3)
 
+class TestCopyFolding(unittest.TestCase):
+  def test_const_copy_is_free(self):
+    b = Tensor(1).to(f"{Device.DEFAULT}:2")
+    check_schedule(b, 0, filter_sink=False)
+    assert b.item() == 1
+
+  def test_late_const_copy_folding(self):
+    a = Tensor.arange(3).realize()
+    zeros = Tensor.zeros(3).realize()
+    b = (a*zeros).to(f"{Device.DEFAULT}:2")
+    run_schedule(check_schedule(b, 0, filter_sink=False))
+    self.assertListEqual(b.tolist(), [0, 0, 0])
+
+  def test_multi_const_folding(self):
+    two_gpus = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
+    with Context(TRACK_MATCH_STATS=0):
+      a = Tensor.arange(3).realize()
+      zeros = Tensor.zeros(3).realize()
+    b = a.to(two_gpus)*zeros.to(two_gpus)
+    sched = check_schedule(b, 6, filter_sink=False)
+    # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
+    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
+    # all these kernels are just because multi calls contiguous on every single shard
+    run_schedule(sched)
+    self.assertListEqual(b.tolist(), [0, 0, 0])
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
