@@ -2,6 +2,7 @@ from math import ceil, log2
 from typing import Tuple
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import ceildiv
+from tinygrad.ops import UOp
 
 class BLAKE3:
   """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf."""
@@ -40,6 +41,9 @@ class BLAKE3:
     end_block = (states * (info < self.DEFAULT_LEN)).sum(0)
     return (states[-1, :] | end_block)[:8].realize()
 
+  # GPU - something is wrong with the tree hash
+  # - disabled JIT
+  # - only running 2048 bytes
   @classmethod # JIT doesn't like making n_tree_steps for the loop a Variable, this is a workaround
   def create_jitted_tree_hash(cls, n_tree_steps: int) -> Tensor:
     def tree_hash(self, chain_vals: Tensor) -> Tensor:
@@ -59,7 +63,7 @@ class BLAKE3:
       return chain_vals.realize()
     return tree_hash
 
-  def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
+  def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, UOp]:
     assert padded_input_size % 1024 == 0, "padded_input_size must be divisible by 1024"
     data = tensor.flatten().pad(((0, (padded_input_size // tensor.element_size()) - tensor.shape[0],),), value=0)
     data = data.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
