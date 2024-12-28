@@ -44,11 +44,13 @@ class BLAKE3:
   # GPU - something is wrong with the tree hash
   # - disabled JIT
   # - only running 2048 bytes
+  # - added stacked print statement
   @classmethod # JIT doesn't like making n_tree_steps for the loop a Variable, this is a workaround
   def create_jitted_tree_hash(cls, n_tree_steps: int) -> Tensor:
     def tree_hash(self, chain_vals: Tensor) -> Tensor:
       for _ in range(n_tree_steps):
         stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
+        print(stacked[:, :, :3].numpy())
         stacked_mask = stacked.any(1)
         final_step = chain_vals[0, :3].prod().cast(dtypes.bool).neg()
         pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
