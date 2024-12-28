@@ -916,12 +916,13 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp
   _handle_viz(sink, bottom_up)
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> tuple[UOp, dict[UOp, UOp]]:
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> dict[UOp, UOp]:
   _handle_viz(sink, bottom_up)
   rewrite_ctx = RewriteContext(pm, ctx)
   rewritten_sink = rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.rewrite(sink)
+  assert rewrite_ctx.replace[sink] == rewritten_sink
   # TODO: is the replace dict correct?
-  return rewritten_sink, rewrite_ctx.replace
+  return rewrite_ctx.replace
 
 # ***** uop type spec *****
 

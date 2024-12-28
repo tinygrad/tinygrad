@@ -11,12 +11,9 @@ class TestRewriteMap(unittest.TestCase):
     root_add = zero_node + inner_add
 
     # Perform top-down rewrite
-    rewritten_sink, node_map = graph_rewrite_map(root_add, symbolic)
+    node_map = graph_rewrite_map(root_add, symbolic)
 
     # We expect that add(0, add(0, 5)) -> add(0, 5) -> 5
-    # So the final node should be 'five_node'
-    assert rewritten_sink == five_node
-
     # Check the mapping
     assert node_map[root_add] == five_node
     assert node_map[inner_add] == five_node
@@ -36,10 +33,8 @@ class TestRewriteMap(unittest.TestCase):
     neg_five = -five_node
     double_neg_five = -neg_five
 
-    rewritten_sink, node_map = graph_rewrite_map(double_neg_five, symbolic)
+    node_map = graph_rewrite_map(double_neg_five, symbolic)
 
-    # Expect neg(neg(5)) -> 5
-    self.assertEqual(rewritten_sink, five_node)
     # node_map should map double_neg_five -> five_node
     self.assertEqual(node_map[double_neg_five], five_node)
     # five_node maps to itself
@@ -55,10 +50,8 @@ class TestRewriteMap(unittest.TestCase):
     double_neg_five = -neg_five
     root_add = zero_node + double_neg_five
 
-    rewritten_sink, node_map = graph_rewrite_map(root_add, symbolic)
+    node_map = graph_rewrite_map(root_add, symbolic)
 
-    # Expect final node is 'five_node'
-    self.assertEqual(rewritten_sink, five_node)
     # node_map: root_add -> five_node, double_neg_five -> five_node
     self.assertEqual(node_map[root_add], five_node)
     self.assertEqual(node_map[double_neg_five], five_node)
@@ -76,11 +69,10 @@ class TestRewriteMap(unittest.TestCase):
     double_neg = -(-combined)           # neg(neg(x + y))
     final_expr = zero_node + double_neg  # 0 + (x + y)
 
-    rewritten_sink, node_map = graph_rewrite_map(final_expr, symbolic)
+    node_map = graph_rewrite_map(final_expr, symbolic)
 
     # The final root should be (x_var + y_var).
     expected = x_var + y_var
-    self.assertEqual(rewritten_sink, expected)
 
     # Each sub-expression has its own "final" result.
     # (y + 0) -> y_var
@@ -134,11 +126,7 @@ class TestRewriteMap(unittest.TestCase):
     double_neg_x = -(-x_plus_yz)        # neg(neg(x+(y+z))) -> x+(y+z)
     final_expr = double_neg_x * one_node  # (x+(y+z)) * 1 -> x+(y+z)
 
-    rewritten_sink, node_map = graph_rewrite_map(final_expr, symbolic)
-
-    # Final root should be x + (y + z)
-    expected = x_var + (y_var + z_var)
-    self.assertEqual(rewritten_sink, expected)
+    node_map = graph_rewrite_map(final_expr, symbolic)
 
     # (y + z) is unchanged
     self.assertEqual(node_map[yz_sum], yz_sum)
