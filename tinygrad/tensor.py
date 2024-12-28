@@ -224,9 +224,10 @@ class Tensor(SimpleMathTrait):
     """
     scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
-    sink = UOp.sink(*scheduled_uops)
-    uop_map = graph_rewrite_map(sink, _substitute, becomes_map, bottom_up=True)
-    for k,v in uop_map.items():
+
+    # apply becomes_map
+    # TODO: add children to scheduled_uops
+    for k,v in graph_rewrite_map(UOp.sink(*scheduled_uops), _substitute, becomes_map).items():
       if (tt:=tensor_map.get(k)) is not None:
         tt.lazydata = v
         tensor_map[v] = tt

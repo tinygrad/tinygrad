@@ -907,22 +907,15 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
-def _handle_viz(sink, bottom_up):
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
     with Context(PICKLE_BUFFERS=0):
-      tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(2)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
-
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  _handle_viz(sink, bottom_up)
+      tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), pickle.dumps(sink)))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> dict[UOp, UOp]:
-  _handle_viz(sink, bottom_up)
   rewrite_ctx = RewriteContext(pm, ctx)
-  rewritten_sink = rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.rewrite(sink)
-  assert rewrite_ctx.replace[sink] == rewritten_sink
-  # TODO: is the replace dict correct?
-  return rewrite_ctx.replace
+  return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.rewrite(k)) for k in list(sink.toposort)[::-1]}
 
 # ***** uop type spec *****
 

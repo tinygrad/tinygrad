@@ -1,8 +1,46 @@
 import unittest
-from tinygrad import dtypes
-from tinygrad.ops import UOp, symbolic, graph_rewrite_map
+from tinygrad import dtypes, Tensor
+from tinygrad.ops import UOp, symbolic, graph_rewrite_map, _substitute
+
+class TestTensorMutates(unittest.TestCase):
+  def test_mutate_add(self):
+    a = Tensor([1,2,3])
+    b = Tensor([4,5,6])
+    ret = a+b
+    ret.schedule()
+    print(a.lazydata)
+    print(b.lazydata)
+    print(ret.lazydata)
+    from tinygrad.ops import becomes_map
+    print(becomes_map)
+    for k,v in becomes_map.items():
+      print(k,v)
 
 class TestRewriteMap(unittest.TestCase):
+  def test_substitute(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    e = UOp.variable('e', 0, 10)
+    ret = (a+b)*c
+    sub = {a+b: e}
+    sub_map = graph_rewrite_map(ret, _substitute, sub, bottom_up=True)
+    self.assertIs(sub_map[a+b], e)
+    self.assertIs(sub_map[(a+b)*c], e*c)
+
+  def test_substitute_depth_2(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    d = UOp.variable('d', 0, 10)
+    e = UOp.variable('e', 0, 10)
+    f = UOp.variable('f', 0, 10)
+    ret = (a+b)*c+d
+    sub = {a+b: e, (a+b)*c: f}
+    sub_map = graph_rewrite_map(ret, _substitute, sub, bottom_up=True)
+    self.assertIs(sub_map[a+b], e)
+    self.assertIs(sub_map[(a+b)*c], f)
+
   def test_add_zero(self):
     # Build a small graph: add(0, add(const=0, const=5))
     zero_node = UOp.const(dtypes.int, 0)
