@@ -7,7 +7,7 @@ from tinygrad.helpers import fetch, getenv
 from test.external.external_model_benchmark import assert_allclose
 from huggingface_hub import list_models
 import numpy as np
-import onnx
+import onnx, pathlib
 from onnx.external_data_helper import uses_external_data, load_external_data_for_model
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
@@ -28,18 +28,22 @@ POTENTIAL_MODEL_PATHS = [
   "punct_cap_seg_en.onnx", # for "1-800-BAD-CODE/punctuation_fullstop_truecase_english"
 ]
 
-def download_onnx_model(model_id:str, root_url:str):
-  for model_path in POTENTIAL_MODEL_PATHS:
-    url = root_url + '/' + model_path
-    try: return fetch(url, model_path.split('/')[-1], model_id.split("/")[-1]), url
-    except urllib.error.HTTPError: pass
-  return None, None
+def _download_data(potential_paths:list[str], potential_file_paths:list[str], model_id:str):
+  for path in potential_paths:
+    for file_path in potential_file_paths:
+      url = f"{path}/{file_path}"
+      file_name = file_path.split('/')[-1]
+      try: yield fetch(url, file_name, model_id.split("/")[-1]), url
+      except urllib.error.HTTPError: pass
 
-def download_metadata(urls:list[str], file_name:str):
-  for url in urls:
-    try: return fetch(url + '/' + file_name)
-    except urllib.error.HTTPError: pass
-  return None
+def download_multiple(potential_paths:list[str], potential_file_paths:list[str], model_id:str) -> list[pathlib.Path]:
+  """ returns all successful matches """
+  return [downloaded_path for downloaded_path, _ in _download_data(potential_paths, potential_file_paths, model_id)]
+
+def download_single(potential_paths:list[str], potential_file_paths:list[str], model_id:str) -> tuple[pathlib.Path, str] | tuple[None, None]:
+  """ returns first successful match """
+  for path, url in _download_data(potential_paths, potential_file_paths, model_id): return path, url
+  return None, None
 
 def check_require_external_data(model_proto:onnx.ModelProto) -> bool:
   for initializer in model_proto.graph.initializer:
@@ -79,10 +83,10 @@ def get_input(inp:onnx.ValueInfoProto, model_config:dict, preprocessor_config:di
 
 def benchmark_model(model_id: str):
   root_url = f"https://huggingface.co/{model_id}/resolve/main"
-  model_fp, model_url = download_onnx_model(model_id, root_url)
+  model_fp, model_url = download_single([root_url], POTENTIAL_MODEL_PATHS, model_id)
+  if model_fp is None: raise Exception(f"failed to download model from https://huggingface.co/{model_id}")
   base_url, file_name = model_url.rsplit('/', 1)
 
-  if model_fp is None: raise Exception(f"failed to download from https://huggingface.co/{model_id}")
   onnx_model = onnx.load(model_fp, load_external_data=False)
   if check_require_external_data(onnx_model):
     file_name_root = file_name.split(".")[0]
@@ -93,13 +97,10 @@ def benchmark_model(model_id: str):
   # prepare data
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
-
-  preprocessor_config = download_metadata([base_url, root_url], "preprocessor_config.json")
-  try: preprocessor_config = json.load(preprocessor_config.open())
-  except: preprocessor_config = {}
-  model_config = download_metadata([base_url, root_url], "config.json")
-  try: model_config = json.load(model_config.open())
-  except: model_config = {}
+  preprocessor_config, _ = download_single([base_url, root_url], ["preprocessor_config.json"], model_id)
+  preprocessor_config = json.load(preprocessor_config.open()) if preprocessor_config is not None else {}
+  model_config, _ = download_single([base_url, root_url], ["config.json"], model_id)
+  model_config = json.load(model_config.open()) if model_config is not None else {}
 
   np_inputs = {inp.name:get_input(inp, model_config, preprocessor_config) for inp in onnx_model.graph.input if inp.name not in excluded}
 
