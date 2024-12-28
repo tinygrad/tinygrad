@@ -542,12 +542,12 @@ class TestShapeSpec(unittest.TestCase):
 
   def test_assign_flat(self):
     buffer = Tensor.arange(4).realize()
-    a = buffer.assign(Tensor.zeros((4,)))
+    a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
     assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat()))
     assert assign_pattern.match(a.lazydata, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
-  
+
   def test_assign_permuted(self):
     buffer = Tensor.arange(4).reshape(2, 1, 2).contiguous().realize()
     a = buffer.permute((2, 1, 0)).assign(buffer)
