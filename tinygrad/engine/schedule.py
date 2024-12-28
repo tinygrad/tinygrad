@@ -49,7 +49,7 @@ tensor_uop_spec = PatternMatcher([
   # ** specs with room for refactoring and improving
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("copyin"),)), lambda copy,copyin:
+  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat.var("copyin"),)), lambda copy,copyin:
    # arg (device, clone?)
    isinstance(copy.arg, tuple) and len(copy.arg) == 2 and isinstance(copy.arg[0], str) and isinstance(copy.arg[1], bool) and \
    # dtype
@@ -77,13 +77,12 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND))), lambda: True),
 
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
-  # TODO: this should be EMPTY(VIEW(BUFFER))
-  (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
+  (UPat(Ops.EMPTY, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)),), arg=None), lambda: True),
 
   # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
   # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
 
-  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x:
+  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER)),), UPat.var("x"),)), lambda root,x:
    # BUFFER_VIEW can replace contiguous, keeping dtype the same
    (root.dtype == x.dtype) or
    # it can also replace bitcast, this changes the dtype, but the itemsize stays the same
