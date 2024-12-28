@@ -46,6 +46,7 @@ class BLAKE3:
   # - only running 2048 bytes
   # - added stacked print statement
   # - added states print statement before final compress_blocks
+  # - states * pair_mask before compress_blocks and print final chain_vals
   @classmethod # JIT doesn't like making n_tree_steps for the loop a Variable, this is a workaround
   def create_jitted_tree_hash(cls, n_tree_steps: int) -> Tensor:
     def tree_hash(self, chain_vals: Tensor) -> Tensor:
@@ -62,8 +63,9 @@ class BLAKE3:
         counts = Tensor.zeros((2, paired.shape[-1]), dtype=dtypes.uint32)
         lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
         states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
-        print(states[:, :3].numpy())
-        chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
+        print((states * pair_mask)[:, :3].numpy())
+        chain_vals = ((self.compress_blocks(states * pair_mask, paired, iv) * pair_mask)[:8] + remainder).realize()
+        print(chain_vals[:, :3].numpy())
         chain_vals = chain_vals.pad((None, (0, chain_vals.shape[1])))
       return chain_vals.realize()
     return tree_hash
