@@ -69,13 +69,13 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #   UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
   #     UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),))
-  @unittest.expectedFailure
   def test_copyin(self):
     a = Tensor([1.,2,3]).realize()
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.lazydata)
     # NOTE: this is wrong, COPY has an extra buffer for some reason
-    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern,)))
+    # NOTE2: this needs the buffer on init to prevent multiple copies from deduping.
+    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern, realized_pattern)))
 
 if __name__ == '__main__':
   unittest.main()
