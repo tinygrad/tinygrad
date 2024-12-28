@@ -550,9 +550,9 @@ class TestShapeSpec(unittest.TestCase):
 
   def test_assign_permuted(self):
     buffer = Tensor.arange(4).reshape(2, 1, 2).contiguous().realize()
-    a = buffer.permute((2, 1, 0)).assign(buffer)
+    a = buffer.permute((1, 2, 0)).assign(Tensor.arange(4).reshape(1, 2, 2).contiguous())
     a.realize()
-    self.assertListEqual(a.tolist(), [[[0, 2]], [[1, 3]]])
+    self.assertEqual(buffer.tolist(), [[[0, 2]], [[1, 3]]])
 
   def test_assign_reshaped(self):
     buffer = Tensor.ones((4,)).contiguous().realize()
