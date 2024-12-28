@@ -7,7 +7,7 @@ from tinygrad.ops import UOp
 class BLAKE3:
   """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf."""
   IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
-  PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
+  PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
     def rotr(x: Tensor, n: int) -> Tensor: return (x << (32 - n)) | (x >> n)
@@ -30,10 +30,10 @@ class BLAKE3:
     lengths = (info == self.DEFAULT_LEN).where(64, info)
     flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
     flags[-1, 0] = flags[-1, 0] + 2 # chunk end flag
-    flags = (flags + 2 * ((flags != 2) * (info < self.DEFAULT_LEN))) # chunk end flag for partial final chunk
+    flags = ((flags != 2) * (info < self.DEFAULT_LEN)).where(flags + 2, flags) # chunk end flag for partial final chunk
     flags[0] = flags[0] + 1 # chunk start flag
-    flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
-    states = (chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD).cast(dtypes.uint32))
+    flags = (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)).where(flags + 8, flags) # root flag
+    states = (chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD))
     for i in range(16):
       next_state = states[i] if i == 0 else states[i-1, :8].cat(states[i, 8:])
       states[i] = self.compress_blocks(next_state, data[i], chain_vals[i])
