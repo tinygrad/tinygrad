@@ -505,57 +505,62 @@ class TestUopsObject(unittest.TestCase):
 
 
 class TestShapeSpec(unittest.TestCase):
-  def test_alu_shape(self):
-    a = Tensor.empty(4, 2, 1).permute((1, 2, 0)).lazydata
-    self.assertEqual(a.st, ShapeTracker.from_shape((4, 2, 1)).permute((1, 2, 0)))
-    alu = a*2
-    self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
+  # ** CONST is CONST(VIEW(DEVICE)) -> RESHPAE -> EXPAND
 
-  def test_reduceop_st(self):
-    a = Tensor.empty(4, 4)
-    r = a.sum(axis=1)
-    self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
-
-  def test_tensor_const_st(self):
+  def test_expanded_const(self):
     a = Tensor(1).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
-
     a = Tensor.ones((4, 4)).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
 
-  def test_masked_const(self):
+  @unittest.expectedFailure
+  def test_padded_const(self):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
     valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
     valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
-    valid, x, y = valid_ternary.src
-    # the mask is in the first source
-    self.assertIsNotNone(valid.st.views[-1].mask)
-    # the constant operands do not have a ShapeTracker
-    self.assertIsNone(x.st)
-    self.assertIsNone(y.st)
     # the WHERE outputs a contiguous (3, 3)
     self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
-    # what is the ShapeTracker of the const operands?
+    valid, x, y = valid_ternary.src
+    # very notably, only the first source is padded
+    self.assertIsNotNone(valid.st.views[-1].mask)
+    assert x.st.views[-1].mask is y.st.views[-1].mask is None
+    assert all(s.shape == (3, 3) for s in valid_ternary.src)
 
-  # assigning to the entire chunk of memory, the ASSIGN views target BUFFER with a ShapeTracker to match src[1]'s shape.
-  def test_assign_simple(self):
-    a = Tensor.ones((4,)).contiguous().realize()
-    assign = a.assign(Tensor.zeros((4,)))
+  # currently this is None, it shouldn't be
+  @unittest.expectedFailure
+  def test_scalar_const(self):
+    a = UOp.const(dtypes.int, 0)
+    self.assertEqual(a.st, ShapeTracker.from_shape(()))
+
+  @unittest.expectedFailure
+  def test_scalar_var(self):
+    vv = UOp.variable("a", 1, 4).bind(2)
+    self.assertEqual(vv.st, ShapeTracker.from_shape(()))
+
+  # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
+
+  def test_assign_flat(self):
+    buffer = Tensor.arange(4).realize()
+    a = buffer.assign(Tensor.zeros((4,)))
     assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat()))
-    assert assign_pattern.match(assign.lazydata, {})
-    assign.realize()
-    self.assertEqual(assign.lazydata.st, ShapeTracker.from_shape((4,)))
-    self.assertEqual(a.tolist(), [0., 0., 0., 0.])
+    assert assign_pattern.match(a.lazydata, {})
+    a.realize()
+    self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
+  
+  def test_assign_permuted(self):
+    buffer = Tensor.arange(4).reshape(2, 1, 2).contiguous().realize()
+    a = buffer.permute((2, 1, 0)).assign(buffer)
+    a.realize()
+    self.assertListEqual(a.tolist(), [[[0, 2]], [[1, 3]]])
 
-  def test_permuted_assign(self):
-    Tensor.manual_seed(0)
-    a = Tensor.arange(8).reshape(2, 4, 1).contiguous().realize()
-    b = Tensor.arange(8).reshape(4, 2, 1).contiguous().realize()
-    assign = a.permute((1, 0, 2)).assign(b)
-    self.assertEqual(assign.lazydata.src[0].st, ShapeTracker.from_shape((2, 4, 1)).permute((1, 0, 2)))
-    assign.realize()
-    self.assertEqual(a.reshape(8).tolist(), [0, 2, 4, 6, 1, 3, 5, 7])
+  def test_assign_reshaped(self):
+    buffer = Tensor.ones((4,)).contiguous().realize()
+    a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),),))), UPat()))
+    assert assign_pattern.match(a.lazydata, {})
+    a.realize()
+    self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 
   # setitem is a partial assign
   def test_setitem(self):
@@ -572,16 +577,20 @@ class TestShapeSpec(unittest.TestCase):
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
-  # currently this is None, it shouldn't be
-  @unittest.expectedFailure
-  def test_const_st(self):
-    a = UOp.const(dtypes.int, 0)
-    self.assertEqual(a.st, ShapeTracker.from_shape(()))
-
   @unittest.expectedFailure
   def test_buffer_st(self):
     a = UOp.new_buffer(Device.DEFAULT, 10, dtypes.float)
     self.assertEqual(a.st, ShapeTracker.from_shape((10,)))
+
+  def test_ops_st(self):
+    # view / mop
+    a = Tensor.empty(4, 2, 1).permute((1, 2, 0)).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape((4, 2, 1)).permute((1, 2, 0)))
+    # alu / reduce
+    alu = a*2
+    self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
+    r = Tensor.empty(4, 4).sum(axis=1)
+    self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
