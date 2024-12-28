@@ -277,18 +277,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
-    # these uops define ShapeTracker from the arg
+    # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
-    # otherwise we derive the st from sources
-    if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
-    assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
-    # st_arg on buffer uops defines the ShapeTracker, it's allowed to be non contiguous
-    if self.op in GroupOp.Buffer: return self.st_arg
-    # all other uops have a contiguous ShapeTracker
+    # buffer ops return the ShapeTracker from sources
+    if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
+    src_sts = [x.st for x in self.src if x.st is not None]
+    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    match self.op:
+      # only reduce ops are allowed to change shape
+      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      # everything else derives shape from sources
+      case _:
+        if len(src_sts) == 0: return None
+        shape = src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
-    # only reduceop is allowed to change shape
-    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
+    return ShapeTracker.from_shape(shape)
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
@@ -321,9 +325,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
-    ret = self.src[0 if self.op is Ops.VALID else 1]
-    assert ret.op is Ops.VIEW, f"st_arg trying to return {ret}"
-    return ret.arg
+    return unwrap(self.st)
   @property
   def const_arg(self) -> ConstType:
     match self.base.op:
