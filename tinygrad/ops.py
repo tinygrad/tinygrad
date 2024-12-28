@@ -280,24 +280,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
-    # buffer ops define a ShapeTracker from the VIEW parent
-    # NOTE: this can be non contiguous
-    if self.op in GroupOp.Buffer:
-      # if it's already lowered to index, it's shapeless
-      if len(view_src:=[x for x in self.src if x.op is Ops.VIEW]) == 0: return None
-      assert len(view_src) == 1, f"found more than one VIEW in {self.op} parents"
-      return view_src[0].st
-    # all other ops have a contiguous ShapeTracker
-    from tinygrad.shape.shapetracker import ShapeTracker
+    # buffer ops return the ShapeTracker from sources
+    if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
+    src_sts = [x.st for x in self.src if x.st is not None]
     match self.op:
-      # only reduceop is allowed to change shape
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = unwrap(self.src[0].st).reduce(self.axis_arg)
+      # only reduce ops are allowed to change shape
+      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
       case _:
-        # if the sources are shapeless, this uop is shapeless too
-        if len(src_shapes:=[x.st.shape for x in self.src if x.st is not None]) == 0: return None
-        assert all_same(src_shapes), f"UOp parents must have the same shape {self} {src_shapes}"
-        shape = src_shapes[0]
+        if len(src_sts) == 0: return None
+        shape = src_sts[0].shape
+    from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(shape)
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
