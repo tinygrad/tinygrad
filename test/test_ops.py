@@ -1845,6 +1845,8 @@ class TestOps(unittest.TestCase):
       helper_test_op([(2,4,9,9), (4,4,3,3)],
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=padding).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding).relu(), grad_rtol=1e-5)
+    with self.assertRaises(ValueError):
+      Tensor.conv_transpose2d(Tensor.randn((2,16,2,2)), Tensor.randn((32,16,3,3)), padding=(1,1,1))
 
   def test_dilated_conv_transpose2d(self):
     for dilation in [(1,2), (2,1), 2, 1]:
@@ -1930,6 +1932,8 @@ class TestOps(unittest.TestCase):
     # regression test for https://github.com/tinygrad/tinygrad/pull/7549/
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w), lambda x,w: Tensor.conv2d(x,w),
                                expected=(RuntimeError, AssertionError))
+    with self.assertRaises(ValueError):
+      Tensor.conv2d(Tensor.randn((2,16,2,2)), Tensor.randn((32,16,3,3)), padding=(1,1,1))
 
   def test_large_input_conv2d(self):
     bs = 4
@@ -2093,6 +2097,8 @@ class TestOps(unittest.TestCase):
           helper_test_op([(32,2,110,28)],
             lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
             lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
+    with self.assertRaises(ValueError):
+      Tensor.max_pool2d(Tensor.randn((32,2,110,28)), kernel_size=(2,2), padding=(1,1,1))
 
   def test_max_pool2d_asymmetric_padding(self):
     shape = (32,2,111,28)
@@ -2176,6 +2182,8 @@ class TestOps(unittest.TestCase):
           helper_test_op([shape],
             lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=p),
             lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=p), rtol=1e-5)
+    with self.assertRaises(ValueError):
+      Tensor.avg_pool2d(Tensor.randn((32,2,111,28)), kernel_size=(2,2), padding=(1,1,1))
 
   def test_avg_pool2d_asymmetric_padding(self):
     shape = (32,2,111,28)
