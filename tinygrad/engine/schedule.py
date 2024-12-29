@@ -32,15 +32,15 @@ tensor_uop_spec = PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
    # naturally correct
    (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
-   # TODO: "make things that can't be images not images" can override the source dtype
-   # is there a clean way to update its _mop children?
-   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
+   # "make things that can't be images not images" can cause a realized buffer to change its dtype to base
+   # is there a clean way to update its movement op children?
+   (x.dtype.base == mv.dtype.base and x.is_realized)),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
-  # Tensor const has a ShapeTracker of shape=() and a device
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
+  # Tensor const has an unmasked ShapeTracker and a device
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)), lambda st: all(v.mask is None for v in st.st.views)),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -55,14 +55,12 @@ tensor_uop_spec = PatternMatcher([
    # dtype
    copy.dtype == copyin.dtype),
 
-  # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
-  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
-   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
+  # VIEW applies a ShapeTracker on top of a BUFFER
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)), lambda view,buf: view.dtype == buf.dtype),
 
   # ASSIGN changes the value of an existing buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val:
-   # target must be a realized device buffer
+   # target must be a realized device buffer (can be a view)
    (target.op is Ops.BUFFER or target.is_realized) and
    # dtype
    (assign.dtype == target.dtype == new_val.dtype)),
@@ -577,6 +575,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
   sink = graph_rewrite(sink, merge_bufs, ctx)
+  if not skip_check: type_verify(list(sink.toposort), extra_spec=tensor_uop_spec+big_graph_spec)
   # create the scheduler context
   graph_rewrite(sink, create_ctx, ctx)
   # group realizes into kernels
