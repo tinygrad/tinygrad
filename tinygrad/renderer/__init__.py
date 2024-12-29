@@ -21,11 +21,13 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def __post_init__(self):
     local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
-    assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but {local_axes} local axes of size 2 found in {self.opts}"
+    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), (
+      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})")
+    assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but found {2**local_axes} in {self.opts}"
     assert 2**upcast_axes == self.elements_per_thread[2], (
-      f"{self.elements_per_thread[2]} elements from C are processed per thread but {upcast_axes} upcast axes of size 2 found in {self.opts}")
+      f"{self.elements_per_thread[2]} elements from C are processed per thread but found {2**upcast_axes} in {self.opts}")
     assert all(len(perm[0]) == local_axes and len(perm[1]) == reduce_axes + upcast_axes for perm in self.swizzle if perm), (
-      f"swizzle perm should be of len (({local_axes})({reduce_axes + upcast_axes})")
+      f"swizzle perm should be of len (({local_axes})({reduce_axes + upcast_axes}))")
 
 @dataclass(frozen=True)
 class Estimates:
