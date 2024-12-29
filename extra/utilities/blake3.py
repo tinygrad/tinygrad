@@ -58,7 +58,7 @@ class BLAKE3:
         chain_vals = ((self.compress_blocks(states * pair_mask, paired, iv) * pair_mask)[:8] + remainder).realize()
         chain_vals = chain_vals.pad((None, (0, chain_vals.shape[1])))
       return chain_vals.realize()
-    return tree_hash
+    return TinyJit(tree_hash)
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, UOp]:
     assert padded_input_size % 1024 == 0, "padded_input_size must be divisible by 1024"
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     size = data.numel() * data.element_size()
 
     start = time.time()
-    BLAKE3().hash(data, padded_input_size=padded_input_size)
+    print(BLAKE3().hash(data, padded_input_size=padded_input_size))
     end = time.time()
 
     elapsed = end - start
