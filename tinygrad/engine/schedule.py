@@ -152,11 +152,11 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
   return ret
 
-# the scheduler wraps every scheduled UOp with a VIEW(BUFFER, <uop>).
-# this BUFFER is used to preserve a link back to the uop living on tensors
-# while the scheduler is free to change this uop.
+# the scheduler wraps every scheduled UOp around a VIEW(BUFFER, <uop>).
+# this BUFFER is used to preserve a link back to the UOp living on tensors
+# while the scheduler is free to change this UOp.
 schedule_uop_spec = tensor_uop_spec+PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="buf"), UPat.var("tuop"))), lambda buf,tuop: buf.size == tuop.size),
 ])
 
 # **** AST graph rewrite
