@@ -594,7 +594,7 @@ class Kernel:
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           wd, tcd = self.global_dims, self.first_upcast
           def get_upcast_axes(buf):
-            upcast_axes = int(math.log2(tc.upcast_size[buf]))
+            upcast_axes = int(math.log2(tc.thread_dims[buf]))
             return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
           def get_tc_swizzle_st(shape, wd_swizzle, tcd_swizzle):
             offset = (tcd - (wd + len(wd_swizzle)))
@@ -619,10 +619,10 @@ class Kernel:
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
             tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
-            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.upcast_size[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.upcast_size[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.upcast_size[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-              UOp.const(tc.dtype_out.vec(tc.upcast_size[2]), 0.0)), arg=wmma_arg)
+            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.thread_dims[2]), src=(
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.thread_dims[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.thread_dims[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+              UOp.const(tc.dtype_out.vec(tc.thread_dims[2]), 0.0)), arg=wmma_arg)
             tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
           else: # for TC=3 MUL/SUM instead of WMMA
