@@ -553,8 +553,13 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
+# **** movement ops
+
 remove_movement_ops = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),
+  # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
+  (UPat(Ops.VIEW, name="view"),
+   lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
   # merge one src (unrealized) views
   # NOTE: we can't merge realized buffer views here, because the buffer is realized before the view
   (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat.var("x"),), name="v1")), name="v2"),
