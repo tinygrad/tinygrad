@@ -9,15 +9,23 @@ from tinygrad.dtype import DType
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: tuple[int,int,int] # N, M, K
-  upcast_size: tuple[int, int, int] # A, B, C/D
+  threads: int # number of threads that construct the warp
+  upcast_size: tuple[int, int, int] # per-thread dimensions for how many A/B/C elements the wmma op loads/stores
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifing kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
   swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], Optional[tuple[tuple[int, ...], tuple[int, ...]]]] = (None, None)
-  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
   def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
+  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
+  def __post_init__(self):
+    local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
+    assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but {local_axes} local axes of size 2 found in {self.opts}"
+    assert 2**upcast_axes == self.upcast_size[2], (
+      f"{self.upcast_size[2]} elements from C are processed per thread but {upcast_axes} upcast axes of size 2 found in {self.opts}")
+    assert all(len(perm[0]) == local_axes and len(perm[1]) == reduce_axes + upcast_axes for perm in self.swizzle if perm), (
+      f"swizzle perm should be of len (({local_axes})({reduce_axes + upcast_axes})")
 
 @dataclass(frozen=True)
 class Estimates:
