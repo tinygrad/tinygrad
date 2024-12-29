@@ -133,6 +133,10 @@ class AM_GFX(AM_IP):
     # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
     self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
 
+    self.adev.wreg_pair(f"regRLC_CSIB_ADDR", "_LO", "_HI", self.adev.mm.palloc(0x40000).mc_addr())
+    self.adev.regRLC_CSIB_LENGTH.write(0x40000) # TODO: double check
+    self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1)
+
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
     for i in range(0, 16):
       self._grbm_select(vmid=i)
@@ -235,8 +239,8 @@ class AM_IH(AM_IP):
     # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[am.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def init(self):
-    self.rings = [(self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "", 0),
-                  (self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "_RING1", 1)]
+    self.rings = [(self.adev.mm.valloc(512 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "", 0),
+                  (self.adev.mm.valloc(512 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "_RING1", 1)]
 
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.va_addr >> 8)
@@ -277,15 +281,17 @@ class AM_SDMA(AM_IP):
     self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR", "_LO", "_HI", wptr_addr)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL_OFFSET").update(offset=doorbell * 2)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL").update(enable=1)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").write(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=1,
-      f32_wptr_poll_enable=1, rb_size=(ring_size//4).bit_length()-1, rb_enable=1)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").write(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4,
+      f32_wptr_poll_enable=1, rb_size=(ring_size//4).bit_length()-1, rb_enable=1, rb_priv=1)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
+    self.adev.regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0)
     self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
     self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
     self.adev.regSDMA0_UTCL1_PAGE.write(0x10cec20)
     self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
+    self.adev.regSDMA0_CNTL.update(ctxempty_int_enable=1, trap_enable=1)
 
 class AM_PSP(AM_IP):
   def __init__(self, adev):

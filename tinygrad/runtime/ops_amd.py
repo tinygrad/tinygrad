@@ -511,16 +511,25 @@ class PCIIface:
     if PCIIface.vfio and len(self.irq_poller.poll(timeout)): os.read(self.irq_fd, 1024)
 
   def on_device_hang(self):
-    self.adev.gmc.on_interrupt()
     for i, d in enumerate(self.dev.devices):
+      d.dev_iface.adev.gmc.on_interrupt()
+      print(f"{i} sign: r: {d.timeline_signal.value} {d.timeline_value}")
       print(f"{i} comp: r: {d.compute_queue.read_ptr[0]} w: {d.compute_queue.write_ptr[0]}")
-      print(f"{i} copy: r: {d.copy_queue.read_ptr[0]} w: {d.copy_queue.write_ptr[0]}")
+      print(f"{i} copy: r: {d.sdma_queue.read_ptr[0]} w: {d.sdma_queue.write_ptr[0]}")
+      if d.compute_queue.read_ptr[0] != d.compute_queue.write_ptr[0]:
+        print("\tretry")
+        d.compute_queue.doorbell[0] = d.compute_queue.put_value
+        import time
+        time.sleep(3)
+        print(f"\t{i} sign: r: {d.timeline_signal.value} {d.timeline_value}")
+        print(f"\t{i} comp: r: {d.compute_queue.read_ptr[0]} w: {d.compute_queue.write_ptr[0]}")
+        print(f"\t{i} copy: r: {d.sdma_queue.read_ptr[0]} w: {d.sdma_queue.write_ptr[0]}")
     raise RuntimeError("Device hang detected")
 
 class AMDDevice(HCQCompiled):
   driverless:bool = not os.path.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
-  # signals_page:Any = None
-  # signals_pool:list[int] = []
+  signals_page:Any = None
+  signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -530,15 +539,15 @@ class AMDDevice(HCQCompiled):
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
 
-    self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
-    self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
-    for d in self.devices: d.dev_iface.map(self.signals_page)
-    for d in self.devices: self.dev_iface.map(d.signals_page)
+    # self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
+    # self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
+    # for d in self.devices: d.dev_iface.map(self.signals_page)
+    # for d in self.devices: self.dev_iface.map(d.signals_page)
 
-    # if AMDDevice.signals_page is None:
-    #   AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=AMDDevice.driverless, uncached=True, cpu_access=True)
-    #   AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-    # else: self.dev_iface.map(AMDDevice.signals_page)
+    if AMDDevice.signals_page is None:
+      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=AMDDevice.driverless, uncached=True, cpu_access=True)
+      AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
+    else: self.dev_iface.map(AMDDevice.signals_page)
 
     # Scratch setup
     max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
