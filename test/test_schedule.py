@@ -14,7 +14,7 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops, to_uop
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
@@ -24,10 +24,11 @@ class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
-  if isinstance(t, Tensor): outs = t.lazydata.lbs
-  elif isinstance(t, List): outs = flatten([r.lazydata.lbs for r in t])
-  else: outs = [t]
-  sched = create_schedule(outs)
+  if isinstance(t, Tensor): sched = t.schedule()
+  elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
+  else:
+    assert isinstance(t, UOp), f"can't schedule {t}"
+    sched = create_schedule([t])
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
