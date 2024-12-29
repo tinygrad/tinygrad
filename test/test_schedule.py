@@ -1059,8 +1059,10 @@ class TestSchedule(unittest.TestCase):
     # should not create extra kernel if output will be realized anyways
     dummy = x.sum().half().float()
     check_schedule(dummy, 1)
+    dummy.schedule()
     dummy = x.sum().half().float().contiguous() + 1
     check_schedule(dummy, 2)
+    dummy.schedule()
 
     # shared between two outputs
     shared = x.sum().half().float()
