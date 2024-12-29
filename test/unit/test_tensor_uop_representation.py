@@ -1,10 +1,11 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.ops import UPat, Ops
+from tinygrad.ops import UPat, Ops, UOp
 
 realized_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
 const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),)))
-def is_pattern(ten:Tensor, pat:UPat): assert pat.match(ten.lazydata, {})
+def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
+def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.lazydata, pat)
 
 class TestTensorUopRepresentation(unittest.TestCase):
   def test_realized(self):

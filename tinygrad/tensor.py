@@ -228,6 +228,7 @@ class Tensor(SimpleMathTrait):
     scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
     rewrite_map = graph_rewrite_map(UOp.sink(*scheduled_uops), _substitute, becomes_map, bottom_up=True)
+    becomes_map.clear()
 
     # apply becomes_map
     # TODO: add children to scheduled_uops
