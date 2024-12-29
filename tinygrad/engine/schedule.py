@@ -417,7 +417,7 @@ def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
     case Ops.MUL: ret **= prshape
     case Ops.MAX: pass # NOTE: Ops.MAX is passthrough
     case _: return None
-  return UOp.const(reduce.dtype, ret)
+  return reduce.const_like(ret)
 
 def found_contiguous(ctx:ScheduleContext, contig:UOp, base:UOp, b:UOp):
   if contig.src[0].op is Ops.VIEW and len(contig.src[0].src):
@@ -438,7 +438,7 @@ ops_folding = symbolic_simple+PatternMatcher([
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
