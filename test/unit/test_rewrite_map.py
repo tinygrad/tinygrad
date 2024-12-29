@@ -1,20 +1,21 @@
 import unittest
 from tinygrad import dtypes, Tensor
 from tinygrad.ops import UOp, symbolic, graph_rewrite_map, _substitute
+from test.unit.test_tensor_uop_representation import is_pattern, realized_pattern
 
 class TestTensorMutates(unittest.TestCase):
   def test_mutate_add(self):
     a = Tensor([1,2,3])
     b = Tensor([4,5,6])
     ret = a+b
+    pa = a.lazydata
+    pb = b.lazydata
+    pr = ret.lazydata
     ret.schedule()
-    print(a.lazydata)
-    print(b.lazydata)
-    print(ret.lazydata)
-    from tinygrad.ops import becomes_map
-    print(becomes_map)
-    for k,v in becomes_map.items():
-      print(k,v)
+    self.assertIsNot(pa, a.lazydata)
+    self.assertIsNot(pb, b.lazydata)
+    self.assertIsNot(pr, ret.lazydata)
+    for t in [a,b,ret]: is_pattern(t, realized_pattern)
 
 class TestRewriteMap(unittest.TestCase):
   def test_substitute(self):

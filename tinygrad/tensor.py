@@ -14,6 +14,13 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
+# *** Tensors are containers for UOps ***
+
+tensor_map: weakref.WeakValueDictionary[UOp, Tensor] = weakref.WeakValueDictionary()
+def update_tensor_map(t:Tensor):
+  # TODO: multi
+  tensor_map[t.lazydata] = t
+
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
@@ -33,6 +40,7 @@ class Function:
     ret = Tensor.__new__(Tensor)
     ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
+    update_tensor_map(ret)
     return ret
 
 import tinygrad.function as F
@@ -104,11 +112,6 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, .
   return mask.where(values, target)
 
 ReductionStr = Literal["mean", "sum", "none"]
-
-tensor_map: weakref.WeakValueDictionary[UOp, Tensor] = weakref.WeakValueDictionary()
-def update_tensor_map(t:Tensor):
-  # TODO: multi
-  tensor_map[t.lazydata] = t
 
 class Tensor(SimpleMathTrait):
   """
@@ -224,10 +227,11 @@ class Tensor(SimpleMathTrait):
     """
     scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
+    rewrite_map = graph_rewrite_map(UOp.sink(*scheduled_uops), _substitute, becomes_map, bottom_up=True)
 
     # apply becomes_map
     # TODO: add children to scheduled_uops
-    for k,v in graph_rewrite_map(UOp.sink(*scheduled_uops), _substitute, becomes_map).items():
+    for k,v in rewrite_map.items():
       if (tt:=tensor_map.get(k)) is not None:
         tt.lazydata = v
         tensor_map[v] = tt
