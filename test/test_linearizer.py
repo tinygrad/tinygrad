@@ -2060,7 +2060,7 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_sum_ok(self):
     N = 18 * 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
-    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
+    a = Tensor.rand(N, N).realize().shrink(((0, 17), (0, 17))) * 100
     b = (Tensor.rand(N, N) < 0.5).realize().shrink(((0, 17), (0, 17)))
 
     helper_linearizer_opt(a.sum(0), [
