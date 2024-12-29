@@ -3,7 +3,6 @@ from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileRangeEvent, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
 
 MOCKGPU = getenv("MOCKGPU")
@@ -34,7 +33,7 @@ class TestProfiler(unittest.TestCase):
 
     TestProfiler.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestProfiler.b = self.a + 1
-    si = create_schedule([self.b.lazydata])[-1]
+    si = self.b.schedule()[-1]
 
     TestProfiler.runner = get_runner(TestProfiler.d0.device, si.ast)
     TestProfiler.b.lazydata.buffer.allocate()
