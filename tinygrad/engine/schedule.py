@@ -156,6 +156,8 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
 # this BUFFER is used to preserve a link back to the UOp living on tensors
 # while the scheduler is free to change this UOp.
 schedule_uop_spec = tensor_uop_spec+PatternMatcher([
+  # partial ASSIGN can have a smaller output size than the linked BUFFER
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.ASSIGN, name="assign"))), lambda buf,assign: assign.size <= buf.size),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="buf"), UPat.var("tuop"))), lambda buf,tuop: buf.size == tuop.size),
 ])
 
