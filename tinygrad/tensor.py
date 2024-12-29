@@ -1069,7 +1069,6 @@ class Tensor(SimpleMathTrait):
     # flat padding
     if all(isinstance(p, (int,UOp)) for p in padding):
       if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
-      print("padding", padding)
       pX = _flat_to_grouped(tuple(cast(Sequence[sint], padding)) + (0,0)*(self.ndim - len(padding)//2))
     # group padding
     else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[Optional[tuple[sint, sint]]], padding))
@@ -2060,6 +2059,16 @@ class Tensor(SimpleMathTrait):
     """
     Applies average pooling over a tensor.
 
+    There are 3 types of `padding` that are supported:
+
+    1. A single `int` that applies the same padding to all spatial dimensions.
+
+    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    spatial dimension.
+
+    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    The length of the `tuple` must be double the number of spatial dimensions.
+
     When `ceil_mode` is set to True, output shape will be determined using ceil division.
     When `count_include_pad` is set to False, zero padding will not be included in the averaging calculation.
 
@@ -2095,6 +2104,16 @@ class Tensor(SimpleMathTrait):
     """
     Applies max pooling over a tensor.
 
+    There are 3 types of `padding` that are supported:
+
+    1. A single `int` that applies the same padding to all spatial dimensions.
+
+    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    spatial dimension.
+
+    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    The length of the `tuple` must be double the number of spatial dimensions.
+
     When `ceil_mode` is set to True, output shape will be determined using ceil division.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
@@ -2120,6 +2139,16 @@ class Tensor(SimpleMathTrait):
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:
     """
     Applies a convolution over a tensor with a given `weight` and optional `bias`.
+
+    There are 3 types of `padding` that are supported:
+
+    1. A single `int` that applies the same padding to all spatial dimensions.
+
+    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    spatial dimension.
+
+    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    The length of the `tuple` must be double the number of spatial dimensions.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d convolutions and instead works for any number of dimensions.
 
@@ -2181,6 +2210,16 @@ class Tensor(SimpleMathTrait):
   def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     """
     Applies a transposed convolution over a tensor with a given `weight` and optional `bias`.
+
+    There are 3 types of `padding` that are supported:
+
+    1. A single `int` that applies the same padding to all spatial dimensions.
+
+    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    spatial dimension.
+
+    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    The length of the `tuple` must be double the number of spatial dimensions.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d transposed convolutions and instead works for any number of dimensions.
 
