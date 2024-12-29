@@ -2163,5 +2163,19 @@ class TestConst(unittest.TestCase):
     run_schedule(sched, var_vals)
     self.assertEqual(a.tolist(), 3)
 
+@unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from another device to clang")
+class TestCopyFolding(unittest.TestCase):
+  def test_const_copy_is_free(self):
+    b = Tensor(1).to("CLANG")
+    check_schedule(b, 0, filter_sink=False)
+    assert b.item() == 1
+
+  def test_late_const_copy_folding(self):
+    a = Tensor.arange(3).realize()
+    zeros = Tensor.zeros(3).realize()
+    b = (a*zeros).to("CLANG")
+    run_schedule(check_schedule(b, 0, filter_sink=False))
+    self.assertListEqual(b.tolist(), [0, 0, 0])
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
