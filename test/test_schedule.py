@@ -22,11 +22,11 @@ from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
+  if to_prerealize:
+    for pre in to_prerealize: pre.schedule()
   if isinstance(t, Tensor): outs = t.lazydata.lbs
   elif isinstance(t, List): outs = flatten([r.lazydata.lbs for r in t])
   else: outs = [t]
-  if to_prerealize:
-    for pre in to_prerealize: pre.schedule()
   sched = create_schedule(outs)
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
