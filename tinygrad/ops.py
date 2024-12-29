@@ -285,6 +285,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
+      case Ops.BUFFER: shape = (self.size,)
       # only reduce ops are allowed to change shape
       case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
@@ -299,7 +300,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int:
+    match self.op:
+      case Ops.BUFFER: return self.arg[1]
+      case Ops.DEFINE_GLOBAL: return cast(PtrDType, self.dtype).size
+      case _:
+        if self.st is None: return self.src[0].size
+        return self.st.size
 
   # *** uop evaluation ***
 
@@ -480,13 +487,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
-  def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
-    ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-    # instant folding rules
-    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
-    return ret
+    return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
@@ -531,9 +533,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
     return ret
   @property
-  def realized(self) -> Optional[Buffer]:
-    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return buffers[self.src[0]]
-    return None
+  def realized(self) -> Optional[Buffer]: return buffers.get(self) if self.op is Ops.BUFFER else None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
