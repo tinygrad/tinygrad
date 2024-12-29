@@ -10,7 +10,7 @@ from tinygrad.dtype import DType
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: tuple[int,int,int] # N, M, K
   threads: int # number of threads that construct the warp
-  elements_per_thread: tuple[int, int, int] # per-thread dimensions for how many A/B/C elements the wmma op loads/stores
+  elements_per_thread: tuple[int, int, int] # elements per-thread to load/store from A/B/C
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifing kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
