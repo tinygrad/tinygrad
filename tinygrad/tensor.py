@@ -16,10 +16,11 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 # *** Tensors are containers for UOps ***
 
-tensor_map: weakref.WeakValueDictionary[UOp, Tensor] = weakref.WeakValueDictionary()
+# NOTE: this has to be a list as UOps can map to more than one Tensor
+tensor_map: dict[UOp, list[weakref.ref[Tensor]]] = {}
 def update_tensor_map(t:Tensor):
   # TODO: multi
-  tensor_map[t.lazydata] = t
+  tensor_map.setdefault(t.lazydata, []).append(weakref.ref(t))
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -234,8 +235,8 @@ class Tensor(SimpleMathTrait):
     # TODO: add children to scheduled_uops
     for k,v in rewrite_map.items():
       if (tt:=tensor_map.get(k)) is not None:
-        tt.lazydata = v
-        tensor_map[v] = tt
+        for t in tt:
+          if (rt:=t()) is not None: rt.lazydata = v
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -377,6 +378,7 @@ class Tensor(SimpleMathTrait):
     # TODO: is this assign?
     if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
     self.lazydata = real.lazydata
+    update_tensor_map(self)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
     """
@@ -405,6 +407,7 @@ class Tensor(SimpleMathTrait):
     Shards the tensor across the given devices in place.
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
+    update_tensor_map(self)
     return self
 
   @staticmethod
