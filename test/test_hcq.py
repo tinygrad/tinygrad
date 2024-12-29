@@ -17,7 +17,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0 = Device[Device.DEFAULT]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    si = create_schedule([self.b.lazydata])[-1]
+    si = self.b.schedule()[-1]
 
     TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
