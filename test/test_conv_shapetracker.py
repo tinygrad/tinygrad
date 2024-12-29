@@ -13,7 +13,7 @@ class TestConvShapetracker(unittest.TestCase):
     conv = Conv2d(16, 32, (3, 3))
 
     # first run to init the weights, they are scheduled.
-    create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata])
+    conv(Tensor.empty(1, 16, 10, 10)).schedule()
     # run it again to get the kernels
     sched = [si for si in create_schedule([conv(Tensor.empty(1, 16, 10, 10)).lazydata]) if si.ast.op is Ops.SINK]
     assert len(sched) == 1, f"conv should only have one kernel, getting {len(sched)}"
