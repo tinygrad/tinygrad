@@ -226,8 +226,10 @@ class Tensor(SimpleMathTrait):
     schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
     # TODO: becomes_map should be returned from create_schedule_with_vars
 
+    # NOTE: this is potentially a lot of Tensors. see above about the universes
     fixed_tensors: list[Tensor] = list(all_tensors)
-    sink = UOp.sink(*[x.lazydata for x in fixed_tensors])
+    sink = UOp.sink(*flatten([x.lazydata.lbs for x in fixed_tensors]))
+    # TODO: multi is wrong
     new_sink = sink.substitute(becomes_map)
     becomes_map.clear()
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
