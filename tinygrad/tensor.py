@@ -103,6 +103,9 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, .
   # select from values for each True element in mask else select from self
   return mask.where(values, target)
 
+#  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
+def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: return tuple(zip(padding[-2::-2], padding[::-2]))
+
 ReductionStr = Literal["mean", "sum", "none"]
 
 class Tensor(SimpleMathTrait):
@@ -1063,12 +1066,15 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if mode not in {"constant", "reflect", "replicate", "circular"}: raise NotImplementedError(f"{mode=} is not supported")
-    if (flat:=all(isinstance(p, (int,UOp)) for p in padding)) and len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
-    # turn flat padding into group padding
-    pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding
+    # flat padding
+    if all(isinstance(p, (int,UOp)) for p in padding):
+      if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
+      print("padding", padding)
+      pX = _flat_to_grouped(tuple(cast(Sequence[sint], padding)) + (0,0)*(self.ndim - len(padding)//2))
+    # group padding
+    else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[Optional[tuple[sint, sint]]], padding))
     if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
-    X, pX = self, cast(tuple[tuple[sint, sint]], tuple((0,0) if p is None else p for p in pX))
-    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
+    X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
     if mode == "constant":
       def _constant(x,px,v): return F.Pad.apply(x, arg=px) if v == 0 else F.Pad.apply(x, arg=px) + F.Pad.apply(Tensor.ones_like(x), arg=px).where(0,v)
       return _constant(X, pX, value) if all(resolve(p >= 0) for p in flatten(pX)) else \
@@ -2038,7 +2044,7 @@ class Tensor(SimpleMathTrait):
 
   def _apply_ceil_mode(self, p_:Sequence[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> List[int]:
     (d_,s_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_)), self.shape[-len(k_):]
-    pads, grouped_pads = list(p_), list(zip(p_[-2::-2], p_[::-2]))
+    pads, grouped_pads = list(p_), _flat_to_grouped(p_)
     # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
     o_ = [ceildiv(i+pB+pA - (d*(k-1)+1), s) + 1 for i,d,k,s,(pB,pA) in zip(i_,d_,k_,s_,grouped_pads)]
     for dim,(o,i,s,k,d,(pB,pA)) in enumerate(zip(o_,i_,s_,k_,d_,grouped_pads)):
@@ -2188,8 +2194,7 @@ class Tensor(SimpleMathTrait):
     """
     x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(*range(3, len(weight.shape)+1))
     HW = weight.shape[2:]
-    padding = self._resolve_pool_pads(padding, len(HW))
-    padding = tuple(zip(padding[-2::-2], padding[::-2]))
+    padding = _flat_to_grouped(self._resolve_pool_pads(padding, len(HW)))
     stride, dilation, output_padding = [make_tuple(x, len(HW)) for x in (stride, dilation, output_padding)]
     if any(s>1 for s in stride):
       # handle strides: (k) -> reshape -> (k,1) -> pad -> (k,s) -> reshape -> (k*s) -> shrink (k-(s-1))
