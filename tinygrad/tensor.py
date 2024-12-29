@@ -228,15 +228,22 @@ class Tensor(SimpleMathTrait):
     """
     scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
-    rewrite_map = graph_rewrite_map(UOp.sink(*scheduled_uops), _substitute, becomes_map, bottom_up=True)
+    # TODO: becomes_map should be returned from create_schedule_with_vars
+
+    # NOTE: we put tensor_map in here instead of scheduled_uops. we could be more selective here
+    # all Tensors in a different graph will just rewrite to themselves
+    rewrite_map = graph_rewrite_map(UOp.sink(*tensor_map), _substitute, becomes_map, bottom_up=True)
     becomes_map.clear()
 
     # apply becomes_map
-    # TODO: add children to scheduled_uops
+    # TODO: gc tensor_map
     for k,v in rewrite_map.items():
+      if k is v: continue
       if (tt:=tensor_map.get(k)) is not None:
         for t in tt:
-          if (rt:=t()) is not None: rt.lazydata = v
+          if (rt:=t()) is not None:
+            rt.lazydata = v
+            update_tensor_map(rt)
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
