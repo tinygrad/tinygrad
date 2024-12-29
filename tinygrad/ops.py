@@ -481,12 +481,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
+    # NOTE: movement ops are allowed to recurse
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+    # base MUST resolve when we hit view
+    if self.op is Ops.VIEW:
+      if (ret:=self.src[0]) is not ret.base: raise RuntimeError(f"base must be base itself, got {self}")
+      return ret
+    # otherwise, it's base already
+    return self
   def view(self, new_st:ShapeTracker) -> UOp:
     if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-    # instant folding rules
+    # instant folding rules (TODO: delete this once BUFFER has a shape.)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret
 
