@@ -285,6 +285,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
+      case Ops.BUFFER: shape = (self.size,)
       # only reduce ops are allowed to change shape
       case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
@@ -482,10 +483,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
+    if self.base.op is Ops.BUFFER: return ret
     # instant folding rules
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
@@ -518,7 +519,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
-    if self.op is Ops.BUFFER: return self
+    if self.base.op is Ops.BUFFER: return self.base
     assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
     return self.src[0].buf_uop
   def buf_uop_view(self) -> UOp: return self.buf_uop.view(unwrap(self.st))
@@ -535,7 +536,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Optional[Buffer]:
-    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return buffers[self.src[0]]
+    if self.base.op is Ops.BUFFER: return buffers.get(self.base)
     return None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
