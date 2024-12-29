@@ -484,7 +484,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # NOTE: movement ops are allowed to recurse
     if self.op in GroupOp.Movement: return self.src[0].base
     # base MUST resolve when we hit view
-    if self.op is Ops.VIEW:
+    #if self.op is Ops.VIEW:
+    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER:
       if (ret:=self.src[0]) is not ret.base: raise RuntimeError(f"base must be base itself, got {self}")
       return ret
     # otherwise, it's base already
