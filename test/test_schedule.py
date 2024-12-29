@@ -14,7 +14,7 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops, to_uop
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
@@ -22,13 +22,12 @@ from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
+  if isinstance(t, Tensor): outs = t.lazydata.lbs
+  elif isinstance(t, List): outs = flatten([r.lazydata.lbs for r in t])
+  else: outs = [t]
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
-  if isinstance(t, Tensor): sched = t.schedule()
-  elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
-  else:
-    assert isinstance(t, UOp), f"can't schedule {t}"
-    sched = create_schedule([t])
+  sched = create_schedule(outs)
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -236,8 +235,7 @@ class TestSchedule(unittest.TestCase):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
     b = src.clone()
-    sched = Tensor.schedule(a, b)
-    self.assertEqual(len(sched), 2)
+    sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to different device Buffers
     self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
@@ -245,8 +243,7 @@ class TestSchedule(unittest.TestCase):
   def test_no_dedup_empty(self):
     a = Tensor.empty((4,))
     b = Tensor.empty((4,))
-    sched = Tensor.schedule(a, b)
-    self.assertEqual(len(sched), 2)
+    sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
 
@@ -1060,10 +1057,8 @@ class TestSchedule(unittest.TestCase):
     # should not create extra kernel if output will be realized anyways
     dummy = x.sum().half().float()
     check_schedule(dummy, 1)
-    dummy.schedule()
     dummy = x.sum().half().float().contiguous() + 1
     check_schedule(dummy, 2)
-    dummy.schedule()
 
     # shared between two outputs
     shared = x.sum().half().float()
@@ -2012,8 +2007,6 @@ class TestView(unittest.TestCase):
     late_mul = a*bv
     other_child = b+2
     s = check_schedule([late_mul, other_child], 2)
-    # this has to be here now
-    Tensor.schedule(late_mul, other_child)
     # the arange realizes
     self.assertIsNotNone(b.lazydata.base.realized)
     # mul still collapses
