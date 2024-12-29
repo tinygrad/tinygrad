@@ -256,8 +256,8 @@ class Tensor(SimpleMathTrait):
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized: return self.replace(x)
-    self.lazydata = self.lazydata.assign(x.lazydata)
-    return self
+    # TODO: useless Tensor construction?
+    return self.replace(Tensor(self.lazydata.assign(x.lazydata)))
 
   def detach(self) -> Tensor:
     """
@@ -355,7 +355,7 @@ class Tensor(SimpleMathTrait):
     real = self.to(device)
     # TODO: is this assign?
     if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
-    self.lazydata = real.lazydata
+    return self.replace(real)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
     """
@@ -383,8 +383,7 @@ class Tensor(SimpleMathTrait):
     """
     Shards the tensor across the given devices in place.
     """
-    self.lazydata = self.shard(devices, axis, splits).lazydata
-    return self
+    return self.replace(self.shard(devices, axis, splits))
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
