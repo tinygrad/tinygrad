@@ -596,11 +596,11 @@ class Kernel:
           def get_upcast_axes(buf):
             upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
             return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
-          def get_tc_swizzle_st(shape, wd_swizzle, tcd_swizzle):
-            offset = (tcd - (wd + len(wd_swizzle)))
+          def get_tc_swizzle_st(shape, local_perm, upcast_perm):
+            offset = (tcd - (wd + len(local_perm)))
             permaxis = list(range(wd)) \
-              + [wd + x + (offset if x >= len(wd_swizzle) else 0) for x in wd_swizzle]  + list(range(wd + len(wd_swizzle), tcd)) \
-              + [wd + x + (offset if x >= len(wd_swizzle) else 0) for x in tcd_swizzle] + list(range(tcd + len(tcd_swizzle), len(shape)))
+              + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
+              + [wd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(tcd + len(upcast_perm), len(shape)))
             return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
