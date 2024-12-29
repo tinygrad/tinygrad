@@ -228,13 +228,13 @@ class Tensor(SimpleMathTrait):
 
     # NOTE: this is potentially a lot of Tensors. see above about the universes
     fixed_tensors: list[Tensor] = list(all_tensors)
-    sink = UOp.sink(*flatten([x.lazydata.lbs for x in fixed_tensors]))
-    # TODO: multi is wrong
+    sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(becomes_map)
     becomes_map.clear()
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
       if s is ns: continue
-      t.lazydata = ns
+      if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
+      else: t.lazydata = ns
 
     return memory_planner(schedule), var_vals
 
