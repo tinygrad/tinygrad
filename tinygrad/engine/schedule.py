@@ -555,7 +555,8 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 # **** movement ops
 
 remove_movement_ops = PatternMatcher([
-  (UPat(GroupOp.Movement, src=(UPat.any(UPat.var("x").view(), UPat.var("x")),), name="x"), lambda x: x.view(unwrap(x.st))),
+  # NOTE: movement ops are always applied to base
+  (UPat(GroupOp.Movement, name="mov", src=(UPat.any(UPat.var("x").view(), UPat.var("x")))), lambda x,mov: x.view(unwrap(mov.st))),
   # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
   (UPat(Ops.VIEW, name="view"),
    lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
