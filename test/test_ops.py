@@ -2088,10 +2088,19 @@ class TestOps(unittest.TestCase):
 
   def test_max_pool2d_padding(self):
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
-      with self.subTest(kernel_size=ksz):
-        helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1),
-          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1))
+      for p in [1, (1,0), (0,1)]:
+        with self.subTest(kernel_size=ksz, padding=p):
+          helper_test_op([(32,2,110,28)],
+            lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p),
+            lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p))
+
+  def test_max_pool2d_asymmetric_padding(self):
+    shape = (32,2,111,28)
+    for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
+      with self.subTest(padding=p):
+        helper_test_op([shape],
+          lambda x: torch.nn.functional.max_pool2d(torch.nn.functional.pad(x, p, value=float("-inf")), kernel_size=(5,5)),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), padding=p))
 
   def test_max_pool2d_padding_int(self):
     ksz = (2,2)
@@ -2162,10 +2171,19 @@ class TestOps(unittest.TestCase):
   def test_avg_pool2d_padding(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
-      with self.subTest(kernel_size=ksz):
+      for p in [1, (1,0), (0,1)]:
+        with self.subTest(kernel_size=ksz, padding=p):
+          helper_test_op([shape],
+            lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=p),
+            lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=p), rtol=1e-5)
+
+  def test_avg_pool2d_asymmetric_padding(self):
+    shape = (32,2,111,28)
+    for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
+      with self.subTest(padding=p):
         helper_test_op([shape],
-          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1), rtol=1e-5)
+          lambda x: torch.nn.functional.avg_pool2d(torch.nn.functional.pad(x, p), kernel_size=(5,5)),
+          lambda x: Tensor.avg_pool2d(x, kernel_size=(5,5), padding=p), rtol=1e-5)
 
   def test_avg_pool2d_padding_not_counted(self):
     shape = (32,2,111,28)
