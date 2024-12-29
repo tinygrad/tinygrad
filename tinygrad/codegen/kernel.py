@@ -593,7 +593,7 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           wd, tcd = self.global_dims, self.first_upcast
-          def get_upcast_axes(buf):
+          def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
             upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
             return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
           def get_tc_swizzle_st(shape, local_perm, upcast_perm):
