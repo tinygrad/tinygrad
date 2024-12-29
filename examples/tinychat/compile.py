@@ -8,6 +8,7 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
+from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 
 def split_safetensor(fn):
   _, data_start, metadata = safe_load_metadata(fn)
@@ -54,12 +55,6 @@ if __name__=="__main__":
     #  maybe extra.models.llama.Transformer.forward_jit is the culprit?
     sys.exit()
 
-  Device.DEFAULT = "WEBGPU"
-  device = Device.DEFAULT
-  model = build_transformer(model_path, model_size=model_size, max_context=max_context, load_weights=False)
-  state_dict = safe_load(f32_fn)
-  load_state_dict(model, state_dict, consume=True)
-
   # For now, we initialize the tinygrad.extra.models.llama.Transformer with the first 3 tokens that the model sees in every first tinychat user prompt
   # Then in the start of tinychat, we will skip those 3 tokens
   # TODO: remove this complexity by getting a jit-compiled llama3 transformer with kv-cache ready but empty (or something like that)
@@ -71,6 +66,17 @@ if __name__=="__main__":
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
   toks = [tokenizer.bos_id] + encode_message("user", "hi")
+
+  # Export BPE data for use with tiktoken.js
+  mergeable_ranks = load_tiktoken_bpe(str(tokenizer_path))  
+  bpe_path = os.path.join(os.path.dirname(__file__), "llama3-2.tiktoken")
+  dump_tiktoken_bpe(mergeable_ranks, bpe_path)
+
+  Device.DEFAULT = "WEBGPU"
+  device = Device.DEFAULT
+  model = build_transformer(model_path, model_size=model_size, max_context=max_context, load_weights=False)
+  state_dict = safe_load(f32_fn)
+  load_state_dict(model, state_dict, consume=True)
 
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   GlobalCounters.reset()

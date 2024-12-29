@@ -39,9 +39,18 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
     // model
     nets: {},
+    tokenizer: null,
 
     async init() {
       try {
+        const wasmResponse = await fetch("./tiktoken_bg.wasm");
+        const wasmBytes = await wasmResponse.arrayBuffer();
+        await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
+
+        this.tokenizer = await createTokenizer("./llama3-2.tiktoken");
+        tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
+        console.log("tokenizer works:", tokenizer_works)
+
         const device = await getDevice();
         console.log("WebGPU device initialized")
 
@@ -383,4 +392,47 @@ function createParser(onParse) {
 const BOM = [239, 187, 191];
 function hasBom(buffer) {
   return BOM.every((charCode, index) => buffer.charCodeAt(index) === charCode);
+}
+
+const PAT_STR = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
+
+async function createTokenizer(bpeUrl) {
+  const num_base_tokens = 128000;
+  const special_tokens = {
+    "<|begin_of_text|>": 128000,
+    "<|end_of_text|>": 128001,
+    "<|start_header_id|>": 128006,
+    "<|end_header_id|>": 128007,
+    "<|eot_id|>": 128009
+  };
+  const model = await window.tiktokenLoad({
+        "load_tiktoken_bpe": bpeUrl,
+        "special_tokens": special_tokens,
+        "pat_str": PAT_STR
+    });
+  const tokenizer = new window.Tiktoken(model.bpe_ranks, model.special_tokens, model.pat_str)
+
+  return {
+    get bos_id() {
+      return special_tokens["<|begin_of_text|>"];
+    },
+
+    get stop_tokens() {
+      return new Set([
+        special_tokens["<|end_of_text|>"],
+        special_tokens["<|eot_id|>"],
+      ]);
+    },
+
+    decode(toks) {
+      const filtered = toks.filter((t) => t < num_base_tokens);
+      return tokenizer.decode(filtered);
+    },
+
+    encode(text, allow_special = false) {
+      const allowedSpecial = allow_special ? "all" : new Set();
+      const disallowedSpecial = new Set();
+      return tokenizer.encode(text, allowedSpecial, disallowedSpecial);
+    },
+  };
 }
