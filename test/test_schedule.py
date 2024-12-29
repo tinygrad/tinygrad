@@ -235,7 +235,8 @@ class TestSchedule(unittest.TestCase):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
     b = src.clone()
-    sched = check_schedule([a, b], 2, filter_sink=False)
+    sched = Tensor.schedule(a, b)
+    self.assertEqual(len(sched), 2)
     run_schedule(sched)
     # a and b are assigned to different device Buffers
     self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
@@ -243,7 +244,8 @@ class TestSchedule(unittest.TestCase):
   def test_no_dedup_empty(self):
     a = Tensor.empty((4,))
     b = Tensor.empty((4,))
-    sched = check_schedule([a, b], 2, filter_sink=False)
+    sched = Tensor.schedule(a, b)
+    self.assertEqual(len(sched), 2)
     run_schedule(sched)
     self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
 
@@ -2007,6 +2009,8 @@ class TestView(unittest.TestCase):
     late_mul = a*bv
     other_child = b+2
     s = check_schedule([late_mul, other_child], 2)
+    # this has to be here now
+    Tensor.schedule(late_mul, other_child)
     # the arange realizes
     self.assertIsNotNone(b.lazydata.base.realized)
     # mul still collapses
