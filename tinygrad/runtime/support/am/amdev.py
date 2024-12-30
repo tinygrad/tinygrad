@@ -271,13 +271,13 @@ class AMDev:
     self.fw = AMFirmware()
 
     # Initialize IP blocks
-    self.soc21 = AM_SOC21(self)
-    self.gmc = AM_GMC(self)
-    self.ih = AM_IH(self)
-    self.psp = AM_PSP(self)
-    self.smu = AM_SMU(self)
-    self.gfx = AM_GFX(self)
-    self.sdma = AM_SDMA(self)
+    self.soc21:AM_SOC21 = AM_SOC21(self)
+    self.gmc:AM_GMC = AM_GMC(self)
+    self.ih:AM_IH = AM_IH(self)
+    self.psp:AM_PSP = AM_PSP(self)
+    self.smu:AM_SMU = AM_SMU(self)
+    self.gfx:AM_GFX = AM_GFX(self)
+    self.sdma:AM_SDMA = AM_SDMA(self)
 
     if self.psp.is_sos_alive(): self.smu.mode1_reset()
 
