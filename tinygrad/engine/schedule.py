@@ -39,8 +39,8 @@ tensor_uop_spec = PatternMatcher([
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
-  # Tensor const has an unmasked ShapeTracker and a device
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)), lambda st: all(v.mask is None for v in st.st.views)),
+  # Tensor const has a ShapeTracker of shape=() and a device
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -549,6 +549,7 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   # TODO: this should be a shrink on the buffer
   if op.op is Ops.BUFFER_VIEW:
     buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
 # **** movement ops
@@ -603,8 +604,6 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   schedule: list[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
-    # update the refcount of scheduled buffers
-    for out in si.outputs: out.ref(1)
     for x in graph[si]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
