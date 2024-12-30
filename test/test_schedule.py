@@ -2186,6 +2186,7 @@ class TestTensorUOpSpec(unittest.TestCase):
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule(list(t.src))
 
+  @track_rewrites(named=True)
   def test_verify_arg(self):
     a = Tensor.ones((4, 4), dtype=dtypes.float32).cast(dtypes.int)
     unsafe_cast_folding = PatternMatcher([
