@@ -187,7 +187,7 @@ def elementwise_view_right(root:UOp) -> UOp|None:
   # push the swizzle from src to root
   output_swizzle = swizzles[0]
   new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
-  ret = root.replace(src=tuple(x if not x.has_st else x.base if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
+  ret = root.replace(src=tuple(x if x.st is None else x.base if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # NOTE: swizzle resolves once we hit STORE
   return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(output_swizzle.shape))
 
