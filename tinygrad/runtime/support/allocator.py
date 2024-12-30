@@ -21,7 +21,7 @@ class TLSFAllocator:
     self._insert_block(0, size)
 
   def lv1(self, size): return size.bit_length()
-  def lv2(self, size): return (size - (1 << (size.bit_length() - 1)))  // (1 << (size.bit_length() - self.l2_cnt))
+  def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
 
   def _insert_block(self, start:int, size:int, prev:Optional[int]=None):
     if prev is None: prev = self.blocks[start][2]

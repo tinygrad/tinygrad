@@ -62,7 +62,7 @@ class AllocatorFuzzer:
     return True
 
   def run(self):
-    for i in range(100000):
+    for i in range(10000000):
       if (random.random() < self.alloc_probability or not self.allocations): self.random_alloc()
       else: self.random_free()
 
