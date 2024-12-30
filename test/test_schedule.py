@@ -2188,7 +2188,7 @@ class TestTensorUOpSpec(unittest.TestCase):
 
   @track_rewrites(named=True)
   def test_verify_arg(self):
-    a = Tensor.ones((4, 4), dtype=dtypes.float32).cast(dtypes.int)
+    a = Tensor(2.0).cast(dtypes.int)
     unsafe_cast_folding = PatternMatcher([
       # this kind of rule should change the arg too, the parser must reject this.
       (UPat(Ops.CAST, src=(UPat.cvar("x"),), name="cast"), lambda cast,x: x.replace(dtype=cast.dtype)),
