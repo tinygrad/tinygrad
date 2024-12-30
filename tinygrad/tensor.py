@@ -238,7 +238,7 @@ class Tensor(SimpleMathTrait):
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert not x.requires_grad and getattr(self, '_ctx', None) is None
+    assert getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
     return self
@@ -358,7 +358,7 @@ class Tensor(SimpleMathTrait):
     real = self.to(device)
     # TODO: is this assign?
     if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
-    self.lazydata = real.lazydata
+    return self.replace(real)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
     """
@@ -386,8 +386,7 @@ class Tensor(SimpleMathTrait):
     """
     Shards the tensor across the given devices in place.
     """
-    self.lazydata = self.shard(devices, axis, splits).lazydata
-    return self
+    return self.replace(self.shard(devices, axis, splits))
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
