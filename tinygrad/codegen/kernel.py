@@ -685,8 +685,9 @@ class Kernel:
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> None:
-  if not uop.has_st or uop in sts: return
+  if uop in sts: return
   # restore globals from the two stage reduce
+  # this is because this LOAD has an implicit movement op
   if uop.op is Ops.LOAD and uop.src[0].op is Ops.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=uop.src[2].src[2], uop.st_arg, sts)
     sts[uop] = sts[local_reduce]
