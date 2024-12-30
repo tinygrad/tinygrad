@@ -5,14 +5,14 @@ from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhu
 
 def parse_amdgpu_logs(log_content, register_names=None):
   register_map = register_names or REGISTER_NAMES
-  
+
   final = ""
   def replace_register(match):
     register = match.group(1)
     return f"Reading register {register_map.get(int(register, base=16), register)}"
 
   pattern = r'Reading register (0x[0-9a-fA-F]+)'
-  
+
   processed_log = re.sub(pattern, replace_register, log_content)
 
   def replace_register_2(match):
@@ -26,7 +26,7 @@ def parse_amdgpu_logs(log_content, register_names=None):
 
   in_trace = False
   cleaned_lines = []
-  
+
   return '\n'.join(cleaned_lines)
 
 def main():
