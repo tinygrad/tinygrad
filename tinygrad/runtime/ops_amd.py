@@ -428,9 +428,11 @@ class PCIIface:
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio and PCIIface.vfio_fd == -1:
-      pathlib.Path("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
-      PCIIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
-      if not vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU): PCIIface.vfio = False
+      try:
+        pathlib.Path("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
+        PCIIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
+        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+      except: PCIIface.vfio = False
 
     # Init vfio for the device
     if PCIIface.vfio:
@@ -458,7 +460,7 @@ class PCIIface:
     self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
 
-    # TODO: think of a way to handle this
+    # TODO: this is for 7900xtx, the only tested card.
     self.props = {'simd_count': 192, 'simd_per_cu': 2, 'max_waves_per_simd': 16, 'gfx_target_version': 110000, 'max_slots_scratch_cu': 32,
                   'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
@@ -508,22 +510,12 @@ class PCIIface:
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
 
   def sleep(self, timeout):
-    if PCIIface.vfio and len(self.irq_poller.poll(timeout)): os.read(self.irq_fd, 1024)
+    if PCIIface.vfio and len(self.irq_poller.poll(timeout)):
+      os.read(self.irq_fd, 1024)
+      self.adev.ih.interrupt_handler()
 
   def on_device_hang(self):
-    for i, d in enumerate(self.dev.devices):
-      d.dev_iface.adev.gmc.on_interrupt()
-      print(f"{i} sign: r: {d.timeline_signal.value} {d.timeline_value}")
-      print(f"{i} comp: r: {d.compute_queue.read_ptr[0]} w: {d.compute_queue.write_ptr[0]}")
-      print(f"{i} copy: r: {d.sdma_queue.read_ptr[0]} w: {d.sdma_queue.write_ptr[0]}")
-      if d.compute_queue.read_ptr[0] != d.compute_queue.write_ptr[0]:
-        print("\tretry")
-        d.compute_queue.doorbell[0] = d.compute_queue.put_value
-        import time
-        time.sleep(3)
-        print(f"\t{i} sign: r: {d.timeline_signal.value} {d.timeline_value}")
-        print(f"\t{i} comp: r: {d.compute_queue.read_ptr[0]} w: {d.compute_queue.write_ptr[0]}")
-        print(f"\t{i} copy: r: {d.sdma_queue.read_ptr[0]} w: {d.sdma_queue.write_ptr[0]}")
+    for i, d in enumerate(self.dev.devices): d.dev_iface.adev.gmc.on_interrupt()
     raise RuntimeError("Device hang detected")
 
 class AMDDevice(HCQCompiled):
@@ -538,11 +530,6 @@ class AMDDevice(HCQCompiled):
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
-
-    # self.signals_page = self.dev_iface.alloc(65536, uncached=True, cpu_access=True)
-    # self.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
-    # for d in self.devices: d.dev_iface.map(self.signals_page)
-    # for d in self.devices: self.dev_iface.map(d.signals_page)
 
     if AMDDevice.signals_page is None:
       AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=AMDDevice.driverless, uncached=True, cpu_access=True)

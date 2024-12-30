@@ -132,9 +132,6 @@ class AM_GFX(AM_IP):
 
     # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
     self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
-
-    self.adev.wreg_pair(f"regRLC_CSIB_ADDR", "_LO", "_HI", self.adev.mm.palloc(0x40000).mc_addr())
-    self.adev.regRLC_CSIB_LENGTH.write(0x40000) # TODO: double check
     self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1)
 
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
@@ -229,18 +226,17 @@ class AM_GFX(AM_IP):
 class AM_IH(AM_IP):
   def interrupt_handler(self):
     ring_vm, rwptr_vm, suf, _ = self.rings[0]
-    wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
+    wptr = to_mv(rwptr_vm.cpu_addr, 8).cast('Q')[0]
 
     if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
     self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
-    # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[am.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def init(self):
-    self.rings = [(self.adev.mm.valloc(512 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "", 0),
-                  (self.adev.mm.valloc(512 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), "_RING1", 1)]
+    self.rings = [(self.adev.mm.valloc(512 << 10, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "", 0),
+      (self.adev.mm.valloc(512 << 10, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "_RING1", 1)]
 
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.va_addr >> 8)
