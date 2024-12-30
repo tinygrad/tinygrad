@@ -36,7 +36,7 @@ class AMDSignal(HCQSignal):
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 0 and self.timeline_for_device is not None: self.timeline_for_device.dev_iface.sleep(200)
+    if time_spent_waiting_ms > 2000 and self.timeline_for_device is not None: self.timeline_for_device.dev_iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __del__(self):
@@ -515,7 +515,7 @@ class PCIIface:
       self.adev.ih.interrupt_handler()
 
   def on_device_hang(self):
-    for i, d in enumerate(self.dev.devices): d.dev_iface.adev.gmc.on_interrupt()
+    for d in self.dev.devices: d.dev_iface.adev.gmc.on_interrupt()
     raise RuntimeError("Device hang detected")
 
 class AMDDevice(HCQCompiled):

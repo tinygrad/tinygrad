@@ -189,19 +189,21 @@ class AMMemoryManager:
 
         pte_st_idx, n_ptes, inner_off = pte_st_idx + update_ptes, n_ptes - update_ptes, inner_off + pte_covers * update_ptes
 
+  def _try_alloc(self, pte_cnt, pte_cvrs):
+    # Try to allocate contiguous physical memory.
+    try: return self.pa_allocator.alloc(pte_cnt * pte_cvrs), pte_cnt
+    except MemoryError:
+      if pte_cnt > 1: return self._try_alloc(pte_cnt // 2)
+      else: raise MemoryError("Failed to allocate physical memory")
+
   def map_range(self, vaddr, size, paddr=None, uncached=False, system=False, snooped=False):
     if AM_DEBUG >= 2: print(f"Mapping {vaddr=:#x} -> {paddr} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
     for _, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
       while n_ptes > 0:
-        def _try_alloc(pte_cnt):
-          # Try to allocate contiguous physical memory.
-          try: return self.pa_allocator.alloc(pte_cnt * pte_covers), pte_cnt
-          except MemoryError:
-            if pte_cnt > 1: return _try_alloc(pte_cnt // 2)
-            else: raise MemoryError("Failed to allocate physical memory")
-        (lpaddr, upd_pte), off = (_try_alloc(n_ptes), 0) if paddr is None else ((paddr, n_ptes), off)
+        # Trying to alloc the contigous frags when possible.
+        (lpaddr, upd_pte), off = (self._try_alloc(n_ptes, pte_covers), 0) if paddr is None else ((paddr, n_ptes), off)
 
         for pte_idx in range(upd_pte):
           assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"
