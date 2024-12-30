@@ -40,6 +40,7 @@ document.addEventListener("alpine:init", () => {
     // model
     nets: {},
     tokenizer: null,
+    first_message: true, // TODO: initialize model with empty cache_kv, and eliminate this variable
 
     async init() {
       try {
@@ -51,7 +52,6 @@ document.addEventListener("alpine:init", () => {
         tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
 
-        /*
         const device = await getDevice();
         console.log("WebGPU device initialized")
 
@@ -65,20 +65,6 @@ document.addEventListener("alpine:init", () => {
                 transformer().setup(device, safetensorParts),
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
         console.log("Transformer setup without exceptions");
-
-        let start_pos = new Float32Array(3.0)
-        let TEMPERATURE = new Float32Array(0.95);
-        let TOP_K = new Float32Array(0.0);
-        let TOP_P = new Float32Array(0.0);
-        let ALPHA_F = new Float32Array(0.0);
-        let ALPHA_P = new Float32Array(0.0);
-        let tok = new Float32Array([[1234]]);
-        let next_tok = await this.nets["transformer"](tok, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
-        console.log(next_tok);
-        tok = new Float32Array([[next_tok[0]]]);
-        next_tok = await this.nets["transformer"](tok, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
-        console.log(next_tok);
-        */
       } catch (error) {
         console.error("Error initializing model:", error);
       }
@@ -210,38 +196,41 @@ document.addEventListener("alpine:init", () => {
     },
 
     async *openaiChatCompletion(messages) {
-      // stream response
-      const response = await fetch(`${this.endpoint}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          "messages": messages,
-          "stream": true,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch");
+      let tokens = [this.tokenizer.bos_id];
+      for (const message of messages) {
+        tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
+      }
+      tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
+      let start_pos = 0
+      
+      // TODO: initialize model with empty cache_kv and eliminate this block
+      // In compile.py, current model had 3 forward passes (1 normal and 2 jit), 1 token each, using first 3 tokens of every user message
+      if (this.first_message) {
+        start_pos = 3;
+        tokens = tokens.slice(3);
+        this.first_message = false;
       }
 
-      const reader = response.body.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream()).getReader();
+      let TEMPERATURE = new Float32Array(0.95);
+      let TOP_K = new Float32Array(0.0);
+      let TOP_P = new Float32Array(0.0);
+      let ALPHA_F = new Float32Array(0.0);
+      let ALPHA_P = new Float32Array(0.0);
+      let prefill_toks = tokens.slice(0, -1);
+
+      // TODO: implement whole llama3.py prefill method, here we are missing the prompt skipping logic
+      for (const tok of prefill_toks) {
+        await this.nets["transformer"](new Float32Array([[tok]]), new Float32Array(start_pos), TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
+        start_pos += 1;
+      }
+
+      let last_tok = tokens[tokens.length - 1];
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        if (value.type === "event") {
-          const json = JSON.parse(value.data);
-          if (json.choices) {
-            const choice = json.choices[0];
-            if (choice.finish_reason === "stop") {
-              break;
-            }
-            yield choice.delta.content;
-          }
-        }
+        const tok = await this.nets["transformer"](new Float32Array([[last_tok]]), new Float32Array(start_pos), TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
+        start_pos += 1;
+        last_tok = tok[0];
+        if (this.tokenizer.stop_tokens.has(last_tok)) break;
+        yield new TextDecoder().decode(this.tokenizer.decode([last_tok]));
       }
     },
   }));
