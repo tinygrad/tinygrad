@@ -180,7 +180,7 @@ class AMMemoryManager:
       inner_off = 0
       while n_ptes > 0:
         if from_entry: frags_cnt = (pt.get_entry(pte_st_idx) >> 7) & 0x1f
-        else: frags_cnt = min((va.bit_length() - 1 if va != 0 else 31), (n_ptes * pte_covers).bit_length() - 1) - 12
+        else: frags_cnt = 0 if pte_covers == 0x1000 else 9 # TODO: optimize
 
         update_ptes = (1 << (frags_cnt + 12)) // pte_covers
         assert update_ptes > 0, f"Invalid update_ptes {update_ptes} {frags_cnt} {pte_covers}"
