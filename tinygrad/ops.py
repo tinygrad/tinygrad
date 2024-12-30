@@ -989,7 +989,7 @@ spec = PatternMatcher([
 def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
   specs = [spec, *extra_specs]
   for i,u in enumerate(uops):
-    results = [s.rewrite(u) for s in specs]
+    results = [cast(bool|None, s.rewrite(u)) for s in specs]
     # none of the specs should return False
     # at least one spec should return True
     if any(ret is False for ret in results) or all(ret is None for ret in results):
