@@ -3140,7 +3140,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return a-b*(a/b).floor().cast(dtypes.int32)
+    return F.Mod.apply(a, b)
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
