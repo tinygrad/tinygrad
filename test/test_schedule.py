@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops, to_uop
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -2047,15 +2047,6 @@ class TestBigGraph(unittest.TestCase):
     a = Tensor(1.0).cast(dtypes.int)
     sink = tensor_rewrite(a)
     assert UPat.cvar(dtype=dtypes.int).match(sink, {})
-
-  # failure: the scheduler must not change image to its base dtype before const folding
-  @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
-  @unittest.expectedFailure
-  def test_float_to_image_cast_stays(self):
-    a = Tensor.empty(4).cast(dtypes.imagef((1,1,4)))
-    sink = to_uop(a.lazydata, ScheduleContext(), {})
-    sink = graph_rewrite(sink, symbolic)
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, dtypes.imagef((1, 1, 4))), UPat(Ops.CAST, src=(UPat.var(dtype=dtypes.float),)))).match(sink, {})
 
 tensor_const_pm = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
