@@ -51,6 +51,7 @@ document.addEventListener("alpine:init", () => {
         tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
 
+        /*
         const device = await getDevice();
         console.log("WebGPU device initialized")
 
@@ -77,6 +78,7 @@ document.addEventListener("alpine:init", () => {
         tok = new Float32Array([[next_tok[0]]]);
         next_tok = await this.nets["transformer"](tok, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
         console.log(next_tok);
+        */
       } catch (error) {
         console.error("Error initializing model:", error);
       }
@@ -189,13 +191,22 @@ document.addEventListener("alpine:init", () => {
     },
 
     updateTotalTokens(messages) {
-      fetch(`${this.endpoint}/chat/token/encode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
-      }).then((response) => response.json()).then((data) => {
-        this.total_tokens = data.length;
-      }).catch(console.error);
+      try {
+        let toks = [this.tokenizer.bos_id];
+        messages.forEach((message) => {
+          if (!message.role || !message.content) {
+            throw new Error("Each message must have a 'role' and 'content' property.");
+          }
+          toks = toks.concat(this.tokenizer.encodeMessage(message.role, message.content));
+
+          if (messages.length > 0 && messages[messages.length - 1].role === "user") {
+            toks = toks.concat(this.tokenizer.encodeRole("assistant"));
+          }
+          this.total_tokens = toks.length;
+        });
+      } catch (error) {
+        console.error("Error updating total tokens:", error);
+      }
     },
 
     async *openaiChatCompletion(messages) {
@@ -433,6 +444,21 @@ async function createTokenizer(bpeUrl) {
       const allowedSpecial = allow_special ? "all" : new Set();
       const disallowedSpecial = new Set();
       return tokenizer.encode(text, allowedSpecial, disallowedSpecial);
+    },
+
+    encodeRole(role) {
+      const tokens = [];
+      tokens.push(special_tokens["<|start_header_id|>"]);
+      tokens.push(...this.encode(role));
+      tokens.push(special_tokens["<|end_header_id|>"]);
+      tokens.push(...this.encode("\n\n"));
+      return tokens;
+    },
+
+    encodeMessage(role, content) {
+      const roleTokens = this.encodeRole(role);
+      const contentTokens = this.encode(content.trim());
+      return [...roleTokens, ...contentTokens, special_tokens["<|eot_id|>"]];
     },
   };
 }
