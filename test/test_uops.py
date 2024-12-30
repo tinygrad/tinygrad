@@ -592,5 +592,29 @@ class TestShapeSpec(unittest.TestCase):
     r = Tensor.empty(4, 4).sum(axis=1)
     self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
 
+class TestUOpChildren(unittest.TestCase):
+  def test_children_exist(self):
+    a = UOp.variable("weird_name_234", 0, 10)
+    b = a*a
+    self.assertEqual(len(a.children), 1)
+    self.assertIs(list(a.children)[0](), b)
+
+  def test_children_cleaned_up(self):
+    a = UOp.variable("weird_name_235", 0, 10)
+    b = a*a
+    self.assertEqual(len(a.children), 1)
+    del b
+    self.assertEqual(len(a.children), 0)
+
+  def test_children_cleaned_up_two(self):
+    a = UOp.variable("weird_name_236", 0, 10)
+    b = a*a
+    c = a*2
+    self.assertEqual(len(a.children), 2)
+    del b
+    self.assertEqual(len(a.children), 1)
+    del c
+    self.assertEqual(len(a.children), 0)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
