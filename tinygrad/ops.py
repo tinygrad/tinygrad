@@ -453,7 +453,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert isinstance(arg, UOp) and arg.op is Ops.BIND and shape == (), f"trying to create BIND with {arg=} {shape=}"
       return UOp(Ops.VIEW, dtype, (UOp(Ops.DEVICE, arg=device), arg), ShapeTracker.from_shape(()))
     # otherwise it's a contiguous st
-    # NOTE: we instantly create a new buffer because COPY and EMPTY must dedup.
+    # NOTE: we instantly create a new buffer because metaop is expected to dedup
+    # TODO: we should rethink why this is the case
     return UOp(op, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype).view(st), *src), arg)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
     # no COPY
