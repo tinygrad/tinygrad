@@ -2,6 +2,7 @@ from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
@@ -410,7 +411,7 @@ class TestUOpMethod(unittest.TestCase):
     with self.assertRaises(AssertionError): UOp.const(dtypes.int, var).const_arg
     const = UOp.const(dtypes.int, 1)
     self.assertEqual(const.const_arg, 1)
-    tensor_const = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), const), ShapeTracker.from_shape(()))
+    tensor_const = UOp.metaop(Ops.CONST, (), dtypes.int, Device.DEFAULT, 1)
     self.assertEqual(tensor_const.const_arg, 1)
 
 class TestUOpStr(unittest.TestCase):
@@ -430,6 +431,14 @@ class TestUOpStr(unittest.TestCase):
   def test_vectorized_str(self):
     vec = UOp(Ops.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
+
+  def test_device_arg(self):
+    device = UOp(Ops.DEVICE, arg="GPU")
+    assert str(eval(str(device))) == str(device)
+
+  def test_reduceop_arg(self):
+    sum_uop = Tensor.empty(32, 32).sum().lazydata
+    assert str(eval(str(sum_uop))) == str(sum_uop)
 
 @unittest.skip("uop no longer has order like this")
 class TestIndexingOrdering(unittest.TestCase):
@@ -493,6 +502,119 @@ class TestUopsObject(unittest.TestCase):
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
     assert len(ret) == 10000
+
+
+class TestShapeSpec(unittest.TestCase):
+  # ** CONST is CONST(VIEW(DEVICE)) -> RESHPAE -> EXPAND
+
+  def test_expanded_const(self):
+    a = Tensor(1).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape(()))
+    a = Tensor.ones((4, 4)).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
+
+  @unittest.expectedFailure
+  def test_padded_const(self):
+    a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
+    ast = a.contiguous().schedule()[0].ast
+    valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
+    valid_ternary = [x for x in ast.toposort if valid_pattern.match(x, {})][0]
+    # the WHERE outputs a contiguous (3, 3)
+    self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
+    valid, x, y = valid_ternary.src
+    # very notably, only the first source is padded
+    self.assertIsNotNone(valid.st.views[-1].mask)
+    assert x.st.views[-1].mask is y.st.views[-1].mask is None
+    assert all(s.shape == (3, 3) for s in valid_ternary.src)
+
+  # currently this is None, it shouldn't be
+  @unittest.expectedFailure
+  def test_scalar_const(self):
+    a = UOp.const(dtypes.int, 0)
+    self.assertEqual(a.st, ShapeTracker.from_shape(()))
+
+  @unittest.expectedFailure
+  def test_scalar_var(self):
+    vv = UOp.variable("a", 1, 4).bind(2)
+    self.assertEqual(vv.st, ShapeTracker.from_shape(()))
+
+  # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
+
+  def test_assign_flat(self):
+    buffer = Tensor.arange(4).realize()
+    a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat()))
+    assert assign_pattern.match(a.lazydata, {})
+    a.realize()
+    self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
+
+  def test_assign_permuted(self):
+    buffer = Tensor.arange(4).reshape(2, 1, 2).contiguous().realize()
+    a = buffer.permute((1, 2, 0)).assign(Tensor.arange(4).reshape(1, 2, 2).contiguous())
+    a.realize()
+    self.assertEqual(buffer.tolist(), [[[0, 2]], [[1, 3]]])
+
+  def test_assign_reshaped(self):
+    buffer = Tensor.ones((4,)).contiguous().realize()
+    a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),),))), UPat()))
+    assert assign_pattern.match(a.lazydata, {})
+    a.realize()
+    self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
+
+  # setitem is a partial assign
+  def test_setitem(self):
+    a = Tensor.ones((4,)).contiguous().realize()
+    assign = a.shrink(((1, 2),)).assign(Tensor.zeros((1,)))
+    # the ASSIGN UOp has size=1
+    self.assertEqual(assign.lazydata.size, 1)
+    # the ASSIGN views the buffer with a shrunk st
+    self.assertEqual(assign.lazydata.src[0].st, ShapeTracker.from_shape((4,)).shrink(((1, 2),)))
+    # the underlying BUFFER has a size=4
+    self.assertEqual(assign.lazydata.buf_uop.size, 4)
+    # NOTE: output shape is different from the BUFFER shape
+    self.assertNotEqual(assign.lazydata.shape, a.lazydata.shape)
+    assign.realize()
+    self.assertEqual(a.tolist(), [1, 0, 1, 1])
+
+  @unittest.expectedFailure
+  def test_buffer_st(self):
+    a = UOp.new_buffer(Device.DEFAULT, 10, dtypes.float)
+    self.assertEqual(a.st, ShapeTracker.from_shape((10,)))
+
+  def test_ops_st(self):
+    # view / mop
+    a = Tensor.empty(4, 2, 1).permute((1, 2, 0)).lazydata
+    self.assertEqual(a.st, ShapeTracker.from_shape((4, 2, 1)).permute((1, 2, 0)))
+    # alu / reduce
+    alu = a*2
+    self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
+    r = Tensor.empty(4, 4).sum(axis=1)
+    self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
+
+class TestUOpChildren(unittest.TestCase):
+  def test_children_exist(self):
+    a = UOp.variable("weird_name_234", 0, 10)
+    b = a*a
+    self.assertEqual(len(a.children), 1)
+    self.assertIs(list(a.children)[0](), b)
+
+  def test_children_cleaned_up(self):
+    a = UOp.variable("weird_name_235", 0, 10)
+    b = a*a
+    self.assertEqual(len(a.children), 1)
+    del b
+    self.assertEqual(len(a.children), 0)
+
+  def test_children_cleaned_up_two(self):
+    a = UOp.variable("weird_name_236", 0, 10)
+    b = a*a
+    c = a*2
+    self.assertEqual(len(a.children), 2)
+    del b
+    self.assertEqual(len(a.children), 1)
+    del c
+    self.assertEqual(len(a.children), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

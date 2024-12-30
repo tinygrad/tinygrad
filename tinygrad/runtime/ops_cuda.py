@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes, ctypes.util, functools
-from typing import Tuple, Optional, List
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -12,14 +11,14 @@ if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint:
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
 
-def encode_args(args, vals) -> Tuple[ctypes.Structure, ctypes.Array]:
+def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
   c_args = init_c_struct_t(tuple([(f'f{i}', cuda.CUdeviceptr_v2) for i in range(len(args))] +
                                  [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
 
-def cu_time_execution(cb, enable=False) -> Optional[float]:
+def cu_time_execution(cb, enable=False) -> float|None:
   if not enable: return cb()
   evs = [init_c_var(cuda.CUevent(), lambda x: cuda.cuEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
   cuda.cuEventRecord(evs[0], None)
@@ -50,7 +49,7 @@ class CUDAProgram:
   def __del__(self):
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
       self.c_args, self.vargs = encode_args(args, vals)
@@ -60,25 +59,25 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def __init__(self, device:CUDADevice):
-    self.device = device
+  def __init__(self, dev:CUDADevice):
+    self.dev = dev
     super().__init__()
   def _alloc(self, size, options:BufferSpec):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _free(self, opaque, options:BufferSpec):
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
   def _copyin(self, dest, src:memoryview):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     host_mem = self.alloc(len(src), BufferSpec(host=True))
-    self.device.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
+    self.dev.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
   def _copyout(self, dest:memoryview, src):
     CUDADevice.synchronize_system()
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     check(cuda.cuCtxSetCurrent(src_dev.context))
@@ -90,7 +89,7 @@ class CUDAAllocator(LRUAllocator):
   def _offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
 
 class CUDADevice(Compiled):
-  devices: List[CUDADevice] = []
+  devices: list[CUDADevice] = []
   peer_access = False
 
   def __init__(self, device:str):
@@ -110,7 +109,7 @@ class CUDADevice(Compiled):
       CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}"
-    self.pending_copyin: List[Tuple[int, int, Optional[BufferSpec]]] = []
+    self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

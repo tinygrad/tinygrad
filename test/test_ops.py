@@ -533,12 +533,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
   def test_div_int(self):
-    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
-    helper_test_op(None, lambda x,y: x//y, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
-    helper_test_op(None, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
-    helper_test_op(None, lambda x: x//2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
+    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=[[5, 6, 7],[1, 2, 3]])
+    helper_test_op(None, lambda x,y: x//y, forward_only=True, vals=[[5, 6, 7],[1, 2, 3]])
+    helper_test_op(None, lambda x: x/2, forward_only=True, vals=[[3, 4, 5]])
+    helper_test_op(None, lambda x: x//2, forward_only=True, vals=[[3, 4, 5]])
     helper_test_op(None, functools.partial(torch.div, rounding_mode="trunc"), Tensor.idiv, forward_only=True,
-                   vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
+                   vals=[[-4, 7, 5, 4, -7, 8], [2, -3, 8, -2, 3, 5]])
     if is_dtype_supported(dtypes.uint64):
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
@@ -765,6 +765,12 @@ class TestOps(unittest.TestCase):
   def test_selu(self):
     helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
     helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
+  def test_silu(self):
+    helper_test_op([(45,65)], torch.nn.functional.silu, Tensor.silu)
+    helper_test_op([()], torch.nn.functional.silu, Tensor.silu)
+  def test_swish(self):
+    helper_test_op([(45,65)], torch.nn.functional.silu, Tensor.swish)
+    helper_test_op([()], torch.nn.functional.silu, Tensor.swish)
 
   def test_abs(self):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
@@ -913,8 +919,8 @@ class TestOps(unittest.TestCase):
     # check if it returns the first index for multiple occurences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[1, 2, 2]])
-    np.testing.assert_equal(Tensor([2,2]).argmax().numpy(), np.array(0))
-    np.testing.assert_equal(Tensor([1,2,2]).argmax().numpy(), np.array(1))
+    np.testing.assert_equal(Tensor([2,2]).argmax().numpy(), 0)
+    np.testing.assert_equal(Tensor([1,2,2]).argmax().numpy(), 1)
     helper_test_op([(10,20)], lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(0, False).type(torch.int32), lambda x: x.argmax(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, False).type(torch.int32), lambda x: x.argmax(1, False), forward_only=True)
@@ -932,8 +938,8 @@ class TestOps(unittest.TestCase):
     # check if it returns the first index for multiple occurences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[3, 2, 2]])
-    np.testing.assert_equal(Tensor([2,2]).argmin().numpy(), np.array(0))
-    np.testing.assert_equal(Tensor([3,2,2]).argmin().numpy(), np.array(1))
+    np.testing.assert_equal(Tensor([2,2]).argmin().numpy(), 0)
+    np.testing.assert_equal(Tensor([3,2,2]).argmin().numpy(), 1)
     helper_test_op([(10,20)], lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(0, False).type(torch.int32), lambda x: x.argmin(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, False).type(torch.int32), lambda x: x.argmin(1, False), forward_only=True)
@@ -1899,9 +1905,6 @@ class TestOps(unittest.TestCase):
       with self.subTest(p):
         for n in [3,4]:
           for k in [2]:
-            helper_test_op([(1,1,n), (1,1,k)],
-              lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
-              lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
             helper_test_op([(1,1,n), (1,1,k)],
               lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu())

@@ -10,24 +10,25 @@ from typing import List, Optional, Union, cast
 
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize, remove_movement_ops
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
-  if isinstance(t, Tensor): outs = t.lazydata.lbs
-  elif isinstance(t, List): outs = flatten([r.lazydata.lbs for r in t])
-  else: outs = [t]
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
-  sched = create_schedule(outs)
+  if isinstance(t, Tensor): sched = t.schedule()
+  elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
+  else:
+    assert isinstance(t, UOp), f"can't schedule {t}"
+    sched = create_schedule([t])
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -246,6 +247,11 @@ class TestSchedule(unittest.TestCase):
     sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+
+  def test_dedup_outputs(self):
+    a = Tensor.full((4, 4), 1.).contiguous().realize()
+    b = Tensor.full((4, 4), 1.).contiguous().realize()
+    check_schedule([a+b, a+b], 1)
 
   def test_fold_double_unary(self):
     y = Tensor.empty(2)
@@ -1400,8 +1406,11 @@ class TestSchedule(unittest.TestCase):
       x = Tensor.randn((9, 9)).realize()
       y = Tensor.randn((9, 9)).realize()
       out = x@y
-      run_schedule(check_schedule(out, 4))
+      run_schedule(check_schedule(out, 3))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
+      self.assertIsInstance(out.dtype, ImageDType)
+      self.assertIsNotNone(out.lazydata.base.realized)
+      self.assertIsInstance(out.lazydata.base.realized.dtype, ImageDType)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]
@@ -1922,7 +1931,7 @@ class TestSwizzle(unittest.TestCase):
     base = ShapeTracker.from_shape((32, 16, 1))
     start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
     r = start.expand((32, 16, 16)).r(Ops.ADD, (2,))
-    add = r.reshape((16, 32, 1)) + UOp.const_with_shape(r.dtype, 0, (16, 32, 1))
+    add = r.reshape((16, 32, 1)) + UOp.const(r.dtype, 0)
     self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
     to_store = add.permute((1, 0, 2)).contiguous()
     to_store = graph_rewrite(to_store, remove_movement_ops)
@@ -1933,6 +1942,8 @@ class TestSwizzle(unittest.TestCase):
     self.assertEqual(swizzle_cnt(ret), 1)
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
+# TODO: we only need valid on ast consts if it's masked, can fold this early to UOp.const
+zero_pm = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat(Ops.CONST, arg=0), UPat.cvar()))
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
     # start with non CONST Ops
@@ -1940,8 +1951,7 @@ class TestView(unittest.TestCase):
     # all masked out, degrades to const 0
     b = a.pad(((0, 10), None))[10:]
     sched = check_schedule(b.contiguous(), 1)
-    # TODO: this VALID can clean up, where do we need st?
-    self.assertIs(store_val(sched[-1]), UOp.const_with_shape(b.dtype, 0, b.lazydata.st.shape))
+    assert zero_pm.match(store_val(sched[-1]), {})
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
@@ -1952,18 +1962,14 @@ class TestView(unittest.TestCase):
     assert b.shape == (10, 10)
     sched = check_schedule(b.contiguous(), 1)
     self.assertEqual(sched[-1].ast.full_shape, (10, 10))
-    self.assertIs(store_val(sched[-1]), UOp.const_with_shape(b.dtype, 0, b.lazydata.st.shape))
+    assert zero_pm.match(store_val(sched[-1]), {})
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
   def test_zero_size_alt(self):
-    st = ShapeTracker.from_shape((135, 0, 9))
-    a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
-    b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
-    self.assertEqual(b.st, st.pad(pad_arg))
-    # TODO: why does this help?
-    b = graph_rewrite(b, remove_movement_ops)
-    self.assertIs(b.base.src[1], UOp.const(dtypes.float, 0))
+    a = Tensor.empty(135, 0, 9)
+    b = a.pad(((0, 0), (0, 0), (18, 0)))
+    check_schedule(b, 0)
 
   def test_partial_mask(self):
     # partial masked out does not degrade into CONST
@@ -1976,33 +1982,75 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
-@track_rewrites(named=True)
-def big_graph_rewrite(big_graph:UOp, ctx) -> UOp: return graph_rewrite(big_graph, do_realize, ctx)
+  # a*VIEW(x), where VIEW(x) = 0
+  # x collapses along with its children
+  def test_parent_view_collapses(self):
+    a = Tensor([1, 2])
+    b = Tensor.arange(3).contiguous()
+    bv = b.pad(((0, 2),))[-2:]
+    # this becomes a late a*0
+    late_mul = a*bv
+    check_schedule(late_mul, 0)
+    # the arange doesn't realize
+    self.assertIsNone(b.lazydata.base.realized)
+    # mul doesn't realize
+    self.assertIsNone(late_mul.lazydata.base.realized)
+    self.assertEqual(late_mul.tolist(), [0, 0])
+
+  # SINK has two branches:
+  # a*VIEW(x), where VIEW(x) = 0
+  # x+2
+  # as long as one child realizes, x does not collapse
+  def test_parent_multiple_children_no_collapse(self):
+    a = Tensor([1, 2])
+    b = Tensor.arange(3).contiguous()
+    bv = b.pad(((0, 2),))[-2:]
+    late_mul = a*bv
+    other_child = b+2
+    s = check_schedule([late_mul, other_child], 2)
+    # the arange realizes
+    self.assertIsNotNone(b.lazydata.base.realized)
+    # mul still collapses
+    self.assertIsNone(late_mul.lazydata.base.realized)
+    run_schedule(s)
+    self.assertEqual(other_child.tolist(), [2, 3, 4])
+
+def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic)
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
-    x = UOp.const(dtypes.int, 0)
-    big_graph = big_graph_rewrite(x.sink(), ctx:=ScheduleContext())
-    self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(ctx.realizes), 0)
-
-  def test_sink_childless_const_alt(self):
-    x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int, (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
-    self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(ctx.realizes), 0)
+    x = Tensor(0)
+    check_schedule(x, 0)
 
   def test_sink_childless_const_alt_expanded(self):
-    # this is a real STORE of CONST (post expand)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    out = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 2, dtypes.int), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
-    big_graph = big_graph_rewrite(out.sink(), ctx:=ScheduleContext())
-    self.assertIs(big_graph, out.sink())
-    self.assertEqual(len(ctx.realizes), 1)
+    x = Tensor.zeros(4, 4).contiguous()
+    check_schedule(x, 1)
+
+  def test_all_const_uops(self):
+    a = Tensor(4)*Tensor(2)
+    sink = tensor_rewrite(a)
+    assert UPat.cvar().match(sink, {})
+
+  def test_masked_const_elementwise(self):
+    a = Tensor.eye(10)@Tensor.eye(10)
+    sink = tensor_rewrite(a)
+    assert UPat(Ops.REDUCE_AXIS, src=(UPat.cvar().view()*UPat.cvar().view(),)).match(sink, {})
+
+  def test_elementwise_ops(self):
+    a = Tensor.empty(4, 4, dtype=dtypes.int)
+    sink = tensor_rewrite(a*0)
+    assert UPat(Ops.CONST, arg=0).match(sink, {})
+    self.assertIs(tensor_rewrite(a*1), a.lazydata)
+    self.assertIs(tensor_rewrite(a+0), a.lazydata)
+    self.assertIs(tensor_rewrite(a//1), a.lazydata)
+
+  def test_cast_folding(self):
+    a = Tensor(1.0).cast(dtypes.int)
+    sink = tensor_rewrite(a)
+    assert UPat.cvar(dtype=dtypes.int).match(sink, {})
 
 tensor_const_pm = PatternMatcher([
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, src=()))), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))))), lambda: True),
 ])
 class TestConst(unittest.TestCase):
   # ** part 1: basic functionality of a tensor directly created from CONST
@@ -2020,15 +2068,12 @@ class TestConst(unittest.TestCase):
 
   def test_uop_methods(self):
     a = Tensor(1)
-    self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
 
     a = Tensor.ones((4, 4))
-    self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
 
     a = Tensor.ones((4, 4)).pad((1, 1),)
-    self.assertTrue(a.lazydata.is_unrealized_const())
     self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
 
   def test_const_schedule(self):
@@ -2095,7 +2140,7 @@ class TestConst(unittest.TestCase):
 
   # ** part 3: Tensor variable bindings
 
-  @unittest.expectedFailure # TODO: should schedule assert if you try to realize a Variable?
+  #@unittest.expectedFailure # TODO: should schedule assert if you try to realize a Variable?
   def test_var_schedule(self):
     vv = UOp.variable("a", 0, 10).bind(1)
     a = Tensor(vv)
@@ -2109,6 +2154,20 @@ class TestConst(unittest.TestCase):
     self.assertEqual(len(sched), 1)
     run_schedule(sched, var_vals)
     self.assertEqual(a.tolist(), 3)
+
+@unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from another device to clang")
+class TestCopyFolding(unittest.TestCase):
+  def test_const_copy_is_free(self):
+    b = Tensor(1).to("CLANG")
+    check_schedule(b, 0, filter_sink=False)
+    assert b.item() == 1
+
+  def test_late_const_copy_folding(self):
+    a = Tensor.arange(3).realize()
+    zeros = Tensor.zeros(3).realize()
+    b = (a*zeros).to("CLANG")
+    run_schedule(check_schedule(b, 0, filter_sink=False))
+    self.assertListEqual(b.tolist(), [0, 0, 0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

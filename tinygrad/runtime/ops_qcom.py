@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Tuple, List, Any, cast, Optional
+from typing import Any, cast, Optional
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.autogen import kgsl, adreno, libc
@@ -43,7 +43,7 @@ class QCOMSignal(HCQSignal):
     if isinstance(self.base_addr, int): QCOMDevice.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
-    # Sleep only for only timeline signals. Do it immidiately to free cpu.
+    # Sleep only for only timeline signals. Do it immediately to free cpu.
     if self.timeline_for_device is not None:
       kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.timeline_for_device.fd, context_id=self.timeline_for_device.ctx,
                                                   timestamp=self.timeline_for_device.last_cmd, timeout=0xffffffff)
@@ -97,7 +97,7 @@ class QCOMComputeQueue(HWQueue):
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
     self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
     # From now on, the queue is on the device for faster submission.
-    self._q = to_mv(self.obj.gpuaddr, len(self._q) * 4).cast("I") # type: ignore
+    self._q = to_mv(self.obj.gpuaddr, len(self._q) * 4).cast("I")
 
   def _submit(self, dev:QCOMDevice):
     if self.binded_device == dev: submit_req = self.submit_req
@@ -170,7 +170,7 @@ class QCOMComputeQueue(HWQueue):
     return self
 
 class QCOMArgsState(HCQArgsState):
-  def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+  def __init__(self, ptr:int, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(ptr, prg, bufs, vals=vals)
 
     if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
@@ -208,7 +208,7 @@ class QCOMProgram(HCQProgram):
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
@@ -268,7 +268,7 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferSpec(cpu_access=True, nolru=True))
 
 class QCOMTextureInfo:
-  def __init__(self, pitch:int, real_stride:int, desc:List[int], ibo:List[int]):
+  def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):
     self.pitch, self.real_stride, self.desc, self.ibo = pitch, real_stride, desc, ibo
 
 class QCOMAllocator(HCQAllocatorBase):
@@ -320,7 +320,7 @@ class QCOMAllocator(HCQAllocatorBase):
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None
-  signals_pool: List[int] = []
+  signals_pool: list[int] = []
   gpu_id: int = 0
   dummy_addr: int = 0
 
@@ -335,7 +335,7 @@ class QCOMDevice(HCQCompiled):
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
 
     self.cmd_buf = self._gpu_alloc(16 << 20)
-    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, start=cast(int, self.cmd_buf.va_addr), wrap=True)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, base=cast(int, self.cmd_buf.va_addr), wrap=True)
 
     self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
 

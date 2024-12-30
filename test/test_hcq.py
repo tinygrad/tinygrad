@@ -17,7 +17,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0 = Device[Device.DEFAULT]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    si = create_schedule([self.b.lazydata])[-1]
+    si = self.b.schedule()[-1]
 
     TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
@@ -347,7 +347,7 @@ class TestHCQ(unittest.TestCase):
     SZ = 200_000_000
     b = Buffer(f"{Device.DEFAULT}:1", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
-    TestHCQ.d0._gpu_map(b._buf)
+    TestHCQ.d0.allocator.map(b._buf)
 
     sig_st, sig_en = TestHCQ.d0.signal_t(), TestHCQ.d0.signal_t()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
