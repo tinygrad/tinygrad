@@ -7,21 +7,6 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid
-from tinygrad.codegen.uopgraph import sym
-
-def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min(dtype)
-
-# If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
-# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`
-def upcast(u: UOp):
-  srcs = [upcast(_src) for _src in u.src]
-  if u.dtype.scalar() is dtypes.int:
-    dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-    ret = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u, u.dtype): return ret
-    # Check the original src, new srcs has Ops.CAST whose vmin, vmax changes the real bounds
-    if any((overflow(src, u.dtype) for src in u.src)): return ret.cast(u.dtype)
-  return u.replace(src=tuple(srcs))
 
 @functools.lru_cache(None)
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
@@ -33,7 +18,7 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
       idxs.append((idx//acc)%d)
       acc *= d
     idx, valid = view.to_indexed_uops(idxs[::-1], valid)
-  return upcast(graph_rewrite(idx, sym, {})), upcast(graph_rewrite(valid, sym, {}))
+  return idx, valid
 
 @functools.lru_cache(None)
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[Optional[sint], ...]:
