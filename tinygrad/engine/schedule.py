@@ -145,7 +145,7 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
   # meta ops and assign already have a target buffer, otherwise we create a new one
-  # TODO: we need to rethink meta ops having buffers at creation time
+  # TODO: we need to rethink "meta ops" having buffers at creation time
   buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, *GroupOp.Meta} else UOp.new_buffer(buf.device, buf.size, dtype)
   op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this op
