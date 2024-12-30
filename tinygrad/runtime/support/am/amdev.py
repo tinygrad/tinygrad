@@ -203,7 +203,7 @@ class AMMemoryManager:
     for _, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
       while n_ptes > 0:
         # Trying to alloc the contigous frags when possible.
-        (lpaddr, upd_pte, f_cnt), off = (self._try_alloc(n_ptes, pte_covers), 0) if paddr is None else ((paddr, n_ptes, frags_cnt), off)
+        (lpaddr, upd_pte, f_cnt), off = (self._try_alloc(n_ptes, pte_covers, frags_cnt), 0) if paddr is None else ((paddr, n_ptes, frags_cnt), off)
 
         for pte_idx in range(upd_pte):
           assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"

@@ -27,12 +27,11 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, dev, base_addr:Optional[int]=None, **kwargs):
-    self.dev = dev
-    super().__init__(self.dev.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
+  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
   def __del__(self):
-    if isinstance(self.base_addr, int): self.dev.signals_pool.append(self.base_addr)
+    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -444,7 +443,7 @@ class PCIIface:
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd))
 
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-      self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, (ctypes.c_char * (len(self.pcibus)+1))(*bytearray(self.pcibus.encode() + b'\0')))
+      self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, (ctypes.c_char * (len(self.pcibus)+1))(*self.pcibus.encode()))
 
       self.irq_fd = os.eventfd(0, 0)
       self.irq_poller = select.poll()
@@ -564,7 +563,7 @@ class AMDDevice(HCQCompiled):
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
-                     functools.partial(AMDSignal, self), AMDComputeQueue, AMDCopyQueue)
+                     AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
