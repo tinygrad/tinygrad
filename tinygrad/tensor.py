@@ -14,6 +14,8 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
+all_tensors: dict[weakref.ref[Tensor], None] = {}
+
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
@@ -131,10 +133,15 @@ class Tensor(SimpleMathTrait):
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
+  def __new__(cls, *args, **kwargs):
+    instance = super().__new__(cls)
+    all_tensors[instance.ref] = None
+    return instance
+
   @functools.cached_property
   def ref(self) -> weakref.ref[Tensor]: return weakref.ref(self)
   def __del__(self):
-    with contextlib.suppress(AttributeError): del self.universe[self.ref]
+    with contextlib.suppress(AttributeError, KeyError): del self.universe[self.ref]
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
@@ -237,7 +244,8 @@ class Tensor(SimpleMathTrait):
     # TODO: becomes_map should be returned from create_schedule_with_vars
 
     # NOTE: this is potentially a lot of Tensors. see above about the universes
-    fixed_tensors: list[Tensor] = dedup(flatten([[x for xref in t.universe if (x:=xref()) is not None] for t in (self,)+lst]))
+    #fixed_tensors: list[Tensor] = dedup(flatten([[x for xref in t.universe if (x:=xref()) is not None] for t in (self,)+lst]))
+    fixed_tensors: list[Tensor] = [x for xref in all_tensors if (x:=xref()) is not None]
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(becomes_map)
     becomes_map.clear()
@@ -245,7 +253,8 @@ class Tensor(SimpleMathTrait):
       if s is ns: continue
       if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
       else: t.lazydata = ns
-      # TODO: we can update the universe here to reflect the realization
+      # update the universe to reflect the realization
+      #if t.lazydata.is_realized: del t.universe[t.ref]
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
