@@ -36,7 +36,7 @@ class AMDSignal(HCQSignal):
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 2000 and self.timeline_for_device is not None: self.timeline_for_device.dev_iface.sleep(200)
+    if time_spent_waiting_ms > 0 and self.timeline_for_device is not None: self.timeline_for_device.dev_iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __del__(self):
@@ -432,7 +432,7 @@ class PCIIface:
         pathlib.Path("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode").write_text("1")
         PCIIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
         vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-      except: PCIIface.vfio = False
+      except OSError: PCIIface.vfio = False
 
     # Init vfio for the device
     if PCIIface.vfio:
