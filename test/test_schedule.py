@@ -2178,13 +2178,13 @@ class TestTensorUOpSpec(unittest.TestCase):
     ])
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_push_views)
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      create_schedule(list(t.src))
+      create_schedule_with_vars(list(t.src))
 
   @track_rewrites(named=True)
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
-    create_schedule(list(t.src))
+    create_schedule_with_vars(list(t.src))
 
   @track_rewrites(named=True)
   def test_verify_arg(self):
@@ -2195,7 +2195,7 @@ class TestTensorUOpSpec(unittest.TestCase):
     ])
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_cast_folding)
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      create_schedule(list(t.src))
+      create_schedule_with_vars(list(t.src))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
