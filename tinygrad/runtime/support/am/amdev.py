@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib
-from typing import Tuple, Dict, Set, Optional, Generator, List
+from typing import Optional
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -10,7 +10,7 @@ AM_DEBUG = getenv("AM_DEBUG", 0)
 
 @dataclasses.dataclass(frozen=True)
 class AMRegister:
-  adev:AMDev; reg_off:int; reg_fields:Dict[str, Tuple[int, int]] # noqa: E702
+  adev:AMDev; reg_off:int; reg_fields:dict[str, tuple[int, int]] # noqa: E702
 
   def _parse_kwargs(self, **kwargs):
     mask, values = 0xffffffff, 0
@@ -46,8 +46,8 @@ class AMFirmware:
       self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
 
     # Load other fw
-    self.ucode_start: Dict[str, int] = {}
-    self.descs: List[Tuple[int, memoryview]] = []
+    self.ucode_start: dict[str, int] = {}
+    self.descs: list[tuple[int, memoryview]] = []
 
     blob, hdr = self.load_fw("smu_13_0_0.bin", am.struct_smc_firmware_header_v1_0)
     self.smu_psp_desc = self.desc(am.GFX_FW_TYPE_SMU, blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes)
@@ -97,7 +97,7 @@ class AMFirmware:
     blob = memoryview(bytearray(fpath.read_bytes()))
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
-  def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> Tuple[int, memoryview]: return (typ, blob[offset:offset+size])
+  def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> tuple[int, memoryview]: return (typ, blob[offset:offset+size])
 
 class AMPhysicalMemoryBlock:
   def __init__(self, adev:AMDev, paddr:int, size:int): self.adev, self.paddr, self.size = adev, paddr, size
@@ -131,7 +131,7 @@ class AMMemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=am.AMDGPU_VM_PDB1)
 
-  def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False, creat_pt=True) -> Generator[Tuple[int, int, int, int], None, None]:
+  def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False, creat_pt=True):
     """
     The function traverses the page table structure, yielding the largest entries that cover the requested virtual address range.
     """
@@ -285,7 +285,7 @@ class AMDev:
     for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
 
-  def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__.get(f"{ip}_HWIP")][inst][seg]
+  def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
@@ -305,15 +305,12 @@ class AMDev:
     self.reg(f"{reg_base}{hi_suffix}").write(val >> 32)
 
   def indirect_rreg(self, reg:int) -> int:
-    self.regBIF_BX_PF0_RSMU_INDEX.write(reg)
-    assert self.regBIF_BX_PF0_RSMU_INDEX.read() == reg
-    return self.regBIF_BX_PF0_RSMU_DATA.read()
+    self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
+    return self.reg("regBIF_BX_PF0_RSMU_DATA").read()
 
   def indirect_wreg(self, reg:int, val:int):
-    self.regBIF_BX_PF0_RSMU_INDEX.write(reg)
-    assert self.regBIF_BX_PF0_RSMU_INDEX.read() == reg
-    self.regBIF_BX_PF0_RSMU_DATA.write(val)
-    assert self.regBIF_BX_PF0_RSMU_DATA.read() == val
+    self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
+    self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
   def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff) -> int:
     for _ in range(10000):
@@ -334,7 +331,7 @@ class AMDev:
 
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
-    self.regs_offset = collections.defaultdict(dict)
+    self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
 
     for num_die in range(ihdr.num_dies):
       dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
@@ -349,11 +346,11 @@ class AMDev:
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
   def _build_regs(self):
-    mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0, "mmMP1"), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]
-    for info in mods:
-      base, module, rpref = info if len(info) == 3 else (*info, "reg")
-      reg_names: Set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
-      reg_fields: Dict[str, List[int, int]] = collections.defaultdict(dict)
+    mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]
+    for base, module in mods:
+      rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
+      reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
+      reg_fields: dict[str, dict[str, tuple]] = collections.defaultdict(dict)
       for k, val in module.__dict__.items():
         if k.endswith("_MASK") and ((rname:=k.split("__")[0]) in reg_names):
           reg_fields[rname][k[2+len(rname):-5].lower()] = (val, module.__dict__.get(f"{k[:-5]}__SHIFT", val.bit_length() - 1))

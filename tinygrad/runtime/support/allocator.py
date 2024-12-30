@@ -14,10 +14,10 @@ class TLSFAllocator:
 
   def __init__(self, size:int, base:int=0, block_size:int=16, lv2_cnt:int=16):
     self.size, self.base, self.block_size, self.l2_cnt = size, base, block_size, lv2_cnt.bit_length()
-    self.storage = [collections.defaultdict(list) for _ in range(size.bit_length() + 1)]
+    self.storage:list = [collections.defaultdict(list) for _ in range(size.bit_length() + 1)]
 
     # self.blocks is more like a linked list, where each entry is a contigous block.
-    self.blocks = {0: (size, None, None, True)} # size, next, prev, is_free
+    self.blocks:dict[int, tuple[int, Optional[int], Optional[int], bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
     self._insert_block(0, size)
 
   def lv1(self, size): return size.bit_length()
@@ -39,20 +39,20 @@ class TLSFAllocator:
     nxt = self.blocks[start][1]
     assert self.blocks[start][3], "block must be free"
     self._remove_block(start, size)._insert_block(start, new_size)._insert_block(start + new_size, size - new_size, prev=start)
-    if self.blocks.get(nxt) is not None: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start + new_size, self.blocks[nxt][3])
+    if nxt in self.blocks: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start + new_size, self.blocks[nxt][3])
     return self
 
   def _merge_right(self, start:int):
     size, nxt, _, is_free = self.blocks[start]
     assert is_free, "block must be free"
 
-    while is_free and self.blocks.get(nxt) is not None:
+    while is_free and nxt in self.blocks:
       if (blk:=self.blocks[nxt])[3] is False: break
       self._remove_block(start, size)._remove_block(nxt, blk[0])._insert_block(start, size:=size + blk[0])
       assert self.blocks[start][1] == blk[1]
       _, nxt, _, _ = self.blocks.pop(nxt)
 
-    if self.blocks.get(nxt) is not None: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start, self.blocks[nxt][3])
+    if nxt in self.blocks: self.blocks[nxt] = (self.blocks[nxt][0], self.blocks[nxt][1], start, self.blocks[nxt][3])
 
   def _merge_block(self, start:int):
     # Go left while blocks are free. Then merge all them right.
