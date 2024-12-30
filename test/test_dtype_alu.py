@@ -6,7 +6,6 @@ import numpy as np
 from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
@@ -72,7 +71,7 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
-  sched = create_schedule([out.lazydata])
+  sched = out.schedule()
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()

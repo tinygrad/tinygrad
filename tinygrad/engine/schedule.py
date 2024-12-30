@@ -612,8 +612,3 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
-
-def create_schedule(outs:list[UOp]) -> list[ScheduleItem]:
-  schedule, var_vals = create_schedule_with_vars(outs)
-  assert len(var_vals) == 0
-  return schedule
