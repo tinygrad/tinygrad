@@ -2186,5 +2186,15 @@ class TestTensorUOpSpec(unittest.TestCase):
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule(list(t.src))
 
+  def test_verify_arg(self):
+    a = Tensor.ones((4, 4)).cast(dtypes.int)
+    unsafe_cast_folding = PatternMatcher([
+      # this kind of rule should change the arg too, the parser must reject this.
+      (UPat(Ops.CAST, src=(UPat.cvar("x"),), name="cast"), lambda cast,x: x.replace(dtype=cast.dtype)),
+    ])
+    t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_cast_folding)
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      create_schedule(list(t.src))
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

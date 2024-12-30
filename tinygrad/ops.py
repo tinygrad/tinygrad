@@ -986,10 +986,13 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
-def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
-  spec_pm = spec if extra_spec is None else extra_spec+spec
+def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
+  specs = [spec, *extra_specs]
   for i,u in enumerate(uops):
-    if not spec_pm.rewrite(u):
+    results = [s.rewrite(u) for s in specs]
+    # none of the specs should return False
+    # at least one spec should return True
+    if any(ret is False for ret in results) or all(ret is None for ret in results):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 

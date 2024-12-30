@@ -570,7 +570,7 @@ remove_movement_ops = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
-  if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
+  if not skip_check: type_verify(list(UOp.sink(*outs).toposort), tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
   sink = add_buffers(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
   # const folding and fusion
