@@ -4,6 +4,7 @@ from tinygrad.ops import UOp, symbolic, graph_rewrite_map, _substitute
 from test.unit.test_tensor_uop_representation import is_pattern, realized_pattern, is_pattern_uop
 
 class TestTensorMutates(unittest.TestCase):
+  @unittest.expectedFailure
   def test_mutate_add(self):
     a = Tensor([1,2,3])
     b = Tensor([4,5,6])
@@ -213,7 +214,6 @@ class TestRewriteMap(unittest.TestCase):
     self.assertEqual(node_map[z_var], z_var)
     self.assertEqual(node_map[zero_node], zero_node)
     self.assertEqual(node_map[one_node], one_node)
-
 
 if __name__ == "__main__":
   unittest.main()

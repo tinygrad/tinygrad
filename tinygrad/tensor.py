@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib, weakref
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -8,19 +8,11 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, becomes_map, graph_rewrite_map, _substitute
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-
-# *** Tensors are containers for UOps ***
-
-# NOTE: this has to be a list as UOps can map to more than one Tensor
-tensor_map: dict[UOp, list[weakref.ref[Tensor]]] = {}
-def update_tensor_map(t:Tensor):
-  # TODO: multi
-  tensor_map.setdefault(t.lazydata, []).append(weakref.ref(t))
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -41,7 +33,6 @@ class Function:
     ret = Tensor.__new__(Tensor)
     ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
-    update_tensor_map(ret)
     return ret
 
 import tinygrad.function as F
@@ -179,7 +170,6 @@ class Tensor(SimpleMathTrait):
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
-    update_tensor_map(self)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -226,24 +216,7 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
-    schedule, var_vals = create_schedule_with_vars(scheduled_uops)
-    # TODO: becomes_map should be returned from create_schedule_with_vars
-
-    # NOTE: we put tensor_map in here instead of scheduled_uops. we could be more selective here
-    # all Tensors in a different graph will just rewrite to themselves
-    rewrite_map = graph_rewrite_map(UOp.sink(*tensor_map), _substitute, becomes_map, bottom_up=True)
-    becomes_map.clear()
-
-    # apply becomes_map
-    # TODO: gc tensor_map
-    for k,v in rewrite_map.items():
-      if k is v: continue
-      if (tt:=tensor_map.get(k)) is not None:
-        for t in tt:
-          if (rt:=t()) is not None:
-            rt.lazydata = v
-            update_tensor_map(rt)
+    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -262,10 +235,9 @@ class Tensor(SimpleMathTrait):
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert not x.requires_grad and getattr(self, '_ctx', None) is None
+    assert getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
-    update_tensor_map(self)
     return self
 
   def assign(self, x) -> Tensor:
@@ -285,7 +257,6 @@ class Tensor(SimpleMathTrait):
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized: return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
-    update_tensor_map(self)
     return self
 
   def detach(self) -> Tensor:
@@ -384,8 +355,7 @@ class Tensor(SimpleMathTrait):
     real = self.to(device)
     # TODO: is this assign?
     if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
-    self.lazydata = real.lazydata
-    update_tensor_map(self)
+    return self.replace(real)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
     """
@@ -413,9 +383,7 @@ class Tensor(SimpleMathTrait):
     """
     Shards the tensor across the given devices in place.
     """
-    self.lazydata = self.shard(devices, axis, splits).lazydata
-    update_tensor_map(self)
-    return self
+    return self.replace(self.shard(devices, axis, splits))
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:

@@ -220,7 +220,8 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
-    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
+    UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
+    for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     return created
@@ -230,8 +231,6 @@ buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # t
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
-becomes_map: weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()
-
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -239,9 +238,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
+  children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    if (k:=(self.op, self.dtype, self.src, self.arg)) in UOpMetaClass.ucache:
+    if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
+      for s in self.src: s.children.discard(ref)
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
@@ -275,8 +276,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  @property
-  def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     # these ops define a ShapeTracker from the arg
@@ -297,7 +296,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ShapeTracker.from_shape(shape)
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
-    return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    if self.op is Ops.VIEW: return self.shape
+    # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
+    return tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL,Ops.DEFINE_VAR,Ops.CONST}]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -474,9 +475,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # CAUTION: MUTABILITY!
   def become(self, u:UOp):
-    becomes_map[self] = u
-    #del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
-    #self.op, self.dtype, self.src, self.arg = u.op, u.dtype, u.src, u.arg
+    del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
+    self.op, self.dtype, self.src, self.arg = u.op, u.dtype, u.src, u.arg
 
   # *** uop movement ops ***
 
@@ -1317,7 +1317,7 @@ merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda
 view_left = merge_views+PatternMatcher([
   # VIEW before elementwise ops
   (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"),
-   lambda e,v: e.replace(src=tuple(s if not s.has_st else s.view(v.st) if s is s.base else s.base.view(s.st+v.st) for s in e.src))),
+   lambda e,v: e.replace(src=tuple(s if s.st is None else s.view(v.st) if s is s.base else s.base.view(s.st+v.st) for s in e.src))),
   # early merge VIEW buffer ops
   (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
 ])
