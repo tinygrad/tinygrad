@@ -193,8 +193,8 @@ class AMMemoryManager:
     # Try to allocate contiguous physical memory.
     try: return self.pa_allocator.alloc(pte_cnt * pte_cvrs), pte_cnt
     except MemoryError:
-      if pte_cnt > 1: return self._try_alloc(pte_cnt // 2)
-      else: raise MemoryError("Failed to allocate physical memory")
+      if pte_cnt > 1: return self._try_alloc(pte_cnt // 2, pte_cvrs)
+      raise
 
   def map_range(self, vaddr, size, paddr=None, uncached=False, system=False, snooped=False):
     if AM_DEBUG >= 2: print(f"Mapping {vaddr=:#x} -> {paddr} ({size=:#x})")
