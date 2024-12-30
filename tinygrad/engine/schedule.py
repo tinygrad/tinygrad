@@ -567,8 +567,15 @@ remove_movement_ops = PatternMatcher([
    lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
 ])
 
+TENSOR_PROCESS_REPLAY: list[tuple[bytes, dict, list[UOp]]] = []
+if getenv("REPLAY_TENSOR"):
+  @atexit.register
+  def save_replay_tensor() -> None:
+    for i,v in enumerate(TENSOR_PROCESS_REPLAY): diskcache_put("tensor_process_replay", i, v)
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+  if getenv("REPLAY_TENSOR"): TENSOR_PROCESS_REPLAY.append((pickle.dumps(UOp.sink(*outs)), {}, []))
   if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
   sink = add_buffers(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
@@ -604,6 +611,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   schedule: list[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
+    if getenv("REPLAY_TENSOR"): TENSOR_PROCESS_REPLAY[-1][-1].append(si.ast)
     for x in graph[si]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

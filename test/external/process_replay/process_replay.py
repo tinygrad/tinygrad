@@ -4,7 +4,7 @@ from collections import defaultdict
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
 from typing import Callable, List, Set, Tuple, Union, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.engine.schedule import ScheduleContext, schedule_uop
+from tinygrad.engine.schedule import ScheduleContext, create_schedule, schedule_uop
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
@@ -68,7 +68,8 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       for x in args[:-1]: logging.info(x)
       continue
     # diff kernels
-    try: assert args[-1] == good
+    try:
+      assert args[-1] == good
     except AssertionError:
       changed += 1
       logging.info("PROCESS REPLAY DETECTED CHANGE")
@@ -106,6 +107,12 @@ def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
     if sum(deletions) != 0: logging.info(colored(f"{sum(deletions)} deletions(-)", "red"))
     if any(changed): warnings.warn("process replay detected changes", ProcessReplayWarning)
 
+def recreate_tensor(a):
+  tensor_sink = pickle.loads(a)
+  assert isinstance(tensor_sink, UOp)
+  sched = create_schedule(list(tensor_sink.src))
+  return [si.ast for si in sched]
+
 # *** main loop
 
 if __name__ == "__main__":
@@ -114,9 +121,13 @@ if __name__ == "__main__":
     exit(0)
 
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
+  name = "tensor"
+  _pmap("tensor", recreate_tensor)
+  """
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
     try: _pmap(name, fxn)
     except Exception as e:
       if ASSERT_DIFF: raise e
       logging.error(f"{name} diff err {e}")
+  """
