@@ -39,8 +39,9 @@ tensor_uop_spec = PatternMatcher([
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
-  # Tensor const has a ShapeTracker of shape=() and a device
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
+  # Tensor const has an unmasked ShapeTracker of stride 0 and a device
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
+   lambda st: all(s == 0 for s in st.st.real_strides()) and len(st.st.views) == 1),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes

@@ -987,7 +987,7 @@ spec = PatternMatcher([
 ])
 
 def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
-  spec_pm = spec if extra_spec is None else spec+extra_spec
+  spec_pm = spec if extra_spec is None else extra_spec+spec
   for i,u in enumerate(uops):
     if not spec_pm.rewrite(u):
       print_uops(uops)
