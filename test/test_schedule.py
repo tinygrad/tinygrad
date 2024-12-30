@@ -14,20 +14,21 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops, to_uop
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
-  if isinstance(t, Tensor): outs = t.lazydata.lbs
-  elif isinstance(t, List): outs = flatten([r.lazydata.lbs for r in t])
-  else: outs = [t]
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
-  sched = create_schedule(outs)
+  if isinstance(t, Tensor): sched = t.schedule()
+  elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
+  else:
+    assert isinstance(t, UOp), f"can't schedule {t}"
+    sched, _ = create_schedule_with_vars([t])
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -54,7 +55,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
   w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
-  with Context(**kwargs): s = create_schedule([ret.lazydata, img.grad.lazydata, w.grad.lazydata])
+  with Context(**kwargs): s = Tensor.schedule(ret, img.grad, w.grad)
   run_schedule(s.copy())
   cnt = len([si for si in s if si.ast.op is Ops.SINK])
   assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
@@ -1393,11 +1394,11 @@ class TestSchedule(unittest.TestCase):
 
   def test_const_schedule(self):
     constv = Tensor.empty(2, 2).lazydata.const_like(10)
-    self.assertEqual(len(create_schedule([constv])), 0)
+    check_schedule(constv, 0)
 
   def test_const_schedule_contig(self):
     constv = Tensor.empty(2, 2).lazydata.const_like(10).contiguous()
-    self.assertEqual(len(create_schedule([constv])), 1)
+    check_schedule(constv, 1)
 
   @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
   def test_image_matmul(self):
@@ -1981,6 +1982,39 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
+  # a*VIEW(x), where VIEW(x) = 0
+  # x collapses along with its children
+  def test_parent_view_collapses(self):
+    a = Tensor([1, 2])
+    b = Tensor.arange(3).contiguous()
+    bv = b.pad(((0, 2),))[-2:]
+    # this becomes a late a*0
+    late_mul = a*bv
+    check_schedule(late_mul, 0)
+    # the arange doesn't realize
+    self.assertIsNone(b.lazydata.base.realized)
+    # mul doesn't realize
+    self.assertIsNone(late_mul.lazydata.base.realized)
+    self.assertEqual(late_mul.tolist(), [0, 0])
+
+  # SINK has two branches:
+  # a*VIEW(x), where VIEW(x) = 0
+  # x+2
+  # as long as one child realizes, x does not collapse
+  def test_parent_multiple_children_no_collapse(self):
+    a = Tensor([1, 2])
+    b = Tensor.arange(3).contiguous()
+    bv = b.pad(((0, 2),))[-2:]
+    late_mul = a*bv
+    other_child = b+2
+    s = check_schedule([late_mul, other_child], 2)
+    # the arange realizes
+    self.assertIsNotNone(b.lazydata.base.realized)
+    # mul still collapses
+    self.assertIsNone(late_mul.lazydata.base.realized)
+    run_schedule(s)
+    self.assertEqual(other_child.tolist(), [2, 3, 4])
+
 def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic)
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
@@ -2013,15 +2047,6 @@ class TestBigGraph(unittest.TestCase):
     a = Tensor(1.0).cast(dtypes.int)
     sink = tensor_rewrite(a)
     assert UPat.cvar(dtype=dtypes.int).match(sink, {})
-
-  # failure: the scheduler must not change image to its base dtype before const folding
-  @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
-  @unittest.expectedFailure
-  def test_float_to_image_cast_stays(self):
-    a = Tensor.empty(4).cast(dtypes.imagef((1,1,4)))
-    sink = to_uop(a.lazydata, ScheduleContext(), {})
-    sink = graph_rewrite(sink, symbolic)
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, dtypes.imagef((1, 1, 4))), UPat(Ops.CAST, src=(UPat.var(dtype=dtypes.float),)))).match(sink, {})
 
 tensor_const_pm = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
@@ -2129,6 +2154,20 @@ class TestConst(unittest.TestCase):
     self.assertEqual(len(sched), 1)
     run_schedule(sched, var_vals)
     self.assertEqual(a.tolist(), 3)
+
+@unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from another device to clang")
+class TestCopyFolding(unittest.TestCase):
+  def test_const_copy_is_free(self):
+    b = Tensor(1).to("CLANG")
+    check_schedule(b, 0, filter_sink=False)
+    assert b.item() == 1
+
+  def test_late_const_copy_folding(self):
+    a = Tensor.arange(3).realize()
+    zeros = Tensor.zeros(3).realize()
+    b = (a*zeros).to("CLANG")
+    run_schedule(check_schedule(b, 0, filter_sink=False))
+    self.assertListEqual(b.tolist(), [0, 0, 0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

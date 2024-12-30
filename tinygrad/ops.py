@@ -220,7 +220,8 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
-    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
+    UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
+    for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     return created
@@ -237,9 +238,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
+  children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    if (k:=(self.op, self.dtype, self.src, self.arg)) in UOpMetaClass.ucache:
+    if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
+      for s in self.src: s.children.discard(ref)
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
@@ -273,8 +276,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  @property
-  def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     # these ops define a ShapeTracker from the arg
@@ -298,7 +299,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ShapeTracker.from_shape(shape)
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
-    return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    if self.op is Ops.VIEW: return self.shape
+    # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
+    return tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL,Ops.DEFINE_VAR,Ops.CONST}]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -455,8 +458,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
-    # TODO: hack const metaop early here, fix this in multi
-    if self.base.op is Ops.CONST: return UOp.metaop(Ops.CONST, (), self.dtype, device, self.const_arg).view(unwrap(self.st))
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
@@ -491,7 +492,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
     # instant folding rules
-    if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret
 
@@ -1318,7 +1318,7 @@ merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda
 view_left = merge_views+PatternMatcher([
   # VIEW before elementwise ops
   (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"),
-   lambda e,v: e.replace(src=tuple(s if not s.has_st else s.view(v.st) if s is s.base else s.base.view(s.st+v.st) for s in e.src))),
+   lambda e,v: e.replace(src=tuple(s if s.st is None else s.view(v.st) if s is s.base else s.base.view(s.st+v.st) for s in e.src))),
   # early merge VIEW buffer ops
   (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
 ])
