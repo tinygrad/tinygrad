@@ -4,7 +4,7 @@ from tinygrad.ops import UOp, symbolic, graph_rewrite_map, _substitute
 from test.unit.test_tensor_uop_representation import is_pattern, realized_pattern, is_pattern_uop
 
 class TestTensorMutates(unittest.TestCase):
-  @unittest.expectedFailure
+  #@unittest.expectedFailure
   def test_mutate_add(self):
     a = Tensor([1,2,3])
     b = Tensor([4,5,6])
