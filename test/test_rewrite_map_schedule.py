@@ -5,7 +5,7 @@ from tinygrad import Tensor
 from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import unwrap
 from tinygrad.ops import GroupOp, Ops, PatternMatcher, UOp, UPat, graph_rewrite, graph_rewrite_map, symbolic_simple, track_rewrites
-from tinygrad.engine.schedule import ScheduleItem, remove_movement_ops, schedule_uop
+from tinygrad.engine.schedule import ScheduleItem, remove_movement_ops
 from tinygrad.shape.shapetracker import ShapeTracker
 
 @dataclass(frozen=True)
@@ -49,6 +49,7 @@ class TestSchedule(unittest.TestCase):
       k.become(v.buf_uop.view(k.st))
     run_schedule(schedule)
     self.assertIsNotNone(a.lazydata.realized)
+    self.assertEqual(a.tolist(), [1])
 
 if __name__ == "__main__":
   unittest.main()
