@@ -108,7 +108,7 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//prod([x[1] for x in tc.threads]) if (tc:=lin2.tensor_core) else 1
+      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         elif c in {"cyan", "green", "white"}: lcl *= s
