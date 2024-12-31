@@ -8,8 +8,6 @@ def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pa
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.lazydata, pat)
 
 class TestTensorMutates(unittest.TestCase):
-  # this fails because uops are mutating
-  @unittest.expectedFailure
   def test_mutate_add(self):
     a = Tensor([1,2,3])
     b = Tensor([4,5,6])
