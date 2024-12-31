@@ -87,12 +87,6 @@ class View:
   mask:Optional[tuple[tuple[sint, sint], ...]]
   contiguous:bool
 
-  @functools.cached_property
-  def t(self):
-    return tuple(x.tuplize if isinstance(x, UOp) else (x,) \
-                 for x in self.shape+self.strides+(self.offset,)+(tuple(flatten(self.mask)) if self.mask is not None else tuple()))
-  def __lt__(self, o:View): return self.t < o.t
-
   def to_indexed_uops(self:View, idxs:Optional[Sequence[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
     """(idx, valid)"""
     if idxs is None: idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)]

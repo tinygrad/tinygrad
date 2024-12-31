@@ -8,7 +8,6 @@ from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.device import is_dtype_supported
 
@@ -517,7 +516,7 @@ class TestNN(unittest.TestCase):
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
-    schedule = create_schedule([result.lazydata])
+    schedule = result.schedule()
     self.assertEqual(3, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
@@ -525,7 +524,7 @@ class TestNN(unittest.TestCase):
                 [4, 5, 6],
                 [7, 8, 9]])
     result = layer(b)
-    schedule = create_schedule([result.lazydata])
+    schedule = result.schedule()
     self.assertEqual(1, len([item for item in schedule if item.ast.op is Ops.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
 
