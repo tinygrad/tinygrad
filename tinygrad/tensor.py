@@ -128,9 +128,8 @@ class Tensor(SimpleMathTrait):
   # global map
   _uop_to_tensor: weakref.WeakKeyDictionary[UOp, set[weakref.ref[Tensor]]] = weakref.WeakKeyDictionary()
   def set_uop(self, value:UOp|MultiLazyBuffer):
-    if isinstance(value, MultiLazyBuffer):
-      for lb in value.lbs: Tensor._uop_to_tensor.setdefault(lb, set()).add(weakref.ref(self))
-    else: Tensor._uop_to_tensor.setdefault(value, set()).add(weakref.ref(self))
+    ref = weakref.ref(self)
+    for lb in value.lbs: Tensor._uop_to_tensor.setdefault(lb, set()).add(ref)
     self._lazydata = value
 
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
@@ -229,6 +228,11 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
+    for x in (self,)+lst:
+      for lb in x.lazydata.lbs:
+        idt = [id(t) for tref in Tensor._uop_to_tensor[lb] if (t:=tref()) is not None]
+        assert id(x) in idt
+
     scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
     # TODO: becomes_map should be returned from create_schedule_with_vars
