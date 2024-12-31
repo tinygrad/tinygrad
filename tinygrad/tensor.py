@@ -242,7 +242,7 @@ class Tensor(SimpleMathTrait):
 
     # link the found UOps back to Tensors. exit early if there's no Tensors to realize
     # NOTE: this uses all_tensors, but it's fast
-    fixed_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
+    fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
     if len(fixed_tensors) == 0: return [], {}
 
     # potentially rewrite all the discovered Tensors
