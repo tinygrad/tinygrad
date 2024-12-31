@@ -353,8 +353,7 @@ class Tensor(SimpleMathTrait):
     Moves the tensor to the given device in place.
     """
     real = self.to(device)
-    # TODO: is this assign?
-    if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
+    if self.grad is not None and real.grad is not None: self.grad.replace(real.grad)
     return self.replace(real)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
