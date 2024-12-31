@@ -121,8 +121,6 @@ plugins:
         - https://docs.python.org/3/objects.inv
         paths: [tinygrad]
         options:
-          extensions:
-          - docs/mkdocs_exts.py:StateAcceptFilenameDecorator
           docstring_options:
             ignore_init_summary: true
           docstring_section_style: list

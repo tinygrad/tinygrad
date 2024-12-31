@@ -161,6 +161,10 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
 @accept_filename
 def tar_extract(t: Tensor) -> dict[str, Tensor]:
   """
+  ```python
+  tar_extract(fn: Tensor | str | Path) -> dict[str, Tensor]
+  ```
+
   Extracts files from a tar archive and returns them as a dictionary of names (keys) and tensors (values).
 
   ```python
@@ -175,6 +179,10 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 @accept_filename
 def torch_load(t:Tensor) -> dict[str, Tensor]:
   """
+  ```python
+  torch_load(fn: Tensor | str | Path) -> dict[str, Tensor]
+  ```
+
   Loads a torch .pth file, returning the `state_dict`.
 
   ```python
