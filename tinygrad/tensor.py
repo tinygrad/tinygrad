@@ -1926,7 +1926,7 @@ class Tensor(SimpleMathTrait):
 
     ```python exec="true" source="above" session="tensor" result="python"
     x = Tensor([[1, 2], [3, 4]])
-    print(Tensor.rearrange(x, "batch channel -> (batch channel)).numpy())
+    print(Tensor.rearrange(x, "batch channel -> (batch channel)").numpy())
     ```
     """
     def parse_formula(formula: str):
