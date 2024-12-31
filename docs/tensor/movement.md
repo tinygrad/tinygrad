@@ -7,7 +7,6 @@
 ::: tinygrad.Tensor.flip
 ::: tinygrad.Tensor.shrink
 ::: tinygrad.Tensor.pad
-::: tinygrad.Tensor.rearrange
 
 ## Movement (high level)
 
