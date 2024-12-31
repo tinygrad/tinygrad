@@ -3140,8 +3140,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    r = F.Mod.apply(a, b).contiguous()
-    return r + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
+    return (r := F.Mod.apply(a, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
