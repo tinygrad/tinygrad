@@ -244,7 +244,7 @@ class Tensor(SimpleMathTrait):
 
     # link the found UOps back to Tensors
     # NOTE: this uses all_tensors, but it's fast
-    fixed_tensors: list[Tensor] = [t for t in all_tensors if any(x in all_uops for x in t.lazydata.lbs)]
+    fixed_tensors: list[Tensor] = [t for t in list(all_tensors) if any(x in all_uops for x in t.lazydata.lbs)]
 
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
