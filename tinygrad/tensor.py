@@ -231,25 +231,26 @@ class Tensor(SimpleMathTrait):
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
     # TODO: becomes_map should be returned from create_schedule_with_vars
 
-    # spider to find all UOps that could possibly be rewritten
-    all_uops = UOp.sink(*scheduled_uops).toposort
-    search_uops = list(all_uops)
+    # get all children of keys in becomes_map
+    all_uops: set[UOp] = set()
+    search_uops = list(becomes_map)
     while len(search_uops):
       x = search_uops.pop(0)
-      if x.op in {Ops.DEVICE, Ops.CONST, Ops.BUFFER} or x.is_realized: continue
-      for c in x.children:
-        if (u:=c()) is not None and u not in all_uops:
-          all_uops[u] = None
-          search_uops.append(u)
+      if x in all_uops: continue
+      all_uops.add(x)
+      search_uops.extend([u for c in x.children if (u:=c()) is not None])
 
-    # link the found UOps back to Tensors
+    # link the found UOps back to Tensors. exit early if there's no Tensors to realize
     # NOTE: this uses all_tensors, but it's fast
     fixed_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
+    if len(fixed_tensors) == 0: return [], {}
 
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(becomes_map)
     becomes_map.clear()
+
+    # set the relevant lazydata to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
       if s is ns: continue
       if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
