@@ -101,10 +101,6 @@ print(sched[-1].ast)
 # run that schedule
 run_schedule(sched)
 
-# NOTE: UOps are no longer mutable, you have to fetch this from the becomes_map
-from tinygrad.ops import becomes_map
-out = becomes_map[out]
-
 # check the data out
 assert out.realized is not None and out.realized.as_buffer().cast('I')[0] == 5
 
