@@ -30,6 +30,7 @@ if __name__ == "__main__":
   # run 20 times
   for _ in range(20):
     new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
+    GlobalCounters.reset()
     st = time.perf_counter()
     out = run_onnx_jit(**new_inputs)
     mt = time.perf_counter()
