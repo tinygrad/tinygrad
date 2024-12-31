@@ -16,7 +16,7 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
-all_tensors: weakref.WeakSet[Tensor] = weakref.WeakSet()
+all_tensors: set[weakref.ref[Tensor]] = set()
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -127,8 +127,9 @@ class Tensor(SimpleMathTrait):
 
   def __new__(cls, *args, **kwargs):
     instance = super().__new__(cls)
-    all_tensors.add(instance)
+    all_tensors.add(weakref.ref(instance))
     return instance
+  def __del__(self): all_tensors.discard(weakref.ref(self))
 
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
@@ -243,7 +244,7 @@ class Tensor(SimpleMathTrait):
 
     # link the found UOps back to Tensors
     # NOTE: this uses all_tensors, but it's fast
-    fixed_tensors: list[Tensor] = [t for t in list(all_tensors) if any(x in all_uops for x in t.lazydata.lbs)]
+    fixed_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
 
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
