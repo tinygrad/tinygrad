@@ -230,6 +230,7 @@ class Tensor(SimpleMathTrait):
     schedule, var_vals = create_schedule_with_vars(scheduled_uops)
     # TODO: becomes_map should be returned from create_schedule_with_vars
 
+    """
     # spider to find all UOps that could possibly be rewritten
     all_uops = UOp.sink(*scheduled_uops).toposort
     def add_children(x:UOp):
@@ -245,6 +246,10 @@ class Tensor(SimpleMathTrait):
     # link the found UOps back to Tensors
     # NOTE: this uses all_tensors, but it's fast
     fixed_tensors: list[Tensor] = [t for t in list(all_tensors) if any(x in all_uops for x in t.lazydata.lbs)]
+    """
+
+    # SLOW!
+    fixed_tensors: list[Tensor] = list(all_tensors)
 
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
