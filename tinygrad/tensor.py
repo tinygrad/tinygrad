@@ -226,9 +226,7 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-
-    scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
-    schedule, var_vals = create_schedule_with_vars(scheduled_uops)
+    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
     # TODO: becomes_map should be returned from create_schedule_with_vars
 
     # get all children of keys in becomes_map
