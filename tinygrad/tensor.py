@@ -14,11 +14,6 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
-# *** all in scope Tensors are here. this is the only way to get children ***
-# TODO: different "universes" for disconnected Tensors
-
-all_tensors: weakref.WeakSet[Tensor] = weakref.WeakSet()
-
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
@@ -36,7 +31,8 @@ class Function:
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
     ret = Tensor.__new__(Tensor)
-    ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
+    ret.requires_grad, ret.grad = ctx.requires_grad, None
+    ret.set_uop(ctx.forward(*[t.lazydata for t in x], **kwargs))
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
     return ret
 
@@ -121,15 +117,21 @@ class Tensor(SimpleMathTrait):
   np.set_printoptions(precision=4)
   ```
   """
-  __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
+  __slots__ = "_lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __new__(cls, *args, **kwargs):
-    instance = super().__new__(cls)
-    all_tensors.add(instance)
-    return instance
+  @property
+  def lazydata(self) -> UOp|MultiLazyBuffer: return self._lazydata
+
+  # global map
+  _uop_to_tensor: weakref.WeakKeyDictionary[UOp, set[weakref.ref[Tensor]]] = weakref.WeakKeyDictionary()
+  def set_uop(self, value:UOp|MultiLazyBuffer):
+    if isinstance(value, MultiLazyBuffer):
+      for lb in value.lbs: Tensor._uop_to_tensor.setdefault(lb, set()).add(weakref.ref(self))
+    else: Tensor._uop_to_tensor.setdefault(value, set()).add(weakref.ref(self))
+    self._lazydata = value
 
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
@@ -174,12 +176,13 @@ class Tensor(SimpleMathTrait):
     if not isinstance(data, (UOp, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
+    if isinstance(device, str): lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
+    elif isinstance(data, UOp): lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
-      self.lazydata = data
+      lazydata = data
+    self.set_uop(lazydata)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -226,18 +229,35 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
+    scheduled_uops = flatten([x.lazydata.lbs for x in (self,)+lst])
+    schedule, var_vals = create_schedule_with_vars(scheduled_uops)
     # TODO: becomes_map should be returned from create_schedule_with_vars
 
-    # NOTE: this is potentially a lot of Tensors. see above about the universes
-    fixed_tensors: list[Tensor] = list(all_tensors)
+    # spider to find all UOps that could possibly be rewritten
+    all_uops = UOp.sink(*scheduled_uops).toposort
+    def add_children(x:UOp):
+      if x.op in {Ops.DEVICE, Ops.CONST, Ops.BUFFER} or x.is_realized: return
+      for c in x.children:
+        if (u:=c()) is not None and u not in all_uops:
+          all_uops[u] = None
+          add_children(u)
+
+    # add the children
+    for u in list(all_uops): add_children(u)
+
+    # link the found UOps back to Tensors
+    fixed_tensors: list[Tensor] = []
+    for p in all_uops:
+      if (s:=Tensor._uop_to_tensor.get(p)) is not None: fixed_tensors.extend([t for tref in s if (t:=tref()) is not None])
+
+    # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(becomes_map)
     becomes_map.clear()
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
       if s is ns: continue
       if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
-      else: t.lazydata = ns
+      else: t.set_uop(ns)
 
     return memory_planner(schedule), var_vals
 
@@ -259,7 +279,7 @@ class Tensor(SimpleMathTrait):
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
     assert getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
-    self.lazydata = x.lazydata
+    self.set_uop(x.lazydata)
     return self
 
   def assign(self, x) -> Tensor:
@@ -278,7 +298,7 @@ class Tensor(SimpleMathTrait):
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized: return self.replace(x)
-    self.lazydata = self.lazydata.assign(x.lazydata)
+    self.set_uop(self.lazydata.assign(x.lazydata))
     return self
 
   def detach(self) -> Tensor:
@@ -375,8 +395,7 @@ class Tensor(SimpleMathTrait):
     Moves the tensor to the given device in place.
     """
     real = self.to(device)
-    # TODO: is this assign?
-    if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
+    if self.grad is not None and real.grad is not None: self.grad.replace(real.grad)
     return self.replace(real)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
