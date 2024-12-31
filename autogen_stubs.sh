@@ -250,6 +250,7 @@ generate_qcom() {
 generate_pciaccess() {
   clang2py -k cdefstum \
     /usr/include/pciaccess.h \
+    /usr/include/linux/pci_regs.h \
     -l /usr/lib/x86_64-linux-gnu/libpciaccess.so \
     -o $BASE/libpciaccess.py
 }
@@ -274,41 +275,41 @@ generate_am() {
     extra/amdpci/headers/soc15_ih_clientid.h \
     -o $BASE/am/am.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/mp_13_0_0_offset.h \
-  #   extra/amdpci/headers/mp_13_0_0_sh_mask.h \
-  #   -o $BASE/am/mp_13_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_13_0_0_offset.h \
+    extra/amdpci/headers/mp_13_0_0_sh_mask.h \
+    -o $BASE/am/mp_13_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/mp_11_0_offset.h \
-  #   extra/amdpci/headers/mp_11_0_sh_mask.h \
-  #   -o $BASE/am/mp_11_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_11_0_offset.h \
+    extra/amdpci/headers/mp_11_0_sh_mask.h \
+    -o $BASE/am/mp_11_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/gc_11_0_0_offset.h \
-  #   extra/amdpci/headers/gc_11_0_0_sh_mask.h \
-  #   -o $BASE/am/gc_11_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/gc_11_0_0_offset.h \
+    extra/amdpci/headers/gc_11_0_0_sh_mask.h \
+    -o $BASE/am/gc_11_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/mmhub_3_0_0_offset.h \
-  #   extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
-  #   -o $BASE/am/mmhub_3_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mmhub_3_0_0_offset.h \
+    extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
+    -o $BASE/am/mmhub_3_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/nbio_4_3_0_offset.h \
-  #   extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
-  #   -o $BASE/am/nbio_4_3_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/nbio_4_3_0_offset.h \
+    extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
+    -o $BASE/am/nbio_4_3_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/osssys_6_0_0_offset.h \
-  #   extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
-  #   -o $BASE/am/osssys_6_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/osssys_6_0_0_offset.h \
+    extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
+    -o $BASE/am/osssys_6_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
-  #   extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
-  #   extra/amdpci/headers/amdgpu_smu.h \
-  #   -o $BASE/am/smu_v13_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
+    extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
+    extra/amdpci/headers/amdgpu_smu.h \
+    -o $BASE/am/smu_v13_0_0.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
@@ -326,7 +327,7 @@ elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "pciaccess" ]; then generate_pciaccess
+elif [ "$1" == "pci" ]; then generate_pciaccess
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am
 else echo "usage: $0 <type>"

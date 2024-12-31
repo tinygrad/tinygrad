@@ -255,9 +255,8 @@ class AM_IH(AM_IP):
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
     self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
-    # TODO: parse from linux/include/uapi/linux/pci_regs.h
-    libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), 0x4)
-    libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | 0x4, 0x4)
+    libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
+    libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:
