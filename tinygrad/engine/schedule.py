@@ -54,6 +54,9 @@ def realize_uop(ctx:SchedulerCtx, root:UOp):
 
 realize = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="root"), realize_uop),
+  # TODO: add view_right and delete this!
+  # reduce op fusion is an optimization, correctness first.
+  (UPat(Ops.REDUCE_AXIS, name="root"), realize_uop),
   (UPat(Ops.COPY, name="root", src=(UPat.var("copyout"), UPat.var("copyin"),)), realize_before_copy),
   (UPat(Ops.COPY, name="root"), realize_metaop),
   (UPat(Ops.SINK, name="root"), realize_sink_src),
@@ -73,9 +76,11 @@ def store_outputs(ctx:list[UOp], sink:UOp):
 astify = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.BUFFER, name="buf"), load_buffer),
-  (UPat(Ops.CONST, src=(UPat(),), name="x"), lambda x: x.replace(src=())),
   (UPat(Ops.SINK, name="sink"), store_outputs),
 ])
+
+# from monday meeting we conculded it's fine for const to not have a shapetracker
+fix_const = PatternMatcher([(UPat(Ops.CONST, src=(UPat(),), name="x"), lambda x: x.replace(src=())),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int]]:
@@ -83,8 +88,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   schedule_map = graph_rewrite_map(UOp.sink(*[tensor_map[x] for x in outs]), remove_movementops+merge_views+realize, ctx:=SchedulerCtx())
   schedule: list[ScheduleItem] = []
   for buf,uop in ctx.realizes.items():
-    ast = graph_rewrite(UOp.sink(uop), merge_views+view_left+astify, bufs:=[buf])
-    schedule.append(ScheduleItem(ast, tuple(dedup(x.buffer for x in bufs)), ()))
+    ast = graph_rewrite(UOp.sink(uop), remove_movementops+merge_views+view_left+astify, bufs:=[buf])
+    schedule.append(ScheduleItem(graph_rewrite(ast, fix_const), tuple(dedup(x.buffer for x in bufs)), ()))
   rev_tensor_map = {v:k for k,v in tensor_map.items()}
   for k,v in schedule_map.items():
     if k is not v and v.op is Ops.BUFFER: rev_tensor_map[k].become(v)

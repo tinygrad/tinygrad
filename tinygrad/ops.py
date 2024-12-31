@@ -401,7 +401,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def valid(self, st:ShapeTracker):
     assert self.op in {Ops.CONST, Ops.DEFINE_VAR}, f"can only create VALID from a constant, got {self.op}"
-    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self, 0)
+    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(UOp.metaop(Ops.CONST, st.shape, self.dtype, self.device, self.const_arg), 0)
   @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
   def _reduce_op(self, op:Ops, axis:tuple[int, ...]):
