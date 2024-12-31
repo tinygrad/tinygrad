@@ -6,7 +6,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
+import ctypes, os
 
 
 class AsDictMixin:
@@ -118,7 +118,7 @@ class Union(ctypes.Union, AsDictMixin):
 
 
 _libraries = {}
-_libraries['libpciaccess.so'] = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libpciaccess.so')
+_libraries['libpciaccess.so'] = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libpciaccess.so') if os.path.exists('/usr/lib/x86_64-linux-gnu/libpciaccess.so') else None
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
@@ -155,7 +155,7 @@ PCI_DEV_MAP_FLAG_WRITE_COMBINE = (1<<1) # macro
 PCI_DEV_MAP_FLAG_CACHABLE = (1<<2) # macro
 PCI_MATCH_ANY = (~0) # macro
 def PCI_ID_COMPARE(a, b):  # macro
-   return (((a)==(~0)) or ((a)==(b)))  
+   return (((a)==(~0)) or ((a)==(b)))
 VGA_ARB_RSRC_NONE = 0x00 # macro
 VGA_ARB_RSRC_LEGACY_IO = 0x01 # macro
 VGA_ARB_RSRC_LEGACY_MEM = 0x02 # macro
@@ -896,7 +896,7 @@ PCI_X_CMD_SPLIT_16 = 0x0060 # macro
 PCI_X_CMD_SPLIT_32 = 0x0070 # macro
 PCI_X_CMD_MAX_SPLIT = 0x0070 # macro
 def PCI_X_CMD_VERSION(x):  # macro
-   return (((x)>>12)&3)  
+   return (((x)>>12)&3)
 PCI_X_STATUS = 4 # macro
 PCI_X_STATUS_DEVFN = 0x000000ff # macro
 PCI_X_STATUS_BUS = 0x0000ff00 # macro
@@ -1147,11 +1147,11 @@ PCI_EXP_SLTCAP2_IBPD = 0x00000001 # macro
 PCI_EXP_SLTCTL2 = 56 # macro
 PCI_EXP_SLTSTA2 = 58 # macro
 def PCI_EXT_CAP_ID(header):  # macro
-   return (header&0x0000ffff)  
+   return (header&0x0000ffff)
 def PCI_EXT_CAP_VER(header):  # macro
-   return ((header>>16)&0xf)  
+   return ((header>>16)&0xf)
 def PCI_EXT_CAP_NEXT(header):  # macro
-   return ((header>>20)&0xffc)  
+   return ((header>>20)&0xffc)
 PCI_EXT_CAP_ID_ERR = 0x01 # macro
 PCI_EXT_CAP_ID_VC = 0x02 # macro
 PCI_EXT_CAP_ID_DSN = 0x03 # macro
@@ -1220,7 +1220,7 @@ PCI_ERR_COR_LOG_OVER = 0x00008000 # macro
 PCI_ERR_COR_MASK = 20 # macro
 PCI_ERR_CAP = 24 # macro
 def PCI_ERR_CAP_FEP(x):  # macro
-   return ((x)&31)  
+   return ((x)&31)
 PCI_ERR_CAP_ECRC_GENC = 0x00000020 # macro
 PCI_ERR_CAP_ECRC_GENE = 0x00000040 # macro
 PCI_ERR_CAP_ECRC_CHKC = 0x00000080 # macro
@@ -1273,35 +1273,35 @@ PCI_CAP_VC_PER_VC_SIZEOF = 0x0C # macro
 PCI_PWR_DSR = 4 # macro
 PCI_PWR_DATA = 8 # macro
 def PCI_PWR_DATA_BASE(x):  # macro
-   return ((x)&0xff)  
+   return ((x)&0xff)
 def PCI_PWR_DATA_SCALE(x):  # macro
-   return (((x)>>8)&3)  
+   return (((x)>>8)&3)
 def PCI_PWR_DATA_PM_SUB(x):  # macro
-   return (((x)>>10)&7)  
+   return (((x)>>10)&7)
 def PCI_PWR_DATA_PM_STATE(x):  # macro
-   return (((x)>>13)&3)  
+   return (((x)>>13)&3)
 def PCI_PWR_DATA_TYPE(x):  # macro
-   return (((x)>>15)&7)  
+   return (((x)>>15)&7)
 def PCI_PWR_DATA_RAIL(x):  # macro
-   return (((x)>>18)&7)  
+   return (((x)>>18)&7)
 PCI_PWR_CAP = 12 # macro
 def PCI_PWR_CAP_BUDGET(x):  # macro
-   return ((x)&1)  
+   return ((x)&1)
 PCI_EXT_CAP_PWR_SIZEOF = 16 # macro
 PCI_RCEC_RCIEP_BITMAP = 4 # macro
 PCI_RCEC_BUSN = 8 # macro
 PCI_RCEC_BUSN_REG_VER = 0x02 # macro
 def PCI_RCEC_BUSN_NEXT(x):  # macro
-   return (((x)>>8)&0xff)  
+   return (((x)>>8)&0xff)
 def PCI_RCEC_BUSN_LAST(x):  # macro
-   return (((x)>>16)&0xff)  
+   return (((x)>>16)&0xff)
 PCI_VNDR_HEADER = 4 # macro
 def PCI_VNDR_HEADER_ID(x):  # macro
-   return ((x)&0xffff)  
+   return ((x)&0xffff)
 def PCI_VNDR_HEADER_REV(x):  # macro
-   return (((x)>>16)&0xf)  
+   return (((x)>>16)&0xf)
 def PCI_VNDR_HEADER_LEN(x):  # macro
-   return (((x)>>20)&0xfff)  
+   return (((x)>>20)&0xfff)
 HT_3BIT_CAP_MASK = 0xE0 # macro
 HT_CAPTYPE_SLAVE = 0x00 # macro
 HT_CAPTYPE_HOST = 0x20 # macro
@@ -1330,22 +1330,22 @@ PCI_ARI_CAP = 0x04 # macro
 PCI_ARI_CAP_MFVC = 0x0001 # macro
 PCI_ARI_CAP_ACS = 0x0002 # macro
 def PCI_ARI_CAP_NFN(x):  # macro
-   return (((x)>>8)&0xff)  
+   return (((x)>>8)&0xff)
 PCI_ARI_CTRL = 0x06 # macro
 PCI_ARI_CTRL_MFVC = 0x0001 # macro
 PCI_ARI_CTRL_ACS = 0x0002 # macro
 def PCI_ARI_CTRL_FG(x):  # macro
-   return (((x)>>4)&7)  
+   return (((x)>>4)&7)
 PCI_EXT_CAP_ARI_SIZEOF = 8 # macro
 PCI_ATS_CAP = 0x04 # macro
 def PCI_ATS_CAP_QDEP(x):  # macro
-   return ((x)&0x1f)  
+   return ((x)&0x1f)
 PCI_ATS_MAX_QDEP = 32 # macro
 PCI_ATS_CAP_PAGE_ALIGNED = 0x0020 # macro
 PCI_ATS_CTRL = 0x06 # macro
 PCI_ATS_CTRL_ENABLE = 0x8000 # macro
 def PCI_ATS_CTRL_STU(x):  # macro
-   return ((x)&0x1f)  
+   return ((x)&0x1f)
 PCI_ATS_MIN_STU = 12 # macro
 PCI_EXT_CAP_ATS_SIZEOF = 8 # macro
 PCI_PRI_CTRL = 0x04 # macro
@@ -1370,7 +1370,7 @@ PCI_EXT_CAP_PASID_SIZEOF = 8 # macro
 PCI_SRIOV_CAP = 0x04 # macro
 PCI_SRIOV_CAP_VFM = 0x00000001 # macro
 def PCI_SRIOV_CAP_INTR(x):  # macro
-   return ((x)>>21)  
+   return ((x)>>21)
 PCI_SRIOV_CTRL = 0x08 # macro
 PCI_SRIOV_CTRL_VFE = 0x0001 # macro
 PCI_SRIOV_CTRL_VFM = 0x0002 # macro
@@ -1392,9 +1392,9 @@ PCI_SRIOV_BAR = 0x24 # macro
 PCI_SRIOV_NUM_BARS = 6 # macro
 PCI_SRIOV_VFM = 0x3c # macro
 def PCI_SRIOV_VFM_BIR(x):  # macro
-   return ((x)&7)  
+   return ((x)&7)
 def PCI_SRIOV_VFM_OFFSET(x):  # macro
-   return ((x)&~7)  
+   return ((x)&~7)
 PCI_SRIOV_VFM_UA = 0x0 # macro
 PCI_SRIOV_VFM_MI = 0x1 # macro
 PCI_SRIOV_VFM_MO = 0x2 # macro

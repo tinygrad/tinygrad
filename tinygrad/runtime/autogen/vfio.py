@@ -206,11 +206,11 @@ VFIO_DEVICE_STATE_SAVING = (1<<1) # macro
 VFIO_DEVICE_STATE_RESUMING = (1<<2) # macro
 VFIO_DEVICE_STATE_MASK = ((1<<0)|(1<<1)|(1<<2)) # macro
 # def VFIO_DEVICE_STATE_VALID(state):  # macro
-#    return (state&(1<<2)?(state&((1<<0)|(1<<1)|(1<<2)))==(1<<2):1)  
+#    return (state&(1<<2)?(state&((1<<0)|(1<<1)|(1<<2)))==(1<<2):1)
 def VFIO_DEVICE_STATE_IS_ERROR(state):  # macro
-   return ((state&((1<<0)|(1<<1)|(1<<2)))==((1<<1)|(1<<2)))  
+   return ((state&((1<<0)|(1<<1)|(1<<2)))==((1<<1)|(1<<2)))
 # def VFIO_DEVICE_STATE_SET_ERROR(state):  # macro
-#    return ((state&~((1<<0)|(1<<1)|(1<<2)))|VFIO_DEVICE_SATE_SAVING|(1<<2))  
+#    return ((state&~((1<<0)|(1<<1)|(1<<2)))|VFIO_DEVICE_SATE_SAVING|(1<<2))
 VFIO_REGION_INFO_CAP_MSIX_MAPPABLE = 3 # macro
 VFIO_REGION_INFO_CAP_NVLINK2_SSATGT = 4 # macro
 VFIO_REGION_INFO_CAP_NVLINK2_LNKSPD = 5 # macro

@@ -253,12 +253,16 @@ generate_pciaccess() {
     /usr/include/linux/pci_regs.h \
     -l /usr/lib/x86_64-linux-gnu/libpciaccess.so \
     -o $BASE/libpciaccess.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libpciaccess.py
+  fixup $BASE/libpciaccess.py
+  sed -i "s/ctypes\.CDLL('\([^']*\)')/ctypes.CDLL('\1') if os.path.exists('\1') else None/g" $BASE/libpciaccess.py
 }
 
 generate_vfio() {
   clang2py -k cdefstum \
     /usr/include/linux/vfio.h \
     -o $BASE/vfio.py
+  fixup $BASE/vfio.py
 }
 
 generate_am() {
@@ -274,42 +278,50 @@ generate_am() {
     extra/amdpci/headers/amdgpu_doorbell.h \
     extra/amdpci/headers/soc15_ih_clientid.h \
     -o $BASE/am/am.py
+  fixup $BASE/am/am.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/mp_13_0_0_offset.h \
     extra/amdpci/headers/mp_13_0_0_sh_mask.h \
     -o $BASE/am/mp_13_0_0.py
+  fixup $BASE/am/mp_13_0_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/mp_11_0_offset.h \
     extra/amdpci/headers/mp_11_0_sh_mask.h \
     -o $BASE/am/mp_11_0.py
+  fixup $BASE/am/mp_11_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/gc_11_0_0_offset.h \
     extra/amdpci/headers/gc_11_0_0_sh_mask.h \
     -o $BASE/am/gc_11_0_0.py
+  fixup $BASE/am/gc_11_0_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/mmhub_3_0_0_offset.h \
     extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
     -o $BASE/am/mmhub_3_0_0.py
+  fixup $BASE/am/mmhub_3_0_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/nbio_4_3_0_offset.h \
     extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
     -o $BASE/am/nbio_4_3_0.py
+  fixup $BASE/am/nbio_4_3_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/osssys_6_0_0_offset.h \
     extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
     -o $BASE/am/osssys_6_0_0.py
+  fixup $BASE/am/osssys_6_0_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
     extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
     -o $BASE/am/smu_v13_0_0.py
+  fixup $BASE/am/smu_v13_0_0.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
