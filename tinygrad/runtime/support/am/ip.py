@@ -284,7 +284,7 @@ class AM_SDMA(AM_IP):
     self.adev.regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0)
     self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
     self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
-    self.adev.regSDMA0_UTCL1_PAGE.write(0x10cec20)
+    self.adev.regSDMA0_UTCL1_PAGE.update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
     self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
     self.adev.regSDMA0_CNTL.update(ctxempty_int_enable=1, trap_enable=1)
 
