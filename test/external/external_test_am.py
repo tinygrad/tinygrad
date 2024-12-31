@@ -60,14 +60,14 @@ class TestAMPageTable(unittest.TestCase):
         _vaddr, _offset, _pte_idx, _n_ptes, _pte_covers, _pt = tup
         total_covered += _n_ptes * _pte_covers
 
-      assert total_covered == sz, f"Expected total coverage {total_covered} to be {test_size}"
+      assert total_covered == sz, f"Expected total coverage {total_covered} to be {sz}"
 
       for tup in results:
         _vaddr, _offset, pte_idx, n_ptes, pte_covers, pt = tup
         for i in range(n_ptes):
           pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
           assert pte['paddr'] == va + _offset + i * pte_covers, f"Expected paddr {pte['paddr']:#x} to be {va + _offset + i * pte_covers:#x}"
-          assert pte['valid'] == 1, f"Expected entry {pte_idx + i} to be valid (non-zero). Found 0x{entry_val:x}."
+          assert pte['valid'] == 1
 
       mm.unmap_range(va, sz, free_paddrs=False)
 
@@ -106,10 +106,10 @@ class TestAMPageTable(unittest.TestCase):
         for i in range(n_ptes):
           pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
           assert pte['paddr'] == 0xdead0000 + _offset + i * pte_covers, f"paddr {pte['paddr']:#x} not {0xdead0000 + _offset + i * pte_covers:#x}"
-          assert pte['valid'] == 1, f"Expected entry {pte_idx + i} to be valid (non-zero). Found 0x{entry_val:x}."
+          assert pte['valid'] == 1
 
       mm0.unmap_range(vaddr=exteranl_va + 0x2000, size=0x100000, free_paddrs=False)
-  
+
   def test_map_from(self):
     mm0 = self.d[0].mm
     mm1 = self.d[1].mm
@@ -135,7 +135,7 @@ class TestAMPageTable(unittest.TestCase):
         for i in range(n_ptes):
           pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
           assert pte['paddr'] == d1_pci_base + va + _offset + i * pte_covers, f"paddr {pte['paddr']:#x} not {d1_pci_base+va+_offset+i*pte_covers:#x}"
-          assert pte['valid'] == 1, f"Expected entry {pte_idx + i} to be valid (non-zero). Found 0x{entry_val:x}."
+          assert pte['valid'] == 1
 
       mm0.unmap_range(vaddr=exteranl_va, size=sz, free_paddrs=False)
       mm1.unmap_range(vaddr=exteranl_va, size=sz, free_paddrs=False)

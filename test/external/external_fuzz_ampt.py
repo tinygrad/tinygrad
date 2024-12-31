@@ -1,4 +1,4 @@
-import unittest, random
+import random
 from tinygrad.helpers import round_up
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from test.external.external_test_am import helper_read_entry_components, FakeAM
@@ -9,7 +9,7 @@ class AMPTFuzzer:
     self.alloc_payload = 0
     self.d = FakeAM()
 
-    self.allocations: Dict[int, tuple[int, int]] = {} # ptr -> (size, pattern)
+    self.allocations: dict[int, tuple[int, int]] = {} # ptr -> (size, pattern)
 
     self.min_alloc_size = 0x1000
     self.max_alloc_size = int(total_size * 0.1)
@@ -25,7 +25,7 @@ class AMPTFuzzer:
       for i in range(_n_ptes):
         pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
         self.d.vram[pte['paddr']] = pattern # Mark this page
-        assert pte['valid'] == 1, f"Expected entry {_pte_idx + i} to be valid (non-zero). Found 0x{entry_val:x}."
+        assert pte['valid'] == 1
 
         # If page has contigous fragment, all range should be this valid memory
         frags_cnt = pte['fragment']
@@ -34,15 +34,16 @@ class AMPTFuzzer:
         start_paddr = pte['paddr'] - (_vaddr - start_vaddr)
         contig_ptes = contig_range // _pte_covers
         assert contig_ptes > 0
-        for f_vaddr, f_offset, f_pte_idx, f_n_ptes, f_pte_covers, f_pt in self.d.mm.page_table_walker(self.d.mm.root_page_table, vaddr=start_vaddr, size=contig_range):
+        frags_l = list(self.d.mm.page_table_walker(self.d.mm.root_page_table, vaddr=start_vaddr, size=contig_range))
+        for f_vaddr, f_offset, f_pte_idx, f_n_ptes, f_pte_covers, f_pt in frags_l:
           for j in range(f_n_ptes):
             f_pte = helper_read_entry_components(f_pt.get_entry(f_pte_idx + j))
-            assert f_pte['valid'] == 1, f"Expected entry {f_pte_idx + j} to be valid (non-zero). Found 0x{entry_val:x}."
-            assert f_pte['paddr'] == start_paddr + f_offset + j * f_pte_covers, f"Expected paddr {f_pte['paddr']:#x} to be {start_paddr + f_offset + j * f_pte_covers:#x}"
+            assert f_pte['valid'] == 1
+            assert f_pte['paddr'] == start_paddr+f_offset+j*f_pte_covers, f"paddr {f_pte['paddr']:#x} not {start_paddr+f_offset+j*f_pte_covers:#x}"
 
         _vaddr += _pte_covers
         _offset += _pte_covers
-    
+
     return pages
 
   def verify_memory(self, pages, pattern: int) -> bool:
