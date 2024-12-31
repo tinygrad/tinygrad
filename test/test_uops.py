@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.schedule import create_schedule, to_si
+from tinygrad.engine.schedule import to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
@@ -237,12 +237,12 @@ class TestExecALU(TestUOps):
 class TestConstantFolding(unittest.TestCase):
   def test_cast_const(self):
     t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)
-    si = create_schedule([t.lazydata])
+    si = t.schedule()
     assert len(si) == 0
 
   def test_bitcast_const(self):
     t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
-    si = create_schedule([t.lazydata])
+    si = t.schedule()
     assert len(si) == 1
     ji = lower_schedule_item(si[-1])
     assert any(uop.op is Ops.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
@@ -591,6 +591,30 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
     r = Tensor.empty(4, 4).sum(axis=1)
     self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
+
+class TestUOpChildren(unittest.TestCase):
+  def test_children_exist(self):
+    a = UOp.variable("weird_name_234", 0, 10)
+    b = a*a
+    self.assertEqual(len(a.children), 1)
+    self.assertIs(list(a.children)[0](), b)
+
+  def test_children_cleaned_up(self):
+    a = UOp.variable("weird_name_235", 0, 10)
+    b = a*a
+    self.assertEqual(len(a.children), 1)
+    del b
+    self.assertEqual(len(a.children), 0)
+
+  def test_children_cleaned_up_two(self):
+    a = UOp.variable("weird_name_236", 0, 10)
+    b = a*a
+    c = a*2
+    self.assertEqual(len(a.children), 2)
+    del b
+    self.assertEqual(len(a.children), 1)
+    del c
+    self.assertEqual(len(a.children), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
