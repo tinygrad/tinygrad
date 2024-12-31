@@ -36,17 +36,15 @@ class TestSchedule(unittest.TestCase):
     #b.realize()
     outs:list[UOp] = [a.lazydata]
     # first, we do the const folding
-    tensor_map = graph_rewrite_map(UOp.sink(*outs), remove_movement_ops+symbolic_simple)
+    node_map = graph_rewrite_map(UOp.sink(*outs), remove_movement_ops+symbolic_simple)
     # then, we sink the node_map and realize
-    schedule_map = graph_rewrite_map(UOp.sink(*[tensor_map[x] for x in outs]), add_realizes, ctx:=ScheduleContext())
+    node_map = graph_rewrite_map(UOp.sink(*[node_map[x] for x in outs]), add_realizes, ctx:=ScheduleContext())
     schedule: list[ScheduleItem] = []
     for store in ctx.realizes.values():
       ast = graph_rewrite(UOp.sink(store), add_buffers, bufs:=[])
       schedule.append(ScheduleItem(ast, tuple(x.buffer for x in bufs), (), ()))
-    for k,v in schedule_map.items():
-      if k is v: continue
-      if v.op is not Ops.LOAD: continue
-      k.become(v.buf_uop.view(k.st))
+    for k,v in node_map.items():
+      if v.op is Ops.LOAD and v.buf_uop in ctx.realizes: k.become(v.buf_uop.view(k.st))
     run_schedule(schedule)
     self.assertIsNotNone(a.lazydata.realized)
     self.assertEqual(a.tolist(), [1])
