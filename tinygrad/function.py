@@ -113,9 +113,6 @@ class Mul(Function):
 class IDiv(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x // y
 
-class Mod(Function):
-  def forward(self, x:UOp, y:UOp) -> UOp: return x % y
-
 # ************* ternary ops *************
 
 class Where(Function):

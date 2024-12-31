@@ -595,7 +595,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       # SHL/SHR on consts only
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
-      if self.op is Ops.MOD and s1_vmin > 0 and s0_vmin >= 0: return 0, s1_vmax-1
+      if self.op is Ops.MOD and s1_vmin > 0: return 0, s1_vmax-1
       if self.op is Ops.IDIV:
         if s1_vmin == s1_vmax:  # min/max are equal in a CONST
           if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
