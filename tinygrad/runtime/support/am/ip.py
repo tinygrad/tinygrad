@@ -95,8 +95,8 @@ class AM_GMC(AM_IP):
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
-      st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32').read()
-      va = (va | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32').read()) << 32) << 12
+      st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
+      va = (va | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()) << 32) << 12
       if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
 
 class AM_SMU(AM_IP):
@@ -235,8 +235,8 @@ class AM_IH(AM_IP):
     self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
 
   def init(self):
-    self.rings = [(self.adev.mm.valloc(512 << 10, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "", 0),
-      (self.adev.mm.valloc(512 << 10, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "_RING1", 1)]
+    self.rings = [(self.adev.mm.valloc(1 << 20, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "", 0),
+      (self.adev.mm.valloc(1 << 20, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "_RING1", 1)]
 
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.va_addr >> 8)

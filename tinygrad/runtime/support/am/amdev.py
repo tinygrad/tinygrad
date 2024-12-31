@@ -180,7 +180,7 @@ class AMMemoryManager:
       inner_off = 0
       while n_ptes > 0:
         if from_entry: frags_cnt = (pt.get_entry(pte_st_idx) >> 7) & 0x1f
-        else: frags_cnt = 0 if pte_covers == 0x1000 else 9 # TODO: optimize
+        else: frags_cnt = pte_covers.bit_length() - 13 # TODO: optimize for other frag sizes
 
         update_ptes = (1 << (frags_cnt + 12)) // pte_covers
         assert update_ptes > 0, f"Invalid update_ptes {update_ptes} {frags_cnt} {pte_covers}"
@@ -213,7 +213,10 @@ class AMMemoryManager:
         if AM_DEBUG >= 3: print(f"\tnptes={upd_pte:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={f_cnt:#x}")
         n_ptes, pte_st_idx = n_ptes - upd_pte, pte_st_idx + upd_pte
 
+    # Invalidate TLB after mappings.
+    self.adev.gmc.flush_tlb(ip="GC", vmid=0, flush_type=2)
     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
+    self.adev.gmc.flush_tlb(ip="MM", vmid=0, flush_type=2)
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
