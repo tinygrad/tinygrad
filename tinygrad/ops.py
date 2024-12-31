@@ -887,11 +887,34 @@ class RewriteContext:
     self.pm: PatternMatcher = pm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-  def rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_src = tuple(map(self.rewrite, n.src))
-    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-    self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
+  # TODO revert; workaround for Python bug where a stack limit of 1000 is used regardless of settings.
+  def rewrite(self, n: UOp) -> UOp:
+    stack: list[tuple[UOp, list[UOp], bool]] = [(n, [], False)] # n, map result, returning from recursive call
+    ret: Optional[UOp] = None
+    while stack:
+      n, results, returning = stack[-1]
+      if len(results) < len(n.src):
+        if (result := ret if returning else self.replace.get(n.src[len(results)])) is not None:
+          stack[-1] = (n, results, False)
+          results.append(result)
+        else:
+          stack[-1] = (n, results, True)
+          stack.append((n.src[len(results)], [], False))
+      elif returning:
+        assert ret is not None
+        self.replace[n] = ret
+        stack.pop()
+      else:
+        new_src = tuple(results)
+        new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+        if (ret := n if new_n is None else self.replace.get(new_n)) is not None:
+          self.replace[n] = ret
+          stack.pop()
+        else:
+          stack[-1] = (n, results, True)
+          assert new_n is not None
+          stack.append((new_n, [], False))
+    assert ret is not None
     return ret
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
