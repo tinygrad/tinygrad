@@ -2,8 +2,7 @@ from __future__ import annotations
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType
-from tinygrad.ops import Ops, MathTrait, UOp
-from tinygrad.shape.shapetracker import sint
+from tinygrad.ops import Ops, MathTrait, UOp, sint
 
 def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
@@ -67,7 +66,8 @@ class MultiLazyBuffer(MathTrait):
     assert (axis is None) == (bounds is None), "must specify bounds iff axis is specified"
     lbs = [lb] * len(devices)
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis, bounds) if axis is not None and bounds is not None else lbs, devices)]
-    return MultiLazyBuffer([lb if lb.is_unrealized_unmasked_const() else lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
+    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
+    return MultiLazyBuffer([lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
 
   def copy_to_device(self, device:str) -> UOp:
     if self.axis is None:

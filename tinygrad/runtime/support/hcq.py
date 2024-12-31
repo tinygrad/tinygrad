@@ -15,13 +15,13 @@ ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class BumpAllocator:
-  def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.start_off, self.wrap = size, 0, start, wrap
+  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
   def alloc(self, size:int, alignment:int=1) -> int:
     if round_up(self.ptr, alignment) + size > self.size:
       if not self.wrap: raise RuntimeError("Out of memory")
       self.ptr = 0
     self.ptr = (res:=round_up(self.ptr, alignment)) + size
-    return res + self.start_off
+    return res + self.base
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
@@ -264,7 +264,7 @@ class HCQProgram(Generic[DeviceType]):
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(kernargs_ptr or self.dev.kernargs_alloctor.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
+    return self.args_state_t(kernargs_ptr or self.dev.kernargs_allocator.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
@@ -308,14 +308,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
-    self.raw_prof_records:list[tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[dict]]] = []
-    self.dep_prof_records:list[tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
-    self.kernargs_alloctor:BumpAllocator = BumpAllocator(self.kernargs_page.size, start=cast(int, self.kernargs_page.va_addr), wrap=True)
+    self.kernargs_allocator:BumpAllocator = BumpAllocator(self.kernargs_page.size, base=cast(int, self.kernargs_page.va_addr), wrap=True)
     self.devices.append(self)
 
   def synchronize(self):

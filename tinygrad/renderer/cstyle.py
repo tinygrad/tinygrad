@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union, DefaultDict, Literal, Callable, cast
+from typing import Optional, Union, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
@@ -77,7 +77,7 @@ class CStyleLanguage(Renderer):
   type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_op: Dict = {
+  code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}|{b})",
@@ -101,11 +101,9 @@ class CStyleLanguage(Renderer):
 
   def render_cast(self, dt:DType, val: str) -> str: return f"({self.render_dtype(dt)})({val})"
   def render_dtype(self, dt:DType, mutable=True) -> str:
-    if isinstance(dt, ImageDType):
-      return f"{'write_only' if mutable else 'read_only'} image2d_t"
+    if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + \
-        self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
+      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
@@ -117,7 +115,7 @@ class CStyleLanguage(Renderer):
     bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
-    c: DefaultDict[str, int] = defaultdict(int)
+    c: defaultdict[str, int] = defaultdict(int)
     for u in uops:
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
@@ -143,8 +141,8 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
-      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX} or (u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST}
-                                                        and child_count[u] == 1 and not getenv("EXPAND_SSA")):
+      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX} or \
+        (u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:
         if u.op in {Ops.RANGE, Ops.ASSIGN, Ops.DEFINE_LOCAL} or u.dtype == dtypes.void:
@@ -177,8 +175,9 @@ class ClangRenderer(CStyleLanguage):
     CStyleLanguage.extra_matcher
 
   if AMX:
-    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
-      for dt, sz in [(dt, 64//dt.itemsize) for dt in [dtypes.float]]]
+    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
+                               swizzle=(None, ((),(4,5,6,7,0,1,2,3))), opts=("u0","u0","u0","u0","u1","u1","u1","u1"))
+                               for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
 
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
@@ -208,7 +207,7 @@ class OpenCLRenderer(CStyleLanguage):
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
-  type_map = { dtypes.int8:"char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
+  type_map = { dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
               dtypes.bfloat16: "ushort" }
 
   string_rewrite = PatternMatcher([
@@ -228,12 +227,12 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,8)],dtype_in=di,dtype_out=do,reduce_axes=[(0,16)],upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
-    st1_pattern=(((1,0),),((1,2),(1,1),(0,0))),expanded_shape=(8,2,8)) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=8, elements_per_thread=(16,16,8), dtype_in=dtypes.half, dtype_out=dtypes.float,
+    opts=("l0","l0","l0","u1","u1","u1"), swizzle=(((4,5,6),(0,1,2,3,7,8,9)), ((0,1,2),(7,8,9,3,4,5,6))))]
 
   string_rewrite = PatternMatcher([
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x[0]]})"),
-    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x[0]]})"),
+    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x]})"),
+    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x]})"),
   ]) + OpenCLRenderer.string_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
@@ -247,10 +246,9 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],expanded_shape=(2,2,2,2),upcast_axes=([(1,2)],[(1,2)],[(1,2)]),
-    st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
-    dtype_in=di,dtype_out=do,reduce_axes=[(0,8)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),
-                                                                (dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=32, elements_per_thread=(2,2,2), dtype_in=di, dtype_out=do, opts=("u0","l0","l1","l1","l0","l1"),
+    swizzle=(((6,1,2,7,4),(8,0,3,5)), ((0,5,6,3,7),(1,2,4,8)))) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),
+    (dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
@@ -297,10 +295,9 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2,2),
-    st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
-    st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
-    upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+  tensor_cores = [TensorCore(dims=(8,16,16), threads=32, elements_per_thread=(8,4,4), dtype_in=di, dtype_out=do,
+    opts=("u0","l0","l0","l1","l1","l1","u1"), swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8))))
+    for di,do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
 
@@ -367,9 +364,9 @@ class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # https://gpuopen.com/learn/wmma_on_rdna3/
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], opts_seq=("LC","UP"),
-    upcast_axes = ([(0,16)],[(0,16)],[(1,8)]), st1_pattern=(((1,2),(0,2),(1,1),(0,1)),((1,0),(0,0))), expanded_shape=(16,2,4))
-    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
+    opts=("l0","l0","l0","l0","l1","u1","u1","u1"), swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))))
+    for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]

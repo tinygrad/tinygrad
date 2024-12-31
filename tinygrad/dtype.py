@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Tuple, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -10,7 +10,7 @@ FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
-  dcache: dict[Tuple, DType] = {}
+  dcache: dict[tuple, DType] = {}
   def __call__(cls, *args, **kwargs):
     if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
@@ -73,7 +73,7 @@ class dtypes:
   @staticmethod
   @functools.lru_cache(None)
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
-  @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
+  @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
   @staticmethod

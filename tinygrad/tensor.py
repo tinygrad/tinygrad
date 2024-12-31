@@ -141,7 +141,7 @@ class Tensor(SimpleMathTrait):
     if isinstance(data, (UOp, MultiLazyBuffer)):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
       # NOTE: this is here because LazyBuffer = UOp
-      if isinstance(data, UOp) and data.op is Ops.BIND: data = _metaop(Ops.CONST, tuple(), dtype or data.dtype, device, data)
+      if isinstance(data, UOp) and data.op is Ops.BIND: data = _metaop(Ops.BIND, tuple(), dtype or data.dtype, device, data)
     elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
@@ -235,7 +235,7 @@ class Tensor(SimpleMathTrait):
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert not x.requires_grad and getattr(self, '_ctx', None) is None
+    assert getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
     return self
@@ -329,7 +329,7 @@ class Tensor(SimpleMathTrait):
 
   def clone(self) -> Tensor:
     """
-    Creates a clone of this tensor allocating a seperate buffer for the data.
+    Creates a clone of this tensor allocating a separate buffer for the data.
     """
     ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.clone()
@@ -355,7 +355,7 @@ class Tensor(SimpleMathTrait):
     real = self.to(device)
     # TODO: is this assign?
     if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
-    self.lazydata = real.lazydata
+    return self.replace(real)
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
     """
@@ -383,8 +383,7 @@ class Tensor(SimpleMathTrait):
     """
     Shards the tensor across the given devices in place.
     """
-    self.lazydata = self.shard(devices, axis, splits).lazydata
-    return self
+    return self.replace(self.shard(devices, axis, splits))
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
@@ -392,7 +391,6 @@ class Tensor(SimpleMathTrait):
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
     if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
-    if y.op is Ops.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
     raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
@@ -1034,16 +1032,17 @@ class Tensor(SimpleMathTrait):
   def pad(self, padding:Union[Sequence[sint], Sequence[Optional[tuple[sint, sint]]]], mode:str="constant", value:float=0.0) -> Tensor:
     """
     Returns a tensor with padding applied based on the input `padding`.
+
     `padding` supports two padding structures:
 
-    1. Flat padding: (padding_left, padding_right, padding_top, padding_bottom, ...)
-       - This structure matches PyTorch's pad.
-       - `padding` length must be even.
+    1. Flat padding: `(padding_left, padding_right, padding_top, padding_bottom, ...)`
+        - This structure matches PyTorch's pad.
+        - `padding` length must be even.
 
-    2. Group padding: (..., (padding_top, padding_bottom), (padding_left, padding_right))
-       - This structure matches pad for jax, numpy, tensorflow and others.
-       - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
-       - `padding` must have the same length as `self.ndim`.
+    2. Group padding: `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
+        - This structure matches pad for JAX, NumPy, TensorFlow, and others.
+        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
+        - `padding` must have the same length as `self.ndim`.
 
     Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
     Padding modes is selected with `mode` which supports `constant`, `reflect` and `replicate`.
@@ -1092,34 +1091,6 @@ class Tensor(SimpleMathTrait):
 
   # ***** movement high level ops *****
 
-  # Supported Indexing Implementations:
-  #   1. Int indexing (no copy)
-  #     - for all dims where there's int, shrink -> reshape
-  #     - negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
-  #     - X = Tensor.rand(4,5,9); X[2,-2] shrinks the Tensor to X.shrink(((2, 3), (3, 4), (0, 9))) -> X.shape=(1,1,9)
-  #     - Then we reshape (collapse) the int dim away such that for X: (1,1,9) -> (9,)
-  #   2. Slice indexing (no copy)
-  #     - for all dims where slice is start:end:stride, shrink -> Optional[flip] -> pad -> reshape -> shrink
-  #     - first shrink the Tensor to X.shrink(((start, end),))
-  #     - then we apply stride through Optional[flip] -> pad -> reshape -> shrink
-  #       - flip where dim value is negative
-  #       - pad on dims to be multiple of strides, such that reshaping [dim_size_padded] -> [dim_size_padded // stride, stride] is possible
-  #       - shrink [dim_size_padded // stride, stride] -> [dim_size_padded // stride, 1]
-  #       - reshape [dim_size_padded // stride, 1] -> [dim_size_padded // stride] and now you have your stride
-  #   3. None indexing (no copy)
-  #     - reshape (inject) a dim at the dim where there's None
-  #   4. Tensor indexing (copy)
-  #     - use Tensor.arange == tensor_index to create masks for dims with Tensors (adds a dim for each mask)
-  #     - combine masks together with mul
-  #     - apply mask to self by mask * self
-  #     - sum reduce away the extra dims added from creating masks
-  # Tiny Things:
-  #   1. Supported indices: Union[int, slice, Tensor, None, List, Tuple, Ellipsis]
-  #     - for any list, list[Union[List, Tuple, int]], must have homogeneous shape
-  #     - for any tuple, tuple[Union[List, Tuple, int]], must have homogeneous shape
-  #   2. Bool indexing is not supported
-  #   3. Out of bounds Tensor indexing results in 0
-  #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
@@ -1168,7 +1139,7 @@ class Tensor(SimpleMathTrait):
       if any(abs(st) != 1 for st in strides):
         strides = tuple(abs(s) for s in strides)
         # pad shape to multiple of stride
-        if not all_int(x.shape): raise RuntimeError("symbolic shape not supprted")
+        if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
         x = x.pad(tuple((0, round_up(s, st) - s) for s, st in zip(x.shape, strides)))
         x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
@@ -1211,6 +1182,43 @@ class Tensor(SimpleMathTrait):
     return x
 
   def __getitem__(self, indices) -> Tensor:
+    """
+    Retrieve a sub-tensor using indexing.
+
+    Supported Index Types: `int | slice | Tensor | None | List | Tuple | Ellipsis`
+
+    Examples:
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(12).reshape(3, 4)
+    print(t.numpy())
+    ```
+
+    - Int Indexing: Select an element or sub-tensor using integers for each dimension.
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t[1, 2].numpy())
+      ```
+
+    - Slice Indexing: Select a range of elements using slice notation (`start:end:stride`).
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t[0:2, ::2].numpy())
+      ```
+
+    - Tensor Indexing: Use another tensor as indices for advanced indexing. Using `tuple` or `list` here also works.
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t[Tensor([2, 0, 1]), Tensor([1, 2, 3])].numpy())
+      ```
+
+    - `None` Indexing: Add a new dimension to the tensor.
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t[:, None].shape)
+      ```
+
+    NOTE: Out-of-bounds indexing results in a value of `0`.
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t[Tensor([4, 3, 2])].numpy())
+    ```
+    """
     return self._getitem(indices)
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
@@ -1508,6 +1516,46 @@ class Tensor(SimpleMathTrait):
       rolled = Tensor.cat(rolled[tuple(slice(None) if i != dim else slice(-shift, None) for i in range(rolled.ndim))],
                           rolled[tuple(slice(None) if i != dim else slice(None, -shift) for i in range(rolled.ndim))], dim=dim)
     return rolled
+
+  def rearrange(self, formula:str, **sizes) -> Tensor:
+    """
+    Rearranges input according to formula
+
+    See: https://einops.rocks/api/rearrange/
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x = Tensor([[1, 2], [3, 4]])
+    print(Tensor.rearrange(x, "batch channel -> (batch channel)").numpy())
+    ```
+    """
+    def parse_formula(formula: str):
+      tokens = f" {formula} ".replace("…", "...").replace("(", " ( ").replace(")", " ) ").replace(" ", "  ").replace(" 1 ", " ( ) ").split()
+      lparens, rparens = map(lambda x: [i for i, ch in enumerate(tokens) if ch == x], ("(", ")"))
+      pairs = list(zip(lparens, rparens))
+      assert len(lparens) == len(rparens) and sorted(flatten(pairs)) == flatten(pairs), "bracket mismatch"
+      return [name for name in tokens if name not in ("(", ")")], [(s - 2*i, e - 1 - 2*i) for i, (s, e) in enumerate(pairs)]
+
+    assert formula.count("->") == 1, 'need exactly one "->" in formula'
+
+    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.split("->"))
+
+    for name in sizes: assert name in lhs, f"axis {name} is not used in transform"
+    assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"
+    for name in flatten((lhs, rhs)): assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
+    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
+    assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
+
+    # resolve ellipsis
+    if "..." in lhs: ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims)
+    lhs, rhs = map(lambda l: l[:(i:=l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
+    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0)) for s, e in unflatten_dims]
+    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0)) for s, e in flatten_dims]
+
+    # apply movement ops in order unflatten -> permute -> flatten/unsqueeze
+    t = functools.reduce(lambda x, dims: x.unflatten(dims[0], tuple(sizes.get(lhs[d], -1) for d in range(*dims))), unflatten_dims, self)
+    for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
+    t = t.permute([lhs.index(name) for name in rhs])
+    return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
 
   # ***** reduce ops *****
 
@@ -1910,46 +1958,6 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
-
-  def rearrange(self, formula: str, **sizes) -> Tensor:
-    """
-    Rearranges input according to formula
-
-    See: https://einops.rocks/api/rearrange/
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    x = Tensor([[1, 2], [3, 4]])
-    print(Tensor.rearrange(x, "batch channel -> (batch channel)).numpy())
-    ```
-    """
-    def parse_formula(formula: str):
-      tokens = f" {formula} ".replace("…", "...").replace("(", " ( ").replace(")", " ) ").replace(" ", "  ").replace(" 1 ", " ( ) ").split()
-      lparens, rparens = map(lambda x: [i for i, ch in enumerate(tokens) if ch == x], ("(", ")"))
-      pairs = list(zip(lparens, rparens))
-      assert len(lparens) == len(rparens) and sorted(flatten(pairs)) == flatten(pairs), "bracket mismatch"
-      return [name for name in tokens if name not in ("(", ")")], [(s - 2*i, e - 1 - 2*i) for i, (s, e) in enumerate(pairs)]
-
-    assert formula.count("->") == 1, 'need exactly one "->" in formula'
-
-    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.split("->"))
-
-    for name in sizes: assert name in lhs, f"axis {name} is not used in transform"
-    assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"
-    for name in flatten((lhs, rhs)): assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
-    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
-    assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
-
-    # resolve ellipsis
-    if "..." in lhs: ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims)
-    lhs, rhs = map(lambda l: l[:(i:=l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
-    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0)) for s, e in unflatten_dims]
-    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0)) for s, e in flatten_dims]
-
-    # apply movement ops in order unflatten -> permute -> flatten/unsqueeze
-    t = functools.reduce(lambda x, dims: x.unflatten(dims[0], tuple(sizes.get(lhs[d], -1) for d in range(*dims))), unflatten_dims, self)
-    for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
-    t = t.permute([lhs.index(name) for name in rhs])
-    return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:Optional[DTypeLike]=None) -> Tensor:
@@ -3092,10 +3100,10 @@ class Tensor(SimpleMathTrait):
     Divides `self` by `x`.
     Equivalent to `self // x`.
     Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division.
+    `idiv` performs integer division (truncate towards zero).
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).idiv(Tensor([2, 3, 4])).numpy())
+    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
     return F.IDiv.apply(*self._broadcasted(x, reverse))

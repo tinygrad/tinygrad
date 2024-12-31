@@ -6,7 +6,6 @@ import numpy as np
 from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
@@ -72,7 +71,7 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
-  sched = create_schedule([out.lazydata])
+  sched = out.schedule()
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
@@ -197,8 +196,8 @@ class TestDTypeALU(unittest.TestCase):
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
     float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    overflow_strat = float_strat.filter(lambda x: x < 0 and x >= dtypes.min(dtypes.int32))
-    universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
+    underflow_strat = float_strat.filter(lambda x: x < 0 and x >= dtypes.min(dtypes.int32))
+    universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
 
   @unittest.expectedFailure
   def test_unsafe_cast_float_to_int_failure(self):
