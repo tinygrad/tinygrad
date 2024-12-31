@@ -892,6 +892,8 @@ class RewriteContext:
     stack: list[tuple[UOp, list[UOp], bool]] = [(n, [], False)] # n, map result, returning from recursive call
     ret: Optional[UOp] = None
     while stack:
+      if len(stack) > 10000:
+        raise RecursionError("rewrite depth exceeded")
       n, results, returning = stack[-1]
       if len(results) < len(n.src):
         if (result := ret if returning else self.replace.get(n.src[len(results)])) is not None:
