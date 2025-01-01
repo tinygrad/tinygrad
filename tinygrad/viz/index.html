@@ -188,8 +188,6 @@
     white-space: pre-wrap;
   }
   .code-block.hljs {
-    max-height: 30%;
-    overflow-y: auto;
     border-radius: 8px;
     padding: 8px;
   }
@@ -275,7 +273,8 @@
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const createPre = (code, lang, wrap) => {
     const pre = Object.assign(document.createElement("pre"),
-      { innerHTML: `<code class="language-${lang} code-block">${DOMPurify.sanitize(code)}</code>`, className: wrap ? "wrap" : "" });
+      { innerHTML: `<code class="language-${lang} code-block">${DOMPurify.sanitize(code)}</code>`,
+        className: wrap ? "wrap" : "", style: "max-height: 30%; overflow-y: auto;" });
     hljs.highlightElement(pre.querySelector("code"));
     return pre;
   }
