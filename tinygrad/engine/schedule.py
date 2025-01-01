@@ -75,7 +75,6 @@ to_ast = view_left+PatternMatcher([
 ])
 
 # ** one uop graph™
-
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int]]:
   sink = UOp.sink(*outs)
@@ -83,15 +82,9 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
-  realize_map = {k:v for k,v in realize_map.items() if k is not v}
-  for k, v in realize_map.items():
-    from test.helpers import print_diff
-    print_diff(k, v)
-    print("-----------")
   # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in ctx.realizes.items():
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(ast, tuple(b.buffer for b in sctx.bufs)))
-    for out in si.outputs: out.ref(1)
   return schedule, {}
