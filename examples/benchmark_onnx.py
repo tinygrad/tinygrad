@@ -91,9 +91,16 @@ def benchmark(onnx_file:pathlib.Path):
       else: np.testing.assert_allclose(tiny_v.numpy(), ort_v, rtol=rtol, atol=atol)
     print("ort test passed")
 
-def download(potential_file_paths:list[str], model_id:str):
+def download(model_id:str):
   """ downloads the model, external data, config, and preprocessing config from huggingface """
   base_path = f"https://huggingface.co/{model_id}/resolve/main"
+  potential_file_paths = [
+    "onnx/model.onnx",
+    "model.onnx",
+    "onnx/decoder_model.onnx",
+    "onnx/decoder_model_merged.onnx",
+    "punct_cap_seg_en.onnx", # for "1-800-BAD-CODE/punctuation_fullstop_truecase_english"
+  ]
   for file_path in potential_file_paths:
     url = f"{base_path}/{file_path}"
     model_name = file_path.split('/')[-1]
@@ -143,14 +150,8 @@ def download(potential_file_paths:list[str], model_id:str):
 
   raise Exception(f"failed to download model from https://huggingface.co/{model_id}")
 
-POTENTIAL_MODEL_PATHS = [
-  "onnx/model.onnx",
-  "model.onnx",
-  "onnx/decoder_model.onnx",
-  "onnx/decoder_model_merged.onnx",
-  "punct_cap_seg_en.onnx", # for "1-800-BAD-CODE/punctuation_fullstop_truecase_english"
-]
-
+# TODO: will deprecate this in favor of exporting a list of top files from get_top_models_huggingface and running with benchmark_model_id
+# just use this as a tool for testing for now
 def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time", "trending"]="downloads", limit:int=100):
   from huggingface_hub import list_models
   # TODO: should we just download all onnx models and files? Then optionally run them? Less hacks this way
@@ -169,11 +170,17 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time", "t
 
     print(f"{i}: {model.id} ({model.downloads} {sort}) ")
     print(f"link: https://huggingface.co/{model.id}")
-    model_path = next(download(POTENTIAL_MODEL_PATHS, model.id))
+    model_path = next(download(model.id))
     benchmark(model_path)
 
+def get_top_models_huggingface(sort:Literal["downloads", "download_all_time", "trending"]="downloads", limit:int=100) -> list[str]:
+  """ get the top models model.id from huggingface """
+  from huggingface_hub import list_models
+  return [model.id for model in list_models(filter="onnx", sort=sort, limit=limit)]
+
 def benchmark_model_id(model_id:str):
-  model_path = next(download(POTENTIAL_MODEL_PATHS, model_id))
+  """ run benchmark for a single model id """
+  model_path = next(download(model_id))
   benchmark(model_path)
 
 if __name__ == "__main__":
