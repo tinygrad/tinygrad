@@ -8,6 +8,8 @@ from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
+from tinygrad.engine.realize import get_kernel
+from tinygrad.ops import Ops, sym_infer, UOp
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -764,6 +766,51 @@ class TestTensorMetadata(unittest.TestCase):
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
     self.assertEqual(bw[0].name, "sigmoid")
+
+class TestIdxUpcast(unittest.TestCase):
+  def _find_op(self, ast: UOp, op: Ops):
+    if ast.op is op: return ast
+    for src in ast.src:
+      if (ret:=self._find_op(src, op)) is not None: return ret
+  def _assert(self, dtype: dtypes, a: Tensor):
+    schedule, var_vals = a.schedule_with_vars()
+    for s in schedule:
+      if s.ast.op is Ops.SINK:
+        renderer = Device[s.bufs[0].device].renderer
+        kernel = get_kernel(renderer, s.ast)
+
+        # If render succeeds, it means types were propagated correctly when upcasting
+        prg = kernel.to_program()
+
+        # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
+        store = prg.uops[-1]
+        assert store.op is Ops.STORE
+        idx = self._find_op(store, Ops.INDEX)
+        assert idx.op is Ops.INDEX
+        idx_val = idx.src[1]
+        assert idx_val.dtype is dtype
+
+        # Test everything except the actual run (including sym_infer)
+        sym_infer(prg.estimates.ops, var_vals)
+        sym_infer(prg.estimates.mem, var_vals)
+
+  # This prevents kernel.py from combining the dims into 1
+  def _permute_expand_contig(self, dtype: dtypes, dim1, dim2, dim3):
+    self._assert(dtype, Tensor.empty(dim1, dim2, 1).permute((2, 1, 0)).expand(dim3, -1, -1).contiguous())
+
+  def test_overflow(self):
+    # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
+    self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
+
+  def test_overflow_sym(self):
+    self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  def test_regular(self):
+    self._permute_expand_contig(dtypes.int, 64, 64, 64)
+
+  def test_regular_sym(self):
+    self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+
 
 if __name__ == '__main__':
   unittest.main()
