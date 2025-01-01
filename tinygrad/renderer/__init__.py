@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Callable
-import functools
+import functools, math
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
@@ -9,19 +9,25 @@ from tinygrad.dtype import DType
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: tuple[int,int,int] # N, M, K
+  threads: int # number of threads that construct the warp
+  elements_per_thread: tuple[int, int, int] # elements per-thread to load/store from A/B/C
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  threads: list[tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  reduce_axes: list[tuple[int,int]] # list of (TC dim,amt) that constructs the shape of the reduce dim
-  @property
-  def early_upcast_axes(self) -> list[tuple[int,int]]: # list of (TC dim,amt) that upcasts the threads remainders of dims [0,1]
-    return [(d,self.dims[d]//sz) for d,sz in [(dim,prod(sz for d,sz in self.threads if d==dim)) for dim in range(2)] if self.dims[d]>sz]
-  upcast_axes: tuple[list[tuple[int,int]], list[tuple[int,int]], list[tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
-  st1_pattern: Optional[tuple[tuple[tuple[int,int], ...], tuple[tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
-  st2_pattern: Optional[tuple[tuple[tuple[int,int], ...], tuple[tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
-  expanded_shape: Optional[tuple[int, ...]] = None
-  opts_seq: tuple[str,str] = ("UP","LC") # upcast input, local the thread pattern
+  opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifing kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
+  swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], Optional[tuple[tuple[int, ...], tuple[int, ...]]]] = (None, None)
+  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
+  def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
+  def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
+  def __post_init__(self):
+    local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
+    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), (
+      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})")
+    assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but found {2**local_axes} in {self.opts}"
+    assert 2**upcast_axes == self.elements_per_thread[2], (
+      f"{self.elements_per_thread[2]} elements from C are processed per thread but found {2**upcast_axes} in {self.opts}")
+    assert all(len(perm[0]) == local_axes and len(perm[1]) == reduce_axes + upcast_axes for perm in self.swizzle if perm), (
+      f"swizzle perm should be of len (({local_axes})({reduce_axes + upcast_axes}))")
 
 @dataclass(frozen=True)
 class Estimates:

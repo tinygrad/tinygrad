@@ -83,8 +83,11 @@ backend_test.exclude('test_dequantizelinear_uint4_cpu')
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
 
-# no support for mod
-backend_test.exclude('test_mod_*')
+# no support for fmod
+backend_test.exclude('test_mod_int64_fmod_cpu')
+backend_test.exclude('test_mod_mixed_sign_float16_cpu')
+backend_test.exclude('test_mod_mixed_sign_float32_cpu')
+backend_test.exclude('test_mod_mixed_sign_float64_cpu')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')

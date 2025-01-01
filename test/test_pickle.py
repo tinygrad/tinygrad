@@ -1,7 +1,6 @@
 import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import GlobalCounters
 from tinygrad.ops import PatternMatcher, UPat, UOp
 
@@ -99,7 +98,7 @@ class TestPickle(unittest.TestCase):
   def test_pickle_schedule(self):
     a = Tensor([1,2])
     out = a + 2
-    sched = create_schedule([out.lazydata])
+    sched = out.schedule()
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
     self.assertEqual(sched_pk[-1].ast, sched[-1].ast)

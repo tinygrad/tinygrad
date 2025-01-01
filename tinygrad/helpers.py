@@ -43,6 +43,8 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
+def lo32(x:Any) -> Any: return x & 0xFFFFFFFF # Any is sint
+def hi32(x:Any) -> Any: return x >> 32 # Any is sint
 def data64(data:Any) -> tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
 def data64_le(data:Any) -> tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32) # Any is sint
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
@@ -77,21 +79,19 @@ def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 
 class Context(contextlib.ContextDecorator):
-  stack: ClassVar[list[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    Context.stack[-1] = {k:o.value for k,o in ContextVar._cache.items()} # Store current state.
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v # Update to new temporary state.
-    Context.stack.append(self.kwargs) # Store the temporary state so we know what to undo later.
+    self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
   def __exit__(self, *args):
-    for k in Context.stack.pop(): ContextVar._cache[k].value = Context.stack[-1].get(k, ContextVar._cache[k].value)
+    for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
 class ContextVar:
   _cache: ClassVar[dict[str, ContextVar]] = {}
   value: int
   key: str
   def __init__(self, key, default_value):
-    assert key not in ContextVar._cache, f"attempt to recreate ContextVar {key}"
+    if key in ContextVar._cache: raise RuntimeError(f"attempt to recreate ContextVar {key}")
     ContextVar._cache[key] = self
     self.value, self.key = getenv(key, default_value), key
   def __bool__(self): return bool(self.value)

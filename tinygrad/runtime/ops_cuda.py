@@ -59,25 +59,25 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def __init__(self, device:CUDADevice):
-    self.device = device
+  def __init__(self, dev:CUDADevice):
+    self.dev = dev
     super().__init__()
   def _alloc(self, size, options:BufferSpec):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _free(self, opaque, options:BufferSpec):
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
   def _copyin(self, dest, src:memoryview):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     host_mem = self.alloc(len(src), BufferSpec(host=True))
-    self.device.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
+    self.dev.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
   def _copyout(self, dest:memoryview, src):
     CUDADevice.synchronize_system()
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     check(cuda.cuCtxSetCurrent(src_dev.context))
