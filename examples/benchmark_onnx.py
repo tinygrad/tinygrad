@@ -105,11 +105,12 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time"]="d
       try:
         model_path = fetch(url, model_name, model_id)
         print(f"Downloaded model at {model_path.as_posix()}")
-      # TODO: check if 404?
       # early continue to the next file model isn't found
-      except urllib.error.HTTPError: continue
+      except urllib.error.HTTPError as e:
+        if e.code == 404: continue
+        raise
       # raise error if unexpected error occurs
-      except Exception as e: raise e
+      except Exception: raise
 
       # download onnx external data in the same directory
       try:
@@ -118,8 +119,9 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time"]="d
         external_data_name = external_data_url.split('/')[-1]
         external_data_path = fetch(external_data_url, external_data_name, model_id)
         print(f"Downloaded external data at {external_data_path.as_posix()}")
-      except urllib.error.HTTPError: pass
-      except Exception as e: raise e
+      except urllib.error.HTTPError as e:
+        if e.code != 404: raise
+      except Exception: raise
 
       # download configs
       for config_path in (base_path, base_path + "/onnx"):
@@ -127,15 +129,17 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time"]="d
           preprocessor_config = fetch(f"{config_path}/preprocessor_config.json", "preprocessor_config.json", model_id)
           print(f"Downloaded preprocessor config at {preprocessor_config.as_posix()}")
           break
-        except urllib.error.HTTPError: pass
-        except Exception as e: raise e
+        except urllib.error.HTTPError as e:
+          if e.code != 404: raise
+        except Exception: raise
       for config_path in (base_path, base_path + "/onnx"):
         try:
           model_config = fetch(f"{config_path}/config.json", "config.json", model_id)
           print(f"Downloaded model config at {model_config.as_posix()}")
           break
-        except urllib.error.HTTPError: pass
-        except Exception as e: raise e
+        except urllib.error.HTTPError as e:
+          if e.code != 404: raise
+        except Exception: raise
 
       # yield the model path
       yield model_path
@@ -152,7 +156,6 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time"]="d
 
   # NOTE: we only download 1 model per project. Can just download all of them.
   for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
-    if i < 85: continue
     # TODO: uses a pipeline of different models with configs scattered everywhere
     if model.id in {"stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo"}: continue
     # TODO: `HuggingFaceTB/SmolLM2-360M-Instruct` need `GroupQueryAttention`
@@ -164,7 +167,8 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time"]="d
     # ZeroDivisionError: integer division or modulo by zero
     if model.id in {"briaai/RMBG-2.0"}: continue
 
-    print(f"{i:<3}: {model.id} ({model.downloads} {sort}), link: https://huggingface.co/{model.id}")
+    print(f"{i}: {model.id} ({model.downloads} {sort}) ")
+    print(f"link: https://huggingface.co/{model.id}")
     model_path = next(_download(POTENTIAL_MODEL_PATHS, model.id))
     benchmark(model_path)
 
