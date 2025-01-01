@@ -91,69 +91,69 @@ def benchmark(onnx_file:pathlib.Path):
       else: np.testing.assert_allclose(tiny_v.numpy(), ort_v, rtol=rtol, atol=atol)
     print("ort test passed")
 
+def download(potential_file_paths:list[str], model_id:str):
+  """ downloads the model, external data, config, and preprocessing config from huggingface """
+  base_path = f"https://huggingface.co/{model_id}/resolve/main"
+  for file_path in potential_file_paths:
+    url = f"{base_path}/{file_path}"
+    model_name = file_path.split('/')[-1]
 
-def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time", "trending"]="downloads", limit:int=100):
-  from huggingface_hub import list_models
-  # TODO: should we just download all onnx models and files? Then optionally run them? Less hacks this way
-  def _download(potential_file_paths:list[str], model_id:str):
-    base_path = f"https://huggingface.co/{model_id}/resolve/main"
-    for file_path in potential_file_paths:
-      url = f"{base_path}/{file_path}"
-      model_name = file_path.split('/')[-1]
+    # download onnx model
+    try:
+      model_path = fetch(url, model_name, model_id)
+      print(f"Downloaded model at {model_path.as_posix()}")
+    # early continue to the next file model isn't found
+    except urllib.error.HTTPError as e:
+      if e.code == 404: continue
+      raise
+    # raise error if unexpected error occurs
+    except Exception: raise
 
-      # download onnx model
+    # download onnx external data in the same directory
+    try:
+      file_path_no_extension = url.rsplit('.', 1)[0]
+      external_data_url = f"{file_path_no_extension}.onnx_data"
+      external_data_name = external_data_url.split('/')[-1]
+      external_data_path = fetch(external_data_url, external_data_name, model_id)
+      print(f"Downloaded external data at {external_data_path.as_posix()}")
+    except urllib.error.HTTPError as e:
+      if e.code != 404: raise
+    except Exception: raise
+
+    # download configs
+    for config_path in (base_path, base_path + "/onnx"):
       try:
-        model_path = fetch(url, model_name, model_id)
-        print(f"Downloaded model at {model_path.as_posix()}")
-      # early continue to the next file model isn't found
+        preprocessor_config = fetch(f"{config_path}/preprocessor_config.json", "preprocessor_config.json", model_id)
+        print(f"Downloaded preprocessor config at {preprocessor_config.as_posix()}")
+        break
       except urllib.error.HTTPError as e:
-        if e.code == 404: continue
-        raise
-      # raise error if unexpected error occurs
+        if e.code != 404: raise
       except Exception: raise
-
-      # download onnx external data in the same directory
+    for config_path in (base_path, base_path + "/onnx"):
       try:
-        file_path_no_extension = url.rsplit('.', 1)[0]
-        external_data_url = f"{file_path_no_extension}.onnx_data"
-        external_data_name = external_data_url.split('/')[-1]
-        external_data_path = fetch(external_data_url, external_data_name, model_id)
-        print(f"Downloaded external data at {external_data_path.as_posix()}")
+        model_config = fetch(f"{config_path}/config.json", "config.json", model_id)
+        print(f"Downloaded model config at {model_config.as_posix()}")
+        break
       except urllib.error.HTTPError as e:
         if e.code != 404: raise
       except Exception: raise
 
-      # download configs
-      for config_path in (base_path, base_path + "/onnx"):
-        try:
-          preprocessor_config = fetch(f"{config_path}/preprocessor_config.json", "preprocessor_config.json", model_id)
-          print(f"Downloaded preprocessor config at {preprocessor_config.as_posix()}")
-          break
-        except urllib.error.HTTPError as e:
-          if e.code != 404: raise
-        except Exception: raise
-      for config_path in (base_path, base_path + "/onnx"):
-        try:
-          model_config = fetch(f"{config_path}/config.json", "config.json", model_id)
-          print(f"Downloaded model config at {model_config.as_posix()}")
-          break
-        except urllib.error.HTTPError as e:
-          if e.code != 404: raise
-        except Exception: raise
+    # yield the model path
+    yield model_path
 
-      # yield the model path
-      yield model_path
+  raise Exception(f"failed to download model from https://huggingface.co/{model_id}")
 
-    raise Exception(f"failed to download model from https://huggingface.co/{model_id}")
+POTENTIAL_MODEL_PATHS = [
+  "onnx/model.onnx",
+  "model.onnx",
+  "onnx/decoder_model.onnx",
+  "onnx/decoder_model_merged.onnx",
+  "punct_cap_seg_en.onnx", # for "1-800-BAD-CODE/punctuation_fullstop_truecase_english"
+]
 
-  POTENTIAL_MODEL_PATHS = [
-    "onnx/model.onnx",
-    "model.onnx",
-    "onnx/decoder_model.onnx",
-    "onnx/decoder_model_merged.onnx",
-    "punct_cap_seg_en.onnx", # for "1-800-BAD-CODE/punctuation_fullstop_truecase_english"
-  ]
-
+def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time", "trending"]="downloads", limit:int=100):
+  from huggingface_hub import list_models
+  # TODO: should we just download all onnx models and files? Then optionally run them? Less hacks this way
   # NOTE: we only download 1 model per project. Can just download all of them.
   for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
     # TODO: uses a pipeline of different models with configs scattered everywhere
@@ -169,8 +169,12 @@ def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time", "t
 
     print(f"{i}: {model.id} ({model.downloads} {sort}) ")
     print(f"link: https://huggingface.co/{model.id}")
-    model_path = next(_download(POTENTIAL_MODEL_PATHS, model.id))
+    model_path = next(download(POTENTIAL_MODEL_PATHS, model.id))
     benchmark(model_path)
+
+def benchmark_model_id(model_id:str):
+  model_path = next(download(POTENTIAL_MODEL_PATHS, model_id))
+  benchmark(model_path)
 
 if __name__ == "__main__":
   # sort` options:
@@ -180,11 +184,15 @@ if __name__ == "__main__":
   sort = getenv("SORT", "downloads")
   limit = int(getenv("LIMIT", "100"))
   test_with_ort = int(getenv("ORT", "0"))
+  single_model = getenv("MODEL", "") # bench a single model using the model id e.g. "HuggingFaceTB/SmolLM2-360M-Instruct"
 
   if len(sys.argv) > 1:
     print(f"** Running benchmark for {sys.argv[1]} **")
     onnx_file = fetch(sys.argv[1])
     benchmark(onnx_file)
+  elif single_model != "":
+    print(f"** Running benchmark for {single_model} on huggingface **")
+    benchmark_model_id(single_model)
   else:
     print(f"** Running benchmarks for top {limit} models ranked by {sort} on huggingface **")
     benchmark_from_huggingface(sort, limit)
