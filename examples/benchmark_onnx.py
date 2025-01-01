@@ -92,7 +92,7 @@ def benchmark(onnx_file:pathlib.Path):
     print("ort test passed")
 
 
-def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time"]="downloads", limit:int=100):
+def benchmark_from_huggingface(sort:Literal["downloads", "download_all_time", "trending"]="downloads", limit:int=100):
   from huggingface_hub import list_models
   # TODO: should we just download all onnx models and files? Then optionally run them? Less hacks this way
   def _download(potential_file_paths:list[str], model_id:str):
@@ -176,6 +176,7 @@ if __name__ == "__main__":
   # sort` options:
   # "downloads": recent 30-day total number of downloads
   # "download_all_time": all-time total number of downloads
+  # "trending": some trending metric huggingface uses idk
   sort = getenv("SORT", "downloads")
   limit = int(getenv("LIMIT", "100"))
   test_with_ort = int(getenv("ORT", "0"))
