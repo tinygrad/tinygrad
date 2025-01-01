@@ -17,7 +17,6 @@ class ScheduleItem:
   def outputs(self): return self.bufs[:len(self.ast.src)]
 
 # ** schedule simplification
-
 prune_movementops = merge_views+PatternMatcher([])
 
 def remove_sink_noops(root:UOp):
@@ -33,12 +32,12 @@ class SchedulerCtx:
   realizes:dict[UOp, UOp] = field(default_factory=dict)
 
 def sink_outputs(ctx:SchedulerCtx, root:UOp):
-  new_src = [x if x.op is Ops.BUFFER else realize(ctx, x) for x in root.src]
+  new_src = [x.base if x.base.op is Ops.BUFFER else realize(ctx, x.base) for x in root.src]
   return None if tuple(new_src) == root.src else UOp.sink(*new_src)
 
-def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, copyin:UOp):
+def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, view:UOp, copyin:UOp):
   ctx.realizes[dest] = root
-  return dest
+  return view
 
 def realize(ctx:SchedulerCtx, root:UOp):
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
@@ -47,7 +46,8 @@ def realize(ctx:SchedulerCtx, root:UOp):
 
 allocate_bufs = PatternMatcher([
   (UPat(Ops.SINK, name="root"), sink_outputs),
-  (UPat(Ops.COPY, name="root", src=(UPat(Ops.BUFFER, name="dest"), UPat.var("copyin"))), realize_copy),
+  # COPY is COPY(VIEW(BUFFER), copyin)
+  (UPat(Ops.COPY, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="dest"))), UPat.var("copyin"))), realize_copy),
 ])
 
 # ** ast creation
@@ -80,6 +80,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   sink = UOp.sink(*outs)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
+  rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
   # create schedule items
@@ -87,4 +88,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   for r,v in ctx.realizes.items():
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(ast, tuple(b.buffer for b in sctx.bufs)))
+    for out in si.outputs: out.ref(1)
+  for k, v in realize_map.items():
+    if (tensor:=rev_tensor_map[k]) is v: continue
+    tensor.become(v)
   return schedule, {}
