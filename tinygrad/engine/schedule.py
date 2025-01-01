@@ -49,7 +49,7 @@ def fold_const_reduce(root:UOp, x:UOp):
   return root.const_like(ret)
 
 def filter_sink_noops(root:UOp):
-  new_src = [x for x in root.src if x.base.op is not Ops.CONST and x.base.realized is None]
+  new_src = [x.base for x in root.src if x.base.op is not Ops.CONST and x.base.realized is None]
   return UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src) if tuple(new_src) != root.src else None
 
 ops_folding = PatternMatcher([

@@ -2216,7 +2216,8 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
   # TODO: linearizer block error
-  @unittest.expectedFailure
+  # update: this is green?
+  #@unittest.expectedFailure
   def test_avg_pool3d_failure(self):
     with Context(NOOPT=0):
       helper_test_op([(1,1,16,16,16)],
