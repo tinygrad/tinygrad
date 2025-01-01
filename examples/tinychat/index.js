@@ -55,7 +55,7 @@ document.addEventListener("alpine:init", () => {
         const device = await getDevice();
         console.log("WebGPU device initialized")
 
-        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7", "net_part8", "net_part9"];
+        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7", "net_part8"];
         let safetensorParts = await Promise.all(netKeys.map(key => loadPart(`${window.MODEL_BASE_URL}/${key}.safetensors`)));
         for (let i = 0; i < safetensorParts.length; i++) {safetensorParts[i] = new Uint8Array(safetensorParts[i]);}
         console.log("Model parts loaded successfully:", safetensorParts);

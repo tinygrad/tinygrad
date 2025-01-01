@@ -180,7 +180,7 @@ if __name__=="__main__":
   state_dict = get_state_dict(model)
   safe_save(state_dict, f32_fn)
   partStartOffsets = split_safetensor(f32_fn)
-  #os.remove(f32_fn)
+  os.remove(f32_fn)
 
   prekernel = f"""
     window.MODEL_BASE_URL= "{base_url}";
