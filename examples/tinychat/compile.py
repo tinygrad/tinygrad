@@ -55,9 +55,6 @@ if __name__=="__main__":
     #  maybe extra.models.llama.Transformer.forward_jit is the culprit?
     sys.exit()
 
-  # For now, we initialize the tinygrad.extra.models.llama.Transformer with the first 3 tokens that the model sees in every first tinychat user prompt
-  # Then in the start of tinychat, we will skip those 3 tokens
-  # TODO: remove this complexity by getting a jit-compiled llama3 transformer with kv-cache ready but empty (or something like that)
   tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
   tokenizer = Tokenizer(str(tokenizer_path))
   # TODO: refactor to consolidate these encode functions with those in examples/llama3.py
@@ -66,6 +63,7 @@ if __name__=="__main__":
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
   toks = [tokenizer.bos_id] + encode_message("user", "hi")
+  toks = toks + encode_role("assistant")
 
   # Export BPE data for use with tiktoken.js
   mergeable_ranks = load_tiktoken_bpe(str(tokenizer_path))  
@@ -78,9 +76,24 @@ if __name__=="__main__":
   state_dict = safe_load(f32_fn)
   load_state_dict(model, state_dict, consume=True)
 
+  # TODO: make these variables tunable by client?
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   GlobalCounters.reset()
-  model.forward(Tensor([[toks[0]]], device=device), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).realize()
+
+  """
+  Here we make concessions to get a jitted model that will compile with the current tinygrad webgpu compiler, to something that works in the browser.
+  TODO: get rid of these concessions to make the browser webgpu model fast
+
+  Concession 1: We are inferencing with our entire context length of tokens, instead of one token at a time,
+    because Variable(...).bind(start_pos) stuff doesn't properly compile to webgpu js code. Instead, to get dynamic inference with a fixed kernel shape, 
+    we use mask tokens (token = 1000000, arbitrarily chosen to be well outside of vocab range). These mask tokens affect the attention mask.
+
+  Concession 2: We are not using the attention layers' kv cache, because otherwise although the model will compile to js with each layer's kv cache 
+    in place, the currently-generated js code doesn't update the kv caches during inference as far as I can tell.
+  """
+
+  toks = toks + (max_context - len(toks)) * [1_000_000]
+  out = model.forward(Tensor([toks]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P, True)
 
   class Step(NamedTuple):
     name: str = ""
@@ -90,10 +103,7 @@ if __name__=="__main__":
   sub_steps = [
     Step(
       name = "transformer", 
-      input = [
-        Tensor([[toks[1]]], device=device), 1, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P,
-        Tensor([[toks[2]]], device=device), 2, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P,
-      ], 
+      input = [Tensor([toks]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P, True], 
       forward = model.forward),
   ]
 
@@ -109,7 +119,7 @@ if __name__=="__main__":
     return code
 
   def compile_step(model, step: Step):
-    run, special_names = jit_model(step, *step.input, two_argsets_provided=True)
+    run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(run, special_names)
     state = get_state_dict(model)
     weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
