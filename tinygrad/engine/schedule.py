@@ -12,9 +12,9 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...]
   @property
-  def inputs(self): return self.bufs[self.ast.src:]
+  def inputs(self): return self.bufs[len(self.ast.src):]
   @property
-  def outputs(self): return self.bufs[:self.ast.src]
+  def outputs(self): return self.bufs[:len(self.ast.src)]
 
 @dataclass(frozen=True)
 class SchedulerCtx:
@@ -120,7 +120,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   schedule: list[ScheduleItem] = []
   for buf,uop in ctx.realizes.items():
     ast = graph_rewrite(UOp.sink(uop), remove_movementops+merge_views+view_left+astify, bufs:=[buf])
-    schedule.append(ScheduleItem(graph_rewrite(ast, fix_const), tuple(dedup(x.buffer for x in bufs)), ()))
+    schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_const), tuple(dedup(x.buffer for x in bufs)), ()))
+    for out in si.outputs: out.ref(1)
   for k,v in tensor_map.items():
     if k is v: continue
     if (realized:=schedule_map.get(v)) is None: continue
