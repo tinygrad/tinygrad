@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from tinygrad.helpers import Metadata, dedup, prod, unwrap
 from tinygrad.ops import GroupOp, Ops, PatternMatcher, UOp, UPat, Variable, graph_rewrite, graph_rewrite_map, track_rewrites
 from tinygrad.ops import merge_views, symbolic_simple, view_left
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 
 def todo(**kwargs): raise Exception("todo!", kwargs)
@@ -105,7 +106,7 @@ def store_outputs(ctx:list[UOp], sink:UOp):
   if all(x.op is Ops.STORE or x.op in GroupOp.Meta for x in sink.src): return None
   new_src: list[UOp] = []
   for i,x in enumerate(sink.src):
-    new_src.append(UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=ctx[i].size), (), i), unwrap(x.st).to_uop(), x))
+    new_src.append(UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=ctx[i].size), (), i), ShapeTracker.from_shape(x.shape).to_uop(), x))
   return UOp.sink(*new_src)
 
 astify = PatternMatcher([
