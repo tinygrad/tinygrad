@@ -44,6 +44,12 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(vm3.strides, vm1.strides)
     self.assertEqual(vm2+vm3, vm2)
 
+  @unittest.expectedFailure
+  def test_merge_view_recursion_err3(self):
+    st1 = ShapeTracker(views=(View(shape=(45, 3, 9), strides=(0, 0, 0), offset=0, mask=((0, 0), (0, 0), (0, 0)), contiguous=False),))
+    st2 = ShapeTracker(views=(View(shape=(45, 0, 9), strides=(0, 0, 0), offset=0, mask=None, contiguous=True),))
+    st1+st2
+
   def test_cat_dim0_strides(self):
     i = Variable("i", 1, 5).bind(3)
     j = Variable("j", 1, 5).bind(3)
