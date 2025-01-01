@@ -128,8 +128,9 @@ class AMMemoryManager:
 
   def __init__(self, adev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
+    self.boot_allocator = TLSFAllocator(vram_size - (32 << 20), base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
-    self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=am.AMDGPU_VM_PDB1)
+    self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False, creat_pt=True):
     """
@@ -254,8 +255,9 @@ class AMMemoryManager:
     self.va_allocator.free(vm.va_addr)
     if vm.paddr is not None: self.pa_allocator.free(vm.paddr)
 
-  def palloc(self, size, align=0x1000, zero=True) -> AMPhysicalMemoryBlock:
-    pm = AMPhysicalMemoryBlock(self.adev, self.pa_allocator.alloc(round_up(size, 0x1000), align), size)
+  def palloc(self, size, align=0x1000, zero=True, boot=False) -> AMPhysicalMemoryBlock:
+    assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
+    pm = AMPhysicalMemoryBlock(self.adev, (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align), size)
     if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
     return pm
 
@@ -268,6 +270,10 @@ class AMDev:
 
     self._run_discovery()
     self._build_regs()
+
+    # AM boot sequence:
+    # TODO: write up
+    self.is_booting = True
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -282,11 +288,19 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.psp.is_sos_alive(): self.smu.mode1_reset()
+    print(hex(self.regSCRATCH_REG1.read()))
 
-    # Initialize all blocks
-    for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
+    if self.regSCRATCH_REG1.read() != (am_version:=0xE0000003):
+      if self.psp.is_sos_alive(): self.smu.mode1_reset()
+      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]: ip.init()
+
+    # Booting done
+    self.is_booting = False
+
+    # Re-initialize main blocks
+    for ip in [self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
+    self.regSCRATCH_REG1.write(am_version)
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 

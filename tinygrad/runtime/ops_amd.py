@@ -183,6 +183,7 @@ class AMDCopyQueue(HWQueue):
     if not AMDDevice.driverless and (dev:=signal.timeline_for_device) is not None:
       self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
+    elif AMDDevice.driverless: self.q(amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
 
     return self
 
@@ -564,6 +565,16 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
+
+    AMDComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    self.timeline_value += 1
+    self.synchronize()
+    print("ok")
+    
+    AMDCopyQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    self.timeline_value += 1
+    self.synchronize()
+    print("ok")
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)

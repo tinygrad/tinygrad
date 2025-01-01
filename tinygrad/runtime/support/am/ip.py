@@ -26,8 +26,8 @@ class AM_GMC(AM_IP):
     self.vm_base = self.adev.mm.va_allocator.base
     self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
 
-    self.memscratch_pm = self.adev.mm.palloc(0x1000)
-    self.dummy_page_pm = self.adev.mm.palloc(0x1000)
+    self.memscratch_pm = self.adev.mm.palloc(0x1000, boot=True)
+    self.dummy_page_pm = self.adev.mm.palloc(0x1000, boot=True)
     self.hub_initted = {"MM": False, "GC": False}
 
   def init(self): self.init_hub("MM")
@@ -151,6 +151,7 @@ class AM_GFX(AM_IP):
     self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x450)
 
     # Enable MEC
+    self.adev.regCP_ME_CNTL.update(me_halt=0, pfp_halt=0)
     self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0,
                                          mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
 
@@ -178,6 +179,7 @@ class AM_GFX(AM_IP):
     self.adev.gmc.flush_hdp()
 
     self._grbm_select(me=1, pipe=pipe, queue=queue)
+    self.adev.regCP_HQD_ACTIVE.write(0x0)
 
     mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
     for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.reg_off, self.adev.regCP_HQD_PQ_WPTR_HI.reg_off + 1)):
@@ -235,16 +237,16 @@ class AM_IH(AM_IP):
     self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
 
   def init(self):
-    self.rings = [(self.adev.mm.valloc(1 << 20, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "", 0),
-      (self.adev.mm.valloc(1 << 20, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "_RING1", 1)]
+    self.rings = [(self.adev.mm.palloc(256 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "", 0),
+      (self.adev.mm.palloc(256 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
 
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.va_addr >> 8)
+      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.mc_addr() >> 8)
 
       self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(ring_vm.size//4).bit_length(),
         mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
-      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.va_addr)
+      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.mc_addr())
 
       self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
       self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
@@ -266,9 +268,11 @@ class AM_SDMA(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Stop if something is running...
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").update(rb_enable=0)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=0)
     while not self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_CONTEXT_STATUS").read(idle=1): pass
 
     # Setup the ring
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_MINOR_PTR_UPDATE").write(0x1)
     self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR", "", "_HI", 0)
     self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR", "", "_HI", 0)
     self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_BASE", "", "_HI", ring_addr >> 8)
@@ -276,11 +280,18 @@ class AM_SDMA(AM_IP):
     self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR", "_LO", "_HI", wptr_addr)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL_OFFSET").update(offset=doorbell * 2)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL").update(enable=1)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_MINOR_PTR_UPDATE").write(0x0)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").write(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4,
       f32_wptr_poll_enable=1, rb_size=(ring_size//4).bit_length()-1, rb_enable=1, rb_priv=1)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
+    # self.adev.regSDMA0_F32_CNTL.update(halt=1)
+    # self.adev.reg(f"regSDMA0_QUEUE0_RB_CNTL").update(rb_enable=0)
+    # self.adev.reg(f"regSDMA0_QUEUE0_IB_CNTL").update(ib_enable=0)
+    # self.adev.regSDMA0_F32_CNTL.update(halt=1)
+    # self.adev.regSDMA0_F32_CNTL.update(halt=1, th1_reset=1)
+
     self.adev.regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0)
     self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
     self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
@@ -292,10 +303,10 @@ class AM_PSP(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG)
-    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE)
-    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE)
-    self.ring_pm = self.adev.mm.palloc(0x10000)
+    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, boot=True)
+    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, boot=True)
+    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, boot=True)
+    self.ring_pm = self.adev.mm.palloc(0x10000, boot=True)
 
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
@@ -341,7 +352,7 @@ class AM_PSP(AM_IP):
     self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
     resp = self._load_toc_cmd(len(fwm))
 
-    self.tmr_pm = self.adev.mm.palloc(resp.resp.tmr_size, align=am.PSP_TMR_ALIGNMENT)
+    self.tmr_pm = self.adev.mm.palloc(resp.resp.tmr_size, align=am.PSP_TMR_ALIGNMENT, boot=True)
 
   def _ring_create(self):
     # Wait until the sOS is ready
