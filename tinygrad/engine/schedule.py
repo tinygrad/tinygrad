@@ -82,11 +82,16 @@ def realize_before_copy(ctx:SchedulerCtx, root:UOp, copyout:UOp, copyin:UOp):
   ctx.realizes[new_copyin] = copyin
   return root.replace(src=(copyout, new_copyin.view(unwrap(copyin.st))))
 
+def realize_view(ctx:SchedulerCtx, root:UOp, view:UOp):
+  if root.st is None or view.size <= root.size or root.base.op is Ops.BUFFER: return None
+  return realize_uop(ctx, root).view(unwrap(view.st))
+
 realize = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="root"), realize_uop),
   # TODO: add view_right and delete this!
   # reduce op fusion is an optimization, correctness first.
   (UPat(Ops.REDUCE_AXIS, name="root"), realize_uop),
+  (UPat.var("root").view(name="view"), realize_view),
   (UPat(Ops.COPY, name="root", src=(UPat.var("copyout"), UPat.var("copyin"),)), realize_before_copy),
   (UPat(Ops.COPY, name="root"), realize_metaop),
   (UPat(Ops.SINK, name="root"), realize_sink_src),
