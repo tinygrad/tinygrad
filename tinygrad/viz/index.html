@@ -187,7 +187,7 @@
     word-wrap: break-word;
     white-space: pre-wrap;
   }
-  .code-block {
+  .code-block.hljs {
     max-height: 30%;
     overflow-y: auto;
     border-radius: 8px;
@@ -274,8 +274,8 @@
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const createPre = (code, lang, wrap) => {
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code class="language-${lang}">${DOMPurify.sanitize(code)}</code>`,
-      className: `code-block ${wrap ? "wrap" : ""}` });
+    const pre = Object.assign(document.createElement("pre"),
+      { innerHTML: `<code class="language-${lang} code-block">${DOMPurify.sanitize(code)}</code>`, className: wrap ? "wrap" : "" });
     hljs.highlightElement(pre.querySelector("code"));
     return pre;
   }
