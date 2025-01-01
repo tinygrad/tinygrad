@@ -89,6 +89,7 @@ def benchmark(onnx_file:pathlib.Path):
     for tiny_v, ort_v in zip(tiny_out, ort_out):
       if tiny_v is None: assert tiny_v == ort_v
       else: np.testing.assert_allclose(tiny_v.numpy(), ort_v, rtol=rtol, atol=atol)
+    del sess
     print("ort test passed")
 
 def download(model_id:str):
