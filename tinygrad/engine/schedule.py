@@ -56,8 +56,8 @@ class ASTCtx:
   bufs: list[UOp]
 
 def load_buf(ctx:ASTCtx, buf:UOp):
-  ctx.bufs.append(buf)
-  glbl = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(size=buf.size), (), len(ctx.bufs)-1)
+  if buf not in ctx.bufs: ctx.bufs.append(buf)
+  glbl = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(size=buf.size), (), ctx.bufs.index(buf))
   return UOp.load(glbl, unwrap(buf.st).to_uop(), dtype=buf.dtype.base)
 
 def ast_sink(root:UOp):
@@ -78,18 +78,20 @@ to_ast = view_left+PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+  sink = UOp.sink(*outs)
   # simplify pass
-  tensor_map = graph_rewrite_map(UOp.sink(*outs), prune_movementops+prune_ops)
+  tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
   # realize pass
-  realize_map = graph_rewrite_map(UOp.sink(*[tensor_map[x] for x in outs]), merge_views+allocate_bufs, ctx:=SchedulerCtx())
+  realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
+  realize_map = {k:v for k,v in realize_map.items() if k is not v}
+  for k, v in realize_map.items():
+    from test.helpers import print_diff
+    print_diff(k, v)
+    print("-----------")
   # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in ctx.realizes.items():
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(ast, tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
-  # update tensors map
-  for r,v in realize_map.items():
-    if (tensor:=tensor_map.get(r)) is None: continue
-    if tensor is not v: tensor.become(v)
   return schedule, {}

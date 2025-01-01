@@ -9,7 +9,6 @@ class TestMap(unittest.TestCase):
   def test_simple_copy(self):
     a = Tensor([11])
     a.realize()
-    print(a.lazydata)
     self.assertListEqual(unwrap_buf(a), [11])
 
   def test_multi_copy(self):
