@@ -28,6 +28,9 @@ def Mean(*data_0:Tensor): return Sum(*data_0) / len(data_0)
 # NOTE: does not support saturate
 def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
 def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
+def Mod(x:Tensor, y:Tensor, fmod:int=0):
+  if fmod != 0: raise NotImplementedError('fmod not implemented')
+  return x%y
 
 # **************** Simple Ops ****************
 
