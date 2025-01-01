@@ -273,6 +273,12 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
+  const createPre = (code, lang, wrap) => {
+    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code class="language-${lang}">${DOMPurify.sanitize(code)}</code>`,
+      className: `code-block ${wrap ? "wrap" : ""}` });
+    hljs.highlightElement(pre.querySelector("code"));
+    return pre;
+  }
 
   // **** main loop
   var ret = {};
@@ -348,10 +354,8 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code class="language-python">${DOMPurify.sanitize(ret.code_line)}</code>`,
-      className: "wrap code-block" });
+    const pre = createPre(ret.code_line, "python", true)
     metadata.appendChild(pre);
-    hljs.highlightElement(pre.querySelector("code"));
 
     // ** code blocks
     let code = ret.uops[currentRewrite];
@@ -360,10 +364,8 @@
       code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       lang = "cpp";
     }
-    const codeBlock = Object.assign(document.createElement("pre"), { innerHTML: `<code class="language-${lang}">${DOMPurify.sanitize(code)}</code>`,
-      className: `code-block` });
+    const codeBlock = createPre(code, lang, false);
     metadata.appendChild(codeBlock);
-    hljs.highlightElement(codeBlock.querySelector("code"));
     // ** rewrite list
     if (ret.graphs.length > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
@@ -380,10 +382,8 @@
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             const link = vsCodeOpener(parts);
             div.appendChild(link);
-            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
-            pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
+            const pre = createPre(pattern, "python", true);
             div.appendChild(pre);
-            hljs.highlightElement(pre.querySelector("code"));
             metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
               const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
