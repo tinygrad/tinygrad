@@ -332,7 +332,8 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
-    if (currentKernel != -1) {
+    if (currentKernel == -1) return;
+    else {
       const cacheKey = `${currentKernel}-${currentUOp}`;
       if (cacheKey in cache) {
         ret = cache[cacheKey];
@@ -347,10 +348,11 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
-      className: "wrap code-block language-python" });
+    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code class="language-python">${DOMPurify.sanitize(ret.code_line)}</code>`,
+      className: "wrap code-block" });
     metadata.appendChild(pre);
-    hljs.highlightElement(pre);
+    hljs.highlightElement(pre.querySelector("code"));
+
     // ** code blocks
     let code = ret.uops[currentRewrite];
     let lang = "python"
@@ -358,10 +360,10 @@
       code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       lang = "cpp";
     }
-    const codeBlock = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`,
-      className: `code-block language-${lang}` });
-    hljs.highlightElement(codeBlock);
+    const codeBlock = Object.assign(document.createElement("pre"), { innerHTML: `<code class="language-${lang}">${DOMPurify.sanitize(code)}</code>`,
+      className: `code-block` });
     metadata.appendChild(codeBlock);
+    hljs.highlightElement(codeBlock.querySelector("code"));
     // ** rewrite list
     if (ret.graphs.length > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
@@ -381,7 +383,7 @@
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
             div.appendChild(pre);
-            hljs.highlightElement(pre);
+            hljs.highlightElement(pre.querySelector("code"));
             metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
               const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
