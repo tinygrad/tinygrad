@@ -126,8 +126,8 @@ class TestVminVmaxDivMod(unittest.TestCase):
     # vmin and vmax for modulo of a variable with a range crossing zero
     x = UOp.variable('x', -10, 10)
     uop = x % 4
-    self.assertEqual(uop.vmin, 0)   # modulo always positive or zero when divisor is positive
-    self.assertEqual(uop.vmax, 3)   # max possible mod is 3 when dividing by 4
+    self.assertEqual(uop.vmin, -3)
+    self.assertEqual(uop.vmax, 3)
 
 class TestVminVmaxVConst(unittest.TestCase):
   def test_vmin_vmax_vconst_single_element(self):
