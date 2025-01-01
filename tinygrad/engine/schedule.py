@@ -17,8 +17,15 @@ class ScheduleItem:
   def outputs(self): return self.bufs[:len(self.ast.src)]
 
 # ** schedule simplification
+
 prune_movementops = merge_views+PatternMatcher([])
-prune_ops = symbolic_simple+PatternMatcher([])
+
+def remove_sink_noops(root:UOp):
+  if len(new_src:=[x.base for x in root.src if x.base.realized is None and x.base.op is not Ops.CONST]) == 0: return UOp(Ops.NOOP)
+  return None if tuple(new_src) == root.src else UOp.sink(*new_src)
+prune_ops = symbolic_simple+PatternMatcher([
+  (UPat(Ops.SINK, name="root"), remove_sink_noops),
+])
 
 # ** memory allocation
 @dataclass(frozen=True)
@@ -26,13 +33,12 @@ class SchedulerCtx:
   realizes:dict[UOp, UOp] = field(default_factory=dict)
 
 def sink_outputs(ctx:SchedulerCtx, root:UOp):
-  if len(new_src:=[x.base for x in root.src if x.base.realized is None and x.base.op is not Ops.CONST]) == 0: return UOp(Ops.NOOP)
-  new_src = [x if x.op is Ops.BUFFER else realize(ctx, x) for x in new_src]
+  new_src = [x if x.op is Ops.BUFFER else realize(ctx, x) for x in root.src]
   return None if tuple(new_src) == root.src else UOp.sink(*new_src)
 
-def realize_copy(ctx:SchedulerCtx, root:UOp, view:UOp, dest:UOp, copyin:UOp):
+def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, copyin:UOp):
   ctx.realizes[dest] = root
-  return view
+  return dest
 
 def realize(ctx:SchedulerCtx, root:UOp):
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
@@ -41,7 +47,7 @@ def realize(ctx:SchedulerCtx, root:UOp):
 
 allocate_bufs = PatternMatcher([
   (UPat(Ops.SINK, name="root"), sink_outputs),
-  (UPat(Ops.COPY, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="dest"),)), UPat.var("copyin"))), realize_copy),
+  (UPat(Ops.COPY, name="root", src=(UPat(Ops.BUFFER, name="dest"), UPat.var("copyin"))), realize_copy),
 ])
 
 # ** ast creation
@@ -72,14 +78,18 @@ to_ast = view_left+PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int]]:
-  tensor_uops = graph_rewrite_map(UOp.sink(*outs), prune_movementops+prune_ops+allocate_bufs, ctx:=SchedulerCtx())
+  # simplify pass
+  tensor_map = graph_rewrite_map(UOp.sink(*outs), prune_movementops+prune_ops)
+  # realize pass
+  realize_map = graph_rewrite_map(UOp.sink(*[tensor_map[x] for x in outs]), merge_views+allocate_bufs, ctx:=SchedulerCtx())
+  # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in ctx.realizes.items():
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(ast, tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
-  for k,v in tensor_uops.items():
-    if k is v: continue
-    if k.op is Ops.ADD: raise Exception(v)
-    k.become(v)
+  # update tensors map
+  for r,v in realize_map.items():
+    if (tensor:=tensor_map.get(r)) is None: continue
+    if tensor is not v: tensor.become(v)
   return schedule, {}
