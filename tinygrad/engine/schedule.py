@@ -94,14 +94,13 @@ realize = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="root"), realize_uop),
   (UPat.var("root").view(name="view"), realize_view),
   (UPat(Ops.COPY, name="root", src=(UPat.var("copyout"), UPat.var("copyin"),)), realize_before_copy),
-  (UPat({Ops.COPY, Ops.ASSIGN}, name="root"), realize_metaop),
+  (UPat(Ops.COPY, name="root"), realize_metaop),
   (UPat(Ops.SINK, name="root"), realize_sink_src),
 ])
 
 def load_buffer(ctx:list[UOp], buf:UOp):
-  if buf not in ctx:
-    ctx.append(buf)
-  return UOp.load(UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(size=buf.size), (), ctx.index(buf)), unwrap(buf.st).to_uop(), dtype=buf.dtype.base)
+  ctx.append(buf)
+  return UOp.load(UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(size=buf.size), (), len(ctx)-1), unwrap(buf.st).to_uop(), dtype=buf.dtype.base)
 
 def store_outputs(ctx:list[UOp], sink:UOp):
   if all(x.op is Ops.STORE or x.op in GroupOp.Meta for x in sink.src): return None
@@ -110,12 +109,8 @@ def store_outputs(ctx:list[UOp], sink:UOp):
     new_src.append(UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=ctx[i].size), (), i), ShapeTracker.from_shape(x.shape).to_uop(), x))
   return UOp.sink(*new_src)
 
-def assign_to(ctx:list[UOp], dst:UOp, st:UOp, n:UOp):
-  return n
-
 astify = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(Ops.ASSIGN, src=(UPat.load(UPat.var("dst"), UPat.var("st")), UPat.var("n"),)), assign_to),
   (UPat(Ops.BUFFER, name="buf"), load_buffer),
   (UPat(Ops.SINK, name="sink"), store_outputs),
 ])
