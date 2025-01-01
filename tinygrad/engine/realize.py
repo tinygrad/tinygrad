@@ -171,6 +171,3 @@ def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, i
   for ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     ei.run(var_vals, do_update_stats=do_update_stats)
-    import numpy as np
-    from tinygrad.tensor import _to_np_dtype
-    print([np.frombuffer(b.as_buffer(), _to_np_dtype(b.dtype))[0] for b in ei.bufs])
