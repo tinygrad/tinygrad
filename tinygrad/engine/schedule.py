@@ -90,9 +90,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   for buf,uop in ctx.realizes.items():
     ast = graph_rewrite(UOp.sink(uop), remove_movementops+merge_views+view_left+astify, bufs:=[buf])
     schedule.append(ScheduleItem(graph_rewrite(ast, fix_const), tuple(dedup(x.buffer for x in bufs)), ()))
-  rev_tensor_map = {v:k for k,v in tensor_map.items()}
-  for k,v in schedule_map.items():
+  for k,v in tensor_map.items():
     if k is v: continue
-    if v.base.op is Ops.BUFFER:
-      rev_tensor_map[k].become(v)
+    if (realized:=schedule_map.get(v)) is None: continue
+    k.become(realized)
   return schedule, {}
