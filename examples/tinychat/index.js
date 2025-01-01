@@ -40,7 +40,7 @@ document.addEventListener("alpine:init", () => {
     // model
     nets: {},
     tokenizer: null,
-    first_message: true, // TODO: initialize model with empty cache_kv, and eliminate this variable
+    max_context: 1024,
 
     async init() {
       try {
@@ -201,36 +201,20 @@ document.addEventListener("alpine:init", () => {
         tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
       }
       tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
-      let start_pos = 0
+      cursor = tokens.length - 1;
       
-      // TODO: initialize model with empty cache_kv and eliminate this block
-      // In compile.py, current model had 3 forward passes (1 normal and 2 jit), 1 token each, using first 3 tokens of every user message
-      if (this.first_message) {
-        start_pos = 3;
-        tokens = tokens.slice(3);
-        this.first_message = false;
+      // pad with mask tokens (1000000)
+      // TODO: re-enable Variable and cache_kv in llama.py, make it compile properly to webgpu js
+      if (tokens.length < this.max_context) {
+        tokens = tokens.concat(new Array(this.max_context - tokens.length).fill(1000000));
       }
 
-      let TEMPERATURE = new Float32Array(0.95);
-      let TOP_K = new Float32Array(0.0);
-      let TOP_P = new Float32Array(0.0);
-      let ALPHA_F = new Float32Array(0.0);
-      let ALPHA_P = new Float32Array(0.0);
-      let prefill_toks = tokens.slice(0, -1);
-
-      // TODO: implement whole llama3.py prefill method, here we are missing the prompt skipping logic
-      for (const tok of prefill_toks) {
-        await this.nets["transformer"](new Float32Array([[tok]]), new Float32Array(start_pos), TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
-        start_pos += 1;
-      }
-
-      let last_tok = tokens[tokens.length - 1];
       while (true) {
-        const tok = await this.nets["transformer"](new Float32Array([[last_tok]]), new Float32Array(start_pos), TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P);
-        start_pos += 1;
-        last_tok = tok[0];
-        if (this.tokenizer.stop_tokens.has(last_tok)) break;
-        yield new TextDecoder().decode(this.tokenizer.decode([last_tok]));
+        const tok = await this.nets["transformer"](new Int32Array(tokens));
+        cursor += 1;
+        tokens[cursor] = tok[0];
+        if (this.tokenizer.stop_tokens.has(tok[0])) break;
+        yield new TextDecoder().decode(this.tokenizer.decode([tok]));
       }
     },
   }));
