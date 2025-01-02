@@ -75,7 +75,6 @@ class CStyleLanguage(Renderer):
   extra_args: list[str] = []
   float4: Optional[str] = None
   type_map: dict[DType, str] = {}
-  invalid_dtype: dict[DType, None] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: dict = {
@@ -118,7 +117,6 @@ class CStyleLanguage(Renderer):
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
     for u in uops:
-      if u.dtype in self.invalid_dtype: raise RuntimeError(f"dtype unsupported {u.dtype=} {u.op=} {u.arg=}")
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
