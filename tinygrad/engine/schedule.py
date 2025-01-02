@@ -66,21 +66,27 @@ def realize(ctx:SchedulerCtx, root:UOp):
   ctx.realizes[dest] = root
   return dest.view(unwrap(root.st))
 
-def realize_uop(ctx:SchedulerCtx, root:UOp):
-  if root.op in {Ops.BUFFER, Ops.CONST, Ops.VALID, Ops.SINK, Ops.VIEW} or root.st is None: return None
-  for child in root.children:
-    if (c:=child()) is not None and c.op is Ops.SINK: return realize(ctx, root)
+def realize_sink_src(ctx:SchedulerCtx, root:UOp):
+  new_src: list[UOp] = []
+  for x in root.src:
+    if x.base.op is Ops.BUFFER: new_src.append(x.base)
+    else: new_src.append(realize(ctx, x.base))
+  return None if tuple(new_src) == root.src else UOp.sink(*new_src)
 
-def realize_view(view:UOp, base:UOp): pass
+def realize_view(ctx:SchedulerCtx, view:UOp, base:UOp):
+  if base.st is None or base.op is Ops.BUFFER: return None
+  if view.size <= base.size: return None
+  return realize(ctx, base).view(unwrap(view.st))
 
 allocate_bufs = PatternMatcher([
   # COPY is COPY(VIEW(BUFFER), copyin)
   (UPat(GroupOp.Meta, name="root"), realize_metaop),
   (UPat(Ops.CONTIGUOUS, name="root"), realize),
+  (UPat(Ops.REDUCE_AXIS, name="root"), realize),
   # sometimes realize before view
   (UPat(Ops.VIEW, name="view", src=(UPat.var("base"),)), realize_view),
-  # otherwise check the buffer
-  (UPat(tuple(Ops), name="root"), realize_uop),
+  # always realize sinked ops
+  (UPat(Ops.SINK, name="root"), realize_sink_src),
 ])
 
 # ** ast creation
@@ -100,7 +106,7 @@ def ast_sink(root:UOp):
     new_src.append(UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), i), ShapeTracker.from_shape(x.shape).to_uop(), x))
   return UOp.sink(*new_src)
 
-to_ast = view_left+PatternMatcher([
+to_ast = view_left+prune_movementops+PatternMatcher([
   # BUFFER -> LOAD(DEFINE_GLOBAL, ShapeTracker(shape=(N,)))
   (UPat(Ops.BUFFER, name="buf"), load_buf),
   # SINK(...) -> SINK(STORE(BUFFER, ...),)
@@ -122,8 +128,10 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   sink = UOp.sink(*outs)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
+  rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
+  rev_realize_map = {v:k for k,v in realize_map.items()}
 
   # create schedule items
   schedule: list[ScheduleItem] = []
@@ -139,4 +147,12 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     if k is r or k is sink or k.st is None: continue
     # if the tensor is flat it becomes a BUFFER, otherwise it's a VIEW(BUFFER)
     k.become(r if k.shape == r.shape else r.view(unwrap(k.st)))
+
+  realized_sink = realize_map[tensor_map[sink]]
+  for r in realized_sink.src:
+    rr = rev_realize_map.get(ctx.realizes[r])
+    if rr is not None:
+      k = rev_tensor_map[rr]
+      k.become(r if k.shape == r.shape else r.view(unwrap(k.st)))
+
   return schedule, {}
