@@ -781,11 +781,11 @@ class TestIdxUpcast(unittest.TestCase):
         # If render succeeds, it means types were propagated correctly when upcasting
         prg = kernel.to_program()
         print_uops(prg.uops)
-        print(prg.uops[-1])
         print(prg.src)
 
         # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
         store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
+        print(store)
         assert store.op is Ops.STORE
         idx = self._find_op(store, Ops.INDEX)
         assert idx.op is Ops.INDEX
@@ -800,18 +800,28 @@ class TestIdxUpcast(unittest.TestCase):
   def _permute_expand_contig(self, dtype: dtypes, dim1, dim2, dim3):
     self._assert(dtype, Tensor.empty(dim1, dim2, 1).permute((2, 1, 0)).expand(dim3, -1, -1).contiguous())
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_overflow(self):
     # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
     self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_overflow_sym(self):
     self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_regular(self):
     self._permute_expand_contig(dtypes.int, 64, 64, 64)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+    
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_failure_int64_unsupported(self):
+    with self.assertRaises(AssertionError):
+      self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
+    
 
 
 if __name__ == '__main__':

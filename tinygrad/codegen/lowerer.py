@@ -7,20 +7,24 @@ from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UP
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 from tinygrad.codegen.uopgraph import sym
+from tinygrad.device import is_dtype_supported
 
 def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min(dtype)
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
-# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`
+# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
+# Cast back is required if the node is in range, siblings would never be upcasted
 def upcast(u: UOp):
   srcs = [upcast(_src) for _src in u.src]
+  ret = upcasted = u.replace(src=tuple(srcs))
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-    ret = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u, u.dtype): return ret
-    # Check the original src, new srcs has Ops.CAST whose vmin, vmax changes the real bounds
-    if any((overflow(src, u.dtype) for src in u.src)): return ret.cast(u.dtype)
-  return u.replace(src=tuple(srcs))
+    upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
+    if overflow(u, u.dtype): ret = upcasted 
+    # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
+    elif any((overflow(src, u.dtype) for src in u.src)): ret = upcasted.cast(u.dtype)
+  assert not ret is upcasted or is_dtype_supported(dtypes.long), f"Integer overflows but int64 not supported {u.op} {u.dtype}"
+  return ret
 
 def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))
 
