@@ -288,7 +288,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       # only reduce ops are allowed to change shape
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.WMMA:
+        if len(src_sts) == 0: return None
+        shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
       case _:
         if len(src_sts) == 0: return None
