@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_left
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule_with_vars, view_left
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 

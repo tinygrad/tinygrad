@@ -1,9 +1,81 @@
 from dataclasses import dataclass, field
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, prod, unwrap
+from tinygrad.dtype import DType, ImageDType, dtypes
+from tinygrad.helpers import Metadata, all_int, prod, unwrap
 from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites
 from tinygrad.ops import symbolic_simple, merge_views, view_left
 from tinygrad.shape.shapetracker import ShapeTracker
+
+BUF_LIMIT = {"METAL":32}
+
+# ** big graph spec
+
+tensor_uop_spec = PatternMatcher([
+  # ** stable and well understood specs
+
+  # DEVICE and BUFFER
+  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"), lambda buf:
+   # arg: (number, size)
+   isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and \
+   # dtype
+   isinstance(buf.dtype, (DType, ImageDType))),
+
+  # movement ops
+  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
+   # naturally correct
+   (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
+   # "make things that can't be images not images" can change the buffer dtype
+   # this is fine as long as it's a realized buffer and base dtypes match.
+   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
+
+  # Tensor variable bindings
+  (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
+
+  # Tensor const has a ShapeTracker of shape=() and a device
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
+
+  # DETACH and CONTIGUOUS change how we interpret the source UOp
+  # CONTIGUOUS ensures the source UOp realizes
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
+
+  # ** specs with room for refactoring and improving
+
+  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat.var("copyin"))), lambda copy,copyin:
+   # arg (clone) + dtype
+   isinstance(copy.arg, bool) and copy.dtype == copyin.dtype),
+
+  # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
+  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
+   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
+
+  # ASSIGN changes the value of an existing buffer
+  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val:
+   # target must be a realized device buffer
+   (target.op is Ops.BUFFER or target.is_realized) and
+   # dtype
+   (assign.dtype == target.dtype == new_val.dtype)),
+
+  # ** TODO: these UOps need new specs, the current representation relies on hacks
+
+  # DEVICE and VIEW specify device and shape for BIND
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND))), lambda: True),
+
+  # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
+  (UPat(Ops.EMPTY, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),),)), arg=None), lambda: True),
+
+  # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
+  # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
+
+  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat.var("x"),)), lambda root,x:
+   # BUFFER_VIEW can replace contiguous, keeping dtype the same
+   (root.dtype == x.dtype) or
+   # it can also replace bitcast, this changes the dtype, but the itemsize stays the same
+   (root.dtype != x.dtype and root.dtype.itemsize == x.dtype.itemsize) or
+   # it can also represent shape changing bitcast (only on DISK)
+   (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
+])
 
 # ** ScheduleItem return type
 @dataclass(frozen=True)
