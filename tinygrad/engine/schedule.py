@@ -128,10 +128,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   sink = UOp.sink(*outs)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
-  rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
-  rev_realize_map = {v:k for k,v in realize_map.items()}
 
   # create schedule items
   schedule: list[ScheduleItem] = []
@@ -140,6 +138,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_ast), tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
 
+  # update tensor references
   for k,v in tensor_map.items():
     # it's ok for realize_map <= tensor_map
     if (r:=realize_map.get(v)) is None: continue
@@ -147,9 +146,10 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     if k is r or k is sink or k.st is None: continue
     # if the tensor is flat it becomes a BUFFER, otherwise it's a VIEW(BUFFER)
     k.become(r if k.shape == r.shape else r.view(unwrap(k.st)))
-
-  realized_sink = realize_map[tensor_map[sink]]
-  for r in realized_sink.src:
+  # also update the sinked outputs
+  rev_tensor_map = {v:k for k,v in tensor_map.items()}
+  rev_realize_map = {v:k for k,v in realize_map.items()}
+  for r in realize_map[tensor_map[sink]].src:
     rr = rev_realize_map.get(ctx.realizes[r])
     if rr is not None:
       k = rev_tensor_map[rr]

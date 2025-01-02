@@ -5,7 +5,6 @@ from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 
 N = 200  # has to be bigger than the cache to fail
 
-@unittest.skip("no assign yet")
 class TestAssign(unittest.TestCase):
   def test_simple_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
