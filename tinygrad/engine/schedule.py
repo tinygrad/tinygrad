@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from tinygrad.device import Buffer
 from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.helpers import Metadata, all_int, prod, unwrap
-from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites, type_verify, buffers
+from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, identity_element, track_rewrites, type_verify, buffers
 from tinygrad.ops import symbolic_simple, merge_views, view_left
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -124,8 +124,10 @@ def collapse_const_reduce(root:UOp, x:UOp):
 
 prune_ops = symbolic_simple+PatternMatcher([
   (UPat(tuple(Ops), name="root"), collapse_size0_ops),
-  (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.cvar("x"),)), collapse_const_reduce),
   (UPat(Ops.DETACH, name="root"), lambda root: root.src[0]),
+  (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.var("x"),)),
+   lambda root,x: root.const_like(identity_element(root.arg[0], root.dtype)) if x.size == 0 and root.size != 0 else None),
+  (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.cvar("x"),)), collapse_const_reduce),
   (UPat(Ops.SINK, name="root"), remove_sink_noops),
 ])
 
