@@ -16,15 +16,17 @@ def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min
 # Cast back is required if the node is in range, siblings would never be upcasted
 def upcast(u: UOp):
   srcs = [upcast(_src) for _src in u.src]
-  ret = upcasted = u.replace(src=tuple(srcs))
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
     upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u, u.dtype): ret = upcasted
+    if overflow(u, u.dtype):
+      assert is_dtype_supported(dtypes.long), f"UOp overflow without int64 support, {u.op=} {u.dtype=}"
+      return upcasted
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
-    elif any((overflow(src, u.dtype) for src in u.src)): ret = upcasted.cast(u.dtype)
-  assert ret is not upcasted or is_dtype_supported(dtypes.long), f"Integer overflows but int64 not supported {u.op} {u.dtype}"
-  return ret
+    elif any((overflow(src, u.dtype) for src in u.src)):
+      assert is_dtype_supported(dtypes.long), f"UOp has child that overflow but without int64 support {u.op=} src: {[_u.src.op for _u in u.src]}"
+      return upcasted.cast(u.dtype)
+  return u.replace(src=tuple(srcs))
 
 def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))
 

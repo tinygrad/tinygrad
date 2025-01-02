@@ -8,7 +8,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_kernel
-from tinygrad.ops import Ops, sym_infer, UOp, print_uops
+from tinygrad.ops import Ops, sym_infer, UOp
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -780,12 +780,9 @@ class TestIdxUpcast(unittest.TestCase):
 
         # If render succeeds, it means types were propagated correctly when upcasting
         prg = kernel.to_program()
-        print_uops(prg.uops)
-        print(prg.src)
 
         # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
         store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
-        print(store)
         assert store.op is Ops.STORE
         idx = self._find_op(store, Ops.INDEX)
         assert idx.op is Ops.INDEX
@@ -809,19 +806,21 @@ class TestIdxUpcast(unittest.TestCase):
   def test_overflow_sym(self):
     self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_regular(self):
     self._permute_expand_contig(dtypes.int, 64, 64, 64)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
-  def test_failure_int64_unsupported(self):
-    with self.assertRaises(AssertionError):
-      self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
+  @unittest.expectedFailure
+  def test_int64_unsupported_overflow_sym(self):
+    self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.expectedFailure
+  def test_int64_unsupported_overflow(self):
+    self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
 
 if __name__ == '__main__':
   unittest.main()
