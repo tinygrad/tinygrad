@@ -206,11 +206,12 @@ def assert_symmetric_pads(pads):
   # use symmetric pads
   return pads[::-2]
 
-def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
+def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS, allow_asymmetric=False):
+  do_assert = (lambda p:p) if allow_asymmetric else assert_symmetric_pads
   i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
-  if auto_pad == "NOTSET": return assert_symmetric_pads(_onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2))
+  if auto_pad == "NOTSET": return do_assert(_onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2))
   o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
-  return assert_symmetric_pads(_onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)))
+  return do_assert(_onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)))
 
 def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
                 dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
@@ -228,7 +229,7 @@ def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET
 
 def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
          kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
-  pads = _resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad)
+  pads = _resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad, allow_asymmetric=True)
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=tuple(pads))
 
 # src: https://github.com/onnx/onnx/blob/main/docs/Operators.md#ConvTranspose
