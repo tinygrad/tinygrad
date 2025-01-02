@@ -20,10 +20,10 @@ def upcast(u: UOp):
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
     upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u, u.dtype): ret = upcasted 
+    if overflow(u, u.dtype): ret = upcasted
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
     elif any((overflow(src, u.dtype) for src in u.src)): ret = upcasted.cast(u.dtype)
-  assert not ret is upcasted or is_dtype_supported(dtypes.long), f"Integer overflows but int64 not supported {u.op} {u.dtype}"
+  assert ret is not upcasted or is_dtype_supported(dtypes.long), f"Integer overflows but int64 not supported {u.op} {u.dtype}"
   return ret
 
 def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))

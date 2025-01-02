@@ -816,12 +816,11 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
-    
+
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_failure_int64_unsupported(self):
     with self.assertRaises(AssertionError):
       self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
-    
 
 
 if __name__ == '__main__':
