@@ -23,7 +23,7 @@ def mv_const(view:UOp, x:UOp):
 
 prune_movementops = merge_views+PatternMatcher([
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov:x.view(mov.st)),
-  (UPat(Ops.VIEW, name="view", src=(UPat.var("x"),)), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
+  (UPat(Ops.VIEW, name="view", src=(UPat.var("x"),)), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape==x.shape else None),
   (UPat(Ops.VIEW, name="view", src=(UPat.cvar("x"),)), mv_const),
 ])
 
