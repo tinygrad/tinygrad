@@ -8,7 +8,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_kernel
-from tinygrad.ops import Ops, sym_infer, UOp
+from tinygrad.ops import Ops, sym_infer, UOp, print_uops
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -780,9 +780,12 @@ class TestIdxUpcast(unittest.TestCase):
 
         # If render succeeds, it means types were propagated correctly when upcasting
         prg = kernel.to_program()
+        print_uops(prg.uops)
+        print(prg.uops[-1])
+        print(prg.src)
 
         # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
-        store = prg.uops[-1]
+        store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
         assert store.op is Ops.STORE
         idx = self._find_op(store, Ops.INDEX)
         assert idx.op is Ops.INDEX
