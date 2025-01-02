@@ -188,9 +188,9 @@ def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:set[UOp]) -> bool:
   return all(can_pad(x.base, edges, visisted) for x in u.src)
 
 # With True as the default, this matches the old symbolic behavior
-def resolve(x, default:bool=True):
-  if not isinstance(x, UOp): return bool(x)
-  assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
+def resolve(x:UOp|bool, default:bool=True):
+  if isinstance(x, bool): return x
+  assert x.dtype == dtypes.bool, "UOp in resolve must be bool"
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 
@@ -288,7 +288,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       # only reduce ops are allowed to change shape
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.WMMA:
+        if len(src_sts) == 0: return None
+        shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
       case _:
         if len(src_sts) == 0: return None
