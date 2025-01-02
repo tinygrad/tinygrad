@@ -451,7 +451,7 @@ def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
-def _resolve_quantize_linear(x, scale, zero_point, axis, block_size):
+def _prepare_quantize_linear(x, scale, zero_point, axis, block_size):
   if axis < 0: axis += x.ndim
   if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point)._broadcast_to(scale.shape)
   if block_size > 0: scale, zero_point = scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
@@ -462,14 +462,14 @@ def _resolve_quantize_linear(x, scale, zero_point, axis, block_size):
 
 def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor = 0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
   if saturate != 1: raise NotImplementedError("float8 is not implemented")
-  y_scale, y_zero_point = _resolve_quantize_linear(x, y_scale, y_zero_point, axis, block_size)
-  y = x.float().div(y_scale).add(y_zero_point).round()
+  y_scale, y_zero_point = _prepare_quantize_linear(x, y_scale, y_zero_point, axis, block_size)
+  y = (x / y_scale).round() + y_zero_point
   output_dtype = dtype_parse(output_dtype) if output_dtype else y_zero_point.dtype
   if output_dtype in {dtypes.uint8, dtypes.int8, dtypes.int16, dtypes.uint16}: y = y.clamp(dtypes.min(output_dtype), dtypes.max(output_dtype))
   return y.cast(output_dtype)
 
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int = 0, axis:int=1, block_size:int=0):
-  x_scale, x_zero_point = _resolve_quantize_linear(x, x_scale, x_zero_point, axis, block_size)
+  x_scale, x_zero_point = _prepare_quantize_linear(x, x_scale, x_zero_point, axis, block_size)
   return ((x.float() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py

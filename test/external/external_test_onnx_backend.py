@@ -82,6 +82,7 @@ backend_test.exclude('test_dequantizelinear_uint4_cpu')
 backend_test.exclude('test_quantizelinear_int4_cpu')
 backend_test.exclude('test_quantizelinear_uint4_cpu')
 
+# i don't get FLOAT8. Maybe I'm doing something wrong..?
 backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_quantizelinear_e5m2_cpu')
 
