@@ -288,7 +288,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       # only reduce ops are allowed to change shape
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.WMMA:
+        if len(src_sts) == 0: return None
+        shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
       case _:
         if len(src_sts) == 0: return None
@@ -1189,9 +1192,9 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   # ** zero folding **
-  (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
+  (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),
-   lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
+   lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
