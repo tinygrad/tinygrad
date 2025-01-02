@@ -35,19 +35,25 @@ def sink_outputs(ctx:SchedulerCtx, root:UOp):
   new_src = [x.base if x.base.op is Ops.BUFFER else realize(ctx, x.base) for x in root.src]
   return None if tuple(new_src) == root.src else UOp.sink(*new_src)
 
-def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, view:UOp, copyin:UOp):
-  ctx.realizes[dest] = root
-  return view
+def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, copyin:UOp):
+  ctx.realizes[dest.buf_uop] = root
+  return dest.buf_uop
 
 def realize(ctx:SchedulerCtx, root:UOp):
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
   ctx.realizes[dest] = root
   return dest
 
+def realize_uop(ctx:SchedulerCtx, root:UOp):
+  if root.st is None or root.op in {Ops.BUFFER, Ops.SINK, Ops.VIEW}: return None
+  return realize(ctx, root)
+
 allocate_bufs = PatternMatcher([
-  (UPat(Ops.SINK, name="root"), sink_outputs),
   # COPY is COPY(VIEW(BUFFER), copyin)
-  (UPat(Ops.COPY, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="dest"))), UPat.var("copyin"))), realize_copy),
+  (UPat(Ops.COPY, name="root", src=(UPat.var("dest"), UPat.var("copyin"))), realize_copy),
+  (UPat(Ops.CONTIGUOUS, name="root"), realize),
+  # otherwise check the buffer
+  (UPat(tuple(Ops), name="root"), realize_uop),
 ])
 
 # ** ast creation
@@ -72,6 +78,7 @@ to_ast = view_left+PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), load_buf),
   # SINK(...) -> SINK(STORE(BUFFER, ...),)
   (UPat(Ops.SINK, name="root"), ast_sink),
+  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x:x),
 ])
 
 # ** one uop graph™
@@ -80,16 +87,16 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   sink = UOp.sink(*outs)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
-  rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
   # create schedule items
   schedule: list[ScheduleItem] = []
-  for r,v in ctx.realizes.items():
+  for r,v in list(ctx.realizes.items()):
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(ast, tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
-  for k, v in realize_map.items():
-    if (tensor:=rev_tensor_map[k]) is v: continue
-    tensor.become(v)
+  for k,v in realize_map.items():
+    if (t:=tensor_map.get(k)) is None: continue
+    if t is v: continue
+    t.become(v)
   return schedule, {}
