@@ -135,7 +135,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       model_tensors[name] = prepare_input(inputs[name], value_info)
       if debug >= 1: print(f"\t{name} - {model_tensors[name]}")
-      if debug >= 3: print(f"\t\tfrom: {MessageToDict(value_info.type)}")
+      if debug >= 2: print(f"\t\tfrom: {MessageToDict(value_info.type)}")
 
     for num,n in enumerate(onnx_model.graph.node):
       inp_tensors = [model_tensors.get(x) for x in n.input]

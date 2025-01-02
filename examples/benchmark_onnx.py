@@ -52,6 +52,7 @@ def benchmark(onnx_file:pathlib.Path):
         val = np.random.randint(0, vocab_size, shape)
       case "attention_mask": val = np.random.randint(0, 2, shape)
       case "token_type_ids": val = np.random.randint(0, model_config.get("type_vocab_size", 2), shape)
+      case "image_tensor": val = np.random.randint(0, 256, shape)
       case _: val = np.random.randn(*shape) if shape else np.array(0)
     return val.astype(dtype)
 
@@ -183,6 +184,9 @@ def benchmark_model_id(model_id:str):
   """ run benchmark for a single model id """
   model_path = next(download(model_id))
   benchmark(model_path)
+
+# get ops
+# Counter(n.op_type for n in onnx_model.graph.node)
 
 if __name__ == "__main__":
   # sort` options:
