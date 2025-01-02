@@ -695,26 +695,16 @@ class UPat(MathTrait):
     assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
     self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: Optional[tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
-    self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
-    self.src: Any = None
+    self.arg, self.name, self.src, self.allow_any_len, self.custom_early_reject = arg, name, src, allow_any_len, custom_early_reject
     assert self.name != "ctx", "UPat can't be named ctx"
 
-    # try all permutations if it's a list
-    if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
-    # only one if it's a tuple
-    elif isinstance(src, tuple): self.src = [src]
-    # repeat if it's a UPat
-    elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
+    #if isinstance(src, list) and all_same(src): self.src = tuple(src)
 
     self.allowed_len: int = -1 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
+    self.early_reject = {}
 
-    if custom_early_reject is not None: self.early_reject = custom_early_reject
-    else:
-      upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
-      self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
-
-  def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
+  def named(self, name:str): return UPat(self.op, self.dtype, self.src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
 
   @staticmethod
   def any(*src): return UPatAny(src=src)
@@ -752,7 +742,7 @@ class UPat(MathTrait):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
       return form % (None if x.op is None else ('(%s)'%', '.join(map(str, x.op))), x.arg, repr(x.name),
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
-    return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
+    return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else x.src)
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if (self.op is not None and uop.op not in self.op) or \
