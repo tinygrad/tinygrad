@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, unwrap
-from tinygrad.ops import PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites
+from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites
 from tinygrad.ops import symbolic_simple, merge_views, view_left
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -17,7 +17,14 @@ class ScheduleItem:
   def outputs(self): return self.bufs[:len(self.ast.src)]
 
 # ** schedule simplification
-prune_movementops = merge_views+PatternMatcher([])
+def mv_const(view:UOp, x:UOp):
+  if any(v.mask is not None for v in unwrap(view.st).views): return x.valid(unwrap(view.st))
+  return x.replace(src=(x.src[0].replace(arg=unwrap(x.src[0].st)+unwrap(x.st)),))
+
+prune_movementops = merge_views+PatternMatcher([
+  (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov:x.view(mov.st)),
+  (UPat(Ops.VIEW, name="view", src=(UPat.cvar("x"),)), mv_const),
+])
 
 def remove_sink_noops(root:UOp):
   if len(new_src:=[x.base for x in root.src if x.base.realized is None and x.base.op is not Ops.CONST]) == 0: return UOp(Ops.NOOP)
@@ -80,6 +87,9 @@ to_ast = view_left+PatternMatcher([
   (UPat(Ops.SINK, name="root"), ast_sink),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x:x),
 ])
+fix_const = PatternMatcher([
+  (UPat(Ops.CONST, name="root", src=(UPat(),)), lambda root: root.replace(src=())),
+])
 
 # ** one uop graph™
 @track_rewrites(named=True)
@@ -87,16 +97,17 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   sink = UOp.sink(*outs)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
+  rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
   # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in list(ctx.realizes.items()):
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
-    schedule.append(si:=ScheduleItem(ast, tuple(b.buffer for b in sctx.bufs)))
+    schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_const), tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
   for k,v in realize_map.items():
-    if (t:=tensor_map.get(k)) is None: continue
+    if (t:=rev_tensor_map.get(k)) is None: continue
     if t is v: continue
     t.become(v)
   return schedule, {}

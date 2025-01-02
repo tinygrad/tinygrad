@@ -25,5 +25,11 @@ class TestMap(unittest.TestCase):
     c.realize()
     self.assertListEqual(unwrap_buf(c), [13])
 
+  def test_simple_const(self):
+    a = Tensor([11])
+    b = a+2
+    b.realize()
+    self.assertListEqual(unwrap_buf(b), [13])
+
 if __name__ == "__main__":
   unittest.main()
