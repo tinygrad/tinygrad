@@ -94,21 +94,21 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   sink = UOp.sink(*outs)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
-  rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
-  rev_realize_map = {v:k for k,v in realize_map.items()}
+
   # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in list(ctx.realizes.items()):
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_const), tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
+
   for k,v in tensor_map.items():
-    if (r:=realize_map.get(v)) is None: continue
-    if r is k: continue
-    if r.base.op is not Ops.BUFFER: continue
-    if k.shape != r.shape:
-      k.become(r.view(k.st))
-    else: k.become(r)
+    # it's ok for realize_map <= tensor_map
+    if k.st is None or (r:=realize_map.get(v)) is None: continue
+    # some things don't need to become
+    if k is r or k is sink: continue
+    # if the tensor is flat it becomes a BUFFER, otherwise it's a VIEW(BUFFER)
+    k.become(r if k.shape == r.shape else r.view(unwrap(k.st)))
   return schedule, {}
