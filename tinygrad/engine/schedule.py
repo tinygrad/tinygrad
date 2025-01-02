@@ -66,7 +66,7 @@ def realize(ctx:SchedulerCtx, root:UOp):
   return dest.view(unwrap(root.st))
 
 def realize_uop(ctx:SchedulerCtx, root:UOp):
-  if root.op in {Ops.BUFFER, Ops.CONST, Ops.SINK, Ops.VIEW} or root.st is None: return None
+  if root.op in {Ops.BUFFER, Ops.CONST, Ops.VALID, Ops.SINK, Ops.VIEW} or root.st is None: return None
   return realize(ctx, root)
 
 allocate_bufs = PatternMatcher([
