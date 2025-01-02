@@ -19,7 +19,7 @@ class ScheduleItem:
 # ** schedule simplification
 def mv_const(view:UOp, x:UOp):
   if any(v.mask is not None for v in unwrap(view.st).views): return x.valid(unwrap(view.st))
-  return x.replace(src=(x.src[0].replace(arg=unwrap(x.src[0].st)+unwrap(x.st)),))
+  return x.replace(src=(x.src[0].replace(arg=unwrap(x.st)+unwrap(view.st)),))
 
 prune_movementops = merge_views+PatternMatcher([
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov:x.view(mov.st)),
@@ -39,21 +39,17 @@ prune_ops = symbolic_simple+PatternMatcher([
 class SchedulerCtx:
   realizes:dict[UOp, UOp] = field(default_factory=dict)
 
-def sink_outputs(ctx:SchedulerCtx, root:UOp):
-  new_src = [x.base if x.base.op is Ops.BUFFER else realize(ctx, x.base) for x in root.src]
-  return None if tuple(new_src) == root.src else UOp.sink(*new_src)
-
 def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, copyin:UOp):
   ctx.realizes[dest.buf_uop] = root
-  return dest.buf_uop
+  return dest.buf_uop.view(unwrap(root.st))
 
 def realize(ctx:SchedulerCtx, root:UOp):
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
   ctx.realizes[dest] = root
-  return dest
+  return dest.view(unwrap(root.st))
 
 def realize_uop(ctx:SchedulerCtx, root:UOp):
-  if root.st is None or root.op in {Ops.BUFFER, Ops.SINK, Ops.VIEW}: return None
+  if root.op in {Ops.BUFFER, Ops.CONST, Ops.SINK, Ops.VIEW} or root.st is None: return None
   return realize(ctx, root)
 
 allocate_bufs = PatternMatcher([
@@ -111,5 +107,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   for k,v in tensor_map.items():
     if (r:=realize_map.get(v)) is None: continue
     if r is k: continue
-    k.become(r)
+    if r.base.op is not Ops.BUFFER: continue
+    if k.shape != r.shape:
+      k.become(r.view(k.st))
+    else: k.become(r)
   return schedule, {}
