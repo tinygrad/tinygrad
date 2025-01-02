@@ -95,7 +95,12 @@ def mv_const(view:UOp, x:UOp):
 
 prune_movementops = merge_views+PatternMatcher([
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov:x.view(mov.st)),
+  # contiguous VIEW of the same shape is a NOOP
   (UPat(Ops.VIEW, name="view", src=(UPat.var("x"),)), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape==x.shape else None),
+  # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
+  (UPat(Ops.VIEW, name="view"),
+   lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
+  # VIEW(const) = masked ? VALID(st, CONST, 0) : CONST(st+st)
   (UPat(Ops.VIEW, name="view", src=(UPat.cvar("x"),)), mv_const),
 ])
 
