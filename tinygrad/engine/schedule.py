@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from tinygrad.device import Buffer
 from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.helpers import Metadata, all_int, prod, unwrap
-from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites
+from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites, type_verify
 from tinygrad.ops import symbolic_simple, merge_views, view_left
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -197,7 +197,8 @@ fix_ast = PatternMatcher([
 # ** one uop graph™
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int]]:
-  sink = UOp.sink(*outs)
+  # create the graph and verify
+  type_verify(list((sink:=UOp.sink(*outs)).toposort), tensor_uop_spec)
   # simplify pass
   tensor_map = graph_rewrite_map(sink, prune_movementops+prune_ops)
   # realize pass
