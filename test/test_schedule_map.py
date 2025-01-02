@@ -31,5 +31,17 @@ class TestMap(unittest.TestCase):
     b.realize()
     self.assertListEqual(unwrap_buf(b), [13])
 
+  def test_simple_const_folding(self):
+    a = Tensor([11])
+    b = a*1
+    b.realize()
+    self.assertListEqual(unwrap_buf(b), [11])
+
+  def test_const_folding_alt(self):
+    a = Tensor([11])
+    b = (a*0).contiguous()
+    b.realize()
+    self.assertListEqual(unwrap_buf(b), [0])
+
 if __name__ == "__main__":
   unittest.main()

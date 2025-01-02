@@ -23,6 +23,7 @@ def mv_const(view:UOp, x:UOp):
 
 prune_movementops = merge_views+PatternMatcher([
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov:x.view(mov.st)),
+  (UPat(Ops.VIEW, name="view", src=(UPat.var("x"),)), lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
   (UPat(Ops.VIEW, name="view", src=(UPat.cvar("x"),)), mv_const),
 ])
 
@@ -100,14 +101,15 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   rev_tensor_map = {v:k for k,v in tensor_map.items()}
   # realize pass
   realize_map = graph_rewrite_map(tensor_map[sink], merge_views+allocate_bufs, ctx:=SchedulerCtx())
+  rev_realize_map = {v:k for k,v in realize_map.items()}
   # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in list(ctx.realizes.items()):
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_const), tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
-  for k,v in realize_map.items():
-    if (t:=rev_tensor_map.get(k)) is None: continue
-    if t is v: continue
-    t.become(v)
+  for k,v in tensor_map.items():
+    if (r:=realize_map.get(v)) is None: continue
+    if r is k: continue
+    k.become(r)
   return schedule, {}
