@@ -183,7 +183,7 @@ def ast_sink(root:UOp):
     new_src.append(UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), i), ShapeTracker.from_shape(x.shape).to_uop(), x))
   return UOp.sink(*new_src)
 
-to_ast = view_left+prune_movementops+PatternMatcher([
+to_si = view_left+prune_movementops+PatternMatcher([
   # BUFFER -> LOAD(DEFINE_GLOBAL, ShapeTracker(shape=(N,)))
   (UPat(Ops.BUFFER, name="buf"), load_buf),
   # SINK(...) -> SINK(STORE(BUFFER, ...),)
@@ -216,7 +216,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   # create schedule items
   schedule: list[ScheduleItem] = []
   for r,v in list(ctx.realizes.items()):
-    ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
+    ast = graph_rewrite(UOp.sink(v), to_si, sctx:=ASTCtx([r]))
     schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_ast), tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
 
