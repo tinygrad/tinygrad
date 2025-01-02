@@ -412,19 +412,18 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # d
 
 def _prepare_quantize_linear(x, scale, zero_point, axis, block_size):
   if axis < 0: axis += x.ndim
-  if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point)._broadcast_to(scale.shape)
-  if block_size > 0: scale, zero_point = scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
-  else:
+  if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point, dtype=dtypes.uint8)._broadcast_to(scale.shape)
+  if block_size == 0:
     shape = (*[1]*axis, *scale.shape, *[1]*(x.ndim - axis - scale.ndim))
-    scale, zero_point = scale.reshape(shape), zero_point.reshape(shape)
-  return scale, zero_point
+    return scale.reshape(shape), zero_point.reshape(shape)
+  return scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
 
 def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
-  output_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
+  out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
   y_scale, y_zero_point = _prepare_quantize_linear(x, y_scale, y_zero_point, axis, block_size)
-  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(output_dtype), dtypes.max(output_dtype)).cast(output_dtype)
+  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype)
 
-def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int = 0, axis:int=1, block_size:int=0):
+def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
   x_scale, x_zero_point = _prepare_quantize_linear(x, x_scale, x_zero_point, axis, block_size)
   return ((x.float() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
