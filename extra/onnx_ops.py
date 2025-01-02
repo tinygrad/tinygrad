@@ -206,11 +206,11 @@ def assert_symmetric_pads(pads):
   return pads[::-2]
 
 def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS, allow_asymmetric=False):
-  do_assert = (lambda p:p) if allow_asymmetric else assert_symmetric_pads
+  def _apply_assertion(pads): return pads if allow_asymmetric else assert_symmetric_pads(pads)
   i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
-  if auto_pad == "NOTSET": return do_assert(_onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2))
+  if auto_pad == "NOTSET": return _apply_assertion(_onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2))
   o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
-  return do_assert(_onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)))
+  return _apply_assertion(_onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)))
 
 def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
                 dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
