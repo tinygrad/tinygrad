@@ -48,6 +48,7 @@ def collapse_const_reduce(root:UOp, x:UOp):
 prune_ops = symbolic_simple+PatternMatcher([
   (UPat(tuple(Ops), name="root"), collapse_size0_ops),
   (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.cvar("x"),)), collapse_const_reduce),
+  (UPat(Ops.DETACH, name="root"), lambda root: root.src[0]),
   (UPat(Ops.SINK, name="root"), remove_sink_noops),
 ])
 
@@ -123,9 +124,9 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
 
   for k,v in tensor_map.items():
     # it's ok for realize_map <= tensor_map
-    if k.st is None or (r:=realize_map.get(v)) is None: continue
+    if (r:=realize_map.get(v)) is None: continue
     # some things don't need to become
-    if k is r or k is sink: continue
+    if k is r or k is sink or k.st is None: continue
     # if the tensor is flat it becomes a BUFFER, otherwise it's a VIEW(BUFFER)
     k.become(r if k.shape == r.shape else r.view(unwrap(k.st)))
   return schedule, {}
