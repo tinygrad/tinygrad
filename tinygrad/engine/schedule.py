@@ -136,6 +136,7 @@ class SchedulerCtx:
 
 def realize_metaop(ctx:SchedulerCtx, root:UOp):
   ctx.realizes[dest:=root.buf_uop] = root
+  # hack subbuffer here, this logic should be moved to realize
   if root.op is Ops.BUFFER_VIEW:
     buffers[dest] = (x:=root.src[1]).buf_uop.buffer.view(root.size, root.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   return dest.view(unwrap(root.st))
@@ -148,13 +149,6 @@ def realize(ctx:SchedulerCtx, root:UOp):
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
   ctx.realizes[dest] = root
   return dest.view(unwrap(root.st))
-
-def realize_sink_src(ctx:SchedulerCtx, root:UOp):
-  new_src: list[UOp] = []
-  for x in root.src:
-    if x.base.op is Ops.BUFFER: new_src.append(x.base)
-    else: new_src.append(realize(ctx, x.base))
-  return None if tuple(new_src) == root.src else UOp.sink(*new_src)
 
 def realize_view(ctx:SchedulerCtx, view:UOp, base:UOp):
   if base.st is None or base.op is Ops.BUFFER: return None
@@ -169,7 +163,7 @@ allocate_bufs = PatternMatcher([
   # sometimes realize before view
   (UPat(Ops.VIEW, name="view", src=(UPat.var("base"),)), realize_view),
   # always realize sinked ops
-  (UPat(Ops.SINK, name="root"), realize_sink_src),
+  (UPat(Ops.SINK, name="root"), lambda ctx,root:None if (new_src:=tuple(realize(ctx, x.base) for x in root.src)) == root.src else UOp.sink(*new_src)),
 ])
 
 # ** ast creation
@@ -233,7 +227,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     # some things don't need to become
     if k is r or k is sink or k.st is None: continue
     # if the tensor is flat it becomes a BUFFER, otherwise it's a VIEW(BUFFER)
-    k.become(r if k.shape == r.shape else r.view(unwrap(k.st)))
+    k.become(r if k.shape == r.shape else r.view(k.st))
   # also update the sinked outputs
   rev_tensor_map = {v:k for k,v in tensor_map.items()}
   rev_realize_map = {v:k for k,v in realize_map.items()}
