@@ -187,7 +187,7 @@ def elementwise_view_right(root:UOp) -> UOp|None:
   # push the swizzle from src to root
   output_swizzle = swizzles[0]
   new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
-  ret = root.replace(src=tuple(x if not x.has_st else x.base if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
+  ret = root.replace(src=tuple(x if x.st is None else x.base if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # NOTE: swizzle resolves once we hit STORE
   return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(output_swizzle.shape))
 
@@ -611,8 +611,3 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
-
-def create_schedule(outs:list[UOp]) -> list[ScheduleItem]:
-  schedule, var_vals = create_schedule_with_vars(outs)
-  assert len(var_vals) == 0
-  return schedule

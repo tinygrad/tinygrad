@@ -77,7 +77,7 @@ assert out.as_buffer().cast('I')[0] == 5
 print("******** third, the LazyBuffer ***********")
 
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.schedule import create_schedule_with_vars
 
 # allocate some values + load in values
 a = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
@@ -91,7 +91,7 @@ b = b.buf_uop_view()
 out = a.alu(Ops.ADD, b)
 
 # schedule the computation as a list of kernels
-sched = create_schedule([out])
+sched, _ = create_schedule_with_vars([out])
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast
@@ -100,6 +100,10 @@ print(sched[-1].ast)
 
 # run that schedule
 run_schedule(sched)
+
+# NOTE: UOps are no longer mutable, you have to fetch this from the becomes_map
+from tinygrad.ops import becomes_map
+out = becomes_map[out]
 
 # check the data out
 assert out.realized is not None and out.realized.as_buffer().cast('I')[0] == 5
