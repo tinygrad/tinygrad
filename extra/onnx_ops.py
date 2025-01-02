@@ -25,12 +25,8 @@ def Max(*data_0:Tensor): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0:Tensor): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0:Tensor): return functools.reduce(Tensor.add, data_0)
 def Mean(*data_0:Tensor): return Sum(*data_0) / len(data_0)
-def Cast(x:Tensor, to:int, saturate:int=1):
-  if saturate != 1: raise NotImplementedError("float8 is not implemented")
-  return x.cast(dtype_parse(to))
-def CastLike(x:Tensor, target_type:Tensor, saturate:int=1):
-  if saturate != 1: raise NotImplementedError("float8 is not implemented")
-  return x.cast(target_type.dtype)
+def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
+def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
 
@@ -460,13 +456,10 @@ def _prepare_quantize_linear(x, scale, zero_point, axis, block_size):
     scale, zero_point = scale.reshape(shape), zero_point.reshape(shape)
   return scale, zero_point
 
-def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor = 0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
-  if saturate != 1: raise NotImplementedError("float8 is not implemented")
+def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
+  output_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
   y_scale, y_zero_point = _prepare_quantize_linear(x, y_scale, y_zero_point, axis, block_size)
-  y = (x / y_scale).round() + y_zero_point
-  output_dtype = dtype_parse(output_dtype) if output_dtype else y_zero_point.dtype
-  if output_dtype in {dtypes.uint8, dtypes.int8, dtypes.int16, dtypes.uint16}: y = y.clamp(dtypes.min(output_dtype), dtypes.max(output_dtype))
-  return y.cast(output_dtype)
+  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(output_dtype), dtypes.max(output_dtype)).cast(output_dtype)
 
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int = 0, axis:int=1, block_size:int=0):
   x_scale, x_zero_point = _prepare_quantize_linear(x, x_scale, x_zero_point, axis, block_size)
