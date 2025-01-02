@@ -1,5 +1,5 @@
 import os, random, pickle, queue
-from typing import List
+from typing import List, Tuple, Optional
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -354,6 +354,134 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
       # happens with BENCHMARK set
       pass
 
+### RetinaNet
+
+def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, X:Tensor,
+                        Y_boxes:Tensor, Y_labels:Tensor, matches:Tensor, anchors:np.ndarray, seed:Optional[int]=None):
+  from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
+  from examples.mlperf.helpers import box_iou, find_matches
+  import torch
+
+  while (data:=queue_in.get()) is not None:
+    idx, img, ann = data
+    img_id = img["id"]
+    img = image_load(base_dir, img["subset"], img["file_name"])
+    tgt = prepare_target(ann, img_id, img.size[::-1])
+
+    if val:
+      img, _ = resize(img)
+    else:
+      if seed is not None:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+      img, tgt = random_horizontal_flip(img, tgt)
+      img, tgt, _ = resize(img, tgt=tgt)
+      match_quality_matrix = box_iou(tgt["boxes"], anchors)
+      match_idxs = find_matches(match_quality_matrix, allow_low_quality_matches=True)
+      clipped_match_idxs = np.clip(match_idxs, 0, None)
+      boxes, labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
+
+      Y_boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = boxes.tobytes()
+      Y_labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = labels.tobytes()
+      matches[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = match_idxs.tobytes()
+
+    X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+    queue_out.put(idx)
+  queue_out.put(None)
+
+def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, batch_size:int=32, shuffle:bool=True, seed:Optional[int]=None):
+  def _enqueue_batch(bc):
+    for idx in range(bc * batch_size, (bc+1) * batch_size):
+      img = dataset.loadImgs(next(dataset_iter))[0]
+      ann = dataset.loadAnns(dataset.getAnnIds(img["id"]))
+      queue_in.put((idx, img, ann))
+
+  def _setup_shared_mem(shm_name:str, size:Tuple[int, ...], dtype:dtypes) -> Tuple[shared_memory.SharedMemory, Tensor]:
+    if os.path.exists(f"/dev/shm/{shm_name}"): os.unlink(f"/dev/shm/{shm_name}")
+    shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(size))
+    shm_tensor = Tensor.empty(*size, dtype=dtype, device=f"disk:/dev/shm/{shm_name}")
+    return shm, shm_tensor
+
+  image_ids = sorted(dataset.imgs.keys())
+  batch_count = min(32, len(image_ids) // batch_size)
+
+  queue_in, queue_out = Queue(), Queue()
+  procs, data_out_count = [], [0] * batch_count
+  shm_x, X = _setup_shared_mem("retinanet_x", (batch_size * batch_count, 800, 800, 3), dtypes.float32)
+  shm_y_boxes, Y_boxes = _setup_shared_mem("retinanet_y_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
+  shm_y_labels, Y_labels = _setup_shared_mem("retinanet_y_labels", (batch_size * batch_count, 120087), dtypes.int64)
+  shm_matches, matches = _setup_shared_mem("retinanet_matches", (batch_size * batch_count, 120087), dtypes.int64)
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, bc):
+      self.bc = bc
+    def __del__(self):
+      if not shutdown:
+        try: _enqueue_batch(self.bc)
+        except StopIteration: pass
+
+  def shuffle_indices(indices, seed):
+    rng = random.Random(seed)
+    rng.shuffle(indices)
+
+  if shuffle: shuffle_indices(image_ids, seed=seed)
+  dataset_iter = iter(image_ids)
+
+  try:
+    for _ in range(cpu_count()):
+      proc = Process(target=load_retinanet_data, args=(base_dir, val, queue_in, queue_out, X, Y_boxes, Y_labels, matches, anchors, seed))
+      proc.daemon = True
+      proc.start()
+      procs.append(proc)
+
+    for bc in range(batch_count):
+      _enqueue_batch(bc)
+
+    for _ in range(len(image_ids) // batch_size):
+      while True:
+        bc = queue_out.get() // batch_size
+        data_out_count[bc] += 1
+        if data_out_count[bc] == batch_size: break
+
+      data_out_count[bc] = 0
+
+      if val:
+        yield X[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+      else:
+        yield (X[bc * batch_size:(bc + 1) * batch_size],
+               Y_boxes[bc * batch_size:(bc + 1) * batch_size],
+               Y_labels[bc * batch_size:(bc + 1) * batch_size],
+               matches[bc * batch_size:(bc + 1) * batch_size],
+               Cookie(bc))
+  finally:
+    shutdown = True
+
+    for _ in procs: queue_in.put(None)
+    queue_in.close()
+
+    for _ in procs:
+      while queue_out.get() is not None: pass
+    queue_out.close()
+
+    # shutdown processes
+    for proc in procs: proc.join()
+
+    shm_x.close()
+    shm_y_boxes.close()
+    shm_y_labels.close()
+    shm_matches.close()
+    try:
+      shm_x.unlink()
+      shm_y_boxes.unlink()
+      shm_y_labels.unlink()
+      shm_matches.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
+
 if __name__ == "__main__":
   def load_unet3d(val):
     assert not val, "validation set is not supported due to different sizes on inputs"
@@ -373,6 +501,15 @@ if __name__ == "__main__":
     with tqdm(total=len(files)) as pbar:
       for x,y,c in batch_load_resnet(val=val):
         pbar.update(x.shape[0])
+
+  def load_retinanet(val):
+    from extra.datasets.openimages import BASEDIR, download_dataset
+    from pycocotools.coco import COCO
+    dataset = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "validation" if val else "train"))
+    anchors = np.ones((120087, 4))
+    with tqdm(total=len(dataset.imgs.keys())) as pbar:
+      for x in batch_load_retinanet(dataset, val, anchors, base_dir):
+        pbar.update(x[0].shape[0])
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
