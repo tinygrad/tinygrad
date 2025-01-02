@@ -57,9 +57,9 @@ prune_ops = symbolic_simple+PatternMatcher([
 class SchedulerCtx:
   realizes:dict[UOp, UOp] = field(default_factory=dict)
 
-def realize_copy(ctx:SchedulerCtx, root:UOp, dest:UOp, copyin:UOp):
-  ctx.realizes[dest.buf_uop] = root
-  return dest.buf_uop.view(unwrap(root.st))
+def realize_metaop(ctx:SchedulerCtx, root:UOp):
+  ctx.realizes[root.buf_uop] = root
+  return root.buf_uop.view(unwrap(root.st))
 
 def realize(ctx:SchedulerCtx, root:UOp):
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
@@ -68,12 +68,17 @@ def realize(ctx:SchedulerCtx, root:UOp):
 
 def realize_uop(ctx:SchedulerCtx, root:UOp):
   if root.op in {Ops.BUFFER, Ops.CONST, Ops.VALID, Ops.SINK, Ops.VIEW} or root.st is None: return None
-  return realize(ctx, root)
+  for child in root.children:
+    if (c:=child()) is not None and c.op is Ops.SINK: return realize(ctx, root)
+
+def realize_view(view:UOp, base:UOp): pass
 
 allocate_bufs = PatternMatcher([
   # COPY is COPY(VIEW(BUFFER), copyin)
-  (UPat(Ops.COPY, name="root", src=(UPat.var("dest"), UPat.var("copyin"))), realize_copy),
+  (UPat(GroupOp.Meta, name="root"), realize_metaop),
   (UPat(Ops.CONTIGUOUS, name="root"), realize),
+  # sometimes realize before view
+  (UPat(Ops.VIEW, name="view", src=(UPat.var("base"),)), realize_view),
   # otherwise check the buffer
   (UPat(tuple(Ops), name="root"), realize_uop),
 ])
@@ -102,8 +107,13 @@ to_ast = view_left+PatternMatcher([
   (UPat(Ops.SINK, name="root"), ast_sink),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x:x),
 ])
-fix_const = PatternMatcher([
+
+# other dumb things the scheduler has to do
+fix_ast = PatternMatcher([
+  # (maskless) const is shapeless once we hand it off to kernel, fix kernel.
   (UPat(Ops.CONST, name="root", src=(UPat(),)), lambda root: root.replace(src=())),
+  # "meta ops" don't get sink or store, fix realize.
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(GroupOp.Meta, name="m")),)), lambda m: m)
 ])
 
 # ** one uop graph™
@@ -119,7 +129,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   schedule: list[ScheduleItem] = []
   for r,v in list(ctx.realizes.items()):
     ast = graph_rewrite(UOp.sink(v), to_ast, sctx:=ASTCtx([r]))
-    schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_const), tuple(b.buffer for b in sctx.bufs)))
+    schedule.append(si:=ScheduleItem(graph_rewrite(ast, fix_ast), tuple(b.buffer for b in sctx.bufs)))
     for out in si.outputs: out.ref(1)
 
   for k,v in tensor_map.items():
