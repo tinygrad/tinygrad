@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from tinygrad.device import Buffer
 from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.helpers import Metadata, all_int, prod, unwrap
-from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites, type_verify
+from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites, type_verify, buffers
 from tinygrad.ops import symbolic_simple, merge_views, view_left
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -130,10 +130,16 @@ class SchedulerCtx:
   realizes:dict[UOp, UOp] = field(default_factory=dict)
 
 def realize_metaop(ctx:SchedulerCtx, root:UOp):
-  ctx.realizes[root.buf_uop] = root
-  return root.buf_uop.view(unwrap(root.st))
+  ctx.realizes[dest:=root.buf_uop] = root
+  if root.op is Ops.BUFFER_VIEW:
+    buffers[dest] = (x:=root.src[1]).buf_uop.buffer.view(root.size, root.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  return dest.view(unwrap(root.st))
+def realize_metaop_with_src(ctx:SchedulerCtx, dest:UOp, root:UOp, src:UOp):
+  new_src = realize(ctx, src)
+  return realize_metaop(ctx, root.replace(src=(dest, new_src)))
 
 def realize(ctx:SchedulerCtx, root:UOp):
+  if root.base.op is Ops.BUFFER: return root
   dest = UOp.new_buffer(root.device, root.size, root.dtype)
   ctx.realizes[dest] = root
   return dest.view(unwrap(root.st))
@@ -151,7 +157,8 @@ def realize_view(ctx:SchedulerCtx, view:UOp, base:UOp):
   return realize(ctx, base).view(unwrap(view.st))
 
 allocate_bufs = PatternMatcher([
-  # COPY is COPY(VIEW(BUFFER), copyin)
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW}, name="root", src=(UPat.var("dest"), UPat.var("src"))), realize_metaop_with_src),
+  (UPat(Ops.EMPTY, src=(UPat.var("dest"),)), realize_metaop),
   (UPat(GroupOp.Meta, name="root"), realize_metaop),
   (UPat(Ops.CONTIGUOUS, name="root"), realize),
   (UPat(Ops.REDUCE_AXIS, name="root"), realize),
