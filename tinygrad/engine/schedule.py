@@ -183,7 +183,9 @@ to_ast = view_left+prune_movementops+PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), load_buf),
   # SINK(...) -> SINK(STORE(BUFFER, ...),)
   (UPat(Ops.SINK, name="root"), ast_sink),
+  # contiguous and assign do not exist in the final ast
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x:x),
+  (UPat.assign(UPat.load(UPat.var("dest"), UPat.var("st")), UPat.var("x")), lambda dest,x,st: UOp.store(dest, ShapeTracker.from_shape(x.shape).to_uop(), x).view(st.st)),
 ])
 
 # other dumb things the scheduler has to do
