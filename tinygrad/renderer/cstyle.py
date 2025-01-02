@@ -29,6 +29,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, arg=-math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x.dtype, f'-{ctx.infinity}')})"),
   (UPat(Ops.CONST, dtype=dtypes.floats, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx.nan)})" if math.isnan(x.arg) else None),
   (UPat(Ops.CONST, dtype=dtypes.float, name="x"), lambda ctx,x: f"{x.arg}f"),
+  (UPat(Ops.CONST, dtype=dtypes.float8, name="x"), lambda ctx,x: f"{ctx.f8.replace('f8', str(x.arg))}"),
   (UPat(Ops.CONST, dtype=dtypes.int64, name="x"), lambda ctx,x: f"{x.arg}ll"),
   (UPat(Ops.CONST, dtype=dtypes.uint64, name="x"), lambda ctx,x: f"{x.arg}ull"),
   (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{x.arg}u"),
@@ -74,6 +75,7 @@ class CStyleLanguage(Renderer):
   code_for_workitem: dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   extra_args: list[str] = []
   float4: Optional[str] = None
+  f8: Optional[str] = None
   type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
@@ -307,6 +309,7 @@ class CUDARenderer(CStyleLanguage):
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
+  f8 = "__nv_fp8_e4m3(f8)"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
   code_for_op = { **CStyleLanguage.code_for_op,
@@ -324,9 +327,10 @@ class CUDARenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
-    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
+    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))", "#define half8 __nv_fp8_e4m3"]
 
     used_dtypes = uops_to_dtypes(uops)
+    if any(dt.scalar() == dtypes.float8 for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]

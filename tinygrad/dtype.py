@@ -108,7 +108,7 @@ class dtypes:
   def finfo(dtype:DType) -> tuple[int, int]:
     """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
-    return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
+    return {dtypes.float8: (4, 3), dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
@@ -121,11 +121,13 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 4, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 8, "long", 'q')
   uint64: Final[DType] = DType.new(8, 8, "unsigned long", 'Q')
-  float16: Final[DType] = DType.new(9, 2, "half", 'e')
+  # fp8 format is E4M3
+  float8: Final[DType] = DType.new(9, 1, "half8", '?') # TODO: Look into type name and formatting. 
+  float16: Final[DType] = DType.new(10, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType.new(10, 2, "__bf16", None)
-  float32: Final[DType] = DType.new(11, 4, "float", 'f')
-  float64: Final[DType] = DType.new(12, 8, "double", 'd')
+  bfloat16: Final[DType] = DType.new(11, 2, "__bf16", None)
+  float32: Final[DType] = DType.new(12, 4, "float", 'f')
+  float64: Final[DType] = DType.new(13, 8, "double", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -141,7 +143,7 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
-  floats = (float16, bfloat16, float32, float64)
+  floats = (float8, float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
@@ -158,7 +160,7 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.float16, dtypes.bfloat16], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16],
-  dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
+  dtypes.float8: [dtypes.float16], dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.lru_cache(None)
 def _get_recursive_parents(dtype:DType) -> set[DType]:
@@ -177,13 +179,19 @@ def sum_acc_dtype(dt:DType):
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, dtypes.float)
 
+def truncate_fp8(x):
+  return x
+  # TODO: Implement this!
+  # try: return struct.unpack()
+  # except OverflowError: return math.copysign(math.inf, x)
+
 def truncate_fp16(x):
   try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
   # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  dtypes.float8: truncate_fp8, dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
