@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.device import Buffer
-from tinygrad.helpers import Metadata, unwrap
+from tinygrad.helpers import Metadata, prod, unwrap
 from tinygrad.ops import GroupOp, PatternMatcher, UOp, UPat, Variable, Ops, graph_rewrite, graph_rewrite_map, track_rewrites
 from tinygrad.ops import symbolic_simple, merge_views, view_left
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -30,7 +30,24 @@ prune_movementops = merge_views+PatternMatcher([
 def remove_sink_noops(root:UOp):
   if len(new_src:=[x.base for x in root.src if x.base.realized is None and x.base.op is not Ops.CONST]) == 0: return UOp(Ops.NOOP)
   return None if tuple(new_src) == root.src else UOp.sink(*new_src)
+
+def collapse_size0_ops(root:UOp):
+  if root.op in {Ops.SINK, Ops.VIEW} or root.st is None or root.st.size != 0: return None
+  return None if root.op is Ops.CONST and root.const_arg == 0 else root.const_like(0)
+
+def collapse_const_reduce(root:UOp, x:UOp):
+  prshape = prod(unwrap(x.st).shape[i] for i in root.arg[1])
+  ret = x.const_arg
+  match root.arg[0]:
+    case Ops.ADD: ret *= prshape
+    case Ops.MUL: ret **= prshape
+    case Ops.MAX: pass
+    case _: return None
+  return root.const_like(ret)
+
 prune_ops = symbolic_simple+PatternMatcher([
+  (UPat(tuple(Ops), name="root"), collapse_size0_ops),
+  (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.cvar("x"),)), collapse_const_reduce),
   (UPat(Ops.SINK, name="root"), remove_sink_noops),
 ])
 
