@@ -158,8 +158,7 @@ def realize_view(ctx:SchedulerCtx, view:UOp, base:UOp):
 
 allocate_bufs = PatternMatcher([
   (UPat({Ops.COPY, Ops.BUFFER_VIEW}, name="root", src=(UPat.var("dest"), UPat.var("src"))), realize_metaop_with_src),
-  (UPat(Ops.EMPTY, src=(UPat.var("dest"),)), realize_metaop),
-  (UPat(GroupOp.Meta, name="root"), realize_metaop),
+  (UPat(Ops.EMPTY, name="root"), realize_metaop),
   (UPat(Ops.CONTIGUOUS, name="root"), realize),
   (UPat(Ops.REDUCE_AXIS, name="root"), realize),
   # sometimes realize before view
@@ -190,17 +189,19 @@ to_ast = view_left+prune_movementops+PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), load_buf),
   # SINK(...) -> SINK(STORE(BUFFER, ...),)
   (UPat(Ops.SINK, name="root"), ast_sink),
-  # contiguous and assign do not exist in the final ast
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x:x),
-  (UPat.assign(UPat.load(UPat.var("dest"), UPat.var("st")), UPat.var("x")), lambda dest,x,st: UOp.store(dest, ShapeTracker.from_shape(x.shape).to_uop(), x).view(st.st)),
+  # STORE(.., ASSIGN(VIEW(BUFFER), new_val)) -> STORE(.., new_val).view()
+  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat.assign(UPat.var("target"), UPat.var("new_val")))),
+   lambda b,target,st,new_val: UOp.store(b, st, new_val).view(target.st)),
 ])
 
-# other dumb things the scheduler has to do
+# some dumb things the scheduler has to do to make the ast compatible with the other abstractions
 fix_ast = PatternMatcher([
-  # (maskless) const is shapeless once we hand it off to kernel, fix kernel.
-  (UPat(Ops.CONST, name="root", src=(UPat(),)), lambda root: root.replace(src=())),
-  # "meta ops" don't get sink or store, fix realize.
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(GroupOp.Meta, name="m")),)), lambda m: m)
+  # (maskless) const is shapeless once we hand it off to kernel.py, fix kernel instead.
+  (UPat(Ops.CONST, name="root", src=(UPat(),)), lambda root:root.replace(src=())),
+  # "meta ops" don't get sink or store, fix lower_schedule_item instead.
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(GroupOp.Meta, name="m")),)), lambda m:m),
+  # contiguous and assign do not exist in the final ast
+  (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="root"), lambda root:root.src[-1]),
 ])
 
 # ** one uop graph™
