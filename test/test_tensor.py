@@ -766,6 +766,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(bw), 1)
     self.assertEqual(bw[0].name, "sigmoid")
 
+dtype_supported = (is_dtype_supported(dtypes.long), "int64 is supported")
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
     if ast.op is op: return ast
@@ -797,12 +798,12 @@ class TestIdxUpcast(unittest.TestCase):
   def _permute_expand_contig(self, dtype: dtypes, dim1, dim2, dim3):
     self._assert(dtype, Tensor.empty(dim1, dim2, 1).permute((2, 1, 0)).expand(dim3, -1, -1).contiguous())
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
+  @unittest.skipUnless(*dtype_supported)
   def test_overflow(self):
     # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
     self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 support required")
+  @unittest.skipUnless(*dtype_supported)
   def test_overflow_sym(self):
     self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
@@ -812,13 +813,13 @@ class TestIdxUpcast(unittest.TestCase):
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
 
-  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   @unittest.expectedFailure
+  @unittest.skipIf(*dtype_supported)
   def test_int64_unsupported_overflow_sym(self):
     self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
-  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   @unittest.expectedFailure
+  @unittest.skipIf(*dtype_supported)
   def test_int64_unsupported_overflow(self):
     self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
 
