@@ -157,7 +157,7 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
   # jit exec
-  def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int], clear_inputs=True) -> ReturnType:
+  def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
@@ -171,7 +171,7 @@ class CapturedJit(Generic[ReturnType]):
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
-    if clear_inputs: self._clear_inputs()
+    self._clear_inputs()
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):

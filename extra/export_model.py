@@ -2,7 +2,7 @@ from typing import Tuple, Dict, List, Optional
 from tinygrad.dtype import DType
 from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Device, Tensor
-from tinygrad.engine.jit import TinyJit, CapturedJit
+from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
@@ -10,9 +10,9 @@ import json
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CLANG", "CUDA", "GPU"]
 
-def compile_net(captured:CapturedJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
+def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
-  for ji in captured._jit_cache:
+  for ji in run.jit_cache:
     fxn: ProgramSpec = ji.prg.p
     functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
     cargs = []
