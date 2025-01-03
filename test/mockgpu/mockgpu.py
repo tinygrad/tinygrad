@@ -1,5 +1,4 @@
-import ctypes, ctypes.util, time, os, builtins
-import fcntl
+import ctypes, ctypes.util, time, os, builtins, sys, fcntl
 from tinygrad.runtime.support.hcq import HAL
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -54,9 +53,7 @@ def _open(path, flags):
         virtfd = driver.open(path, flags, 0o777, file)
         tracked_fds[virtfd.fd] = virtfd
         return virtfd.fd
-  if os.path.exists(path):
-    return os.open(path, flags, 0o777)
-  else: return None
+  return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
 class MockHAL(HAL):
   def __init__(self, path:str, flags=os.O_RDONLY):
@@ -82,19 +79,14 @@ class MockHAL(HAL):
   def read(self, size=None):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].read_text(size, self.offset)
-    file = open(self.fd)
-    file.seek(self.offset)
-    return file.read(size)
-
-  def readlink(self):
-    if self.fd in tracked_fds: #NOTE is'nt used right now
-      return tracked_fds[self.fd].readlink()
-    return os.readlink(self.fd)
+    with open(self.fd) as file:
+      file.seek(self.offset)
+      return file.read(size)
 
   def write(self, content):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].write_text(content)
-    return open(self.fd).write(content)
+    with open(self.fd, "w") as file: return file.write(content)
 
   def listdir(self):
     if self.fd in tracked_fds:
@@ -102,15 +94,13 @@ class MockHAL(HAL):
     return os.listdir(self.fd)
 
   def seek(self, offset): self.offset += offset
-  def munmap(buf, sz): return libc.munmap(buf, sz)
-
-  def exists(path):
-    ret = _open(path, os.O_RDONLY)
-    return True if ret else False
-
+  @staticmethod
+  def exists(path): return _open(path, os.O_RDONLY) is not None
+  @staticmethod
+  def readlink(path): return os.readlink(path)
+  @staticmethod
   def eventfd(initval, flags=None):
-    fd = os.eventfd(initval, flags)
-    ret = MockHAL.__new__(MockHAL)
-    ret.fd = fd
-    ret.offset = 0
-    return ret
+    if sys.platform == "linux":
+      ret = MockHAL.__new__(MockHAL)
+      ret.fd = os.eventfd(initval, flags)
+      return ret
