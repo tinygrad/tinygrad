@@ -52,15 +52,10 @@ def q6k_to_f32(x: Tensor) -> Tensor:
   d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
   return (d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales).cast(dtypes.float32).flatten()
 
-if __name__=="__main__":
-  default_device = Device.DEFAULT
+def clang_export_q6k_to_f32():
+  # won't work currently due to compile_net exceptions
+  # works with commit 254ea814259465bffd157b10094a32e412ca8860
   Device.DEFAULT="CLANG"
-  model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
-  model_size="1B"
-  Tensor.no_grad = True
-  f32_fn = os.path.join(os.path.dirname(__file__), "llama3_1B_f32.safetensors")
-  max_context=1024
-
   class Step(NamedTuple):
     name: str = ""
     input: List[Tensor] = []
@@ -91,13 +86,21 @@ if __name__=="__main__":
     text_file.write(prg)
     # we still need to manually edit this file: 
     #   manually fixed type declarations, deleted buf_6 and buf_7, cast buf_0 to buf_6, cast buf_4 to buf_7
-  sys.exit()
+
+if __name__=="__main__":
+  default_device = Device.DEFAULT
+  model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+  model_size="1B"
+  Tensor.no_grad = True
+  f32_fn = os.path.join(os.path.dirname(__file__), "llama3_1B_f32.safetensors")
+  max_context=1024
+
+  #clang_export_q6k_to_f32()
 
   if not os.path.exists(f32_fn):
     # this is ugly, but wgpu adapter doesn't support f16 (they're working on it), throws exception on loading llama3 1B weights
     # the tinygrad llama code just converts the f16 to f32 anyway, we let that happen, then transfer the weights to WEBGPU device
     # TODO clean this up when wgpu supports f16, or maybe use dawn if it supports f16 (cc wpmed92)
-    Device.DEFAULT=default_device
     model = build_transformer(model_path, model_size=model_size, max_context=max_context)
     state_dict = get_state_dict(model)
     safe_save(state_dict, f32_fn)
