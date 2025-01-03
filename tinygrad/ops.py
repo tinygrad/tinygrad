@@ -230,8 +230,6 @@ buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # t
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
-becomes_map: weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()
-
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -474,10 +472,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metadata(self): return all_metadata.get(self, None)
   @property
   def forced_realize(self): return self in forced_realize
-
-  # *** less danger zone ***
-
-  def become(self, u:UOp): becomes_map[self] = u
 
   # *** uop movement ops ***
 
