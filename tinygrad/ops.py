@@ -779,20 +779,18 @@ class PatternMatcher:
   def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
     self.states: dict[int, dict[tuple|int, int]] = {}
-    # TODO: add i to final to sort fxns
-    self.final: dict[int, tuple[dict[int, str], bool, Callable]] = {}
+    self.final: dict[int, list[tuple[int, dict[str, list[int]], bool, Callable]]] = {}
     self.num_states = 0
 
     for i,(pat,fxn) in enumerate(self.patterns):
-      def _build(pat: UPat, names: dict[int, str]) -> tuple[int]:
+      def _build(pat: UPat, ns:int|None) -> tuple[int]:
         src = (pat.src,) if isinstance(pat.src, UPat) else () if pat.src is None else pat.src
-        src = tuple(_build(s, names) for s in src)
+        src = tuple(_build(s, names, i) for i,s in enumerate(src))
         # in the case of past permutations
         all_srcs = tuple(itertools.product(*src)) if src else (src,)
         # src permutations are valid
         if isinstance(pat.src, list): all_srcs = tuple(itertools.permutations(all_srcs[0]))
-        # any src is valid
-        #elif isinstance(pat.src[0], tuple):
+        # TODO: add support for any src
         def _new_states(vals: tuple, state: int):
           for v in vals:
             if v not in self.states.setdefault(state, {}):
@@ -803,28 +801,33 @@ class PatternMatcher:
 
         ret = []
         for src in all_srcs:
-          # create transitions for all srcs
+          # create transitions for srcs
           state = _new_states(src, 0)
           if state not in self.states: self.states[state] = {}
           # if src is a UPat repeats of the src are valid
-          if isinstance(pat.src, UPat):
-            self.states[state][src[0]] = state
-            assert len(src) == 1
+          if isinstance(pat.src, UPat): self.states[state][src[0]] = state
           # if allow_any_len all srcs after are valid (None is always valid)
           if pat.allow_any_len: self.states[state][None] = state
           # create transition for upat vals to be matched
+          # TODO: decompose this and ops and dtypes, for dtypes it's a set of dtypes and dtypes.scalar
           state = _new_states(((pat.op, pat.dtype, pat.arg),), state)
-          if pat.name is not None: names[state] = pat.name
           ret.append(state)
-        return tuple(ret)
+        # TODO: fix names
+        # add path to all names
+        if ns is not None:
+          for nm in names.values(): nm.insert(0, ns)
+        # add new name and end of path
+        if pat.name is not None: names[pat.name] = [ns]
+        
+        return tuple(ret), names
 
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
       has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
       names = {}
-      states = _build(pat, names)
-      for st in states: self.final[st] = (names, has_ctx, real_fxn)
+      states = _build(pat, names, None)
+      for st in states: self.final.setdefault(st, []).append((i, names, has_ctx, real_fxn))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -843,64 +846,39 @@ class RewriteContext:
   def __init__(self, pm, ctx):
     self.pm: PatternMatcher = pm
     self.ctx = ctx
-    self.stores: dict[int, UOp] = {}
-    self.replace: dict[UOp, UOp] = {}
+    self.replace: dict[UOp, tuple[UOp, tuple[int]]] = {}
 
   def advance(self, uop:UOp, srcs:tuple) -> tuple:
-    #srcs = tuple(self.match(s, store) for s in uop.src)
     states = (0,)
     for src in srcs: states = tuple(self.pm.states[st][s] for st in states for s in (*src, None) if s in self.pm.states[st])
     def _match(uop: UOp, ops, dtypes, arg):
-      return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes) and (arg is None or uop.arg == arg)
+      return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes or uop.dtype.scalar() in dtypes) and (arg is None or uop.arg == arg)
     states = tuple(self.pm.states[st][vals] for st in states for vals in self.pm.states[st] if isinstance(vals, tuple) and _match(uop, *vals))
-    for v in states: self.stores[v] = uop
     return states
   
   def rewrite_uop(self, uop:UOp, srcs:tuple[int]) -> UOp|None:
     states = self.advance(uop, srcs)
-    matches = (self.pm.final[st] for st in states if st in self.pm.final)
-    for nm,has_ctx,fxn in matches:
+    sorted_matches = sorted((m for st in states if st in self.pm.final for m in self.pm.final[st]), key=lambda m: m[0])
+    for _,nm,has_ctx,fxn in sorted_matches:
       reverse_names = {self.stores[k]:v for k,v in nm.items() if k in self.stores}
       # invalid match if same name assigned to different uop
       if len(reverse_names.values()) != len(set(reverse_names.values())): continue
       names = {v:self.stores[k] for k,v in nm.items() if k in self.stores}
       if (ret:=(fxn(ctx=self.ctx, **names) if has_ctx else fxn(**names))) is not None:
-        self.stores = {}
         return ret, states
     return None, states
 
-  def _rewrite(self, n:UOp) -> tuple[UOp, tuple[int]]:
+  def rewrite(self, n:UOp) -> tuple[UOp, tuple[int]]:
     if n in self.replace and self.replace[n][0] is not None: return self.replace[n]
-    new_src, src_states = zip(*map(self._rewrite, n.src)) if n.src else ((), ())
+    new_src, src_states = zip(*map(self.rewrite, n.src)) if n.src else ((), ())
     new_n, states = self.rewrite_uop(n, src_states) if new_src == n.src else (UOp(n.op, n.dtype, new_src, n.arg), src_states)
-    self.replace[n] = ret = (n, states) if new_n is None else self._rewrite(new_n)
+    self.replace[n] = ret = (n, states) if new_n is None else self.rewrite(new_n)
     return ret
-
-  def rewrite(self, n:UOp) -> UOp: return self._rewrite(n)[0]
 
 # *** simple graph rewrite engine ***
-'''
-class RewriteContext:
-  def __init__(self, pm, ctx):
-    self.pm: PatternMatcher = pm
-    self.ctx = ctx
-    self.replace: dict[UOp, UOp] = {}
-  def rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_src = tuple(map(self.rewrite, n.src))
-    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-    self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
-    return ret
-  def bottom_up_rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_n: UOp|None = n
-    while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
-    new_src = tuple(map(self.bottom_up_rewrite, last_n.src))
-    self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
-    return ret
-'''
+
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  return RewriteContext(pm, ctx).rewrite(sink)
+  return RewriteContext(pm, ctx).rewrite(sink)[0]
 
 # ***** uop type spec *****
 
