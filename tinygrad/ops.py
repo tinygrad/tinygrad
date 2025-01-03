@@ -230,8 +230,6 @@ buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # t
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
-becomes_map: weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()
-
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -356,8 +354,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True):
-    if bitcast: return self.bitcast(dtype, allow_buffer_view)
+  def cast(self, dtype:DType, bitcast=False):
+    if bitcast: return self.bitcast(dtype)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
@@ -371,8 +369,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
       return ret
     return UOp(Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType, allow_buffer_view=True):
-    if self.can_view() and allow_buffer_view:
+  def bitcast(self, dtype:DType):
+    if self.can_view():
       if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
       else:
         if not self.device.startswith("DISK") or not all_int(self.shape): raise RuntimeError(f"shape changing bitcast not supported on {self}")
@@ -462,7 +460,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
+    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, clone, (UOp(Ops.DEVICE, arg=device), src)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
@@ -474,10 +472,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metadata(self): return all_metadata.get(self, None)
   @property
   def forced_realize(self): return self in forced_realize
-
-  # *** less danger zone ***
-
-  def become(self, u:UOp): becomes_map[self] = u
 
   # *** uop movement ops ***
 
@@ -514,8 +508,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str]:
     if self.op is Ops.DEVICE: return self.arg
-    # TODO: why does this fail?
-    #if self.op is Ops.COPY: return self.arg[0]
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
