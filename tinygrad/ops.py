@@ -288,7 +288,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     match self.op:
       case Ops.BUFFER: shape = (self.size,)
       # only reduce ops are allowed to change shape
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.WMMA:
+        if len(src_sts) == 0: return None
+        shape = src_sts[0].reduce(self.axis_arg)
       # everything else derives shape from sources
       case _:
         if len(src_sts) == 0: return None

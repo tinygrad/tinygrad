@@ -128,6 +128,7 @@
     right: 0;
   }
   #metadata-resize-handle {
+    margin-top: 0;
     left: 0;
   }
   .floating-container {
@@ -187,9 +188,9 @@
     word-wrap: break-word;
     white-space: pre-wrap;
   }
-  .code-block {
-    max-height: 30%;
+  .code-block.hljs {
     overflow-y: auto;
+    max-height: 30vh;
     border-radius: 8px;
     padding: 8px;
   }
@@ -273,6 +274,13 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
+  const highlightedCodeBlock = (code, lang, wrap) => {
+    const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
+    const codeEl= Object.assign(document.createElement("code"), {className: `language-${lang} code-block`, textContent: DOMPurify.sanitize(code)});
+    pre.appendChild(codeEl);
+    hljs.highlightElement(codeEl);
+    return pre;
+  };
 
   // **** main loop
   var ret = {};
@@ -332,7 +340,8 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
-    if (currentKernel != -1) {
+    if (currentKernel == -1) return;
+    else {
       const cacheKey = `${currentKernel}-${currentUOp}`;
       if (cacheKey in cache) {
         ret = cache[cacheKey];
@@ -347,10 +356,9 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
-      className: "wrap code-block language-python" });
+    const pre = highlightedCodeBlock(ret.code_line, "python", true)
     metadata.appendChild(pre);
-    hljs.highlightElement(pre);
+
     // ** code blocks
     let code = ret.uops[currentRewrite];
     let lang = "python"
@@ -358,9 +366,7 @@
       code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       lang = "cpp";
     }
-    const codeBlock = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`,
-      className: `code-block language-${lang}` });
-    hljs.highlightElement(codeBlock);
+    const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
     if (ret.graphs.length > 1) {
@@ -378,10 +384,8 @@
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             const link = vsCodeOpener(parts);
             div.appendChild(link);
-            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
-            pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
+            const pre = highlightedCodeBlock(pattern, "python", true);
             div.appendChild(pre);
-            hljs.highlightElement(pre);
             metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
               const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
