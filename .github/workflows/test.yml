@@ -27,6 +27,8 @@ jobs:
         python-version: 3.12
     - name: Install docs dependencies (no cache)
       run: pip install -e '.[docs]'
+    - name: Install capstone for CLANG disassembly
+      run: pip install capstone
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -240,8 +242,8 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Repo line count <= 9999 lines
-      run: MAX_LINE_COUNT=10136 python sz.py
+    - name: Repo line count < 11000 lines
+      run: MAX_LINE_COUNT=11000 python sz.py
 
   testopencl:
     strategy:

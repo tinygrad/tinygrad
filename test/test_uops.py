@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.schedule import create_schedule, to_si
+from tinygrad.engine.schedule import to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
@@ -237,12 +237,12 @@ class TestExecALU(TestUOps):
 class TestConstantFolding(unittest.TestCase):
   def test_cast_const(self):
     t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)
-    si = create_schedule([t.lazydata])
+    si = t.schedule()
     assert len(si) == 0
 
   def test_bitcast_const(self):
     t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
-    si = create_schedule([t.lazydata])
+    si = t.schedule()
     assert len(si) == 1
     ji = lower_schedule_item(si[-1])
     assert any(uop.op is Ops.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
@@ -591,6 +591,13 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
     r = Tensor.empty(4, 4).sum(axis=1)
     self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
+
+  def test_st_wmma_none(self):
+    A = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('a', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 1)))
+    B = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('b', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 2)))
+    C = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('c', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 3)))
+    wmma = UOp(Ops.WMMA, dtypes.float.vec(16), (A, B, C))
+    assert wmma.st is None
 
 class TestUOpChildren(unittest.TestCase):
   def test_children_exist(self):

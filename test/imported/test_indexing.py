@@ -1,6 +1,6 @@
 # test cases are modified from pytorch test_indexing.py https://github.com/pytorch/pytorch/blob/597d3fb86a2f3b8d6d8ee067e769624dcca31cdb/test/test_indexing.py
 
-import unittest, random, copy, warnings
+import unittest, random, warnings
 import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
@@ -27,8 +27,8 @@ def set_(reference: Tensor, shape, strides, offset):
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
 
-def clone(original:Tensor): return copy.copy(original)
-def copy_(src:Tensor, other:Tensor) -> Tensor: return copy.copy(src)
+def clone(original:Tensor): return original.clone()
+def copy_(src:Tensor, other:Tensor) -> Tensor: return src.clone()
 # this is fine for tested usecases since as geohotstan understands,
 # data_ptr is used to compare if operations needed between tensors is the same
 def data_ptr(tensor:Tensor): return tensor.lazydata
