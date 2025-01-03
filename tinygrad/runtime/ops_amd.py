@@ -278,7 +278,7 @@ class AMDQueueDesc:
   put_value: int = 0
 
 class KFDIface:
-  kfd:int = -1
+  kfd:HAL
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   gpus:list[pathlib.Path] = []
 
@@ -290,18 +290,16 @@ class KFDIface:
     self.dev = dev
 
     BASE_DIR = "/sys/devices/virtual/kfd/kfd/topology/nodes"
-    if KFDIface.kfd == -1:
-      KFDIface.kfd = HAL("/dev/kfd", os.O_RDWR)
-      gpus = [g for g in HAL(BASE_DIR, os.O_RDONLY).listdir() if self._is_usable_gpu(HAL(pathlib.PurePath(BASE_DIR,g,"gpu_id").as_posix(), os.O_RDONLY))]
-      print(gpus)
-      gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
-      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-      KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
+    KFDIface.kfd = HAL("/dev/kfd", os.O_RDWR)
+    gpus = [g for g in HAL(BASE_DIR).listdir() if self._is_usable_gpu(HAL(pathlib.PurePath(BASE_DIR,g,"gpu_id").as_posix()))]
+    gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
+    visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+    KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
-    self.gpu_id = int(HAL(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/gpu_id", os.O_RDONLY).read())
-    self.props = {line.split()[0]: int(line.split()[1]) for line in HAL(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties", os.O_RDONLY).read().splitlines()}
+    self.gpu_id = int(HAL(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/gpu_id").read())
+    self.props = {line.split()[0]: int(line.split()[1]) for line in HAL(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
     self.drm_fd = HAL(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
 
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd.fd, gpu_id=self.gpu_id)
@@ -438,14 +436,14 @@ class PCIIface:
       HAL(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write("vfio-pci")
       HAL("/sys/bus/pci/drivers_probe").write(self.pcibus)
 
-      iommu_group = HAL(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group", os.O_RDONLY).readlink().split('/')[-1]
+      iommu_group = HAL(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").readlink().split('/')[-1]
       self.vfio_group = HAL(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd))
 
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode()))
 
-      self.irq_fd = HAL.eventfd().fd
+      self.irq_fd = HAL.eventfd(0,0).fd
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd, select.POLLIN)
 
@@ -525,7 +523,6 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")

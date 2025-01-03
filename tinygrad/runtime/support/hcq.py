@@ -13,8 +13,9 @@ from tinygrad.ops import sym_infer, sint, Variable
 from tinygrad.runtime.autogen import libc
 # all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
 class HAL:
-  def __init__(self, path:str, flags, fd=None):
-    self.fd = os.open(path, flags) if path else fd
+  def __init__(self, path:str, flags=os.O_RDONLY):
+    self.path = path
+    self.fd = os.open(path, flags)
     self.offset = 0
   def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
@@ -23,17 +24,23 @@ class HAL:
     file = open(self.fd)
     file.seek(self.offset)
     return file.read(size)
-  def readlink(self): return os.readlink(self.fd)
+  def readlink(self): return os.readlink(self.path)
   def write(self, content): return open(self.fd).write(content)
   def listdir(self): return os.listdir(self.fd)
   def seek(self, offset): self.offset += offset
+  @staticmethod
   def munmap(buf, sz): return libc.munmap(buf, sz)
+  @staticmethod
   def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
-  def exists(path): return os.path.exists(path)
-  @classmethod
-  def eventfd(cls, initval, flags=None):
+  @staticmethod
+  def exists(path:str): return os.path.exists(path)
+  @staticmethod
+  def eventfd(initval, flags=None):
     fd = os.eventfd(initval, flags)
-    return cls(None, flags if flags else os.O_RDONLY, fd)
+    ret = HAL.__new__(HAL)
+    ret.path = ""
+    ret.offset = 0
+    ret.fd = fd
 
 if MOCKGPU:=getenv("MOCKGPU"):
   from test.mockgpu.mockgpu import MockHAL as HAL  # noqa: F401 # pylint: disable=unused-import

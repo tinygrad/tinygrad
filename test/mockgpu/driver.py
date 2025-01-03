@@ -1,8 +1,5 @@
-import ctypes, struct, os
 from typing import Any
 from dataclasses import dataclass
-from tinygrad.helpers import round_up
-import pathlib
 
 class VirtFileDesc:
   def __init__(self, fd): self.fd, self.off = fd, 0
@@ -19,7 +16,7 @@ class TextFileDesc(VirtFileDesc):
   def ioctl(self, fd, req, argp): return 0
   def write(self, fd, buf, sz): return -1
   def read_text(self, size=None, offset=0):
-    if size == None: size = len(self.content)
+    if size is None: size = len(self.content)
     return self.content[offset:offset+size]
   def write_text(self, content): self.content = content
 class DirFileDesc(VirtFileDesc):
