@@ -21,3 +21,11 @@ These steps were done on ubuntu 24.04:
     - `tokenizer works: true` will be output if tiktoken.js was set up properly above
     - `Transformer setup without exceptions` `true` will be output if webgpu loads the model without issues
 - use app as normal
+
+
+# Compiling wasm files
+
+To compile `q6k_to_f32.js` and `q6k_to_f32.wasm`:
+
+- install and activate emscripten
+- from the tinychat dir run `emcc q6k_to_f32.c -o q6k_to_f32.js -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='["_net", "_malloc", "_free"]' -s EXPORTED_RUNTIME_METHODS='["cwrap", "getValue", "setValue"]'`

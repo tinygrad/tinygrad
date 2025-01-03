@@ -44,6 +44,17 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       try {
+        const q6k_to_f32 = await Module();
+        const inputPtr = q6k_to_f32._malloc(430080);
+        const outputPtr = q6k_to_f32._malloc(524288 * 4);
+        const input = new Uint8Array(q6k_to_f32.HEAPU8.buffer, inputPtr, 430080);
+        input.fill(1);
+        q6k_to_f32._net(inputPtr, outputPtr);
+        const output = new Float32Array(q6k_to_f32.HEAPF32.buffer, outputPtr, 524288);
+        console.log("output:", output);
+        q6k_to_f32._free(inputPtr);
+        q6k_to_f32._free(outputPtr);
+
         const wasmResponse = await fetch("./tiktoken_bg.wasm");
         const wasmBytes = await wasmResponse.arrayBuffer();
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
