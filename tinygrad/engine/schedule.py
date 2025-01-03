@@ -123,7 +123,7 @@ class ScheduleContext:
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
-  becomes: dict[UOp, UOp] = field(default_factory=dict)
+  becomes_map: dict[UOp, UOp] = field(default_factory=dict)
 
 # TODO: delete this once BIND has a VIEW source
 def is_constant(u:UOp): return u.op is Ops.CONST or (u.op is Ops.VIEW and len(u.src) == 2 and u.src[1].op is Ops.BIND)
@@ -460,7 +460,7 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
 
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   # early become
-  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): ctx.becomes[luop] = b1.view(unwrap(luop.st))
+  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): ctx.becomes_map[luop] = b1.view(unwrap(luop.st))
   return v1
 
 merge_bufs = PatternMatcher([
@@ -584,7 +584,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
       prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
       # can only schedule once
       for buf_uop in store_uops:
-        for luop in ctx.tensor_uops[buf_uop]: ctx.becomes[luop] = buf_uop.view(unwrap(luop.st))
+        for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
@@ -610,4 +610,4 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   # confirm everything was scheduled correctly
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-  return schedule, ctx.var_vals, ctx.becomes
+  return schedule, ctx.var_vals, ctx.becomes_map
