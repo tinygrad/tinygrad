@@ -52,6 +52,16 @@ class TensorCoreOptions:
       elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
+def get_full_reduce_st(u:UOp, cache:dict[UOp, ShapeTracker]) -> ShapeTracker:
+  if (cret:=cache.get(u)) is not None: return cret
+  if u.op is Ops.REDUCE_AXIS: return unwrap(u.st)
+  if u.op is Ops.VIEW: return u.arg
+  src_st = [get_full_reduce_st(x, cache) for x in u.src if x.st is not None]
+  assert len(src_st) != 0, f"expected src of reduce to have at least one st {src_st}"
+  # TODO: given a LOAD*LOAD, which st should it pick?
+  cache[u] = ret = src_st[0]
+  return ret
+
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
     if ast.op is Ops.SINK: self.ast = ast
@@ -81,8 +91,10 @@ class Kernel:
     # we use this to track which axes are reduced in each reduce
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
-      # TODO: why does this fail?
-      self.sts.append(x.src[0].reduce_st)
+      src_st = get_full_reduce_st(x.src[0], cache={})
+      # TODO: uncommenting the line below causes TestKernelOpts.test_padto_group to fail
+      #src_st = unwrap(x.src[0].st)
+      self.sts.append(src_st)
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
