@@ -82,9 +82,7 @@ class Kernel:
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
       # TODO: why does this fail?
-      #to_reduce = x.src[0].st
-      to_reduce = x.src[0].src[0].st if x.src[0].op is Ops.WHERE and x.src[0].src[0].op is Ops.VALID else x.src[0].st
-      self.sts.append(unwrap(to_reduce))
+      self.sts.append(x.src[0].reduce_st)
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))

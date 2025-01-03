@@ -301,6 +301,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW: return self.shape
     # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
     return tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL,Ops.DEFINE_VAR,Ops.CONST}]))
+  @functools.cached_property
+  def reduce_st(self) -> ShapeTracker:
+    if self.op is Ops.REDUCE_AXIS: return unwrap(self.st)
+    if self.op is Ops.VIEW: return self.arg
+    # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
+    src_st = [x.reduce_st for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL,Ops.DEFINE_VAR,Ops.CONST}]
+    return src_st[0]
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
