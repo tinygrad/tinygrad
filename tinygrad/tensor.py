@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, becomes_map
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
@@ -226,8 +226,7 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
-    # TODO: becomes_map should be returned from create_schedule_with_vars
+    schedule, var_vals, becomes_map = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
 
     # get all children of keys in becomes_map
     all_uops: set[UOp] = set()
@@ -246,7 +245,6 @@ class Tensor(SimpleMathTrait):
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(becomes_map)
-    becomes_map.clear()
 
     # set the relevant lazydata to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
