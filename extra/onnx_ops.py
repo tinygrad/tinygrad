@@ -442,27 +442,20 @@ def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_s
   y = ((y * (x_scale * w_scale / y_scale)) + y_zero_point).round().int()
   return y.clamp(dtypes.min(y_zero_point.dtype), dtypes.max(y_zero_point.dtype)).cast(y_zero_point.dtype)
 
-def wraparound(x:Tensor, dt): return ((dtypes.min(dt) > x) | (x > dtypes.max(dt))).where(x.int() % (dtypes.max(dt) + 1), x)
 def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point:Tensor|int) -> Tensor:
   a = a.int() - a_zero_point
   b = b.int() - b_zero_point
   y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
   y = ((y * (a_scale * b_scale / y_scale)) + y_zero_point).round()
-  # Production must never overflow, and accumulation may overflow if and only if in 32 bits.
-  # src: https://github.com/onnx/onnx/blob/main/docs/Operators.md#qlinearmatmul
-  # accumulation may overflow? (this means it can wrap around)
-  # wtf
-  # also numpy downcast for oob values wraps around (from int32 to int8 for example)
-  # our downcast clamps the value
-  return wraparound(y, y_zero_point.dtype).cast(y_zero_point.dtype)
+  return y.int().cast(y_zero_point.dtype)
 
 def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
   a = a.int() - a_zero_point
   b = b.int() - b_zero_point
   y = (a * a_scale + b * b_scale) / c_scale
   y = y.round() + c_zero_point
-  return y.clip(dtypes.min(c_zero_point.dtype), dtypes.max(c_zero_point.dtype)).cast(c_zero_point.dtype)
+  return y.clamp(dtypes.min(c_zero_point.dtype), dtypes.max(c_zero_point.dtype)).cast(c_zero_point.dtype)
 
 def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
   assert channels_last in {0, 1}
