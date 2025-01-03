@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, select, struct
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, struct
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HAL
@@ -280,7 +280,7 @@ class AMDQueueDesc:
 class KFDIface:
   kfd:HAL
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
-  gpus:list[pathlib.Path] = []
+  gpus:list[HAL] = []
 
   def _is_usable_gpu(self, gpu_id):
     with contextlib.suppress(OSError): return int(gpu_id.read()) != 0
@@ -291,7 +291,7 @@ class KFDIface:
 
     BASE_DIR = "/sys/devices/virtual/kfd/kfd/topology/nodes"
     KFDIface.kfd = HAL("/dev/kfd", os.O_RDWR)
-    gpus = [g for g in HAL(BASE_DIR).listdir() if self._is_usable_gpu(HAL(pathlib.PurePath(BASE_DIR,g,"gpu_id").as_posix()))]
+    gpus = [g for g in HAL(BASE_DIR).listdir() if self._is_usable_gpu(HAL(f"{BASE_DIR}/{g}/gpu_id"))]
     gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
     visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
     KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
@@ -436,7 +436,7 @@ class PCIIface:
       HAL(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write("vfio-pci")
       HAL("/sys/bus/pci/drivers_probe").write(self.pcibus)
 
-      iommu_group = HAL(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").readlink().split('/')[-1]
+      iommu_group = HAL.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
       self.vfio_group = HAL(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd))
 
@@ -474,7 +474,7 @@ class PCIIface:
       va = HAL.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      f = HAL("/proc/self/pagemap", "rb")
+      f = HAL("/proc/self/pagemap", os.O_RDONLY)
       for off in range(0, size, mmap.PAGESIZE):
         f.seek(((va + off) // mmap.PAGESIZE) * 8)
         pt_entry = struct.unpack("Q", f.read(8))[0] & ((1 << 55) - 1)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, sys
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
@@ -16,27 +16,28 @@ class HAL:
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
   def read(self, size=None):
-    file = open(self.fd)
-    file.seek(self.offset)
-    return file.read(size)
-  def readlink(self): return os.readlink(self.path)
-  def write(self, content): return open(self.fd).write(content)
+    with open(self.fd) as file:
+      file.seek(self.offset)
+      return file.read(size)
+
+  def write(self, content):
+    with open(self.fd, "w") as file: return file.write(content)
   def listdir(self): return os.listdir(self.fd)
   def seek(self, offset): self.offset += offset
   @staticmethod
-  def munmap(buf, sz): return libc.munmap(buf, sz)
-  @staticmethod
   def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
   @staticmethod
-  def exists(path:str): return os.path.exists(path)
+  def munmap(buf, sz): return libc.munmap(buf, sz)
+  @staticmethod
+  def exists(path): return os.path.exists(path)
+  @staticmethod
+  def readlink(path): return os.readlink(path)
   @staticmethod
   def eventfd(initval, flags=None):
-    fd = os.eventfd(initval, flags)
-    ret = HAL.__new__(HAL)
-    ret.path = ""
-    ret.offset = 0
-    ret.fd = fd
-
+    if sys.platform == "linux":
+      ret = HAL.__new__(HAL)
+      ret.fd = os.eventfd(initval, flags)
+      return ret
 if MOCKGPU:=getenv("MOCKGPU"):
   from test.mockgpu.mockgpu import MockHAL as HAL  # noqa: F401 # pylint: disable=unused-import
 
