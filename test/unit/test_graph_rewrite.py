@@ -203,7 +203,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
 
 
 import inspect
-from tinygrad.ops import graph_rewrite, _substitute, track_rewrites, symbolic_simple
+from tinygrad.ops import graph_rewrite, _substitute, symbolic_simple
 
 class TestBottomUpRewrite(unittest.TestCase):
   def test_const_folding(self):
@@ -214,7 +214,6 @@ class TestBottomUpRewrite(unittest.TestCase):
     self.assertIs(gt, ret)
 
 # normally .substitute would be fine, but it's not tracked
-@track_rewrites()
 def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
 def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
 

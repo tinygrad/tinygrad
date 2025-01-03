@@ -774,93 +774,62 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
+# https://en.wikipedia.org/wiki/Tree_automaton
 class PatternMatcher:
-  def __init__(self, patterns:list[tuple[UPat, Callable]]):
+  def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
-    # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set, bool]]] = {}
-    # uop is required, arg is optional
-    for p,fxn in self.patterns:
-      assert p.op is not None
+    self.states: dict[int, dict[tuple|int, int]] = {}
+    # TODO: add i to final to sort fxns
+    self.final: dict[int, tuple[dict[int, str], bool, Callable]] = {}
+    self.num_states = 0
+
+    for i,(pat,fxn) in enumerate(self.patterns):
+      def _build(pat: UPat, names: dict[int, str]) -> tuple[int]:
+        src = (pat.src,) if isinstance(pat.src, UPat) else () if pat.src is None else pat.src
+        src = tuple(_build(s, names) for s in src)
+        # in the case of past permutations
+        all_srcs = tuple(itertools.product(*src)) if src else (src,)
+        # src permutations are valid
+        if isinstance(pat.src, list): all_srcs = tuple(itertools.permutations(all_srcs[0]))
+        # any src is valid
+        #elif isinstance(pat.src[0], tuple):
+        def _new_states(vals: tuple, state: int):
+          for v in vals:
+            if v not in self.states.setdefault(state, {}):
+              self.num_states += 1
+              self.states[state][v] = self.num_states
+            state = self.states[state][v]
+          return state
+
+        ret = []
+        for src in all_srcs:
+          # create transitions for all srcs
+          state = _new_states(src, 0)
+          if state not in self.states: self.states[state] = {}
+          # if src is a UPat repeats of the src are valid
+          if isinstance(pat.src, UPat):
+            self.states[state][src[0]] = state
+            assert len(src) == 1
+          # if allow_any_len all srcs after are valid (None is always valid)
+          if pat.allow_any_len: self.states[state][None] = state
+          # create transition for upat vals to be matched
+          state = _new_states(((pat.op, pat.dtype, pat.arg),), state)
+          if pat.name is not None: names[state] = pat.name
+          ret.append(state)
+        return tuple(ret)
+
+      assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
+      has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
+      names = {}
+      states = _build(pat, names)
+      for st in states: self.final[st] = (names, has_ctx, real_fxn)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
-
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    ler = {u.op for u in uop.src}
-    for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
-      if not early_reject.issubset(ler): continue
-      for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
-    return None
-
-# *** tracking pattern matcher ***
-
-TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
-match_stats:dict[UPat, list[Union[int, float]]] = dict()
-@dataclass(frozen=True)
-class TrackedGraphRewrite:
-  loc: tuple[str, int]                                                                              # location that called graph_rewrite
-  sink: UOp                                                                                         # the sink input to graph_rewrite
-  matches: list[tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # before+after of all the matches
-tracked_keys:list[Any] = []
-tracked_ctxs:list[list[TrackedGraphRewrite]] = []
-_name_cnt:dict[str, int] = {}
-def track_rewrites(named=False):
-  def _decorator(func):
-    def __wrapper(self, *args, **kwargs):
-      if TRACK_MATCH_STATS >= 2:
-        if named: _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if named else self)
-        tracked_ctxs.append([])
-      return func(self, *args, **kwargs)
-    return __wrapper
-  return _decorator
-
-class TrackedPatternMatcher(PatternMatcher):
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    ret = None
-    ler = {u.op for u in uop.src}
-    for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
-      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-      st = time.perf_counter()
-      if not early_reject.issubset(ler):
-        match_stats[p][2] += time.perf_counter()-st
-        continue
-      match_stats[p][1] += 1
-      for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None:
-          match_stats[p][0] += 1
-          match_stats[p][3] += (et:=time.perf_counter()-st)
-          if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p, et))
-          return ret # NOTE: if it returns None, we keep trying to match
-      match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
-    return None
-
-if TRACK_MATCH_STATS:
-  PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit
-  @atexit.register
-  def print_match_stats():
-    if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl"), "wb") as f:
-        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    launch_viz("VIZ", temp("rewrites.pkl"))
-    if getenv("PRINT_MATCH_STATS", 1):
-      ret = [0,0,0.0,0.0]
-      for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
-        loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
-        ret = [x+y for x,y in zip(ret, v)]
-      print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
 
 def launch_viz(env_str:str, data:str):
   os.environ[env_str] = "0"
@@ -870,8 +839,47 @@ def launch_viz(env_str:str, data:str):
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
 
-# *** simple graph rewrite engine ***
+class RewriteContext:
+  def __init__(self, pm, ctx):
+    self.pm: PatternMatcher = pm
+    self.ctx = ctx
+    self.stores: dict[int, UOp] = {}
+    self.replace: dict[UOp, UOp] = {}
 
+  def advance(self, uop:UOp, srcs:tuple) -> tuple:
+    #srcs = tuple(self.match(s, store) for s in uop.src)
+    states = (0,)
+    for src in srcs: states = tuple(self.pm.states[st][s] for st in states for s in (*src, None) if s in self.pm.states[st])
+    def _match(uop: UOp, ops, dtypes, arg):
+      return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes) and (arg is None or uop.arg == arg)
+    states = tuple(self.pm.states[st][vals] for st in states for vals in self.pm.states[st] if isinstance(vals, tuple) and _match(uop, *vals))
+    for v in states: self.stores[v] = uop
+    return states
+  
+  def rewrite_uop(self, uop:UOp, srcs:tuple[int]) -> UOp|None:
+    states = self.advance(uop, srcs)
+    matches = (self.pm.final[st] for st in states if st in self.pm.final)
+    for nm,has_ctx,fxn in matches:
+      reverse_names = {self.stores[k]:v for k,v in nm.items() if k in self.stores}
+      # invalid match if same name assigned to different uop
+      if len(reverse_names.values()) != len(set(reverse_names.values())): continue
+      names = {v:self.stores[k] for k,v in nm.items() if k in self.stores}
+      if (ret:=(fxn(ctx=self.ctx, **names) if has_ctx else fxn(**names))) is not None:
+        self.stores = {}
+        return ret, states
+    return None, states
+
+  def _rewrite(self, n:UOp) -> tuple[UOp, tuple[int]]:
+    if n in self.replace and self.replace[n][0] is not None: return self.replace[n]
+    new_src, src_states = zip(*map(self._rewrite, n.src)) if n.src else ((), ())
+    new_n, states = self.rewrite_uop(n, src_states) if new_src == n.src else (UOp(n.op, n.dtype, new_src, n.arg), src_states)
+    self.replace[n] = ret = (n, states) if new_n is None else self._rewrite(new_n)
+    return ret
+
+  def rewrite(self, n:UOp) -> UOp: return self._rewrite(n)[0]
+
+# *** simple graph rewrite engine ***
+'''
 class RewriteContext:
   def __init__(self, pm, ctx):
     self.pm: PatternMatcher = pm
@@ -890,11 +898,9 @@ class RewriteContext:
     new_src = tuple(map(self.bottom_up_rewrite, last_n.src))
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
-
+'''
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
-  return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
+  return RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 
