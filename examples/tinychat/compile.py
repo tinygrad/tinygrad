@@ -1,14 +1,16 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 
 import os, sys
-from extra.export_model import compile_net, jit_model, dtype_to_js_type
+from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata
+from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
+from tinygrad.helpers import flatten
 
 def split_safetensor(fn):
   _, data_start, metadata = safe_load_metadata(fn)
@@ -35,17 +37,67 @@ def split_safetensor(fn):
 
   return part_end_offsets
 
+# from nn.state.ggml_data_to_tensor
+def q_to_uint8(t: Tensor, b: int) -> Tensor:
+  # TODO: rewrite with arange?
+  shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
+  return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+
+# adapted from nn.state.ggml_data_to_tensor
+# uint8 (256 elements per 210 bytes) to float32
+def q6k_to_f32(x: Tensor) -> Tensor:
+  blocks = x.reshape((-1, 210))
+  xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
+  scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
+  d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
+  return (d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales).cast(dtypes.float32).flatten()
+
 if __name__=="__main__":
+  default_device = Device.DEFAULT
+  Device.DEFAULT="CLANG"
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
   model_size="1B"
   Tensor.no_grad = True
   f32_fn = os.path.join(os.path.dirname(__file__), "llama3_1B_f32.safetensors")
   max_context=1024
 
+  class Step(NamedTuple):
+    name: str = ""
+    input: List[Tensor] = []
+    forward: Any = None
+
+  step = Step(
+    name = "q6k_to_f32", 
+    input = [Tensor.randn(430_080, dtype=dtypes.uint8).realize()], # llama-3.2-1B Q6_K weights are multiples of 430_080 bytes
+    forward = q6k_to_f32,
+  )
+  
+  run, special_names = jit_model(step, *step.input)
+
+  # hack the jit code to make clang export work
+  # TODO: fix the export_model.compile_net code, which doesn't work by default here
+  #   export_model doesn't work by default because there are ViewOp ExecItems (for casting) that don't have code,
+  #   where extra.export_model.compile_net is looking for it
+  Tensor.realize(*step.input)
+  lbs = flatten([t.lazydata.lbs for t in step.input])
+  input_buffers = [lb.base.realized for lb in lbs if lb.base.realized is not None]
+  out = run.captured(input_buffers, {}, clear_inputs=False)
+  functions, statements, bufs, bufs_to_save = compile_net(run.captured, special_names)
+  input_names = [name for _,name in special_names.items() if "input" in name]
+  output_names = [name for _,name in special_names.items() if "output" in name]
+  prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
+
+  with open(os.path.join(os.path.dirname(__file__), "q6k_to_f32.c"), "w") as text_file:
+    text_file.write(prg)
+    # we still need to manually edit this file: 
+    #   manually fixed type declarations, deleted buf_6 and buf_7, cast buf_0 to buf_6, cast buf_4 to buf_7
+  sys.exit()
+
   if not os.path.exists(f32_fn):
     # this is ugly, but wgpu adapter doesn't support f16 (they're working on it), throws exception on loading llama3 1B weights
     # the tinygrad llama code just converts the f16 to f32 anyway, we let that happen, then transfer the weights to WEBGPU device
     # TODO clean this up when wgpu supports f16, or maybe use dawn if it supports f16 (cc wpmed92)
+    Device.DEFAULT=default_device
     model = build_transformer(model_path, model_size=model_size, max_context=max_context)
     state_dict = get_state_dict(model)
     safe_save(state_dict, f32_fn)
