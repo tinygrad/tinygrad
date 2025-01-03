@@ -1,11 +1,6 @@
 from __future__ import annotations
-<<<<<<< HEAD
-from typing import cast, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array
-=======
 from typing import cast, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
->>>>>>> cb94e3c2 (HAL)
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
