@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections
+import sys, base64, multiprocessing, itertools, collections, zlib
 from typing import Optional, Union, Literal, List
 
 from tinygrad import Tensor, TinyJit, Variable, nn
@@ -94,7 +94,7 @@ class AudioEncoder:
 class TextDecoder:
   def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer, **_):
     self.max_tokens_to_sample = n_text_ctx // 2
-    self.max_self_attn_cache_len = self.max_tokens_to_sample * 2 + 5  # roughly prompt + start toks + max_tokens_to_sample
+    self.max_self_attn_cache_len = self.max_tokens_to_sample * 3 + 5  # inferloop upper range + n_text_ctx + start_tokens
 
     self.token_embedding = nn.Embedding(n_vocab, n_text_state)
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
@@ -236,6 +236,10 @@ def load_file_waveform(filename):
 def transcribe_file(model, enc, filename):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)])
 
+def compression_ratio(text) -> float:
+    text_bytes = text.encode("utf-8")
+    return len(text_bytes) / len(zlib.compress(text_bytes))
+
 def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
@@ -245,15 +249,24 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
 
-  def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
+  def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio: Tensor, temperature: int):
     pos, next_tokens = 0, ctx
+    sum_probs = Tensor.zeros(ctx.shape[0])
     for i in range((nsample-len(start_tokens))*2):
-      next_tokens = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
+      logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1]
+      if temperature == 0:
+        next_tokens = logits.argmax(axis=-1)
+      else:
+        scaled = (logits / temperature).softmax(axis=-1)
+        next_tokens = scaled.multinomial(1)
+        probs = scaled[Tensor.arange(logits.shape[0]), next_tokens.flatten()]
+        sum_probs += probs
+      next_tokens = next_tokens.numpy().astype(np.int32).reshape(-1, 1)
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
       if (next_tokens == eot).all(): break
-    return ctx
+    return ctx, sum_probs
 
   def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]
   start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
@@ -266,21 +279,29 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
 
   eot = enc._special_tokens["<|endoftext|>"]
 
-  ctx = np.tile(start_tokens, (model.batch_size,1))
-  transcriptions = [[] for _ in waveforms]
+  ctx = start_tokens
+  transcriptions = []
 
   for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
     encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
 
-    if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
-    else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
+    to_decode = np.tile(ctx, (5, 1))
+    for t in [0, 0.2, 0.4, 0.6]:
+      inferred, sum_probs = inferloop(to_decode, encoded_audio, t)
+      candidate_idx = sum_probs.argmax().tolist()
+      selected = inferred[candidate_idx]
+      tokens = selected[np.where(selected == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(selected == eot)[0]) else None]
+      text = enc.decode(tokens)
+      if compression_ratio(text) < 2.4: # this threshold is taken from openai's implementation
+        print(f"\n{curr_frame=} {text}")
+        transcriptions.append(text)
+        break
+      print(f"\n{curr_frame=} Too repetitive, trying higher temp: \033[31m{text}\033[0m")
+      
 
-    for i, (res, arr) in enumerate(zip(transcriptions, ctx)):
-      if curr_frame*HOP_LENGTH <= len(waveforms[i]):res.extend(arr[np.where(arr == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(arr == eot)[0]) else None])
-    ctx = [[enc._special_tokens['<|startofprev|>']]+gettexttoks(cs)+start_tokens for cs in ctx]
+    ctx = [enc._special_tokens['<|startofprev|>']]+gettexttoks(selected)+start_tokens
 
-  transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcriptions))
-  return transcriptions if len(transcriptions) > 1 else transcriptions[0]
+  return " ".join(transcriptions)
 
 CHUNK = 1600
 RECORD_SECONDS = 10
