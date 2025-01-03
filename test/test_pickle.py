@@ -1,7 +1,7 @@
 import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.helpers import GlobalCounters
+from tinygrad.helpers import GlobalCounters, ContextVar
 from tinygrad.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
@@ -94,6 +94,15 @@ class TestPickle(unittest.TestCase):
     print("post jit")
     out = add_fxn(x, y)
     np.testing.assert_equal(out.numpy(), 102)
+
+  def test_pickle_context_var(self):
+    v = ContextVar("a", 0)
+    v.value = 1
+    vs = pickle.dumps(v)
+    v.value = 2
+    v2 = pickle.loads(vs)
+    self.assertEqual(v2.value, 1)
+    self.assertEqual(v.value, 2)
 
   def test_pickle_schedule(self):
     a = Tensor([1,2])
