@@ -1,5 +1,6 @@
 import ctypes, ctypes.util, time, os, builtins
 import fcntl
+from tinygrad.runtime.support.hcq import HAL
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 start = time.perf_counter()
@@ -50,56 +51,66 @@ def _open(path, flags):
   for driver in drivers:
     for file in driver.tracked_files:
       if path == file.path:
-        virtfd = driver.open(path, flags, 0o777, file) 
+        virtfd = driver.open(path, flags, 0o777, file)
         tracked_fds[virtfd.fd] = virtfd
         return virtfd.fd
   if os.path.exists(path):
     return os.open(path, flags, 0o777)
   else: return None
-from tinygrad.runtime.support.hcq import HAL
+
 class MockHAL(HAL):
-  def __init__(self, path:str, flags, fd=None):
-    self.fd = _open(path, flags) if path else fd
+  def __init__(self, path:str, flags=os.O_RDONLY):
+    self.fd = _open(path, flags)
     self.offset = 0
+
   def __del__(self):
-    if self.fd == None: return
     if self.fd in tracked_fds:
       tracked_fds[self.fd].close(self.fd)
       tracked_fds.pop(self.fd)
     else: os.close(self.fd)
+
   def ioctl(self, request, arg):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].ioctl(self.fd, request, ctypes.addressof(arg))
     return fcntl.ioctl(self.fd, request, arg)
+
   def mmap(self, start, sz, prot, flags, offset):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].mmap(start, sz, prot, flags, self.fd, offset)
     return libc.mmap(start, sz, prot, self.fd, offset)
+
   def read(self, size=None):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].read_text(size, self.offset)
     file = open(self.fd)
     file.seek(self.offset)
     return file.read(size)
+
   def readlink(self):
     if self.fd in tracked_fds: #NOTE is'nt used right now
       return tracked_fds[self.fd].readlink()
     return os.readlink(self.fd)
+
   def write(self, content):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].write_text(content)
     return open(self.fd).write(content)
+
   def listdir(self):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].listdir()
     return os.listdir(self.fd)
+
   def seek(self, offset): self.offset += offset
   def munmap(buf, sz): return libc.munmap(buf, sz)
+
   def exists(path):
     ret = _open(path, os.O_RDONLY)
-    if ret != None: return True
-    else: return False
-  @classmethod
-  def eventfd(cls, initval, flags=None):
+    return True if ret else False
+
+  def eventfd(initval, flags=None):
     fd = os.eventfd(initval, flags)
-    return cls(None, flags if flags else os.O_RDONLY, fd)
+    ret = MockHAL.__new__(MockHAL)
+    ret.fd = fd
+    ret.offset = 0
+    return ret

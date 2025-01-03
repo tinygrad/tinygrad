@@ -1,16 +1,17 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
+import os, ctypes, contextlib, re, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
 from typing import Any, cast, Union, Type
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator, HAL, MOCKGPU
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
+from tinygrad.runtime.support.hcq import HAL, MOCKGPU
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod, OSX
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
-from tinygrad.runtime.autogen import nv_gpu, libc
+from tinygrad.runtime.autogen import nv_gpu
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -311,7 +312,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, tag="") -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
     normal_page_size = (4 << (12 if OSX else 10))
-    page_size = (normal_page_size if uncached or host else ((2 << 20) if size >= (8 << 20) else normal_page_size)
+    page_size = normal_page_size if uncached or host else ((2 << 20) if size >= (8 << 20) else normal_page_size)
     size = round_up(size, page_size)
     va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
 
@@ -363,8 +364,9 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     # NOTE: va_addr is set to make rawbufs compatible with HCQBuffer protocol.
     self._debug_mappings[(va_base, size)] = tag
-    return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd, hClient=self.root,
-      hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping))
+    return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd,
+      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs,
+      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping))
 
   def _gpu_map(self, mem:HCQBuffer):
     if self.gpu_uuid in mem.meta.mapped_gpu_ids: return
@@ -385,7 +387,7 @@ class NVDevice(HCQCompiled[NVSignal]):
       NVDevice.fd_ctl = HAL("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.fd_uvm = HAL("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       fd_uvm_2 = HAL("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-      NVDevice.root = rm_alloc(self.fd_ctl.fd, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
+      NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
       with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm.fd) # this error is okay, CUDA hits it too
 
