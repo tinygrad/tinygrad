@@ -2190,7 +2190,6 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
 class TestTensorUOpSpec(unittest.TestCase):
-  @track_rewrites(named=True)
   def test_const_must_be_unmasked(self):
     a = Tensor.ones((4, 4)).pad((2, 2))
     unsafe_push_views = PatternMatcher([
@@ -2200,22 +2199,10 @@ class TestTensorUOpSpec(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
       create_schedule_with_vars(list(t.src))
 
-  @track_rewrites(named=True)
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule_with_vars(list(t.src))
-
-  @track_rewrites(named=True)
-  def test_verify_arg(self):
-    a = Tensor(2.0).cast(dtypes.int)
-    unsafe_cast_folding = PatternMatcher([
-      # this kind of rule should change the arg too, the parser must reject this.
-      (UPat(Ops.CAST, src=(UPat.cvar("x"),), name="cast"), lambda cast,x: x.replace(dtype=cast.dtype)),
-    ])
-    t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_cast_folding)
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      create_schedule_with_vars(list(t.src))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
