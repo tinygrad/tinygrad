@@ -433,68 +433,44 @@ def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:i
   x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
   return ((x.float() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
-def _qlinear(fxn, y_scale:Tensor, y_zero_point:Tensor, inputs:list[Tensor], input_scales:list[Tensor], input_zero_points:list[Tensor]):
-  # run the op in int32?
-  args = [inp.cast(dtypes.int32) - zero_point.cast(dtypes.int32) for inp, zero_point in zip(inputs, input_zero_points)]
-  y = fxn(*args)
-  y = ((y * prod(input_scales) / y_scale) + y_zero_point).round()
+def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
+                y_zero_point: Tensor|int, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:int|list[int]=1, group:int=1,
+                kernel_shape:list[int]|None=None, pads:int|list[int]=0, strides:int|list[int]=1):
+  x = x.int() - x_zero_point
+  w = w.int() - w_zero_point
+  y = Conv(x, w, B, auto_pad, dilations, group, kernel_shape, pads, strides)
+  y = ((y * (x_scale * w_scale / y_scale)) + y_zero_point).round().int()
+  return y.clamp(dtypes.min(y_zero_point.dtype), dtypes.max(y_zero_point.dtype)).cast(y_zero_point.dtype)
+
+def wraparound(x:Tensor, dt): return ((dtypes.min(dt) > x) | (x > dtypes.max(dt))).where(x.int() % (dtypes.max(dt) + 1), x)
+def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
+                  y_zero_point:Tensor|int) -> Tensor:
+  a = a.int() - a_zero_point
+  b = b.int() - b_zero_point
+  y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
+  y = ((y * (a_scale * b_scale / y_scale)) + y_zero_point).round()
   # Production must never overflow, and accumulation may overflow if and only if in 32 bits.
   # src: https://github.com/onnx/onnx/blob/main/docs/Operators.md#qlinearmatmul
   # accumulation may overflow? (this means it can wrap around)
   # wtf
   # also numpy downcast for oob values wraps around (from int32 to int8 for example)
   # our downcast clamps the value
-  def wraparound(x:Tensor, dt): return ((dtypes.min(dt) > x) | (x > dtypes.max(dt))).where(x.int() % (dtypes.max(dt) + 1), x)
   return wraparound(y, y_zero_point.dtype).cast(y_zero_point.dtype)
 
-def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
-                y_zero_point: Tensor|int, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:int|list[int]=1, group:int=1,
-                kernel_shape:list[int]|None=None, pads:int|list[int]=0, strides:int|list[int]=1):
-  fxn = functools.partial(Conv, B=B, auto_pad=auto_pad, dilations=dilations, group=group, kernel_shape=kernel_shape, pads=pads, strides=strides)
-  return _qlinear(fxn, y_scale, y_zero_point, (x, w), (x_scale, w_scale), (x_zero_point, w_zero_point))
+def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+  a = a.int() - a_zero_point
+  b = b.int() - b_zero_point
+  y = (a * a_scale + b * b_scale) / c_scale
+  y = y.round() + c_zero_point
+  return y.clip(dtypes.min(c_zero_point.dtype), dtypes.max(c_zero_point.dtype)).cast(c_zero_point.dtype)
 
-def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
-                  y_zero_point:Tensor|int) -> Tensor:
-  return _qlinear(Tensor.matmul, y_scale, y_zero_point, (a, b), (a_scale, b_scale), (a_zero_point, b_zero_point))
-
-def QLinearAdd(A:Tensor, A_scale:Tensor, A_zero_point:Tensor, B:Tensor, B_scale:Tensor, B_zero_point:Tensor, C_scale:Tensor, C_zero_point:Tensor):
-  return _qlinear(Tensor.add, C_scale, C_zero_point, (A, B), (A_scale, B_scale), (A_zero_point, B_zero_point))
-
-def QLinearAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, kernel_shape:list[int],
-                        auto_pad:str="NOTSET", ceil_mode:int=0, channels_last:int=0, count_include_pad:int=0, pads:list[int]=None,
-                        strides:list[int]=None):
-  fxn = functools.partial(AveragePool, kernel_shape=kernel_shape, auto_pad=auto_pad, ceil_mode=ceil_mode, count_include_pad=count_include_pad,
-                          pads=pads, strides=strides)
-  return _qlinear(fxn, y_scale, y_zero_point, [X], [x_scale], [x_zero_point])
-
-def QLinearConcat(Y_scale:Tensor, Y_zero_point:Tensor, *inputs:tuple[Tensor, Tensor, Tensor], axis:int):
-  tensors = [(x - x_zero_point) * x_scale for x, x_scale, x_zero_point in inputs]
-  fxn = functools.partial(Concat, axis=axis)
-  return _qlinear(fxn, Y_scale, Y_zero_point, tensors, [x_scale for _, x_scale, _ in inputs], [x_zero_point for _, _, x_zero_point in inputs])
-
-def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int=0):
-  return _qlinear(GlobalAveragePool, y_scale, y_zero_point, [X], [x_scale], [x_zero_point])
-
-def QLinearLeakyRelu(X:Tensor, X_scale:Tensor, X_zero_point:Tensor, Y_scale:Tensor, Y_zero_point:Tensor, alpha:float):
-  return _qlinear(functools.partial(LeakyRelu, alpha=alpha), Y_scale, Y_zero_point, [X], [X_scale], [X_zero_point])
-
-def QLinearMul(A:Tensor, A_scale:Tensor, A_zero_point:Tensor, B:Tensor, B_scale:Tensor, B_zero_point:Tensor, C_scale:Tensor, C_zero_point:Tensor):
-  return _qlinear(Tensor.mul, C_scale, C_zero_point, (A, B), (A_scale, B_scale), (A_zero_point, B_zero_point))
-
-def QLinearReduceMean(data:Tensor, data_scale:Tensor, data_zero_point:Tensor, reduced_scale:Tensor, reduced_zero_point:Tensor, axes:list[int],
-                      keepdims:int):
-  fxn = functools.partial(ReduceMean, axes=axes, keepdims=keepdims)
-  return _qlinear(fxn, reduced_scale, reduced_zero_point, [data], [data_scale], [data_zero_point])
-
-def QLinearSigmoid(X:Tensor, X_scale:Tensor, X_zero_point:Tensor, Y_scale:Tensor, Y_zero_point:Tensor):
-  return _qlinear(Tensor.sigmoid, Y_scale, Y_zero_point, [X], [X_scale], [X_zero_point])
-
-def QLinearSoftmax(X:Tensor, X_scale:Tensor, X_zero_point:Tensor, Y_scale:Tensor, Y_zero_point:Tensor, axis:int, opset:int):
-  return _qlinear(functools.partial(Tensor.softmax, axis=axis), Y_scale, Y_zero_point, [X], [X_scale], [X_zero_point])
-
-def QLinearWhere(condition:Tensor, X:Tensor, x_scale:Tensor, x_zero_point:Tensor, Y:Tensor, y_scale:Tensor, y_zero_point:Tensor, z_scale:Tensor,
-                 z_zero_point:Tensor):
-  return _qlinear(functools.partial(Tensor.where, self=condition), z_scale, z_zero_point, [X, Y], [x_scale, y_scale], [x_zero_point, y_zero_point])
+def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
+  assert channels_last in {0, 1}
+  if channels_last == 1: X = X.permute(0, 2, 3, 1)
+  X = (X.int() - x_zero_point) * x_scale
+  y = GlobalAveragePool(X)
+  y = (y / y_scale + y_zero_point).round()
+  return y.clamp(dtypes.min(y_zero_point.dtype), dtypes.max(y_zero_point.dtype)).cast(y_zero_point.dtype)
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
