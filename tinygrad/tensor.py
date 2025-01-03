@@ -2070,7 +2070,7 @@ class Tensor(SimpleMathTrait):
   def _resolve_pool_pads(self, padding:Union[int, Sequence[int]], dims:int, allow_asymmetric:bool=True) -> Sequence[int]:
     if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
       raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
-    if not allow_asymmetric and not (isinstance(padding, int) or len(padding) == dims): raise ValueError("Only supports per-dimension padding")
+    if not allow_asymmetric and not (isinstance(padding, int) or len(padding) == dims): raise ValueError("Only per-dimension padding is supported.")
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
   def _apply_ceil_mode(self, pads:Sequence[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> List[int]:
@@ -2224,7 +2224,7 @@ class Tensor(SimpleMathTrait):
     """
     x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(*range(3, len(weight.shape)+1))
     HW = weight.shape[2:]
-    if not (isinstance(padding, int) or len(padding) == len(HW)): raise ValueError("Only supports per-dimension padding.")
+    if not (isinstance(padding, int) or len(padding) == len(HW)): raise ValueError("Only per-dimension padding is supported.")
     stride, dilation, padding, output_padding = [make_tuple(x, len(HW)) for x in (stride, dilation, padding, output_padding)]
     if any(s>1 for s in stride):
       # handle strides: (k) -> reshape -> (k,1) -> pad -> (k,s) -> reshape -> (k*s) -> shrink (k-(s-1))
