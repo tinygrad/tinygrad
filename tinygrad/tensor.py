@@ -245,6 +245,7 @@ class Tensor(SimpleMathTrait):
 
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
+    for k,v in becomes_map.items(): assert k is not v, f"{k} can't become something it already is"
     new_sink = sink.substitute(becomes_map)
     becomes_map.clear()
 

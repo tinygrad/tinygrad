@@ -49,7 +49,7 @@ tensor_uop_spec = PatternMatcher([
   # ** specs with room for refactoring and improving
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("copyin"),)), lambda copy,copyin:
+  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.BUFFER).view(), UPat.var("copyin"),)), lambda copy,copyin:
    # arg (device, clone?)
    isinstance(copy.arg, tuple) and len(copy.arg) == 2 and isinstance(copy.arg[0], str) and isinstance(copy.arg[1], bool) and \
    # dtype
@@ -77,13 +77,12 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND))), lambda: True),
 
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
-  # TODO: this should be EMPTY(VIEW(BUFFER))
-  (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
+  (UPat(Ops.EMPTY, src=(UPat(Ops.BUFFER).view(),), arg=None), lambda: True),
 
   # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
   # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
 
-  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x:
+  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat(Ops.BUFFER).view(), UPat.var("x"),)), lambda root,x:
    # BUFFER_VIEW can replace contiguous, keeping dtype the same
    (root.dtype == x.dtype) or
    # it can also replace bitcast, this changes the dtype, but the itemsize stays the same
@@ -135,7 +134,7 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
-  if buf.st is None or buf.base.is_realized or is_constant(buf.base): return buf
+  if buf.st is None or buf.base.is_realized or buf.base.op is Ops.VIEW or is_constant(buf.base): return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
@@ -146,14 +145,13 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
   # meta ops and assign already have a target buffer, otherwise we create a new one
-  buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, Ops.VIEW} else UOp.new_buffer(buf.device, buf.size, dtype)
+  buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, *GroupOp.Meta} else UOp.new_buffer(buf.device, buf.size, dtype)
   # TODO: we need to rethink meta ops having buffers at creation time
-  if buf.op is Ops.VIEW: op = buf.src[1].replace(src=tuple(add_buffers(x, ctx, cache) for x in buf.src[1].src))
-  else: op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
+  op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this op
   ctx.tensor_uops[buf_uop] = [buf]
   # (early) bufferize
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize and buf.op not in GroupOp.Meta else op), buf.st)
   return ret
 
 # **** AST graph rewrite
@@ -463,7 +461,8 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
 
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   # early become
-  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
+  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []):
+    if luop is not (buf_view:=b1.view(unwrap(luop.st))): luop.become(buf_view)
   return v1
 
 merge_bufs = PatternMatcher([
