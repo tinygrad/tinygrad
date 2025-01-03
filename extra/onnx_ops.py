@@ -439,8 +439,8 @@ def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_s
   x = x.int() - x_zero_point
   w = w.int() - w_zero_point
   y = Conv(x, w, B, auto_pad, dilations, group, kernel_shape, pads, strides)
-  y = ((y * (x_scale * w_scale / y_scale)) + y_zero_point).round().int()
-  return y.clamp(dtypes.min(y_zero_point.dtype), dtypes.max(y_zero_point.dtype)).cast(y_zero_point.dtype)
+  y = ((y * (x_scale * w_scale / y_scale)) + y_zero_point).round()
+  return y.cast(y_zero_point.dtype)
 
 def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point:Tensor|int) -> Tensor:
@@ -448,14 +448,15 @@ def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b
   b = b.int() - b_zero_point
   y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
   y = ((y * (a_scale * b_scale / y_scale)) + y_zero_point).round()
+  # cast to int first because result expects overflow/underflow wrap around
   return y.int().cast(y_zero_point.dtype)
 
 def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
   a = a.int() - a_zero_point
   b = b.int() - b_zero_point
-  y = (a * a_scale + b * b_scale) / c_scale
-  y = y.round() + c_zero_point
-  return y.clamp(dtypes.min(c_zero_point.dtype), dtypes.max(c_zero_point.dtype)).cast(c_zero_point.dtype)
+  c = (a * a_scale + b * b_scale)
+  c = ((c / c_scale) + c_zero_point).round()
+  return c.cast(c_zero_point.dtype)
 
 def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
   assert channels_last in {0, 1}
@@ -463,7 +464,7 @@ def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_sc
   X = (X.int() - x_zero_point) * x_scale
   y = GlobalAveragePool(X)
   y = (y / y_scale + y_zero_point).round()
-  return y.clamp(dtypes.min(y_zero_point.dtype), dtypes.max(y_zero_point.dtype)).cast(y_zero_point.dtype)
+  return y.cast(y_zero_point.dtype)
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
