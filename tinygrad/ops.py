@@ -851,6 +851,7 @@ class RewriteContext:
   def advance(self, uop:UOp, srcs:tuple) -> tuple:
     states = (0,)
     for src in srcs: states = tuple(self.pm.states[st][s] for st in states for s in (*src, None) if s in self.pm.states[st])
+    # TODO: add (0,) here to match pattern where this uop doesn't have srcs
     def _match(uop: UOp, ops, dtypes, arg):
       return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes or uop.dtype.scalar() in dtypes) and (arg is None or uop.arg == arg)
     states = tuple(self.pm.states[st][vals] for st in states for vals in self.pm.states[st] if isinstance(vals, tuple) and _match(uop, *vals))
