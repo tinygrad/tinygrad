@@ -5,7 +5,7 @@ from extra.onnx import get_run_onnx
 import onnxruntime as ort
 import numpy as np
 
-def benchmark(onnx_file:pathlib.Path, test_with_ort=False):
+def benchmark(onnx_file:pathlib.Path, test_vs_ort=False):
   print(f"running benchmark")
   onnx_model = onnx.load(onnx_file)
   Tensor.no_grad = True
@@ -40,7 +40,7 @@ def benchmark(onnx_file:pathlib.Path, test_with_ort=False):
     et = time.perf_counter()
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
 
-  if test_with_ort:
+  if test_vs_ort:
     sess = ort.InferenceSession(onnx_file)
     ort_out = sess.run([out.name for out in onnx_model.graph.output], {k:v.numpy() for k,v in new_inputs.items()})
     rtol, atol = 1e-3, 1e-3
