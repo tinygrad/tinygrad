@@ -1,10 +1,42 @@
 from __future__ import annotations
+<<<<<<< HEAD
 from typing import cast, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array
+=======
+from typing import cast, Type, TypeVar, Generic, Any
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
+>>>>>>> cb94e3c2 (HAL)
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
 from tinygrad.ops import sym_infer, sint, Variable
+from tinygrad.runtime.autogen import libc
+# all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
+class HAL:
+  def __init__(self, path:str, flags, fd=None):
+    self.fd = os.open(path, flags) if path else fd
+    self.offset = 0
+  def __del__(self): os.close(self.fd)
+  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
+  def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
+  def read(self, size=None):
+    file = open(self.fd)
+    file.seek(self.offset)
+    return file.read(size)
+  def readlink(self): return os.readlink(self.fd)
+  def write(self, content): return open(self.fd).write(content)
+  def listdir(self): return os.listdir(self.fd)
+  def seek(self, offset): self.offset += offset
+  def munmap(buf, sz): return libc.munmap(buf, sz)
+  def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
+  def exists(path): return os.path.exists(path)
+  @classmethod
+  def eventfd(cls, initval, flags=None):
+    fd = os.eventfd(initval, flags)
+    return cls(None, flags if flags else os.O_RDONLY, fd)
+
+if MOCKGPU:=getenv("MOCKGPU"):
+  from test.mockgpu.mockgpu import MockHAL as HAL  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
