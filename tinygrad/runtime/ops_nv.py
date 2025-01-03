@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
-from typing import Any, cast, Union, Type, Optional
+from typing import Any, cast, Union, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.ops import sint
@@ -72,7 +72,7 @@ qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 class NVSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+  def __init__(self, base_addr:int|None=None, **kwargs):
     super().__init__(NVDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=1000, value_off=0, timestamp_off=8)
 
   def __del__(self):

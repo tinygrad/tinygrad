@@ -1,4 +1,4 @@
-from typing import Any, cast, Optional
+from typing import Any, cast
 import ctypes
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
@@ -58,7 +58,7 @@ class MetalGraph(GraphRunner):
     if len(self.vars): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
     self.range = to_struct(0, len(jit_cache))
 
-  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> float|None:
 
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
