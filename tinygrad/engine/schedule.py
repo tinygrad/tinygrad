@@ -49,11 +49,9 @@ tensor_uop_spec = PatternMatcher([
   # ** specs with room for refactoring and improving
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("copyin"),)), lambda copy,copyin:
-   # arg (device, clone?)
-   isinstance(copy.arg, tuple) and len(copy.arg) == 2 and isinstance(copy.arg[0], str) and isinstance(copy.arg[1], bool) and \
-   # dtype
-   copy.dtype == copyin.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("copyin"),)), lambda copy,copyin:
+   # arg (clone?) + dtype
+   isinstance(copy.arg, bool) and copy.dtype == copyin.dtype),
 
   # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
   # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
@@ -436,12 +434,13 @@ ops_folding = symbolic_simple+PatternMatcher([
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
-  (UPat(Ops.COPY, src=(UPat.cvar("x"),)), lambda x: x),
+  (UPat(Ops.COPY, src=(UPat(), UPat.cvar("x"),)), lambda x: x),
   # no double COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("dest"), UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, src=(UPat(), UPat.var("x"),))),))),
+   lambda dest,copy,x: copy.replace(src=(dest, x))),
   # no COPY to same device, except clone (arg is True)
-  (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
-   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg[1] is not True else None),
+  (UPatScheduled(Ops.COPY, src=(UPat(), UPat(Ops.VIEW, name="copyin")), name="copy"),
+   lambda base,b,copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
@@ -510,7 +509,8 @@ do_realize = PatternMatcher([
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
 ])
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp

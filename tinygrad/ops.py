@@ -462,7 +462,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
+    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, clone, (UOp(Ops.DEVICE, arg=device), src)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
@@ -514,8 +514,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str]:
     if self.op is Ops.DEVICE: return self.arg
-    # TODO: why does this fail?
-    #if self.op is Ops.COPY: return self.arg[0]
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
