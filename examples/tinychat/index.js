@@ -1,5 +1,86 @@
+
+// copied from examples/webgpu/stable_diffusion/index.html
+const getDevice = async () => {
+  const adapter = await navigator.gpu.requestAdapter();
+  const requiredLimits = {};
+  const maxBufferSizeInSDModel = 1073741824;
+  requiredLimits.maxStorageBufferBindingSize = maxBufferSizeInSDModel;
+  requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
+            
+  return await adapter.requestDevice({
+    requiredLimits
+  });
+};
+
+// modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
+const loadPart = async (part) => {
+    const response = await fetch(part);
+    // const contentLength = response.headers.get('content-length');
+    // const total = parseInt(contentLength, 10);
+
+    const res = new Response(new ReadableStream({
+        async start(controller) {
+            const reader = response.body.getReader();
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                //progressCallback(part, value.byteLength, total);
+                controller.enqueue(value);
+            }
+                    
+            controller.close();
+        },
+    }));
+        
+    return res.arrayBuffer();
+};
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
+    // model
+    nets: {},
+    tokenizer: null,
+    max_context: 1024,
+
+    async init() {
+      try {
+        const q6k_to_f32 = await Module();
+        const inputPtr = q6k_to_f32._malloc(430080);
+        const outputPtr = q6k_to_f32._malloc(524288 * 4);
+        const input = new Uint8Array(q6k_to_f32.HEAPU8.buffer, inputPtr, 430080);
+        input.fill(1);
+        q6k_to_f32._net(inputPtr, outputPtr);
+        const output = new Float32Array(q6k_to_f32.HEAPF32.buffer, outputPtr, 524288);
+        console.log("output:", output);
+        q6k_to_f32._free(inputPtr);
+        q6k_to_f32._free(outputPtr);
+
+        const wasmResponse = await fetch("./tiktoken_bg.wasm");
+        const wasmBytes = await wasmResponse.arrayBuffer();
+        await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
+
+        this.tokenizer = await createTokenizer("./llama3-2.tiktoken");
+        tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
+        console.log("tokenizer works:", tokenizer_works)
+
+        const device = await getDevice();
+        console.log("WebGPU device initialized")
+
+        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7", "net_part8"];
+        let safetensorParts = await Promise.all(netKeys.map(key => loadPart(`${window.MODEL_BASE_URL}/${key}.safetensors`)));
+        for (let i = 0; i < safetensorParts.length; i++) {safetensorParts[i] = new Uint8Array(safetensorParts[i]);}
+        console.log("Model parts loaded successfully:", safetensorParts);
+
+        let models = ["transformer"];
+        this.nets = await Promise.all([
+                transformer().setup(device, safetensorParts),
+            ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
+        console.log("Transformer setup without exceptions");
+      } catch (error) {
+        console.error("Error initializing model:", error);
+      }
+    },
+
     // current state
     cstate: {
       time: null,
@@ -107,48 +188,44 @@ document.addEventListener("alpine:init", () => {
     },
 
     updateTotalTokens(messages) {
-      fetch(`${this.endpoint}/chat/token/encode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
-      }).then((response) => response.json()).then((data) => {
-        this.total_tokens = data.length;
-      }).catch(console.error);
+      try {
+        let toks = [this.tokenizer.bos_id];
+        messages.forEach((message) => {
+          if (!message.role || !message.content) {
+            throw new Error("Each message must have a 'role' and 'content' property.");
+          }
+          toks = toks.concat(this.tokenizer.encodeMessage(message.role, message.content));
+
+          if (messages.length > 0 && messages[messages.length - 1].role === "user") {
+            toks = toks.concat(this.tokenizer.encodeRole("assistant"));
+          }
+          this.total_tokens = toks.length;
+        });
+      } catch (error) {
+        console.error("Error updating total tokens:", error);
+      }
     },
 
     async *openaiChatCompletion(messages) {
-      // stream response
-      const response = await fetch(`${this.endpoint}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          "messages": messages,
-          "stream": true,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch");
+      let tokens = [this.tokenizer.bos_id];
+      for (const message of messages) {
+        tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
+      }
+      tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
+      cursor = tokens.length - 1;
+      
+      // pad with mask tokens (1000000)
+      // TODO: re-enable Variable and cache_kv in llama.py, make it compile properly to webgpu js
+      if (tokens.length < this.max_context) {
+        tokens = tokens.concat(new Array(this.max_context - tokens.length).fill(1000000));
       }
 
-      const reader = response.body.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream()).getReader();
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        if (value.type === "event") {
-          const json = JSON.parse(value.data);
-          if (json.choices) {
-            const choice = json.choices[0];
-            if (choice.finish_reason === "stop") {
-              break;
-            }
-            yield choice.delta.content;
-          }
-        }
+        const tok = await this.nets["transformer"](new Int32Array(tokens));
+        cursor += 1;
+        tokens[cursor] = tok[0];
+        if (this.tokenizer.stop_tokens.has(tok[0])) break;
+        yield new TextDecoder().decode(this.tokenizer.decode([tok]));
       }
     },
   }));
@@ -310,4 +387,62 @@ function createParser(onParse) {
 const BOM = [239, 187, 191];
 function hasBom(buffer) {
   return BOM.every((charCode, index) => buffer.charCodeAt(index) === charCode);
+}
+
+const PAT_STR = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
+
+async function createTokenizer(bpeUrl) {
+  const num_base_tokens = 128000;
+  const special_tokens = {
+    "<|begin_of_text|>": 128000,
+    "<|end_of_text|>": 128001,
+    "<|start_header_id|>": 128006,
+    "<|end_header_id|>": 128007,
+    "<|eot_id|>": 128009
+  };
+  const model = await window.tiktokenLoad({
+        "load_tiktoken_bpe": bpeUrl,
+        "special_tokens": special_tokens,
+        "pat_str": PAT_STR
+    });
+  const tokenizer = new window.Tiktoken(model.bpe_ranks, model.special_tokens, model.pat_str)
+
+  return {
+    get bos_id() {
+      return special_tokens["<|begin_of_text|>"];
+    },
+
+    get stop_tokens() {
+      return new Set([
+        special_tokens["<|end_of_text|>"],
+        special_tokens["<|eot_id|>"],
+      ]);
+    },
+
+    decode(toks) {
+      const filtered = toks.filter((t) => t < num_base_tokens);
+      return tokenizer.decode(filtered);
+    },
+
+    encode(text, allow_special = false) {
+      const allowedSpecial = allow_special ? "all" : new Set();
+      const disallowedSpecial = new Set();
+      return tokenizer.encode(text, allowedSpecial, disallowedSpecial);
+    },
+
+    encodeRole(role) {
+      const tokens = [];
+      tokens.push(special_tokens["<|start_header_id|>"]);
+      tokens.push(...this.encode(role));
+      tokens.push(special_tokens["<|end_header_id|>"]);
+      tokens.push(...this.encode("\n\n"));
+      return tokens;
+    },
+
+    encodeMessage(role, content) {
+      const roleTokens = this.encodeRole(role);
+      const contentTokens = this.encode(content.trim());
+      return [...roleTokens, ...contentTokens, special_tokens["<|eot_id|>"]];
+    },
+  };
 }
