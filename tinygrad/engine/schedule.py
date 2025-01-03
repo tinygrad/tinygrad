@@ -49,11 +49,9 @@ tensor_uop_spec = PatternMatcher([
   # ** specs with room for refactoring and improving
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("copyin"),)), lambda copy,copyin:
-   # arg (device, clone?)
-   isinstance(copy.arg, tuple) and len(copy.arg) == 2 and isinstance(copy.arg[0], str) and isinstance(copy.arg[1], bool) and \
-   # dtype
-   copy.dtype == copyin.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("copyin"),)), lambda copy,copyin:
+   # arg (clone?) + dtype
+   isinstance(copy.arg, bool) and copy.dtype == copyin.dtype),
 
   # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
   # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
@@ -123,6 +121,7 @@ class ScheduleContext:
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+  becomes_map: dict[UOp, UOp] = field(default_factory=dict)
 
 # TODO: delete this once BIND has a VIEW source
 def is_constant(u:UOp): return u.op is Ops.CONST or (u.op is Ops.VIEW and len(u.src) == 2 and u.src[1].op is Ops.BIND)
@@ -215,7 +214,6 @@ view_right = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  tensor_uops: dict[UOp, list[UOp]]
   ops_metadata: dict[UOp, Metadata]
   assigns: set[UOp]
   var_vals: dict[Variable, int]
@@ -260,7 +258,7 @@ multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: c
 
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # create the ast context
-  si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
+  si_ctx = ScheduleItemContext(ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
   create_ctx = add_metadata if len(si_ctx.assigns) == 0 else add_metadata+add_assign_adjacents
   sink = graph_rewrite(pre, create_ctx if len(si_ctx.sinked) == 1 else multioutput+create_ctx, si_ctx)
   # do movement ops
@@ -277,9 +275,6 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  # can only schedule once
-  for buf_uop in si_ctx.sinked:
-    for luop in si_ctx.tensor_uops[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
     PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))
@@ -436,12 +431,13 @@ ops_folding = symbolic_simple+PatternMatcher([
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
-  (UPat(Ops.COPY, src=(UPat.cvar("x"),)), lambda x: x),
+  (UPat(Ops.COPY, src=(UPat(), UPat.cvar("x"),)), lambda x: x),
   # no double COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("dest"), UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, src=(UPat(), UPat.var("x"),))),))),
+   lambda dest,copy,x: copy.replace(src=(dest, x))),
   # no COPY to same device, except clone (arg is True)
-  (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
-   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg[1] is not True else None),
+  (UPatScheduled(Ops.COPY, src=(UPat(), UPat(Ops.VIEW, name="copyin")), name="copy"),
+   lambda base,b,copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
@@ -463,7 +459,7 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
 
 def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
   # early become
-  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
+  for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): ctx.becomes_map[luop] = b1.view(unwrap(luop.st))
   return v1
 
 merge_bufs = PatternMatcher([
@@ -510,7 +506,8 @@ do_realize = PatternMatcher([
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
 ])
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
@@ -568,7 +565,7 @@ remove_movement_ops = PatternMatcher([
 ])
 
 @track_rewrites(named=True)
-def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
   sink = add_buffers(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
@@ -585,6 +582,9 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   for store_uops in store_groups:
     if len(stores:=[ctx.realizes[u] for u in store_uops if ctx.realizes[u].op is Ops.STORE]) != 0:
       prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
+      # can only schedule once
+      for buf_uop in store_uops:
+        for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
@@ -610,4 +610,4 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   # confirm everything was scheduled correctly
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-  return schedule, ctx.var_vals
+  return schedule, ctx.var_vals, ctx.becomes_map

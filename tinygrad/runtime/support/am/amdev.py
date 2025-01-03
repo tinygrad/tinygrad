@@ -1,6 +1,5 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib
-from typing import Optional
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -106,7 +105,7 @@ class AMPhysicalMemoryBlock:
   def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
 
 @dataclasses.dataclass(frozen=True)
-class AMVirtualMapping: va_addr:int; size:int; cpu_addr:Optional[int]=None; paddr:Optional[int]=None # noqa: E702
+class AMVirtualMapping: va_addr:int; size:int; cpu_addr:int|None=None; paddr:int|None=None # noqa: E702
 
 class AMPageTableEntry:
   def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
