@@ -6,7 +6,7 @@ import onnxruntime as ort
 import numpy as np
 
 def benchmark(onnx_file:pathlib.Path, test_vs_ort=False):
-  print(f"running benchmark")
+  print("running benchmark")
   onnx_model = onnx.load(onnx_file)
   Tensor.no_grad = True
   Tensor.training = False
