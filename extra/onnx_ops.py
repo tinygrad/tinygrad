@@ -431,7 +431,7 @@ def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int
 
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
   x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
-  return ((x.float() - x_zero_point) * x_scale).cast(x_scale.dtype)
+  return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
 def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
                 y_zero_point: Tensor|int, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:int|list[int]=1, group:int=1,
