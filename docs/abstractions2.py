@@ -91,7 +91,7 @@ b = b.buf_uop_view()
 out = a.alu(Ops.ADD, b)
 
 # schedule the computation as a list of kernels
-sched, _ = create_schedule_with_vars([out])
+sched, _, __ = create_schedule_with_vars([out])
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast

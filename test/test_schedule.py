@@ -28,7 +28,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sched, _ = create_schedule_with_vars([t])
+    sched, _, __ = create_schedule_with_vars([t])
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
