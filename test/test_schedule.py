@@ -2187,5 +2187,10 @@ class TestCopyFolding(unittest.TestCase):
     run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
+  def test_copy_to_same_device(self):
+    a = Tensor.ones((4, 4)).contiguous().realize()
+    b = a.to(a.device).contiguous()
+    check_schedule(b, 1, filter_sink=False)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

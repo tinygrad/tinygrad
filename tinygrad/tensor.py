@@ -174,7 +174,7 @@ class Tensor(SimpleMathTrait):
     if not isinstance(data, (UOp, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
+    if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
     elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
     else:
