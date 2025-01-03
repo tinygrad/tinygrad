@@ -2066,10 +2066,10 @@ class Tensor(SimpleMathTrait):
     return x.permute(*range(len(noop)), *[len(noop)+i*2 for i in range(len(i_))], *[len(noop)+i*2+1 for i in range(len(i_))])
 
   def _resolve_pool_pads(self, padding:Union[int, Sequence[int]], dims:int, allow_asymmetric:bool=True) -> Sequence[int]:
-    if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
-      raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
     if not allow_asymmetric and not (isinstance(padding, int) or len(padding) == dims):
       raise ValueError(f"Padding must be an int or a sequence of length {dims}.")
+    if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
+      raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
   def _apply_ceil_mode(self, pads:Sequence[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> List[int]:
