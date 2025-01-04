@@ -34,10 +34,9 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{x.arg}u"),
   (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "1" if x.arg else "0"),
   # consts are rendered to larger type and casted
-  (UPat(Ops.CONST, (dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}f')})"),
+  (UPat(Ops.CONST, (dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}f')})"),
   (UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}u')})"),
   (UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
-  (UPat(Ops.CONST, (dtypes.fp8e4m3, dtypes.fp8e5m2), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
   # default const render
   (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.arg)),
   # new load/store
@@ -319,7 +318,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_storage_t", dtypes.fp8e5m2: "__nv_fp8_storage_t"}
 
   extra_matcher = PatternMatcher([
     # cast float8 alus to float16
@@ -331,7 +330,6 @@ class CUDARenderer(CStyleLanguage):
       lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.half), y.cast(dtypes.half)), alu.arg)),
     (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e4m3, name="x"),
       lambda x: (UOp(x.op, dtypes.half, tuple(vv.cast(dtypes.half) for vv in x.src), x.arg).cast(dtypes.fp8e4m3))),
-
     (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
       lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.half, src=(b,x.cast(dtypes.half), y.cast(dtypes.half))).cast(dtypes.fp8e5m2)),
     (UPat(GroupOp.ALU, dtype=dtypes.fp8e5m2, name="x"),
@@ -341,10 +339,24 @@ class CUDARenderer(CStyleLanguage):
     (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e5m2, name="x"),
       lambda x: (UOp(x.op, dtypes.half, tuple(vv.cast(dtypes.half) for vv in x.src), x.arg).cast(dtypes.fp8e5m2))),
 
-    (UPat(Ops.CAST, dtypes.fp8e4m3, UPat.var("x", dtypes.fp8e5m2)), lambda x: (x.cast(dtypes.half).cast(dtypes.fp8e4m3))),
-    (UPat(Ops.CAST, dtypes.fp8e5m2, UPat.var("x", dtypes.fp8e4m3)), lambda x: (x.cast(dtypes.half).cast(dtypes.fp8e5m2))),
-    ]) + extra_pm
+    # intermediate casting so we can use no saturation
+    (UPat(Ops.CAST, dtypes.fp8e4m3, UPat.var("x")),lambda x: x.cast(dtypes.half).cast(dtypes.fp8e4m3) if x.dtype!=dtypes.half else None),
+    (UPat(Ops.CAST, name="x", src=UPat.var("y", dtypes.fp8e4m3)),lambda x,y: y.cast(dtypes.half).cast(x.dtype) if x.dtype!=dtypes.half else None),
+    (UPat(Ops.CAST, dtypes.fp8e5m2, UPat.var("x")),lambda x: x.cast(dtypes.half).cast(dtypes.fp8e5m2) if x.dtype!=dtypes.half else None),
+    (UPat(Ops.CAST, name="x", src=UPat.var("y", dtypes.fp8e5m2)),lambda x,y: y.cast(dtypes.half).cast(x.dtype) if x.dtype!=dtypes.half else None),
 
+    # bfloat16 casting
+    # (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
+    ]) + extra_pm
+  
+  string_rewrite = PatternMatcher([
+    # fp8 - half casting
+    (UPat(Ops.CAST, dtype=dtypes.fp8e4m3, src=(UPat.var('x', dtype=dtypes.half))), lambda ctx,x: f"__nv_cvt_halfraw_to_fp8({ctx[x]}, __NV_NOSAT, __NV_E4M3)"),
+    (UPat(Ops.CAST, dtype=dtypes.half, src=(UPat.var('x', dtype=dtypes.fp8e4m3))), lambda ctx,x: f"(__half)__nv_cvt_fp8_to_halfraw({ctx[x]}, __NV_E4M3)"),
+    (UPat(Ops.CAST, dtype=dtypes.fp8e5m2, src=(UPat.var('x', dtype=dtypes.half))), lambda ctx,x: f"__nv_cvt_halfraw_to_fp8({ctx[x]}, __NV_NOSAT, __NV_E5M2)"),
+    (UPat(Ops.CAST, dtype=dtypes.half, src=(UPat.var('x', dtype=dtypes.fp8e5m2))), lambda ctx,x: f"(__half)__nv_cvt_fp8_to_halfraw({ctx[x]}, __NV_E5M2)"),
+    ]) + base_rewrite
+  
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
     elems, header = ', '.join(_nms[:dt.count]), ', '.join([f"{scal} {x}" for x in _nms[:dt.count]])
@@ -362,7 +374,6 @@ class CUDARenderer(CStyleLanguage):
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
 
-    # yyyyyyyy???????????
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
