@@ -602,7 +602,7 @@ jobs:
           brew install cmake rust
       - name: Cache comgr
         if: matrix.backend == 'amd'
-        id: cache-build
+        id: cache-comgr
         uses: actions/cache@v4
         env:
           cache-name: cache-comgr-osx-build
@@ -610,36 +610,42 @@ jobs:
           path: ${{ github.workspace }}/llvm-project/amd/comgr/build
           key: macos-15-comgr-669db884972e769450470020c06a6f132a8a065b
       - name: Clone/compile comgr
-        if: matrix.backend == 'amd' && steps.cache-build.outputs.cache-hit != 'true'
+        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
-          git clone -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
+          git clone -b rocm-6.1.x --depth 1 https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
           cd ${{ github.workspace }}/llvm-project
-          mkdir build
-          cd build
+          mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ../llvm
           make -j$(nproc)
           cd ${{ github.workspace }}/llvm-project/amd/device-libs
-          mkdir build
-          cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${ github.workspace }/llvm-project/build" ..
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build" ..
           make -j$(nproc)
           cd ${{ github.workspace }}/llvm-project/amd/comgr
-          mkdir build
-          cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${ github.workspace }/llvm-project/build;${ github.workspace }/llvm-project/amd/device-libs/build" -DCOMGR_DISABLE_SPIRV=1 -DBUILD_TESTING=OFF ..
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build;${{ github.workspace }}/llvm-project/amd/device-libs/build" -DCOMGR_DISABLE_SPIRV=1 -DBUILD_TESTING=OFF ..
           make -j$(nproc)
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: |
           cd ${{ github.workspace }}/llvm-project/amd/comgr/build
           sudo make install
-      - name: Build and install remu
-        if: matrix.backend == 'amd'
+      - name: Cache remu
+        uses: actions/cache@v4
+        id: cache-remu
+        with:
+          path: ${{ github.workspace ]}/remu/target
+          key: remu-osx-b873f2d254ebfdc81fc113e311c80efaedf061f8
+      - name: Clone/compile remu
+        if: matrix.backend == 'amd' && steps.cache-remu.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/Qazalin/remu
+          git clone https://github.com/Qazalin/remu ${{ github.workspace }}/remu
+          git checkout b873f2d254ebfdc81fc113e311c80efaedf061f8
           cd remu
           cargo build --release
-          sudo cp target/release/libremu.dylib /usr/local/lib
+      - name: Install remu
+        if: matrix.backend == 'amd'
+        run: sudo cp ${{ github.workspace }}/remu/target/libremu.dylib /usr/local/lib/
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run tiny test (amd)
