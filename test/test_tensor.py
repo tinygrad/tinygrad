@@ -791,7 +791,7 @@ class TestIdxUpcast(unittest.TestCase):
     store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
-    if not idx:
+    if idx is None:
       idx_val = store.src[0] # PTX does not have Ops.INDEX
     else:
       assert idx.op is Ops.INDEX
