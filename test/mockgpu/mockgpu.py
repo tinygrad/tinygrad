@@ -89,17 +89,12 @@ class MockHWInterface(HWInterface):
       file.seek(self.offset)
       return file.read(size) if newlines else file.read(size).rstrip()
 
-  def write(self, content, binary=False):
-    if binary: raise NotImplementedError()
-    if self.fd in tracked_fds:
-      return tracked_fds[self.fd].write_contents(content)
-    with open(self.fd, "w") as file: return file.write(content)
-
   def listdir(self):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].list_contents()
     return os.listdir(self.fd)
 
+  def write(self, content, binary=False): raise NotImplementedError()
   def seek(self, offset): self.offset += offset
   @staticmethod
   def exists(path): return _open(path, os.O_RDONLY) is not None
