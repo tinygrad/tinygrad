@@ -451,21 +451,6 @@ def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b
   # cast to int first because result expects overflow/underflow wrap around
   return y.int().cast(y_zero_point.dtype)
 
-def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
-  a = a.int() - a_zero_point
-  b = b.int() - b_zero_point
-  c = (a * a_scale + b * b_scale)
-  c = ((c / c_scale) + c_zero_point).round()
-  return c.cast(c_zero_point.dtype)
-
-def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
-  assert channels_last in {0, 1}
-  if channels_last == 1: X = X.permute(0, 2, 3, 1)
-  X = (X.int() - x_zero_point) * x_scale
-  y = GlobalAveragePool(X)
-  y = (y / y_scale + y_zero_point).round()
-  return y.cast(y_zero_point.dtype)
-
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   try: import PIL.Image
@@ -559,6 +544,21 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present if past is not None else out
+
+def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+  a = a.int() - a_zero_point
+  b = b.int() - b_zero_point
+  c = (a * a_scale + b * b_scale)
+  c = ((c / c_scale) + c_zero_point).round()
+  return c.cast(c_zero_point.dtype)
+
+def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
+  assert channels_last in {0, 1}
+  if channels_last == 1: X = X.permute(0, 2, 3, 1)
+  X = (X.int() - x_zero_point) * x_scale
+  y = GlobalAveragePool(X)
+  y = (y / y_scale + y_zero_point).round()
+  return y.cast(y_zero_point.dtype)
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
