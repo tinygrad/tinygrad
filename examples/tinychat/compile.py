@@ -1,13 +1,14 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 
-import os, sys
+import os, sys, json
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
+from extra.models.llama import convert_from_gguf
 from examples.llama3 import build_transformer, Tokenizer
-from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata
+from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata, gguf_load
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, prod
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 from tinygrad.helpers import flatten
@@ -87,6 +88,69 @@ def clang_export_q6k_to_f32():
     # we still need to manually edit this file: 
     #   manually fixed type declarations, deleted buf_6 and buf_7, cast buf_0 to buf_6, cast buf_4 to buf_7
 
+def prepare_browser_gguf_chunks(model_path, model):
+  # split gguf file into browser-friendly chunks
+  # export metadata JSON with offsets -- depends on tinygrad gguf metadata parser below
+  chunk_size = 2**29 # 536_870_912
+  metadata = {}
+
+  gguf_tensor = Tensor.empty(os.stat(model_path).st_size, dtype=dtypes.uint8, device=f"disk:{model_path}").to(Device.DEFAULT)
+  kv_data, state_dict, t_infos, data_start = gguf_load(gguf_tensor)
+
+  # calculate byte size of each tensor
+  for i, info in enumerate(t_infos[:-1]):
+    size = t_infos[i+1][3] - t_infos[i][3]
+    t_infos[i] = (size, info)
+  assert (last_info_dtype:=t_infos[-1][2]) in (0, 14)
+  last_info_size = {0: 4, 14: 8*210/256}.get(last_info_dtype) * prod(t_infos[-1][1])
+  t_infos[-1] = (last_info_size, t_infos[-1])
+
+  prerun_model = build_transformer(model_path, model_size=model_size, max_context=max_context, load_weights=False)
+  # for llama, some model parameters used in inference are instantiated at runtime
+  new_state_dict = get_state_dict(model)
+  new_weights = set(new_state_dict.keys()) - set(convert_from_gguf(state_dict, prerun_model).keys())
+  new_weights = {name: new_state_dict[name].contiguous().to("CLANG").realize() for name in new_weights}
+  for k,v in new_weights.items():
+    next_start_pos = t_infos[-1][1][3] + t_infos[-1][0]
+    t_infos.append((v.lazydata.buffer.nbytes, (k, "not_from_gguf_file", {dtypes.float: 0, dtypes.int: 18}[v.dtype], next_start_pos)))
+
+  chunks = []
+  # FFD bin packing
+  t_infos = sorted(t_infos, reverse=True)
+  for info in t_infos:
+      placed = False
+      for chunk in chunks:
+        if sum(i[0] for i in chunk) + info[0] <= chunk_size:
+          chunk.append(info)
+          placed = True
+          break
+      if not placed:
+        chunks.append([info])
+
+  gguf_dtypes = {0: "float32", 14: "Q6_K", 18: "int32"}
+  new_weights = {k: {"tensor": v} for k,v in new_weights.items()}
+  with open(model_path, 'rb') as reader:
+    for i, chunk in enumerate(chunks):
+      cursor = 0
+      with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "wb+") as writer:
+        for size, info in chunk:
+          weight_metadata = {"chunk": i, "start_pos": cursor, "size": size, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}
+          if (name:=info[0]) not in new_weights:
+            reader.seek(data_start + info[3])
+            data = reader.read(size)
+            metadata[name] = weight_metadata
+          elif name in new_weights:
+            data = bytes(new_weights[name]["tensor"].lazydata.buffer.as_buffer())
+            new_weights[name]["metadata"] = weight_metadata
+          writer.write(data)
+          cursor += size
+
+  metadata = convert_from_gguf(metadata, model)
+  for k,v in new_weights.items():
+    metadata[k] = v["metadata"]
+  with open(os.path.join(os.path.dirname(__file__), f'./net_metadata.json'), "w") as writer: json.dump(metadata, writer, indent=4)
+  return metadata
+
 if __name__=="__main__":
   default_device = Device.DEFAULT
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
@@ -96,6 +160,7 @@ if __name__=="__main__":
   max_context=1024
 
   #clang_export_q6k_to_f32()
+  #metadata = prepare_browser_gguf_chunks(str(model_path))
 
   if not os.path.exists(f32_fn):
     # this is ugly, but wgpu adapter doesn't support f16 (they're working on it), throws exception on loading llama3 1B weights
@@ -149,6 +214,10 @@ if __name__=="__main__":
 
   toks = toks + (max_context - len(toks)) * [1_000_000]
   out = model.forward(Tensor([toks]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P, True)
+
+  # We waited to prepare the chunks until here, because model.freqs_cis and model.tok_embeddings.arange are only ready now
+  metadata = prepare_browser_gguf_chunks(str(model_path), model)
+  os.remove(f32_fn)
 
   class Step(NamedTuple):
     name: str = ""
@@ -230,12 +299,7 @@ if __name__=="__main__":
     prg += compile_step(model, step)
     base_url="."
 
-  # Since last safe_save, we added cache_kv, tok_embeddings.arange, maybe more
-  # TODO: remove all the safe_save calls, and streamline original quantized weights --> partStartOffsets
-  state_dict = get_state_dict(model)
-  safe_save(state_dict, f32_fn)
-  partStartOffsets = split_safetensor(f32_fn)
-  os.remove(f32_fn)
+  partStartOffsets=[]
 
   prekernel = f"""
     window.MODEL_BASE_URL= "{base_url}";
