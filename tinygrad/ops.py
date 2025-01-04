@@ -783,51 +783,63 @@ class PatternMatcher:
     self.num_states = 0
 
     for i,(pat,fxn) in enumerate(self.patterns):
-      def _build(pat: UPat, ns:int|None) -> tuple[int]:
+      def _build(pat: UPat) -> tuple[int]:
         src = (pat.src,) if isinstance(pat.src, UPat) else () if pat.src is None else pat.src
-        src = tuple(_build(s, names, i) for i,s in enumerate(src))
-        # in the case of past permutations
-        all_srcs = tuple(itertools.product(*src)) if src else (src,)
-        # src permutations are valid
-        if isinstance(pat.src, list): all_srcs = tuple(itertools.permutations(all_srcs[0]))
-        # TODO: add support for any src
-        def _new_states(vals: tuple, state: int):
-          for v in vals:
-            if v not in self.states.setdefault(state, {}):
-              self.num_states += 1
-              self.states[state][v] = self.num_states
-            state = self.states[state][v]
-          return state
+        src = tuple(_build(s) for s in src)
 
-        ret = []
+        def _new_states(vals: tuple, states: list[int]):
+          ret = []
+          for st in states:
+            for v in vals:
+              if v not in self.states.setdefault(st, {}):
+                self.num_states += 1
+                self.states[st][v] = self.num_states
+              ret.append(self.states[st][v])
+          return ret
+
+        # if src is a list all src permutations are valid TODO: add support for any src
+        all_srcs = itertools.permutations(src) if isinstance(pat.src, list) else (src,)
+        # create transitions for srcs
+        all_states = []
         for src in all_srcs:
-          # create transitions for srcs
-          state = _new_states(src, 0)
-          if state not in self.states: self.states[state] = {}
-          # if src is a UPat repeats of the src are valid
-          if isinstance(pat.src, UPat): self.states[state][src[0]] = state
-          # if allow_any_len all srcs after are valid (None is always valid)
-          if pat.allow_any_len: self.states[state][None] = state
-          # create transition for upat vals to be matched
-          # TODO: decompose this and ops and dtypes, for dtypes it's a set of dtypes and dtypes.scalar
-          state = _new_states(((pat.op, pat.dtype, pat.arg),), state)
-          ret.append(state)
-        # TODO: fix names
-        # add path to all names
-        if ns is not None:
-          for nm in names.values(): nm.insert(0, ns)
-        # add new name and end of path
-        if pat.name is not None: names[pat.name] = [ns]
-        
-        return tuple(ret), names
+          src_states = [0]
+          for s in src: src_states = _new_states(s, src_states)
+          all_states.extend(src_states)
+        # if src is a UPat repeats of the src are valid
+        if isinstance(pat.src, UPat):
+          assert len(src) == 1 and len(all_states) == len(src[0])
+          for s,st in zip(src[0], all_states):
+            #assert s not in self.states[st]
+            self.states.setdefault(st, {})[s] = st
+        # if allow_any_len all subsequent srcs are valid (None is always valid)
+        elif pat.allow_any_len:
+          for st in all_states: self.states.setdefault(st, {})[None] = st
+        # create transitions for upat vals to be matched
+        states = _new_states(((pat.op, pat.dtype, pat.arg),), all_states)
+        return tuple(states)
+      
+      def _assign_names(pat: UPat, si: int) -> list[dict[str, list[int]]]:
+        if isinstance(pat.src, list): all_src = itertools.permutations(pat.src)
+        elif isinstance(pat.src, UPat): all_src = ((pat.src,),)
+        elif pat.src is None: all_src = ((),)
+        else: all_src = (pat.src,)
+
+        all_names:list[dict[str, list[int]]] = []
+        for src in all_src: all_names.append({k:v for i,s in enumerate(src) for d in _assign_names(s, i) for k,v in d.items()})
+        for nms in all_names:
+          if pat.name is not None: nms[pat.name] = []
+          if si is not None:
+            for nm in nms.values(): nm.insert(0, si)
+        return all_names
 
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
       has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
-      names = {}
-      states = _build(pat, names, None)
-      for st in states: self.final.setdefault(st, []).append((i, names, has_ctx, real_fxn))
+      states = _build(pat)
+      # names has dictionaries with key being the name to assign the uop and the value the path to get to that uop
+      names = _assign_names(pat, None)
+      for st,nm in zip(states, names): self.final.setdefault(st, []).append((i, nm, has_ctx, real_fxn))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -841,6 +853,8 @@ def launch_viz(env_str:str, data:str):
     args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
+
+# *** graph rewrite engine ***
 
 class RewriteContext:
   def __init__(self, pm, ctx):
@@ -861,10 +875,17 @@ class RewriteContext:
     states = self.advance(uop, srcs)
     sorted_matches = sorted((m for st in states if st in self.pm.final for m in self.pm.final[st]), key=lambda m: m[0])
     for _,nm,has_ctx,fxn in sorted_matches:
-      reverse_names = {self.stores[k]:v for k,v in nm.items() if k in self.stores}
+
+      names = {}
+      for name,path in nm.items():
+        u = uop
+        for p in path: u = u.src[p]
+        names[name] = u
+
+      #reverse_names = {self.stores[k]:v for k,v in nm.items() if k in self.stores}
       # invalid match if same name assigned to different uop
-      if len(reverse_names.values()) != len(set(reverse_names.values())): continue
-      names = {v:self.stores[k] for k,v in nm.items() if k in self.stores}
+      #if len(reverse_names.values()) != len(set(reverse_names.values())): continue
+      #names = {v:self.stores[k] for k,v in nm.items() if k in self.stores}
       if (ret:=(fxn(ctx=self.ctx, **names) if has_ctx else fxn(**names))) is not None:
         return ret, states
     return None, states
@@ -875,8 +896,6 @@ class RewriteContext:
     new_n, states = self.rewrite_uop(n, src_states) if new_src == n.src else (UOp(n.op, n.dtype, new_src, n.arg), src_states)
     self.replace[n] = ret = (n, states) if new_n is None else self.rewrite(new_n)
     return ret
-
-# *** simple graph rewrite engine ***
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   return RewriteContext(pm, ctx).rewrite(sink)[0]
