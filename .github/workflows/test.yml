@@ -617,7 +617,7 @@ jobs:
           git checkout 669db884972e769450470020c06a6f132a8a065b
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ../llvm
-          make -j$(nproc)
+          make -j2
           cd ${{ github.workspace }}/llvm-project/amd/device-libs
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build" ..
