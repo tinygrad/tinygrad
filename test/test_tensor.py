@@ -8,7 +8,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_kernel
-from tinygrad.ops import Ops, sym_infer, UOp
+from tinygrad.ops import Ops, sym_infer, UOp, print_uops
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -772,27 +772,28 @@ class TestIdxUpcast(unittest.TestCase):
     if ast.op is op: return ast
     for src in ast.src:
       if (ret:=self._find_op(src, op)) is not None: return ret
-  def _assert(self, dtype: dtypes, a: Tensor):
+  def _schedule_render(self, a: Tensor):
     schedule, var_vals = a.schedule_with_vars()
     for s in schedule:
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         kernel = get_kernel(renderer, s.ast)
-
         # If render succeeds, it means types were propagated correctly when upcasting
         prg = kernel.to_program()
-
-        # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
-        store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
-        assert store.op is Ops.STORE
-        idx = self._find_op(store, Ops.INDEX)
-        assert idx.op is Ops.INDEX
-        idx_val = idx.src[1]
-        assert idx_val.dtype is dtype
-
         # Test everything except the actual run (including sym_infer)
         sym_infer(prg.estimates.ops, var_vals)
         sym_infer(prg.estimates.mem, var_vals)
+        return prg
+
+  def _assert(self, dtype: dtypes, a: Tensor):
+    prg = self._schedule_render(a)
+    # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
+    store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
+    assert store.op is Ops.STORE
+    idx = self._find_op(store, Ops.INDEX)
+    assert idx.op is Ops.INDEX
+    idx_val = idx.src[1]
+    assert idx_val.dtype is dtype
 
   # This prevents kernel.py from combining the dims into 1
   def _permute_expand_contig(self, dtype: dtypes, dim1, dim2, dim3):
@@ -812,6 +813,12 @@ class TestIdxUpcast(unittest.TestCase):
 
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+  
+  def test_symfold(self):
+    # This would cause an overflow before sym folding, and after upcast, the original sym fold pattern matcher won't apply
+    a = Tensor.arange(100_000)
+    prg = self._schedule_render(a)
+    assert all(uop.dtype is not dtypes.long for uop in prg.uops)
 
   @unittest.expectedFailure
   @unittest.skipIf(*dtype_supported)
