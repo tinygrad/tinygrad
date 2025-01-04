@@ -7,7 +7,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import cuda_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
-if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # noqa: F401 # pylint: disable=reimported
+if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # noqa: F401 # pylint: disable=reimported # type: ignore[no-redef]
 
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")  # noqa: E501
@@ -56,7 +56,7 @@ class CUDAProgram:
       self.c_args, self.vargs = encode_args(args, vals)
 
       # HACK: For MOCKGPU send the args struct itself.
-      if MOCKGPU: self.vargs = self.c_args
+      if MOCKGPU: self.vargs = self.c_args # type: ignore[assignment]
     else:
       for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
