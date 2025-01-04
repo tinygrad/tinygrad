@@ -107,7 +107,7 @@ class MetalCompiler(Compiler):
         ret = CompileError(errorMessage.decode())
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
-    params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{cache_dir}"'
+    params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{cache_dir}" -fno-caret-diagnostics'
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
     request = struct.pack('<QQ', len(src_padded), len(params_padded)) + src_padded + params_padded
