@@ -299,7 +299,7 @@ class KFDIface:
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
     self.gpu_id = int(HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/gpu_id").read())
-    self.props = {line.split()[0]: int(line.split()[1]) for line in HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
+    self.props = {l.split()[0]: int(l.split()[1]) for l in HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
     self.drm_fd = HWInterface(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
 
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd.fd, gpu_id=self.gpu_id)
