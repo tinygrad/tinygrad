@@ -455,7 +455,8 @@ def AffineGrid(theta:Tensor, size:list[int], align_corners:int=0):
 # **************** com.microsoft Ops ****************
 
 def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
-  x = x + skip + bias
+  x = x + skip
+  if bias is not None: x = x + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
 def FastGelu(x:Tensor, bias:Tensor|None=None):

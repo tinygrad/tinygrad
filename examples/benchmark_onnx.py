@@ -4,7 +4,7 @@ from extra.onnx import get_run_onnx, dtype_parse
 import onnxruntime as ort
 import numpy as np
 
-def get_input(inp:onnx.ValueInfoProto, config:dict):
+def get_input(inp:onnx.ValueInfoProto, config:dict) -> Tensor:
   # TODO: not complete
   def _get_size(key:str) -> int:
     size = config.get("crop_size") or config.get("size") or 224
@@ -23,7 +23,6 @@ def get_input(inp:onnx.ValueInfoProto, config:dict):
       case (False, "decoder_sequence_length"): shape.append(20)
       case (False, "encoder_sequence_length"): shape.append(20)
       case (False, _): shape.append(1)
-  shape = tuple(shape)
   # get dtype
   dtype = dtype_parse(inp.type.tensor_type.elem_type)
   # determine value
