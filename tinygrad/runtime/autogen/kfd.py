@@ -11,7 +11,7 @@ import ctypes, os
 
 
 import functools
-from tinygrad.runtime.support.hcq import HAL
+from tinygrad.runtime.support.hcq import HWInterface
 
 def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):
   ret = __fd.ioctl((__idir<<30) | (ctypes.sizeof(made := __user_struct(**kwargs))<<16) | (__base<<8) | __nr, made)
