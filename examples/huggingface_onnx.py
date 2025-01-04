@@ -2,7 +2,7 @@ import argparse, onnx, json, csv
 from collections import Counter
 from pathlib import Path
 from huggingface_hub import list_models, snapshot_download
-from tinygrad.helpers import _ensure_downloads_dir
+from tinygrad.helpers import _ensure_downloads_dir, getenv
 from examples.benchmark_onnx import benchmark
 
 def huggingface_download_onnx_model(model_id:str) -> Path:
@@ -30,7 +30,7 @@ def run_huggingface_model(model_id:str):
 
     try:
       # TODO: pass report into benchmark to collect more stats? Like run speed, inputs chosen, etc
-      benchmark(onnx_model_path, config, test_vs_ort=True)
+      benchmark(onnx_model_path, config, test_vs_ort=int(getenv("ORT", "1")))
       report[relative_path]["status"] = "success"
     except Exception as e:
       report[relative_path]["status"] = f"failed: {e}"

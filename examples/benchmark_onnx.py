@@ -19,9 +19,9 @@ def get_input(inp:onnx.ValueInfoProto, config:dict):
       case (False, "height"): shape.append(_get_size("height"))
       case (False, "width"): shape.append(_get_size("width"))
       case (False, "num_channels"): shape.append(config.get("in_channels", 3))
-      case (False, "sequence_length"): shape.append(20)  # kinda random sequence length maybe use max_position_embeddings?
-      case (False, "decoder_sequence_length"): shape.append(20) # dunno about these two lol
-      case (False, "encoder_sequence_length"): shape.append(20) # dunno about these two lol
+      case (False, "sequence_length"): shape.append(20)  # maybe use max_position_embeddings?
+      case (False, "decoder_sequence_length"): shape.append(20)
+      case (False, "encoder_sequence_length"): shape.append(20)
       case (False, _): shape.append(1)
   shape = tuple(shape)
   # get dtype
@@ -84,4 +84,4 @@ def benchmark(onnx_model_path:pathlib.Path, config:dict={}, test_vs_ort=False):
 if __name__ == "__main__":
   onnx_file = fetch(sys.argv[1])
   print(f"loaded model {onnx_file}" )
-  benchmark(onnx_file, int(getenv("ORT", "0")))
+  benchmark(onnx_file, test_vs_ort=int(getenv("ORT", "0")))
