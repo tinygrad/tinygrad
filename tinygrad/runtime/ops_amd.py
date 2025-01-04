@@ -443,12 +443,12 @@ class PCIIface:
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode()))
 
-      self.irq_fd = HAL.eventfd(0,0).fd
+      self.irq_fd = HAL.eventfd(0,0)
       self.irq_poller = select.poll()
-      self.irq_poller.register(self.irq_fd, select.POLLIN)
+      self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
       irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd))
+        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
     else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
 
@@ -508,7 +508,7 @@ class PCIIface:
 
   def sleep(self, timeout):
     if PCIIface.vfio and len(self.irq_poller.poll(timeout)):
-      HAL(self.irq_fd, 1024)
+      self.irq_fd.read(1024)
       self.adev.ih.interrupt_handler()
 
   def on_device_hang(self):
