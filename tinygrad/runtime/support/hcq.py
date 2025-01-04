@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen import libc
 class HAL:
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.path = path
-    self.fd = os.open(path, flags) if path else fd
+    self.fd = os.open(path, flags) if fd is None else fd
     self.offset = 0
   def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
@@ -35,7 +35,7 @@ class HAL:
   @staticmethod
   def eventfd(initval, flags=None):
     if sys.platform == "linux":
-      ret = HAL(None, flags, os.eventfd(initval, flags))
+      ret = HAL("", flags, os.eventfd(initval, flags))
       return ret
 if MOCKGPU:=getenv("MOCKGPU"):
   from test.mockgpu.mockgpu import MockHAL as HAL  # noqa: F401 # pylint: disable=unused-import

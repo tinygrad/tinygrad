@@ -57,7 +57,7 @@ def _open(path, flags):
 
 class MockHAL(HAL):
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
-    self.fd = _open(path, flags) if path else fd
+    self.fd = _open(path, flags) if fd is None else fd
     self.offset = 0
 
   def __del__(self):
@@ -102,5 +102,5 @@ class MockHAL(HAL):
   @staticmethod
   def eventfd(initval, flags=None):
     if sys.platform == "linux":
-      ret = HAL(None, flags, os.eventfd(initval, flags))
+      ret = HAL("", flags, os.eventfd(initval, flags))
       return ret
