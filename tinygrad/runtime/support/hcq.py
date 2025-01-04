@@ -13,6 +13,7 @@ class HAL:
   offset:int
 
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
+    print(f"HAL: {self}, {path}, {flags}, {fd}")
     self.path = path
     self.fd = os.open(path, flags) if fd is None else fd
     self.offset = 0
