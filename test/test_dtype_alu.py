@@ -44,15 +44,13 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
 if (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
 
-fp8s = [0.1, 0.5, 1]
-
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
   bfloat16 = strat.floats(width=16, allow_subnormal=False)
-  fp8e4m3 = strat.sampled_from(fp8s + list(map(lambda x: -x, fp8s)))
-  fp8e5m2 = strat.sampled_from(fp8s + list(map(lambda x: -x, fp8s)))
+  fp8e4m3 = strat.sampled_from([0.0, 0.1, 0.5, 1.0, -0.1, -0.5, -1.0])
+  fp8e5m2 = strat.sampled_from([0.0, 0.1, 0.5, 1.0, -0.1, -0.5, -1.0])
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -126,13 +124,22 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
   def test_fp8e4m3(self, a, b, op): universal_test(a, b, dtypes.fp8e4m3, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
   def test_fp8e5m2(self, a, b, op): universal_test(a, b, dtypes.fp8e5m2, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
-  def test_fp8e4m3_unary(self, a, op): universal_test_unary(a, dtypes.fp8e4m3, op)
+  def test_fp8e4m3_unary(self, a, op):
+    if (op[0] == Tensor.log or op[0] == Tensor.reciprocal) and a == 0.0:
+      out: Tensor = Tensor([0.0], dtype=dtypes.fp8e4m3).log()
+      sched = create_schedule([out.lazydata])
+      run_schedule(sched)
+      tensor_value = out.numpy()
+      np.testing.assert_equal(tensor_value, [math.nan]) # inf is not supported for fp8e4m3
+    else: universal_test_unary(a, dtypes.fp8e4m3, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
   def test_fp8e5m2_unary(self, a, op): universal_test_unary(a, dtypes.fp8e5m2, op)
 

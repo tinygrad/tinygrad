@@ -207,15 +207,15 @@ class TestBFloat16DTypeCast(unittest.TestCase):
 @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "fp8e5m2 not supported")
 class TestFp8sDType(unittest.TestCase):
   def test_half_to_fp8_conversion(self):
-    t = Tensor([10000, -1, 402, -10000, 20, 1.27, 0.0, float('inf')]).cast(dtypes.fp8e4m3)
+    t = Tensor([10000000, -1, 402, -300, -10000000, 20, 1.4123, 0.0, math.inf, math.nan]).cast(dtypes.fp8e4m3)
     t.realize()
     back = t.cast(dtypes.half)
-    np.testing.assert_equal(tuple(back.numpy().tolist()), (448., -1, 416, -448, 20, 1.25, 0.0, 448., ))
+    np.testing.assert_equal(tuple(back.numpy().tolist()), (math.nan, -1, 416, -288, -math.nan, 20, 1.375, 0.0, math.nan, math.nan)) # inf is not representable
 
-    t = Tensor([10000, -1, 402, -10000, 20, 1.27, 0.0, float('inf')]).cast(dtypes.fp8e5m2)
+    t = Tensor([10000000, -1, 402, -300, -10000000, 20, 1.4123, 0.0, math.inf, math.nan]).cast(dtypes.fp8e5m2)
     t.realize()
     back = t.cast(dtypes.half)
-    np.testing.assert_equal(tuple(back.numpy().tolist()), (10240., -1, 384, -10240, 20, 1.25, 0.0, 57344., ))
+    np.testing.assert_equal(tuple(back.numpy().tolist()), (math.inf, -1, 384, -320, -math.inf, 20, 1.5, 0.0, math.inf, math.nan))
 
   def test_fp8_to_half_conversion(self):
     t = Tensor([448, -1, 416, -448, 20, 1.25, 0.0, 448.], dtype=dtypes.fp8e4m3)
