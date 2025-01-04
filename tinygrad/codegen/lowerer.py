@@ -28,6 +28,7 @@ def upcast(u: UOp):
       return upcasted.cast(u.dtype)
   return u.replace(src=tuple(srcs))
 
+# pooling op may overflow before folding causing unnecessary upcast
 def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
