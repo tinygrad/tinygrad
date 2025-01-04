@@ -3,7 +3,7 @@ from typing import Any
 import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, struct
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HAL
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
@@ -278,9 +278,9 @@ class AMDQueueDesc:
   put_value: int = 0
 
 class KFDIface:
-  kfd:HAL
+  kfd:HWInterface
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
-  gpus:list[HAL] = []
+  gpus:list[HWInterface] = []
 
   def _is_usable_gpu(self, gpu_id):
     with contextlib.suppress(OSError): return int(gpu_id.read()) != 0
@@ -290,17 +290,17 @@ class KFDIface:
     self.dev = dev
 
     BASE_DIR = "/sys/devices/virtual/kfd/kfd/topology/nodes"
-    KFDIface.kfd = HAL("/dev/kfd", os.O_RDWR)
-    gpus = [g for g in HAL(BASE_DIR).listdir() if self._is_usable_gpu(HAL(f"{BASE_DIR}/{g}/gpu_id"))]
+    KFDIface.kfd = HWInterface("/dev/kfd", os.O_RDWR)
+    gpus = [g for g in HWInterface(BASE_DIR).listdir() if self._is_usable_gpu(HWInterface(f"{BASE_DIR}/{g}/gpu_id"))]
     gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
     visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
     KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
-    self.gpu_id = int(HAL(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/gpu_id").read())
-    self.props = {line.split()[0]: int(line.split()[1]) for line in HAL(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
-    self.drm_fd = HAL(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
+    self.gpu_id = int(HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/gpu_id").read())
+    self.props = {line.split()[0]: int(line.split()[1]) for line in HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
+    self.drm_fd = HWInterface(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
 
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd.fd, gpu_id=self.gpu_id)
 
@@ -328,8 +328,8 @@ class KFDIface:
 
     if cpu_access or host: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC
 
-    if host: buf = addr = HAL.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
-    else: buf, addr = 0, HAL.anon_mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, 0)
+    if host: buf = addr = HWInterface.anon_mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
+    else: buf, addr = 0, HWInterface.anon_mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, 0)
     assert addr != 0xffffffffffffffff
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
@@ -352,7 +352,7 @@ class KFDIface:
       c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
-    if mem.va_addr: HAL.munmap(mem.va_addr, mem.size)
+    if mem.va_addr: HWInterface.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
   def map(self, mem):
@@ -395,7 +395,7 @@ class KFDIface:
     raise RuntimeError("\n".join(report))
 
 class PCIIface:
-  vfio:bool = getenv("VFIO", 1) and HAL.exists("/dev/vfio/vfio")
+  vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
   vfio_fd:int = -1
   gpus:list[Any] = []
 
@@ -416,9 +416,9 @@ class PCIIface:
     self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
 
     # Unbind the device from the kernel driver
-    if HAL.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      HAL(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_RDWR).write(self.pcibus)
-      HAL(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
+    if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_RDWR).write(self.pcibus)
+      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
 
     # Probe device
     libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
@@ -426,24 +426,24 @@ class PCIIface:
     # Try to init vfio. Use it if success.
     if PCIIface.vfio and PCIIface.vfio_fd == -1:
       try:
-        HAL("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
-        PCIIface.vfio_fd = HAL("/dev/vfio/vfio", os.O_RDWR).fd
+        HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
+        PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR).fd
         vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       except OSError: PCIIface.vfio = False
 
     # Init vfio for the device
     if PCIIface.vfio:
-      HAL(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write("vfio-pci")
-      HAL("/sys/bus/pci/drivers_probe").write(self.pcibus)
+      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write("vfio-pci")
+      HWInterface("/sys/bus/pci/drivers_probe").write(self.pcibus)
 
-      iommu_group = HAL.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
-      self.vfio_group = HAL(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
+      iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+      self.vfio_group = HWInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd))
 
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode()))
 
-      self.irq_fd = HAL.eventfd(0,0)
+      self.irq_fd = HWInterface.eventfd(0,0)
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
@@ -452,7 +452,7 @@ class PCIIface:
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
     else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
 
-    self.bar_fds = {bar: HAL(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
 
     self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
@@ -471,10 +471,10 @@ class PCIIface:
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host:
       vaddr = self.adev.mm.alloc_vaddr(size, align=mmap.PAGESIZE)
-      va = HAL.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
+      va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      f = HAL("/proc/self/pagemap", os.O_RDONLY)
+      f = HWInterface("/proc/self/pagemap", os.O_RDONLY)
       for off in range(0, size, mmap.PAGESIZE):
         f.seek(((va + off) // mmap.PAGESIZE) * 8)
         pt_entry = struct.unpack("Q", f.read(8, binary=True))[0] & ((1 << 55) - 1)
@@ -516,7 +516,7 @@ class PCIIface:
     raise RuntimeError("Device hang detected")
 
 class AMDDevice(HCQCompiled):
-  driverless:bool = not HAL.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
+  driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
   signals_page:Any = None
   signals_pool:list[int] = []
 

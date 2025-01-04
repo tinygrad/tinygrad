@@ -80,7 +80,7 @@ generate_kfd() {
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
   sed -i "s\import fcntl, functools\import functools" $BASE/kfd.py
-  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HAL\g" $BASE/kfd.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/kfd.py
   sed -i "s\ret = fcntl.ioctl(__fd, (__idir<<30) | (ctypes.sizeof(made := __user_struct(**kwargs))<<16) | (__base<<8) | __nr, made)\ret = __fd.ioctl((__idir<<30) | (ctypes.sizeof(made := __user_struct(**kwargs))<<16) | (__base<<8) | __nr, made)\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }

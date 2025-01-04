@@ -1,5 +1,5 @@
 import ctypes, ctypes.util, time, os, builtins, sys, fcntl
-from tinygrad.runtime.support.hcq import HAL
+from tinygrad.runtime.support.hcq import HWInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 start = time.perf_counter()
@@ -55,7 +55,7 @@ def _open(path, flags):
         return virtfd.fd
   return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
-class MockHAL(HAL):
+class MockHWInterface(HAL):
   path:str
   fd:int
   offset:int
@@ -68,7 +68,7 @@ class MockHAL(HAL):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].close(self.fd)
       tracked_fds.pop(self.fd)
-    else: os.close(self.fd)
+    elif self.fd: os.close(self.fd)
 
   def ioctl(self, request, arg):
     if self.fd in tracked_fds:
@@ -106,5 +106,5 @@ class MockHAL(HAL):
   @staticmethod
   def eventfd(initval, flags=None):
     if sys.platform == "linux":
-      ret = HAL("", flags, os.eventfd(initval, flags))
+      ret = HWInterface("", flags, os.eventfd(initval, flags))
       return ret
