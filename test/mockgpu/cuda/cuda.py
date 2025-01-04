@@ -1,7 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Callable, Optional, Dict, List, Tuple
-import ctypes, time, numpy as np
+from typing import Any
+import ctypes, time
 from tinygrad.runtime.autogen import cuda as orig_cuda
 from tinygrad.helpers import mv_address
 
@@ -11,19 +10,18 @@ for attr in dir(orig_cuda):
 
 try:
   gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-  # gpuocelot_lib = ctypes.CDLL("/home/nimlgen/gpuocelot/ocelot/build/libgpuocelot.so")
   gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
 except Exception: pass
 
 # Global state
 class CUDAState:
   def __init__(self):
-    self.memory: Dict[int, bytearray] = {}
-    self.events: Dict[int, float] = {}  # Event ID -> timestamp
-    self.modules: Dict[int, Dict[str, Callable]] = {}  # Module ID -> {func_name: func}
-    self.current_context: Optional[int] = None
-    self.contexts: Dict[int, Dict] = {}  # Context ID -> context data
-    self.devices: Dict[int, Dict] = {}   # Device ID -> device data
+    self.memory: dict[int, bytearray] = {}
+    self.events: dict[int, float] = {} # Event ID -> timestamp
+    self.modules: dict[int, memoryview] = {} # Module ID -> code
+    self.current_context: int|None = None
+    self.contexts: dict[int, dict] = {} # Context ID -> context data
+    self.devices: dict[int, dict] = {}  # Device ID -> device data
     self.next_ptr = 1000  # For memory allocation
     self.next_event_id = 1
     self.next_module_id = 1
@@ -84,20 +82,19 @@ def cuMemcpyDtoH_v2(dst: ctypes.c_void_p, src: orig_cuda.CUdeviceptr_v2, bytesiz
 def cuEventCreate(phEvent, flags: int) -> int:
   event_id = cuda_state.next_event_id
   cuda_state.next_event_id += 1
-  cuda_state.events[event_id] = 0.0  # Initialize with current time
+  cuda_state.events[event_id] = 0.0
   phEvent._obj.value = event_id
   return orig_cuda.CUDA_SUCCESS
 
 def cuEventRecord(hEvent: orig_cuda.CUevent, hStream: Any) -> int:
   if hEvent.value not in cuda_state.events:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
-  cuda_state.events[hEvent.value] = time.time()
+  cuda_state.events[hEvent.value] = time.perf_counter_ns()
   return orig_cuda.CUDA_SUCCESS
 
 def cuEventSynchronize(hEvent: orig_cuda.CUevent) -> int:
   if hEvent.value not in cuda_state.events:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
-  time.sleep(0.001)  # Simulate some synchronization delay
   return orig_cuda.CUDA_SUCCESS
 
 def cuEventElapsedTime(pMilliseconds, hStart: orig_cuda.CUevent, hEnd: orig_cuda.CUevent) -> int:
@@ -139,8 +136,8 @@ def cuLaunchKernel(f: orig_cuda.CUfunction, gx: int, gy: int, gz: int, lx: int, 
 def cuDeviceComputeCapability(major, minor, dev: int) -> int:
   if dev not in cuda_state.devices:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
-  major._obj.value = cuda_state.devices[dev]["compute_capability"][0]
-  minor._obj.value = cuda_state.devices[dev]["compute_capability"][1]
+  major._obj.value = 3
+  minor._obj.value = 5
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceCanAccessPeer(canAccessPeer, dev: int, peerDev: int) -> int:
