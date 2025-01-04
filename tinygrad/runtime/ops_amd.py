@@ -13,6 +13,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
 
@@ -396,7 +397,7 @@ class KFDIface:
 
 class PCIIface:
   vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
-  vfio_fd:int = -1
+  vfio_fd:HWInterface
   gpus:list[Any] = []
 
   def __init__(self, dev, dev_id):
@@ -407,7 +408,6 @@ class PCIIface:
       pci_iter = libpciaccess.pci_id_match_iterator_create(None)
       while pcidev:=libpciaccess.pci_device_next(pci_iter):
         if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c: PCIIface.gpus.append(pcidev.contents)
-      print(PCIIface.gpus)
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
       PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
@@ -424,7 +424,7 @@ class PCIIface:
     libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
 
     # Try to init vfio. Use it if success.
-    if PCIIface.vfio and PCIIface.vfio_fd == -1:
+    if PCIIface.vfio:
       try:
         HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
         PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR).fd
