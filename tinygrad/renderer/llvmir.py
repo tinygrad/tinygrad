@@ -75,7 +75,8 @@ llvm_rewrite = PatternMatcher([
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
   new_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
-  return UOp(Ops.LOAD, dtypes.ushort, (UOp(Ops.INDEX, new_buf.dtype, (new_buf, idx)),)).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
+  ld = UOp(Ops.LOAD, dtypes.ushort, (UOp(Ops.INDEX, new_buf.dtype, (new_buf, idx)),))
+  return ld.cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
