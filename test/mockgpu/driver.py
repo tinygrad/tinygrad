@@ -5,29 +5,28 @@ class VirtFileDesc:
   def __init__(self, fd): self.fd, self.off = fd, 0
   def ioctl(self, fd, req, argp): raise NotImplementedError()
   def mmap(self, st, sz, prot, flags, fd, off): raise NotImplementedError()
-  def write(self, fd, buf, sz): raise NotImplementedError()
+  def read_contetns(self, size=None, offset=0): raise NotImplementedError()
+  def write_contents(self, content): raise NotImplementedError()
   def close(self, fd): return 0
 
 class TextFileDesc(VirtFileDesc):
   def __init__(self, fd, text):
     super().__init__(fd)
-    self.content = text
+    self.content = bytes(text,encoding="utf-8")
 
   def ioctl(self, fd, req, argp): return 0
-  def write(self, fd, buf, sz): return -1
-  def read_text(self, size=None, offset=0):
+  def read_contents(self, size=None, offset=0):
     if size is None: size = len(self.content)
     return self.content[offset:offset+size]
-  def write_text(self, content): self.content = content
+  def write_contents(self, content): self.content = content
 class DirFileDesc(VirtFileDesc):
   def __init__(self, fd, child_names):
     super().__init__(fd)
     self.child_names = child_names
 
   def ioctl(self, fd, req, argp): return 0
-  def write(self, fd, buf, sz): return -1
 
-  def listdir(self):
+  def list_contents(self):
     return self.child_names
 
 @dataclass(frozen=True)

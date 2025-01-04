@@ -477,7 +477,7 @@ class PCIIface:
       f = HAL("/proc/self/pagemap", os.O_RDONLY)
       for off in range(0, size, mmap.PAGESIZE):
         f.seek(((va + off) // mmap.PAGESIZE) * 8)
-        pt_entry = struct.unpack("Q", f.read(8))[0] & ((1 << 55) - 1)
+        pt_entry = struct.unpack("Q", f.read(8, binary=True))[0] & ((1 << 55) - 1)
         self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=pt_entry * mmap.PAGESIZE, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
