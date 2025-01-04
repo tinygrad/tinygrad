@@ -612,8 +612,9 @@ jobs:
       - name: Clone/compile comgr
         if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
-          git clone -b rocm-6.1.x --depth 1 https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
+          git clone -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
           cd ${{ github.workspace }}/llvm-project
+          git checkout 669db884972e769450470020c06a6f132a8a065b
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ../llvm
           make -j$(nproc)
@@ -640,8 +641,8 @@ jobs:
         if: matrix.backend == 'amd' && steps.cache-remu.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/Qazalin/remu ${{ github.workspace }}/remu
-          git checkout b873f2d254ebfdc81fc113e311c80efaedf061f8
           cd remu
+          git checkout b873f2d254ebfdc81fc113e311c80efaedf061f8
           cargo build --release
       - name: Install remu
         if: matrix.backend == 'amd'
