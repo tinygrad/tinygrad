@@ -8,11 +8,17 @@ from tinygrad.ops import sym_infer, sint, Variable
 from tinygrad.runtime.autogen import libc
 # all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
 class HAL:
+  path:str
+  fd:int
+  offset:int
+
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.path = path
     self.fd = os.open(path, flags) if fd is None else fd
     self.offset = 0
-  def __del__(self): os.close(self.fd)
+  def __del__(self):
+    print(self.path)
+    os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
   def read(self, size=None, binary=False, newlines=False):

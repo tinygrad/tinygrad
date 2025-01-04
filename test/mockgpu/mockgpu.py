@@ -56,6 +56,10 @@ def _open(path, flags):
   return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
 class MockHAL(HAL):
+  path:str
+  fd:int
+  offset:int
+
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.fd = _open(path, flags) if fd is None else fd
     self.offset = 0
