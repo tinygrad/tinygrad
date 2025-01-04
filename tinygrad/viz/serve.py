@@ -79,13 +79,6 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
         else: label += f"\n{x.op.name}{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
-def _replace_uop(base:UOp, replaces:dict[UOp, UOp]) -> UOp:
-  if (found:=replaces.get(base)) is not None: return found
-  ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
-  if (final := replaces.get(ret)) is not None:
-      return final
-  replaces[base] = ret
-  return ret
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
@@ -95,12 +88,10 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
   g.graphs.append(uop_to_json(sink:=g.uops[0]))
   for i,(u0,u1,upat,_) in enumerate(ctx.matches):
     # if the match didn't result in a rewrite we move forward
-    if u1 is None:
-      replaces[u0] = u0
-      continue
+    if u1 is None: continue
     replaces[u0] = u1
     # first, rewrite this UOp with the current rewrite + all the matches in replaces
-    new_sink = _replace_uop(sink, {**replaces})
+    new_sink = sink.substitute(replaces)
     # sanity check
     if new_sink is sink: raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
