@@ -8,7 +8,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_kernel
-from tinygrad.ops import Ops, sym_infer, UOp, print_uops
+from tinygrad.ops import Ops, sym_infer, UOp
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -818,7 +818,7 @@ class TestIdxUpcast(unittest.TestCase):
 
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
-  
+
   def test_symfold(self):
     # This would cause an overflow before sym folding, and after upcast, the original sym fold pattern matcher won't apply
     a = Tensor.arange(100_000)
