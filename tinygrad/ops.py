@@ -780,8 +780,12 @@ class PatternMatcher:
 
     for i,(pat,fxn) in enumerate(self.patterns):
       def _build(pat: UPat) -> tuple[int]:
-        src = (pat.src,) if isinstance(pat.src, UPat) else () if pat.src is None else pat.src
-        src = tuple(_build(s) for s in src)
+        std_src = (pat.src,) if isinstance(pat.src, UPat) else () if pat.src is None else pat.src
+        # tuple of tuples means any src is valid
+        if std_src and isinstance(std_src[0], tuple):
+          src = tuple(tuple(_build(s) for s in ss) for ss in std_src)
+        else:
+          src = tuple(_build(s) for s in std_src)
 
         def _new_states(vals: tuple, states: list[int]):
           ret = []
@@ -794,7 +798,7 @@ class PatternMatcher:
           return ret
 
         # if src is a list all src permutations are valid TODO: add support for any src
-        all_srcs = itertools.permutations(src) if isinstance(pat.src, list) else (src,)
+        all_srcs = itertools.permutations(src) if isinstance(pat.src, list) else src if std_src and isinstance(std_src[0], tuple) else (src,)
         # create transitions for srcs
         all_states = []
         for src in all_srcs:
@@ -818,6 +822,7 @@ class PatternMatcher:
         if isinstance(pat.src, list): all_src = itertools.permutations(pat.src)
         elif isinstance(pat.src, UPat): all_src = ((pat.src,),)
         elif pat.src is None: all_src = ((),)
+        elif pat.src and isinstance(pat.src[0], tuple): all_src = pat.src
         else: all_src = (pat.src,)
 
         all_names: list[list[tuple[str, list[int]]]] = []
