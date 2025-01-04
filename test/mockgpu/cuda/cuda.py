@@ -28,10 +28,6 @@ class CUDAState:
     self.next_event_id = 1
     self.next_module_id = 1
     self.next_context_id = 1
-    self.graphs: Dict[int, CUDAGraph] = {}
-    self.graph_execs: Dict[int, CUDAGraphExec] = {}
-    self.next_graph_id = 1
-    self.next_exec_id = 1
 
 cuda_state = CUDAState()
 

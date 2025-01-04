@@ -118,7 +118,7 @@ class CUDADevice(Compiled):
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=None if MOCKGPU else CUDAGraph)
+                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))
