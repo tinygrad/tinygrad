@@ -55,7 +55,7 @@ def _open(path, flags):
         return virtfd.fd
   return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
-class MockHWInterface(HAL):
+class MockHWInterface(HWInterface):
   path:str
   fd:int
   offset:int
