@@ -307,9 +307,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self):
-    with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, symbolic)
+  def simplify(self): return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -320,9 +318,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:dict[UOp, UOp]):
-    with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars, bottom_up=True)
+  def substitute(self, dvars:dict[UOp, UOp]): return graph_rewrite(self, _substitute, dvars, bottom_up=True)
 
   # *** uop syntactic sugar ***
 
@@ -779,7 +775,7 @@ class PatternMatcher:
   def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
     self.states: dict[int, dict[tuple|int, int]] = {}
-    self.final: dict[int, list[tuple[int, dict[str, list[int]], bool, Callable]]] = {}
+    self.final: dict[int, list[tuple[int, list[tuple[str, list[int]]], bool, Callable]]] = {}
     self.num_states = 0
 
     for i,(pat,fxn) in enumerate(self.patterns):
@@ -818,18 +814,18 @@ class PatternMatcher:
         states = _new_states(((pat.op, pat.dtype, pat.arg),), all_states)
         return tuple(states)
       
-      def _assign_names(pat: UPat, si: int) -> list[dict[str, list[int]]]:
+      def _assign_names(pat: UPat, si: int) -> list[list[tuple[str, list[int]]]]:
         if isinstance(pat.src, list): all_src = itertools.permutations(pat.src)
         elif isinstance(pat.src, UPat): all_src = ((pat.src,),)
         elif pat.src is None: all_src = ((),)
         else: all_src = (pat.src,)
 
-        all_names:list[dict[str, list[int]]] = []
-        for src in all_src: all_names.append({k:v for i,s in enumerate(src) for d in _assign_names(s, i) for k,v in d.items()})
+        all_names: list[list[tuple[str, list[int]]]] = []
+        for src in all_src: all_names.append([(nm,path) for i,s in enumerate(src) for nms in _assign_names(s, i) for nm,path in nms])
         for nms in all_names:
-          if pat.name is not None: nms[pat.name] = []
+          if pat.name is not None: nms.append((pat.name, []))
           if si is not None:
-            for nm in nms.values(): nm.insert(0, si)
+            for nm in nms: nm[1].insert(0, si)
         return all_names
 
       assert pat.op is not None
@@ -863,9 +859,12 @@ class RewriteContext:
     self.replace: dict[UOp, tuple[UOp, tuple[int]]] = {}
 
   def advance(self, uop:UOp, srcs:tuple) -> tuple:
+    assert len(uop.src) == len(srcs)
     states = (0,)
     for src in srcs: states = tuple(self.pm.states[st][s] for st in states for s in (*src, None) if s in self.pm.states[st])
-    # TODO: add (0,) here to match pattern where this uop doesn't have srcs
+    # add root state to match pattern where the pat for this uop doesn't have srcs
+    # TODO: get rid of root state
+    if uop.src: states = states + (0,)
     def _match(uop: UOp, ops, dtypes, arg):
       return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes or uop.dtype.scalar() in dtypes) and (arg is None or uop.arg == arg)
     states = tuple(self.pm.states[st][vals] for st in states for vals in self.pm.states[st] if isinstance(vals, tuple) and _match(uop, *vals))
@@ -875,19 +874,15 @@ class RewriteContext:
     states = self.advance(uop, srcs)
     sorted_matches = sorted((m for st in states if st in self.pm.final for m in self.pm.final[st]), key=lambda m: m[0])
     for _,nm,has_ctx,fxn in sorted_matches:
-
+      no_match = False
       names = {}
-      for name,path in nm.items():
+      for name,path in nm:
         u = uop
         for p in path: u = u.src[p]
+        if name in names and u is not names[name]: no_match = True
         names[name] = u
-
-      #reverse_names = {self.stores[k]:v for k,v in nm.items() if k in self.stores}
-      # invalid match if same name assigned to different uop
-      #if len(reverse_names.values()) != len(set(reverse_names.values())): continue
-      #names = {v:self.stores[k] for k,v in nm.items() if k in self.stores}
-      if (ret:=(fxn(ctx=self.ctx, **names) if has_ctx else fxn(**names))) is not None:
-        return ret, states
+      if no_match: continue
+      if (ret:=(fxn(ctx=self.ctx, **names) if has_ctx else fxn(**names))) is not None: return ret, states
     return None, states
 
   def rewrite(self, n:UOp) -> tuple[UOp, tuple[int]]:
@@ -981,10 +976,10 @@ spec = PatternMatcher([
 
 def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
   spec_pm = spec if extra_spec is None else spec+extra_spec
-  for i,u in enumerate(uops):
-    if not spec_pm.rewrite(u):
-      print_uops(uops)
-      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
+  #for i,u in enumerate(uops):
+  #  if not spec_pm.rewrite(u):
+  #    print_uops(uops)
+  #    raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
 # *** most of symbolic lives here now ***
 

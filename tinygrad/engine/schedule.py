@@ -160,8 +160,7 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
 
 # ** movement ops
 
-def apply_swizzle(u:UOp) -> UOp:
-  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
+def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left)
 
 def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   input_st = ShapeTracker.from_shape(unwrap(src.st).shape)
