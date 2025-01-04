@@ -9,6 +9,7 @@ from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_kernel
 from tinygrad.ops import Ops, sym_infer, UOp
+from tinygrad.runtime.support.compiler_cuda import PTX
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -791,12 +792,10 @@ class TestIdxUpcast(unittest.TestCase):
     store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
-    if idx is None:
-      idx_val = store.src[0] # PTX does not have Ops.INDEX
-    else:
+    if idx is not None: # PTX has additional rewrite turns Ops.INDEX into buffer op in int64, so skipping asserts here
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-    assert idx_val.dtype is dtype
+      assert idx_val.dtype is dtype
 
   # This prevents kernel.py from combining the dims into 1
   def _permute_expand_contig(self, dtype: dtypes, dim1, dim2, dim3):
@@ -817,6 +816,7 @@ class TestIdxUpcast(unittest.TestCase):
   def test_regular_sym(self):
     self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
 
+  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow before sym folding, and after upcast, the original sym fold pattern matcher won't apply
     a = Tensor.arange(100_000)
