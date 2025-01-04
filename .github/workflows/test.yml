@@ -612,7 +612,7 @@ jobs:
       - name: Clone/compile comgr
         if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
-          git clone -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
+          git clone --depth 10 -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
           cd ${{ github.workspace }}/llvm-project
           git checkout 669db884972e769450470020c06a6f132a8a065b
           mkdir build && cd build
