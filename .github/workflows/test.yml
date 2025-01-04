@@ -626,7 +626,7 @@ jobs:
           cd ${{ github.workspace }}/llvm-project/amd/comgr
           mkdir build
           cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${ github.workspace }/llvm-project/build;${ github.workspace }/llvm-project/amd/device-libs/build" ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${ github.workspace }/llvm-project/build;${ github.workspace }/llvm-project/amd/device-libs/build" -DCOMGR_DISABLE_SPIRV=1 -DBUILD_TESTING=OFF ..
           make -j$(nproc)
       - name: Install comgr
         if: matrix.backend == 'amd'
