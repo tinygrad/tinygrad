@@ -6,6 +6,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
 from tinygrad.ops import sym_infer, sint, Variable
 from tinygrad.runtime.autogen import libc
+
 # all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
 class HWInterface:
   path:str
