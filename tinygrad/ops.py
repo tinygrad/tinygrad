@@ -357,7 +357,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def cast(self, dtype:DType, bitcast=False):
     if bitcast: return self.bitcast(dtype)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
-    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
+    if getenv("CAST_BEFORE_VIEW", 0) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
       # TODO: move this to the scheduler
       ret = self.base.cast(dtype, bitcast)
