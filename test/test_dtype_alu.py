@@ -162,7 +162,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
   # Metal and CUDA and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV"}
+  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
