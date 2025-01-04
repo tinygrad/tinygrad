@@ -28,6 +28,10 @@ class CUDAState:
     self.next_event_id = 1
     self.next_module_id = 1
     self.next_context_id = 1
+    self.graphs: Dict[int, CUDAGraph] = {}
+    self.graph_execs: Dict[int, CUDAGraphExec] = {}
+    self.next_graph_id = 1
+    self.next_exec_id = 1
 
 cuda_state = CUDAState()
 
@@ -74,14 +78,10 @@ def cuMemFree_v2(dptr: orig_cuda.CUdeviceptr_v2) -> int:
   return orig_cuda.CUDA_ERROR_INVALID_VALUE
 
 def cuMemcpyHtoDAsync_v2(dst: orig_cuda.CUdeviceptr_v2, src: ctypes.c_void_p, bytesize: int, stream: Any) -> int:
-  if dst.value not in cuda_state.memory:
-    return orig_cuda.CUDA_ERROR_INVALID_VALUE
   ctypes.memmove(dst.value, src, bytesize)
   return orig_cuda.CUDA_SUCCESS
 
 def cuMemcpyDtoH_v2(dst: ctypes.c_void_p, src: orig_cuda.CUdeviceptr_v2, bytesize: int) -> int:
-  if src.value not in cuda_state.memory:
-    return orig_cuda.CUDA_ERROR_INVALID_VALUE
   ctypes.memmove(dst, src.value, bytesize)
   return orig_cuda.CUDA_SUCCESS
 
@@ -160,14 +160,13 @@ def cuMemHostAlloc(pp, bytesize: int, flags: int) -> int:
 def cuMemFreeHost(p: ctypes.c_void_p) -> int: return cuMemFree_v2(p)
 
 def cuMemcpyDtoDAsync_v2(dst: orig_cuda.CUdeviceptr_v2, src: orig_cuda.CUdeviceptr_v2, bytesize: int, stream: Any) -> int:
-  if src.value not in cuda_state.memory or dst.value not in cuda_state.memory:
-    return orig_cuda.CUDA_ERROR_INVALID_VALUE
   ctypes.memmove(dst.value, src.value, bytesize)
   return orig_cuda.CUDA_SUCCESS
 
 def cuFuncSetAttribute(hfunc: orig_cuda.CUfunction, attrib: int, value: int) -> int:
   return orig_cuda.CUDA_SUCCESS
 
+def cuStreamWaitEvent(stream: Any, event: orig_cuda.CUevent, flags: int) -> int: return orig_cuda.CUDA_SUCCESS
 def cuCtxSynchronize() -> int: return orig_cuda.CUDA_SUCCESS
 
 def cuGetErrorString(error: int, pStr) -> int:
