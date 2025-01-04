@@ -427,8 +427,8 @@ class PCIIface:
     if PCIIface.vfio:
       try:
         HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
-        PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR).fd
-        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+        PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
+        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd.fd, vfio.VFIO_NOIOMMU_IOMMU)
       except OSError: PCIIface.vfio = False
 
     # Init vfio for the device
@@ -438,7 +438,7 @@ class PCIIface:
 
       iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
       self.vfio_group = HWInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd))
+      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
 
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode()))
