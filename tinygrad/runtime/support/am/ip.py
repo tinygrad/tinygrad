@@ -235,8 +235,8 @@ class AM_IH(AM_IP):
     self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
 
   def init(self):
-    self.rings = [(self.adev.mm.valloc(1 << 20, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "", 0),
-      (self.adev.mm.valloc(1 << 20, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "_RING1", 1)]
+    self.rings = [(self.adev.mm.valloc(512 << 10, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "", 0),
+      (self.adev.mm.valloc(512 << 10, uncached=True, contigous=True), self.adev.mm.valloc(0x1000, uncached=True, contigous=True), "_RING1", 1)]
 
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.va_addr >> 8)

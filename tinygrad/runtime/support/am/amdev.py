@@ -188,29 +188,19 @@ class AMMemoryManager:
 
         pte_st_idx, n_ptes, inner_off = pte_st_idx + update_ptes, n_ptes - update_ptes, inner_off + pte_covers * update_ptes
 
-  def _try_alloc(self, pte_cnt, pte_cvrs, frags_cnt):
-    # Try to allocate contiguous physical memory.
-    try: return self.pa_allocator.alloc(pte_cnt * pte_cvrs), pte_cnt, frags_cnt
-    except MemoryError:
-      if pte_cnt > 1: return self._try_alloc(pte_cnt // 2, pte_cvrs, frags_cnt - 1)
-      raise
-
   def map_range(self, vaddr, size, paddr=None, uncached=False, system=False, snooped=False):
     if AM_DEBUG >= 2: print(f"Mapping {vaddr=:#x} -> {paddr} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
     for _, off, pte_st_idx, n_ptes, pte_covers, pt, frags_cnt in self.frags_walker(self.root_page_table, vaddr, size):
-      while n_ptes > 0:
-        # Trying to alloc the contigous frags when possible.
-        (lpaddr, upd_pte, f_cnt), off = (self._try_alloc(n_ptes, pte_covers, frags_cnt), 0) if paddr is None else ((paddr, n_ptes, frags_cnt), off)
+      lpaddr, off = (self.pa_allocator.alloc(n_ptes * pte_covers), 0) if paddr is None else (paddr, off)
 
-        for pte_idx in range(upd_pte):
-          assert (pe:=pt.get_entry(pte_st_idx + pte_idx)) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pe:#x}"
-          pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=f_cnt, valid=True)
-          off += pte_covers
+      for pte_idx in range(n_ptes):
+        assert pt.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, f"Entry already set {pt.get_entry(pte_st_idx + pte_idx):#x}"
+        pt.set_page(pte_st_idx + pte_idx, paddr=lpaddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
+        off += pte_covers
 
-        if AM_DEBUG >= 3: print(f"\tnptes={upd_pte:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={f_cnt:#x}")
-        n_ptes, pte_st_idx = n_ptes - upd_pte, pte_st_idx + upd_pte
+      if AM_DEBUG >= 3: print(f"\tnptes={n_ptes:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip="GC", vmid=0, flush_type=2)
