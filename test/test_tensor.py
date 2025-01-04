@@ -787,8 +787,6 @@ class TestIdxUpcast(unittest.TestCase):
 
   def _assert(self, dtype: dtypes, a: Tensor):
     prg = self._schedule_render(a)
-    print(prg.src)
-    print(prg.uops[-1])
     # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
     store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
