@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, time, os, builtins, sys, fcntl
+import ctypes, ctypes.util, time, os, builtins, fcntl
 from tinygrad.runtime.support.hcq import HWInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -81,17 +81,19 @@ class MockHWInterface(HWInterface):
     return libc.mmap(start, sz, prot, self.fd, offset)
 
   def read(self, size=None, binary=False, newlines=False):
+    if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
       contents = tracked_fds[self.fd].read_contents(size, self.offset)
-      return contents if binary else contents.decode()
-    with open(self.fd, "rb" if binary else "r") as file:
+      return contents
+    with open(self.fd, "r") as file:
       file.seek(self.offset)
-      return file.read(size) if newlines or binary else file.read(size).rstrip()
+      return file.read(size) if newlines else file.read(size).rstrip()
 
   def write(self, content, binary=False):
+    if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].write_contents(content) if binary else tracked_fds[self.fd].write_contents(content.encode())
-    with open(self.fd, "wb" if binary else "w") as file: return file.write(content)
+      return tracked_fds[self.fd].write_contents(content)
+    with open(self.fd, "w") as file: return file.write(content)
 
   def listdir(self):
     if self.fd in tracked_fds:
@@ -102,9 +104,6 @@ class MockHWInterface(HWInterface):
   @staticmethod
   def exists(path): return _open(path, os.O_RDONLY) is not None
   @staticmethod
-  def readlink(path): return os.readlink(path)
+  def readlink(path): raise NotImplementedError()
   @staticmethod
-  def eventfd(initval, flags=None):
-    if sys.platform == "linux":
-      ret = HWInterface("", flags, os.eventfd(initval, flags))
-      return ret
+  def eventfd(initval, flags=None): NotImplementedError()

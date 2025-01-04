@@ -12,7 +12,7 @@ class VirtFileDesc:
 class TextFileDesc(VirtFileDesc):
   def __init__(self, fd, text):
     super().__init__(fd)
-    self.content = bytes(text,encoding="utf-8")
+    self.content = text
 
   def ioctl(self, fd, req, argp): return 0
   def read_contents(self, size=None, offset=0):

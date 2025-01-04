@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
@@ -268,7 +268,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def map(self, buf:HCQBuffer): self.dev.dev_iface.map(buf._base if buf._base is not None else buf)
 
-MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0x2000
+MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
 
 @dataclass
 class AMDQueueDesc:
@@ -466,7 +466,7 @@ class PCIIface:
       vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
       fd, sz, off = self.vfio_dev, size or reg.size, reg.offset + off
     else: fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
-    return to_mv(libc.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), fd, off), sz)
+    return to_mv(fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host:
