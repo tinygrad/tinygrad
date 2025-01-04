@@ -43,7 +43,7 @@ class HWInterface:
       ret = HWInterface("", flags, os.eventfd(initval, flags))
       return ret
 if MOCKGPU:=getenv("MOCKGPU"):
-  from test.mockgpu.mockgpu import MockHWInterface as HAL  # noqa: F401 # pylint: disable=unused-import
+  from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
