@@ -7,7 +7,7 @@ import numpy as np
 def get_input(inp:onnx.ValueInfoProto, config:dict):
   # TODO: not complete
   def _get_size(key:str) -> int:
-    size = config.get("crop_size") or config.get("size") or 512
+    size = config.get("crop_size") or config.get("size") or 224
     if isinstance(size, int): return size
     elif isinstance(size, dict): return size.get(key)
     else: raise ValueError(f"{config} {key}")
