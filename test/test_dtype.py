@@ -278,7 +278,7 @@ class TestUint8DType(TestDType):
 class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
   def test_shape_change_bitcast(self, dt1, dt2):
-    if dt2 in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]: raise unittest.SkipTest("no test for bf16 and f8 bitcast yet")
+    if dt2 in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]: raise unittest.SkipTest("no test for bf16 and fp8 bitcast yet")
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
     _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
 
@@ -408,7 +408,7 @@ class TestHelpers(unittest.TestCase):
   def test_bf16_is_float(self):
     assert dtypes.is_float(dtypes.bfloat16)
 
-  def test_f8s_are_float(self):
+  def test_fp8s_are_float(self):
     assert dtypes.is_float(dtypes.fp8e4m3)
     assert dtypes.is_float(dtypes.fp8e5m2)
 
