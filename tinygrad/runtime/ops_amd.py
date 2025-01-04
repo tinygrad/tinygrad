@@ -278,7 +278,7 @@ class AMDQueueDesc:
   put_value: int = 0
 
 class KFDIface:
-  kfd:HAL
+  kfd:Any
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   gpus:list[HAL] = []
 
@@ -290,11 +290,12 @@ class KFDIface:
     self.dev = dev
 
     BASE_DIR = "/sys/devices/virtual/kfd/kfd/topology/nodes"
-    KFDIface.kfd = HAL("/dev/kfd", os.O_RDWR)
-    gpus = [g for g in HAL(BASE_DIR).listdir() if self._is_usable_gpu(HAL(f"{BASE_DIR}/{g}/gpu_id"))]
-    gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
-    visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-    KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
+    if KFDIface.kfd is None:
+      KFDIface.kfd = HAL("/dev/kfd", os.O_RDWR)
+      gpus = [g for g in HAL(BASE_DIR).listdir() if self._is_usable_gpu(HAL(f"{BASE_DIR}/{g}/gpu_id"))]
+      gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
