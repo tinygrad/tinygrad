@@ -23,7 +23,7 @@ def upcast(u: UOp):
       return upcasted
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
     if any((overflow(src, u.dtype) for src in u.src)):
-      assert is_dtype_supported(dtypes.long), f"UOp has child that overflow but without int64 support {u.op=} src: {[_u.src.op for _u in u.src]}"
+      assert is_dtype_supported(dtypes.long), f"UOp has child that overflow but without int64 support {u.op=}"
       # Cast back is required if the node is in range, siblings would never be upcasted
       return upcasted.cast(u.dtype)
   return u.replace(src=tuple(srcs))
