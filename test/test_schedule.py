@@ -230,16 +230,16 @@ class TestSchedule(unittest.TestCase):
     # a and b share the same underlying device memory
     self.assertIs(a.lazydata.realized, b.lazydata.realized)
 
-  # EMPTY and COPY are assigned to unique device Buffers
-
-  def test_no_dedup_copy(self):
+  def test_copy_dedups(self):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
     b = src.clone()
-    sched = check_schedule([a, b], 2, filter_sink=False)
+    sched = check_schedule([a, b], 1, filter_sink=False)
     run_schedule(sched)
-    # a and b are assigned to different device Buffers
-    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+    # a and b are assigned to the same device Buffer
+    self.assertIs(a.lazydata.realized, b.lazydata.realized)
+
+  # EMPTY is assigned to a unique device Buffer
 
   def test_no_dedup_empty(self):
     a = Tensor.empty((4,))
