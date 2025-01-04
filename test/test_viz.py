@@ -3,6 +3,7 @@ import unittest, decimal, json
 from tinygrad.dtype import dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
 
@@ -46,14 +47,14 @@ class TestViz(unittest.TestCase):
     self.assertEqual(uops[1], graph_rewrite(a+a, pm))
 
   def test_rewrite_with_ctx(self):
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
-    b = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1), UOp.const(dtypes.int, 0)))
-    def store_load(ctx:Dict[UOp, None], x:UOp) -> Optional[UOp]:
-      if x in ctx: return None
-      ctx[x] = None
-      return UOp.store(*x.src, x)
+    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), ShapeTracker.from_shape((1, 1)).to_uop()))
+    b = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1), ShapeTracker.from_shape((1, 1)).to_uop()))
+    def store_load(ctx:Dict[UOp, None], glbl, st) -> Optional[UOp]:
+      if glbl in ctx: return None
+      ctx[glbl] = None
+      return UOp.store(glbl, ShapeTracker.from_shape(st.shape).to_uop())
     pm = PatternMatcher([
-      (UPat(Ops.LOAD, name="x"), store_load),
+      (UPat.load(UPat(Ops.DEFINE_GLOBAL, name="glbl"), UPat.var("st")), store_load),
     ])
     uops = helper_test_viz(a+b, pm, ctx={})
     self.assertEqual(len(uops), 2)
