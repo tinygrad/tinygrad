@@ -13,7 +13,6 @@ def overflow(u, dtype): return u.vmax > dtypes.max(dtype) or u.vmin < dtypes.min
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-# Cast back is required if the node is in range, siblings would never be upcasted
 def upcast(u: UOp):
   srcs = [upcast(_src) for _src in u.src]
   if u.dtype.scalar() is dtypes.int:
@@ -23,8 +22,9 @@ def upcast(u: UOp):
       assert is_dtype_supported(dtypes.long), f"UOp overflow without int64 support, {u.op=} {u.dtype=}"
       return upcasted
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
-    elif any((overflow(src, u.dtype) for src in u.src)):
+    if any((overflow(src, u.dtype) for src in u.src)):
       assert is_dtype_supported(dtypes.long), f"UOp has child that overflow but without int64 support {u.op=} src: {[_u.src.op for _u in u.src]}"
+      # Cast back is required if the node is in range, siblings would never be upcasted
       return upcasted.cast(u.dtype)
   return u.replace(src=tuple(srcs))
 
