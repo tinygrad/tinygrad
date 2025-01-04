@@ -73,9 +73,9 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
 
-def llvm_bf16_cast(buf:UOp, idx:UOp):
+def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
   new_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
-  return UOp(Ops.LOAD, dtypes.ushort, (UOp(Ops.INDEX, new_buf.dtype, (new_buf, idx)),)).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32)
+  return UOp(Ops.LOAD, dtypes.ushort, (UOp(Ops.INDEX, new_buf.dtype, (new_buf, idx)),)).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
@@ -91,8 +91,8 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
-    # rewrite bf16 LOAD hack
-    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
+    # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
+    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
