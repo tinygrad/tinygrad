@@ -1,6 +1,5 @@
 import sys, onnx, time, pathlib
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, fetch, getenv
-from tinygrad.tensor import _from_np_dtype
 from extra.onnx import get_run_onnx
 import onnxruntime as ort
 import numpy as np
@@ -84,6 +83,5 @@ def benchmark(onnx_model_path:pathlib.Path, config:dict={}, test_vs_ort=False):
 
 if __name__ == "__main__":
   onnx_file = fetch(sys.argv[1])
-  onnx_model = onnx.load(onnx_file)
   print(f"loaded model {onnx_file}" )
-  benchmark(onnx_model, int(getenv("ORT", "0")))
+  benchmark(onnx_file, int(getenv("ORT", "0")))
