@@ -47,17 +47,17 @@ def _memoryview(cls, mem):
 builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
 def _open(path, flags):
-  for driver in drivers:
-    for file in driver.tracked_files:
-      if path == file.path:
-        virtfd = driver.open(path, flags, 0o777, file)
+  for d in drivers:
+    for x in d.tracked_files:
+      if path == x.path:
+        virtfd = d.open(path, flags, 0o777, x)
         tracked_fds[virtfd.fd] = virtfd
         return virtfd.fd
   return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
 class MockHAL(HAL):
-  def __init__(self, path:str, flags=os.O_RDONLY):
-    self.fd = _open(path, flags)
+  def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
+    self.fd = _open(path, flags) if path else fd
     self.offset = 0
 
   def __del__(self):
@@ -76,21 +76,22 @@ class MockHAL(HAL):
       return tracked_fds[self.fd].mmap(start, sz, prot, flags, self.fd, offset)
     return libc.mmap(start, sz, prot, self.fd, offset)
 
-  def read(self, size=None):
+  def read(self, size=None, binary=False, newlines=False):
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].read_text(size, self.offset)
-    with open(self.fd) as file:
+      contents = tracked_fds[self.fd].read_contents(size, self.offset)
+      return contents if binary else contents.decode()
+    with open(self.fd, "rb" if binary else "r") as file:
       file.seek(self.offset)
-      return file.read(size)
+      return file.read(size) if newlines or binary else file.read(size).rstrip()
 
-  def write(self, content):
+  def write(self, content, binary=False):
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].write_text(content)
-    with open(self.fd, "w") as file: return file.write(content)
+      return tracked_fds[self.fd].write_contents(content) if binary else tracked_fds[self.fd].write_contents(content.encode())
+    with open(self.fd, "wb" if binary else "w") as file: return file.write(content)
 
   def listdir(self):
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].listdir()
+      return tracked_fds[self.fd].list_contents()
     return os.listdir(self.fd)
 
   def seek(self, offset): self.offset += offset
@@ -101,6 +102,5 @@ class MockHAL(HAL):
   @staticmethod
   def eventfd(initval, flags=None):
     if sys.platform == "linux":
-      ret = MockHAL.__new__(MockHAL)
-      ret.fd = os.eventfd(initval, flags)
+      ret = HAL(None, flags, os.eventfd(initval, flags))
       return ret
