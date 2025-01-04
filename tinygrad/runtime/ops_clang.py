@@ -4,7 +4,6 @@ from tinygrad.helpers import OSX, WIN, mv_address, cpu_time_execution, cpu_objdu
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.runtime.support.elf import elf_loader, relocate
 from tinygrad.renderer.cstyle import ClangRenderer
-if not WIN: from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -55,6 +54,7 @@ class CPUProgram:
 
   def __init__(self, name:str, lib:bytes):
     assert not WIN, "clang is not supported for windows"
+    from mmap import PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
     # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
     # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
     self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)
