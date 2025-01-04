@@ -569,6 +569,82 @@ jobs:
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+osxtests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [amd]
+
+    name: OSX tiny tests on (${{ matrix.backend }})
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: /Users/runner/Library/Python/3.11/lib/python/site-packages
+          key: m1-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Install packages
+        if: matrix.backend == 'amd'
+        run: |
+          brew update
+          brew install cmake rust
+      - name: Cache comgr
+        if: matrix.backend == 'amd'
+        id: cache-build
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-comgr-osx-build
+        with:
+          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
+          key: macos-15-comgr-669db884972e769450470020c06a6f132a8a065b
+      - name: Clone/compile comgr
+        if: matrix.backend == 'amd' && steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          git clone -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
+          cd ${{ github.workspace }}/llvm-project
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ../llvm
+          make -j$(nproc)
+          cd ${{ github.workspace }}/llvm-project/amd/device-libs
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${ github.workspace }/llvm-project/build" ..
+          make -j$(nproc)
+          cd ${{ github.workspace }}/llvm-project/amd/comgr
+          mkdir build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${ github.workspace }/llvm-project/build;${ github.workspace }/llvm-project/amd/device-libs/build" ..
+          make -j$(nproc)
+      - name: Install comgr
+        if: matrix.backend == 'amd'
+        run: |
+          cd ${{ github.workspace }}/llvm-project/amd/comgr/build
+          sudo make install
+      - name: Build and install remu
+        if: matrix.backend == 'amd'
+        run: |
+          git clone https://github.com/Qazalin/remu
+          cd remu
+          cargo build --release
+          sudo cp target/release/libremu.dylib /usr/local/lib
+      - name: Install dependencies
+        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run tiny test (amd)
+        if: matrix.backend=='amd'
+        run: python3 test/test_tiny.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
