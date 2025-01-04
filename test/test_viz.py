@@ -52,9 +52,9 @@ class TestViz(unittest.TestCase):
     def store_load(ctx:Dict[UOp, None], glbl, st) -> Optional[UOp]:
       if glbl in ctx: return None
       ctx[glbl] = None
-      return UOp.store(glbl, st)
+      return UOp.store(glbl, ShapeTracker.from_shape(st.shape).to_uop())
     pm = PatternMatcher([
-      (UPat.load(UPat.var("glbl"), UPat.var("st")), store_load),
+      (UPat.load(UPat(Ops.DEFINE_GLOBAL, name="glbl"), UPat.var("st")), store_load),
     ])
     uops = helper_test_viz(a+b, pm, ctx={})
     self.assertEqual(len(uops), 2)
