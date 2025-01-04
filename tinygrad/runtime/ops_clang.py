@@ -25,14 +25,16 @@ class ClangCompiler(Compiler):
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
 class ClangJITCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
+  def __init__(self, cachekey="compile_clang_jit", args:list[str]|None=None):
+    self.compiler_args = ['-x', 'c'] if args is None else args
+    super().__init__(cachekey)
 
   def compile(self, src:str) -> bytes:
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
     # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
     args = ['-march=native', f'--target={platform.machine()}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib']
     arch_args = ['-ffixed-x18'] if platform.machine() == 'arm64' else []
-    obj = subprocess.check_output(['clang', '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
+    obj = subprocess.check_output(['clang', '-c', *self.compiler_args, *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
     image, _, relocs = elf_loader(obj)
     # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
     for ploc,tgt,r_type,r_addend in relocs:

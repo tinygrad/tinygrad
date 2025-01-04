@@ -24,7 +24,6 @@ setup(name='tinygrad',
       install_requires=[],
       python_requires='>=3.10',
       extras_require={
-        'llvm': ["llvmlite"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [
