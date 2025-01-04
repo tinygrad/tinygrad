@@ -584,15 +584,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: 3.12
       - name: Cache python packages
         uses: actions/cache@v4
         with:
-          path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-          key: m1-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+          path:  ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
+          key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install packages
