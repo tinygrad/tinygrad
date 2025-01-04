@@ -5,13 +5,12 @@ from extra.onnx import get_run_onnx
 import onnxruntime as ort
 import numpy as np
 
-def benchmark(onnx_file:pathlib.Path, test_vs_ort=False):
+def benchmark(onnx_model:onnx.ModelProto, test_vs_ort=False):
   print("running benchmark")
-  onnx_model = onnx.load(onnx_file)
   Tensor.no_grad = True
   Tensor.training = False
   run_onnx = get_run_onnx(onnx_model)
-  print("loaded model")
+  print("loaded into tinygrad onnx runner")
 
   # find preinitted tensors and ignore them
   initted_tensors = {inp.name for inp in onnx_model.graph.initializer}
@@ -53,5 +52,6 @@ def benchmark(onnx_file:pathlib.Path, test_vs_ort=False):
 
 if __name__ == "__main__":
   onnx_file = fetch(sys.argv[1])
-  print(onnx_file)
-  benchmark(onnx_file, int(getenv("ORT", "0")))
+  onnx_model = onnx.load(onnx_file)
+  print(f"loaded model {onnx_file}" )
+  benchmark(onnx_model, int(getenv("ORT", "0")))
