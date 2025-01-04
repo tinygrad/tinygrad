@@ -40,15 +40,15 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--sort', default="downloads", help="sort by (downloads, download_all_time, trending)", choices=["downloads", "download_all_time", "trending"])
   parser.add_argument('--limit', type=int, default=10, help="number of models") # 100 is alot lol
-  parser.add_argument('--model', default="", help="the name of a model.id (repo name) from huggingface to target")
-  parser.add_argument('--onnx-path', default=None, help="path to a specific ONNX model to benchmark. If not provided, benchmarks all ONNX models in the repository.")
+  parser.add_argument('--repo', default="", help="the name of a model.id (repo name) from huggingface to target")
+  parser.add_argument('--model', default=None, help="path to a specific ONNX model to benchmark. If not provided, benchmarks all ONNX models in the repository.")
   args = parser.parse_args()
 
   d = {}
-  if args.model != "":
-    print(f"** Running benchmark for {args.model}/{args.onnx_path or ''} on huggingface **")
-    d["url"] = f"https://huggingface.co/{args.model}"
-    d[args.model] = run_huggingface_model(args.model, args.onnx_path)
+  if args.repo != "":
+    print(f"** Running benchmark for {args.repo}/{args.model or ''} on huggingface **")
+    d["url"] = f"https://huggingface.co/{args.repo}"
+    d[args.repo] = run_huggingface_model(args.repo, args.model)
   else:
     print(f"** Running benchmarks for top {args.limit} models ranked by '{args.sort}' on huggingface **")
     for i, model in enumerate(list_models(filter="onnx", sort=args.sort, limit=args.limit)):
