@@ -1,25 +1,25 @@
-import sys, onnx, time
-from tinygrad import Tensor, TinyJit, Device, GlobalCounters, fetch
+import sys, onnx, time, pathlib
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters, fetch, getenv
 from tinygrad.tensor import _from_np_dtype
 from extra.onnx import get_run_onnx
+import onnxruntime as ort
+import numpy as np
 
-if __name__ == "__main__":
-  onnx_file = fetch(sys.argv[1])
-  print(onnx_file)
-  onnx_model = onnx.load(onnx_file)
+def benchmark(onnx_model:onnx.ModelProto, test_vs_ort=False):
+  print("running benchmark")
   Tensor.no_grad = True
   Tensor.training = False
   run_onnx = get_run_onnx(onnx_model)
-  print("loaded model")
+  print("loaded into tinygrad onnx runner")
 
   # find preinitted tensors and ignore them
-  initted_tensors = {inp.name:None for inp in onnx_model.graph.initializer}
+  initted_tensors = {inp.name for inp in onnx_model.graph.initializer}
   expected_inputs = [inp for inp in onnx_model.graph.input if inp.name not in initted_tensors]
 
   # get real inputs
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in expected_inputs}
   input_types = {inp.name:onnx.helper.tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in expected_inputs}
-  run_onnx_jit = TinyJit(lambda **kwargs: next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())), prune=True)
+  run_onnx_jit = TinyJit(lambda **kwargs: tuple(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values()), prune=True)
 
   for i in range(3):
     new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
@@ -34,6 +34,24 @@ if __name__ == "__main__":
     st = time.perf_counter()
     out = run_onnx_jit(**new_inputs)
     mt = time.perf_counter()
-    val = out.numpy()
+    out[0].realize(*out[1:])
+    tiny_out = tuple(o.numpy() for o in out)
     et = time.perf_counter()
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
+
+  if test_vs_ort:
+    sess = ort.InferenceSession(onnx_file)
+    ort_out = sess.run([out.name for out in onnx_model.graph.output], {k:v.numpy() for k,v in new_inputs.items()})
+    rtol, atol = 1e-3, 1e-3
+    assert len(tiny_out) == len(ort_out)
+    for tiny_v, ort_v in zip(tiny_out, ort_out):
+      if tiny_v is None: assert tiny_v == ort_v
+      else: np.testing.assert_allclose(tiny_v, ort_v, rtol=rtol, atol=atol)
+    del sess
+    print("ort test passed")
+
+if __name__ == "__main__":
+  onnx_file = fetch(sys.argv[1])
+  onnx_model = onnx.load(onnx_file)
+  print(f"loaded model {onnx_file}" )
+  benchmark(onnx_model, int(getenv("ORT", "0")))
