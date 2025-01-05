@@ -1,7 +1,7 @@
 from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, unwrap
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -141,13 +141,15 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def to_subbuffer(ctx:tuple[Buffer, ...], bitcast:UOp):
+def to_subbuffer(ctx:tuple[Buffer, ...], input:UOp, bitcast:UOp):
   if not ctx[0].device.startswith("DISK"): return None
-  return ViewOp(ctx[0])
+  # some ops can be processed without the extra buffer
+  view = ctx[1].view(bitcast.size, bitcast.dtype, unwrap(input.st).views[0].offset*input.dtype.itemsize)
+  return ViewOp(view), [view, ctx[1]]
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat({Ops.BITCAST, Ops.CONTIGUOUS}, name="root", src=(UPat(Ops.LOAD),))),)), to_subbuffer),
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.BITCAST, name="bitcast", src=(UPat(Ops.LOAD, name="input"),))),)), to_subbuffer),
   (UPat(Ops.SINK, name="sink"), lambda ctx,sink: (runner:=get_runner(ctx[0].device, sink), [ctx[x] for x in runner.p.globals])),
   (UPat(Ops.EMPTY), lambda ctx: (EmptyOp(ctx[0]), list(ctx))),
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: ((BufferXfer(copy.size, ctx[0].device, ctx[1].device) \
