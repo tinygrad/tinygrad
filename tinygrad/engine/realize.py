@@ -1,7 +1,7 @@
 from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, unwrap
+from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, unwrap, all_same
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, view_supported_devices
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -143,9 +143,10 @@ class ExecItem:
 
 def buffer_view(ctx:tuple[Buffer, ...], src:UOp, output:UOp):
   if (buffer:=ctx[1]).device not in view_supported_devices and not buffer.device.startswith("DISK"): return None
+  if (view:=unwrap(src.st).views[0]).offset == 0: return None
   # some ops can be processed without a new buffer
-  view = buffer.view(output.size, output.dtype, unwrap(src.st).views[0].offset*src.dtype.itemsize)
-  return ViewOp(view), [view, buffer]
+  buf_view = buffer.view(output.size, output.dtype, view.offset*src.dtype.itemsize)
+  return ViewOp(view), [buf_view, buffer]
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
