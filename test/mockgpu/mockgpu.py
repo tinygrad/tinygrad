@@ -91,7 +91,10 @@ class MockHWInterface(HWInterface):
     return os.listdir(self.path)
 
   def write(self, content, binary=False): raise NotImplementedError()
-  def seek(self, offset): self.offset += offset
+  def seek(self, offset):
+    if self.fd in tracked_fds:
+      return self.offset += offset
+    self.offset += os.lseek(self.fd, offset, os.SEEK_CUR)
   @staticmethod
   def exists(path): return _open(path, os.O_RDONLY) is not None
   @staticmethod
