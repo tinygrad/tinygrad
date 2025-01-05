@@ -599,15 +599,13 @@ jobs:
         run: |
           brew update
           brew install cmake rust
-      - name: Restore comgr from cache
+      - name: Cache comgr
         if: matrix.backend == 'amd'
-        id: cache-comgr-restore
+        id: cache-comgr
         uses: actions/cache/restore@v4
-        env:
-          cache-name: cache-comgr-osx-build
         with:
-          path: ${{ github.workspace }}/llvm-project/amd/comgr
-          key: macos-15-comgr-669db884972e769450470020c06a6f132a8a065b
+          path: ${{ github.workspace }}/llvm-project/
+          key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Clone/compile comgr
         if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
         run: |
@@ -625,15 +623,6 @@ jobs:
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build;${{ github.workspace }}/llvm-project/amd/device-libs/build" -DCOMGR_DISABLE_SPIRV=1 -DBUILD_TESTING=OFF ..
           make -j$(sysctl -n hw.ncpu)
-      - name: Cache comgr
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
-        id: cache-comgr-save
-        uses: actions/cache/save@v4
-        env:
-          cache-name: cache-comgr-osx-build
-        with:
-          path: ${{ github.workspace }}/llvm-project/amd/comgr
-          key: macos-15-comgr-669db884972e769450470020c06a6f132a8a065b
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: |
