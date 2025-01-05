@@ -77,12 +77,26 @@ backend_test.exclude('test_matmulinteger_*')
 
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
+backend_test.exclude('test_quantizelinear_int4_cpu')
+backend_test.exclude('test_quantizelinear_uint4_cpu')
+
+# no support for FLOAT8
+backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
+backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
 
-# no support for mod
-backend_test.exclude('test_mod_*')
+# no support for fmod
+backend_test.exclude('test_mod_int64_fmod_cpu')
+backend_test.exclude('test_mod_mixed_sign_float16_cpu')
+backend_test.exclude('test_mod_mixed_sign_float32_cpu')
+backend_test.exclude('test_mod_mixed_sign_float64_cpu')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
@@ -96,7 +110,6 @@ backend_test.exclude('test_regex_*')
 backend_test.exclude('test_dynamicquantizelinear_*')
 backend_test.exclude('test_qlinearmatmul_*')
 backend_test.exclude('test_qlinearconv_*')
-backend_test.exclude('test_quantizelinear_*')
 
 # no rnn
 backend_test.exclude('test_gru_*')
@@ -161,6 +174,14 @@ backend_test.exclude('test_scatter_elements_with_reduction_min_cpu') # min not y
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
+
+# asymmetric pads
+backend_test.exclude('test_averagepool_2d_same_lower_cpu')
+backend_test.exclude('test_averagepool_2d_same_upper_cpu')
+backend_test.exclude('test_convtranspose_autopad_same_cpu')
+backend_test.exclude('test_convtranspose_output_shape_cpu')
+backend_test.exclude('test_maxpool_2d_same_lower_cpu')
+backend_test.exclude('test_maxpool_2d_same_upper_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')

@@ -1,7 +1,6 @@
 import unittest, struct, array, ctypes
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import to_mv
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.runtime.ops_nv import NVDevice, HWQueue
 from tinygrad.engine.search import Opt, OptOps
 from test.test_linearizer_failures import helper_test_lin
@@ -20,7 +19,7 @@ class TestNV(unittest.TestCase):
     TestNV.d0: NVDevice = Device["NV"]
     TestNV.a = Tensor([0.,1.], device="NV").realize()
     TestNV.b = self.a + 1
-    si = create_schedule([self.b.lazydata])[-1]
+    si = self.b.schedule()[-1]
     TestNV.d0_runner = get_runner(TestNV.d0.device, si.ast)
     TestNV.b.lazydata.buffer.allocate()
     TestNV.addr = struct.pack("QQ", TestNV.b.lazydata.buffer._buf.va_addr, TestNV.a.lazydata.buffer._buf.va_addr)
@@ -65,4 +64,3 @@ class TestNV(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
-

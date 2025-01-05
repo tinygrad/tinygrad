@@ -365,8 +365,8 @@ class Kernel:
     if opt.op is OptOps.SWAP: amt = cast(int, opt.amt)  # amt is an axis in the SWAPs
     elif opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      check(isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless")
-      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, "no longer valid shift")
+      check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
+      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
     else: amt = -1
 
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
@@ -685,8 +685,9 @@ class Kernel:
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> None:
-  if not uop.has_st or uop in sts: return
+  if uop in sts: return
   # restore globals from the two stage reduce
+  # this is because this LOAD has an implicit movement op
   if uop.op is Ops.LOAD and uop.src[0].op is Ops.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=uop.src[2].src[2], uop.st_arg, sts)
     sts[uop] = sts[local_reduce]

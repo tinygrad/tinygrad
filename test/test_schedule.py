@@ -13,10 +13,10 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, remove_movement_ops, to_uop
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -28,7 +28,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sched = create_schedule([t])
+    sched, _, __ = create_schedule_with_vars([t])
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -55,7 +55,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
   w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
-  with Context(**kwargs): s = create_schedule([ret.lazydata, img.grad.lazydata, w.grad.lazydata])
+  with Context(**kwargs): s = Tensor.schedule(ret, img.grad, w.grad)
   run_schedule(s.copy())
   cnt = len([si for si in s if si.ast.op is Ops.SINK])
   assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
@@ -1337,11 +1337,12 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
   def test_bitcast_subbufer(self):
     x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
-    b = x.cast(dtypes.int32, True, allow_buffer_view=True)
+    a = x.alu(Ops.EXP2).cast(dtypes.int32, True)
+    b = x.cast(dtypes.int32, True)
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 2) # this should fuse when it makes sense
 
+  @unittest.skip("disabling subbuffer manually isn't supported anymore")
   def test_bitcast_disable_subbufer(self):
     x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
     a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
@@ -1394,11 +1395,11 @@ class TestSchedule(unittest.TestCase):
 
   def test_const_schedule(self):
     constv = Tensor.empty(2, 2).lazydata.const_like(10)
-    self.assertEqual(len(create_schedule([constv])), 0)
+    check_schedule(constv, 0)
 
   def test_const_schedule_contig(self):
     constv = Tensor.empty(2, 2).lazydata.const_like(10).contiguous()
-    self.assertEqual(len(create_schedule([constv])), 1)
+    check_schedule(constv, 1)
 
   @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
   def test_image_matmul(self):
@@ -2015,7 +2016,7 @@ class TestView(unittest.TestCase):
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
-def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic)
+def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic_simple)
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = Tensor(0)
@@ -2048,14 +2049,23 @@ class TestBigGraph(unittest.TestCase):
     sink = tensor_rewrite(a)
     assert UPat.cvar(dtype=dtypes.int).match(sink, {})
 
-  # failure: the scheduler must not change image to its base dtype before const folding
-  @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
-  @unittest.expectedFailure
-  def test_float_to_image_cast_stays(self):
-    a = Tensor.empty(4).cast(dtypes.imagef((1,1,4)))
-    sink = to_uop(a.lazydata, ScheduleContext(), {})
-    sink = graph_rewrite(sink, symbolic)
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, dtypes.imagef((1, 1, 4))), UPat(Ops.CAST, src=(UPat.var(dtype=dtypes.float),)))).match(sink, {})
+  def test_const_folding_mul(self):
+    a = Tensor([1])
+    sink = tensor_rewrite(a*0)
+    assert UPat(Ops.CONST, arg=0).match(sink, {}), f"expected {sink} to collapse to a const 0"
+    assert sink.shape == a.shape
+
+  def test_const_folding_ne(self):
+    a = Tensor([1])
+    sink = tensor_rewrite(a != a)
+    assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
+    assert sink.shape == a.shape
+
+  def test_const_folding_lt(self):
+    a = Tensor([1])
+    sink = tensor_rewrite(a < a)
+    assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
+    assert sink.shape == a.shape
 
 tensor_const_pm = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),

@@ -1,8 +1,7 @@
 import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.engine.schedule import create_schedule
-from tinygrad.helpers import GlobalCounters
+from tinygrad.helpers import GlobalCounters, ContextVar, Context
 from tinygrad.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
@@ -96,10 +95,17 @@ class TestPickle(unittest.TestCase):
     out = add_fxn(x, y)
     np.testing.assert_equal(out.numpy(), 102)
 
+  def test_pickle_context_var(self):
+    v = ContextVar("test_var", 0)
+    with Context(test_var=1):
+      vs = pickle.dumps(v)
+    v2 = pickle.loads(vs)
+    self.assertEqual(v2.value, 1)
+
   def test_pickle_schedule(self):
     a = Tensor([1,2])
     out = a + 2
-    sched = create_schedule([out.lazydata])
+    sched = out.schedule()
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
     self.assertEqual(sched_pk[-1].ast, sched[-1].ast)

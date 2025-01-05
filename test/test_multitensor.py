@@ -4,7 +4,6 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import Ops
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 from tinygrad.multi import all_reduce, MultiLazyBuffer
 import numpy as np
@@ -69,7 +68,7 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
     out = (X + X)
-    sched = create_schedule(out.lazydata.lbs)
+    sched = out.schedule()
     names = []
     for si, ei in zip(sched[:], lower_schedule(sched)):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
@@ -492,7 +491,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
+    scheds = [sched for sched in out.schedule() if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
     assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
@@ -723,7 +722,7 @@ class TestHandleData(unittest.TestCase):
     device = (d0, d1, d2, d3)
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
     not_covered = t.to(d5)
-    sched = create_schedule([not_covered.lazydata])
+    sched = not_covered.schedule()
     assert len(sched) == 1
     # setup again because create_schedule has side effect
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
@@ -733,7 +732,7 @@ class TestHandleData(unittest.TestCase):
     for d in device:
       t = Tensor([1, 2, 3, 4]).shard(device).realize()
       covered = t.to(d)
-      sched = create_schedule([covered.lazydata])
+      sched = covered.schedule()
       assert len(sched) == 0
       # setup again because create_schedule has side effect
       t = Tensor([1, 2, 3, 4]).shard(device).realize()
@@ -1001,9 +1000,9 @@ class TestBatchNorm(unittest.TestCase):
           p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = list(create_schedule(synced_out.lazydata.lbs))
+      synced_si = list(synced_out.schedule())
       unsynced_out = unsynced_bn(x)
-      unsynced_si = list(create_schedule(unsynced_out.lazydata.lbs))
+      unsynced_si = list(unsynced_out.schedule())
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si

@@ -1,5 +1,6 @@
-from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc
+from dataclasses import dataclass
+from tinygrad.helpers import getbits, i2u
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
@@ -34,3 +35,20 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
     relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs
+
+def relocate(instr: int, ploc: int, tgt: int, r_type: int):
+  match r_type:
+    # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
+    case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
+    # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
+    # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
+    case libc.R_AARCH64_ADR_PREL_PG_HI21:
+      rel_pg = (tgt & ~0xFFF) - (ploc & ~0xFFF)
+      return instr | (getbits(rel_pg, 12, 13) << 29) | (getbits(rel_pg, 14, 32) << 5)
+    case libc.R_AARCH64_ADD_ABS_LO12_NC: return instr | (getbits(tgt, 0, 11) << 10)
+    case libc.R_AARCH64_CALL26: return instr | getbits(tgt, 2, 27)
+    case libc.R_AARCH64_LDST16_ABS_LO12_NC: return instr | (getbits(tgt, 1, 11) << 10)
+    case libc.R_AARCH64_LDST32_ABS_LO12_NC: return instr | (getbits(tgt, 2, 11) << 10)
+    case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
+    case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
+  raise NotImplementedError(f"Encountered unknown relocation type {r_type}")

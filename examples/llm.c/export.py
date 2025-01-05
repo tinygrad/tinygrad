@@ -5,7 +5,6 @@ from tinygrad import Device, nn, Tensor, dtypes, Variable
 Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GlobalCounters, ansilen, to_function_name
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_kernel, run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.ops import Ops
@@ -37,7 +36,7 @@ if __name__ == "__main__":
       tensors = optimizer.schedule_step()
     else:
       tensors = []
-    sched = create_schedule([loss.lazydata] + [x.lazydata for x in tensors])
+    sched = loss.schedule(*tensors)
     print(f"calls {i}:", len(sched))
     #run_schedule(sched[:])
   sched = memory_planner(sched)

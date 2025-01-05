@@ -25,7 +25,6 @@ def Max(*data_0:Tensor): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0:Tensor): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0:Tensor): return functools.reduce(Tensor.add, data_0)
 def Mean(*data_0:Tensor): return Sum(*data_0) / len(data_0)
-# NOTE: does not support saturate
 def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
 def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
@@ -254,10 +253,13 @@ def SpaceToDepth(X:Tensor, blocksize:int):
   return X.rearrange("b c (h h1) (w w1) -> b (h1 w1 c) h w", h1=blocksize, w1=blocksize)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
-def Dropout(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
+def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
   if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   mask = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
+# 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
+def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
+Dropout = {6:Dropout_6, 7:Dropout_7}
 
 def LRN(x:Tensor, size:int, alpha:float=1e-4, beta:float=0.75, bias:float=1.0):
   pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
@@ -406,14 +408,22 @@ def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
-def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int = 0, axis:int=1, block_size:int=0):
+def _prepare_quantize_linear(x, scale, zero_point, axis, block_size):
   if axis < 0: axis += x.ndim
-  if not isinstance(x_zero_point, Tensor): x_zero_point = Tensor(x_zero_point)
-  if block_size: x_zer, x_sc = x_zero_point.repeat_interleave(block_size, axis), x_scale.repeat_interleave(block_size, axis)
-  else:
-    shape = (*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-    x_sc, x_zer = x_scale.reshape(shape), x_zero_point.reshape(shape)
-  return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
+  if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point, dtype=dtypes.uint8)._broadcast_to(scale.shape)
+  if block_size == 0:
+    shape = (*[1]*axis, *scale.shape, *[1]*(x.ndim - axis - scale.ndim))
+    return scale.reshape(shape), zero_point.reshape(shape)
+  return scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
+
+def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
+  out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
+  y_scale, y_zero_point = _prepare_quantize_linear(x, y_scale, y_zero_point, axis, block_size)
+  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype)
+
+def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
+  x_scale, x_zero_point = _prepare_quantize_linear(x, x_scale, x_zero_point, axis, block_size)
+  return ((x.float() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
