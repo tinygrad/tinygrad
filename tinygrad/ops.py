@@ -371,7 +371,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType):
     # subbuffer support on DISK tesor bitcast
-    if self.can_view():
+    if self.can_view() and self.device.startswith("DISK"):
       if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
       else:
         # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
