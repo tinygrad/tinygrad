@@ -616,6 +616,7 @@ jobs:
       - name: Build LLVM
         if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
         run: |
+          cd ${{ github.workspace }}/llvm-project
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" -DLLVM_TARGETS_TO_BUILD="AMDGPU;AArch64" ../llvm
           make -j$(sysctl -n hw.ncpu)
