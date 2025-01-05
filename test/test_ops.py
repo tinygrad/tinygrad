@@ -1852,6 +1852,10 @@ class TestOps(unittest.TestCase):
       helper_test_op([(2,4,9,9), (4,4,3,3)],
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=padding).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding).relu(), grad_rtol=1e-5)
+    self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=(1,1,1)),
+                   lambda x,w: Tensor.conv_transpose2d(x,w,padding=(1,1,1)), expected=(RuntimeError, ValueError))
+    self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=(0,1,0,1)),
+                   lambda x,w: Tensor.conv_transpose2d(x,w,padding=(0,1,0,1)), expected=(RuntimeError, ValueError))
 
   def test_dilated_conv_transpose2d(self):
     for dilation in [(1,2), (2,1), 2, 1]:
@@ -1937,6 +1941,8 @@ class TestOps(unittest.TestCase):
     # regression test for https://github.com/tinygrad/tinygrad/pull/7549/
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w), lambda x,w: Tensor.conv2d(x,w),
                                expected=(RuntimeError, AssertionError))
+    self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w,padding=(1,1,1)),
+                               lambda x,w: Tensor.conv2d(x,w,padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
   def test_large_input_conv2d(self):
     bs = 4
@@ -2099,6 +2105,10 @@ class TestOps(unittest.TestCase):
         helper_test_op([(32,2,110,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1))
+    self.helper_test_exception([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
+                   lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
+    self.helper_test_exception([(32,2,110,28)], lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), padding=(0,1,0,1)),
+                   lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), padding=(0,1,0,1)), expected=(RuntimeError, ValueError))
 
   def test_max_pool2d_padding_int(self):
     ksz = (2,2)
@@ -2173,6 +2183,10 @@ class TestOps(unittest.TestCase):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1), rtol=1e-5)
+    self.helper_test_exception([shape], lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
+                               lambda x: Tensor.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
+    self.helper_test_exception([shape], lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,2), padding=(0,1,0,1)),
+                               lambda x: Tensor.avg_pool2d(x, kernel_size=(2,2), padding=(0,1,0,1)), expected=(RuntimeError, ValueError))
 
   def test_avg_pool2d_padding_not_counted(self):
     shape = (32,2,111,28)

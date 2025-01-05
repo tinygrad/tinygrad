@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, select, struct
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -27,7 +27,7 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+  def __init__(self, base_addr:int|None=None, **kwargs):
     super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
   def __del__(self):
@@ -445,7 +445,7 @@ class PCIIface:
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode()))
 
-      self.irq_fd = os.eventfd(0, 0)
+      self.irq_fd = os.eventfd(0, 0)  # type: ignore[attr-defined]
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd, select.POLLIN)
 

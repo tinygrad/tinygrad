@@ -28,7 +28,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sched, _ = create_schedule_with_vars([t])
+    sched, _, __ = create_schedule_with_vars([t])
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -2055,14 +2055,12 @@ class TestBigGraph(unittest.TestCase):
     assert UPat(Ops.CONST, arg=0).match(sink, {}), f"expected {sink} to collapse to a const 0"
     assert sink.shape == a.shape
 
-  @unittest.expectedFailure
   def test_const_folding_ne(self):
     a = Tensor([1])
     sink = tensor_rewrite(a != a)
     assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
     assert sink.shape == a.shape
 
-  @unittest.expectedFailure
   def test_const_folding_lt(self):
     a = Tensor([1])
     sink = tensor_rewrite(a < a)

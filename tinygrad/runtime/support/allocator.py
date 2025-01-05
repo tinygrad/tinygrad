@@ -1,5 +1,4 @@
 import collections
-from typing import Optional
 from tinygrad.helpers import round_up
 
 class TLSFAllocator:
@@ -17,19 +16,19 @@ class TLSFAllocator:
     self.storage:list = [collections.defaultdict(list) for _ in range(size.bit_length() + 1)]
 
     # self.blocks is more like a linked list, where each entry is a contigous block.
-    self.blocks:dict[int, tuple[int, Optional[int], Optional[int], bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
+    self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
     self._insert_block(0, size)
 
   def lv1(self, size): return size.bit_length()
   def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
 
-  def _insert_block(self, start:int, size:int, prev:Optional[int]=None):
+  def _insert_block(self, start:int, size:int, prev:int|None=None):
     if prev is None: prev = self.blocks[start][2]
     self.storage[self.lv1(size)][self.lv2(size)].append(start)
     self.blocks[start] = (size, start + size, prev, True)
     return self
 
-  def _remove_block(self, start:int, size:int, prev:Optional[int]=None):
+  def _remove_block(self, start:int, size:int, prev:int|None=None):
     if prev is None: prev = self.blocks[start][2]
     self.storage[self.lv1(size)][self.lv2(size)].remove(start)
     self.blocks[start] = (size, start + size, prev, False)
