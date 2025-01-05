@@ -67,7 +67,7 @@ class MockHWInterface(HWInterface):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].close(self.fd)
       tracked_fds.pop(self.fd)
-    elif self.fd: os.close(self.fd)
+    else: os.close(self.fd)
 
   def ioctl(self, request, arg):
     if self.fd in tracked_fds:
