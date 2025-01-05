@@ -605,7 +605,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/llvm-project/
-          restore-keys: macos-15-comgr-aarch64-
+          key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Clone LLVM and AMD projects
         if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
         run: |
