@@ -203,9 +203,7 @@ class AMMemoryManager:
       if AM_DEBUG >= 3: print(f"\tnptes={n_ptes:#x} incr={pte_covers:#x} upd_flags={pt.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
 
     # Invalidate TLB after mappings.
-    self.adev.gmc.flush_tlb(ip="GC", vmid=0, flush_type=2)
     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
-    self.adev.gmc.flush_tlb(ip="MM", vmid=0, flush_type=2)
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
