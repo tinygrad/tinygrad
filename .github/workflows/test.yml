@@ -576,8 +576,8 @@ jobs:
         backend: [amd]
 
     name: OSX tiny tests on (${{ matrix.backend }})
-    runs-on: macos-13
-
+    runs-on: macos-15
+    timeout-minutes: 120
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -616,7 +616,7 @@ jobs:
           git checkout 669db884972e769450470020c06a6f132a8a065b
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ../llvm
-          make -j3
+          make -j$(nproc)
           cd ${{ github.workspace }}/llvm-project/amd/device-libs
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build" ..
@@ -645,7 +645,7 @@ jobs:
           cargo build --release
       - name: Install remu
         if: matrix.backend == 'amd'
-        run: sudo cp ${{ github.workspace }}/remu/target/libremu.dylib /usr/local/lib/
+        run: sudo cp ${{ github.workspace }}/remu/target/release/libremu.dylib /usr/local/lib/
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Run tiny test (amd)
