@@ -140,5 +140,12 @@ class LLVMRenderer(Renderer):
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
               r[x] = f"%acc{vc}"
 
-    # output the function
-    return f"define void @{name}({','.join(args)}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
+    # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
+    return f'''\
+define void @{name}({','.join(args)}) #0 {{
+{chr(10).join(kernel)}
+  ret void
+}}
+{chr(10).join(end_lines.keys())}
+attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
+'''
