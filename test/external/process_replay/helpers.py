@@ -14,4 +14,4 @@ def get_process_replay_ctx() -> Tuple[ProcessReplayContext, Dict]:
   loc = "\n".join(traceback.format_list(stack))
   try: head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode()
   except Exception: head_sha = ""
-  return ProcessReplayContext(loc, head_sha, getenv("GITHUB_RUN_ID") or None), {k:v.value for k,v in ContextVar._cache.items()}
+  return ProcessReplayContext(loc, head_sha, getenv("GITHUB_RUN_ID") or None), ContextVar._cache

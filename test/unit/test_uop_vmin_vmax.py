@@ -160,6 +160,13 @@ class TestVminVmaxVConst(unittest.TestCase):
     self.assertEqual(uop.vmin, -3.2)
     self.assertEqual(uop.vmax, 1.5)
 
+  def test_vmin_vmax_vconst_with_bools(self):
+    # vmin and vmax for a vector constant of bool values
+    uop = UOp.const(dtypes.float32.vec(3), (True, False, False))
+    # TODO: these return floats, not bool
+    self.assertEqual(uop.vmin, 0.0)
+    self.assertEqual(uop.vmax, 1.0)
+
 class TestConstFactor(unittest.TestCase):
   def test_const_factor_constant(self):
     # const_factor for a constant
