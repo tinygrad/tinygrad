@@ -3761,7 +3761,7 @@ class Tensor(SimpleMathTrait):
   def llvm_bf16_cast(self, dtype:DTypeLike):
     # hack for devices that don't support bfloat16
     assert self.dtype == dtypes.bfloat16
-    return self.to("LLVM").bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).cast(dtype)
+    return self.to("LLVM").cast(dtype)
 
   def cast(self, dtype:DTypeLike) -> Tensor:
     """
