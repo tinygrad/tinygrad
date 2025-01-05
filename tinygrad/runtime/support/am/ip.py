@@ -1,4 +1,3 @@
-from __future__ import annotations
 import ctypes, time
 from typing import Literal
 from tinygrad.runtime.autogen import libpciaccess
