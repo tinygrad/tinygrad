@@ -26,7 +26,7 @@ class HWInterface:
     return ret if binary else ret.decode()
   def write(self, content, binary=False): os.write(self.fd, content) if binary else os.write(self.fd, content.encode("utf-8"))
   def listdir(self): return os.listdir(self.path)
-  def seek(self, offset): self.offset = os.lseek(self.fd, offset, os.SEEK_CUR)
+  def seek(self, offset): self.offset += os.lseek(self.fd, offset, os.SEEK_CUR)
   @staticmethod
   def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
   @staticmethod
