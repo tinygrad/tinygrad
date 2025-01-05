@@ -575,7 +575,7 @@ jobs:
       matrix:
         backend: [amd]
 
-    name: OSX tiny tests on (${{ matrix.backend }})
+    name: Tests on MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 60
     steps:
