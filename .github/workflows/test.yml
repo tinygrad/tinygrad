@@ -339,7 +339,9 @@ jobs:
         run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
-        run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
+        run: |
+          PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
+          PYTHONPATH=. MODEL=bert GPU=1 DEBUG=1 BS=2 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
         run: |
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
