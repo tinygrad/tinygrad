@@ -21,15 +21,12 @@ class HWInterface:
     if self.fd: os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
-  def read(self, size=None, binary=False, newlines=False):
-    with open(self.fd, "rb" if binary else "r") as file:
-      file.seek(self.offset)
-      return file.read(size) if newlines or binary else file.read(size).rstrip()
-
-  def write(self, content, binary=False):
-    with open(self.fd, "wb" if binary else "w") as file: return file.write(content)
+  def read(self, size=None, binary=False):
+    ret = os.read(self.fd, size) if size else os.read(self.fd, os.fstat(self.fd).st_size-self.offset)
+    return ret if binary else ret.decode()
+  def write(self, content, binary=False): os.write(self.fd, content) if binary else os.write(self.fd, content.encode("utf-8"))
   def listdir(self): return os.listdir(self.path)
-  def seek(self, offset): self.offset += offset
+  def seek(self, offset): self.offset = os.lseek(fd, offset, os.SEEK_CUR)
   @staticmethod
   def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
   @staticmethod
