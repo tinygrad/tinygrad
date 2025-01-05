@@ -17,7 +17,7 @@ class HWInterface:
     self.path = path
     self.fd = os.open(path, flags) or fd
     self.offset = 0
-  def __del__(self): if self.fd: os.close(self.fd)
+  def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
   def read(self, size=None, binary=False):
