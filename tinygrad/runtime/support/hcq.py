@@ -43,6 +43,7 @@ class HWInterface:
     if sys.platform == "linux":
       ret = HWInterface("", flags, os.eventfd(initval, flags))
       return ret
+
 if MOCKGPU:=getenv("MOCKGPU"):
   from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
