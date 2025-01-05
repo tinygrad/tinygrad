@@ -615,7 +615,7 @@ jobs:
           cd ${{ github.workspace }}/llvm-project
           git checkout 669db884972e769450470020c06a6f132a8a065b
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ../llvm
+          cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" -DLLVM_TARGETS_TO_BUILD="AMDGPU;AArch64" ../llvm
           make -j$(sysctl -n hw.ncpu)
           cd ${{ github.workspace }}/llvm-project/amd/device-libs
           mkdir build && cd build
