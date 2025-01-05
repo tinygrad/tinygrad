@@ -254,7 +254,7 @@ if __name__=="__main__":
     input_buf_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
     output_buf_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-    exported_bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+    exported_bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
     return f"""\n    var {step.name} = function() {{
@@ -262,8 +262,7 @@ if __name__=="__main__":
     {kernel_code}
 
     return {{
-      "setup": async (device, safetensor) => {{
-        const metadata = safetensor ? getTensorMetadata(safetensor[0]) : null;
+      "setup": async (device, safetensor, metadata) => {{
 
         {exported_bufs}
 
@@ -303,38 +302,8 @@ if __name__=="__main__":
 
   prekernel = f"""
     window.MODEL_BASE_URL= "{base_url}";
-    const getTensorMetadata = (safetensorBuffer) => {{
-      const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
-      const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
-      return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
-    }};
 
-  const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
-    let selectedPart = 0;
-    let counter = 0;
-    let partStartOffsets = [{", ".join(str(i) for i in partStartOffsets)}];
-    let correctedOffsets = tensorMetadata.data_offsets;
-    let prev_offset = 0;
-
-    for (let start of partStartOffsets) {{
-      prev_offset = (counter == 0) ? 0 : partStartOffsets[counter-1];
-
-      if (tensorMetadata.data_offsets[0] < start) {{
-        selectedPart = counter;
-        correctedOffsets = [correctedOffsets[0]-prev_offset, correctedOffsets[1]-prev_offset];
-        break;
-      }}
-
-      counter++;
-    }}
-
-    return safetensorParts[selectedPart].subarray(...correctedOffsets);
-  }}
-
-  const getWeight = (safetensors, key) => {{
-    let uint8Data = getTensorBuffer(safetensors, getTensorMetadata(safetensors[0])[key], key);
-    return new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
-  }}
+  const getTensorBuffer = (safetensorParts, t) => {{return safetensorParts[t.chunk].subarray(t.start_pos, t.start_pos + t.size)}}
 
   const createEmptyBuf = (device, size) => {{
       return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});

@@ -35,6 +35,205 @@ const loadPart = async (part) => {
     return res.arrayBuffer();
 };
 
+// copied from examples/webgpu/stable_diffusion/index.html 
+function initDb() {
+  return new Promise((resolve, reject) => {
+    let db;
+    const request = indexedDB.open('tinydb', 1);
+    request.onerror = (event) => {
+      console.error('Database error:', event.target.error);
+      resolve(null);
+    };
+
+    request.onsuccess = (event) => {
+      db = event.target.result;
+      console.log("Db initialized.");
+      resolve(db);
+    };
+
+    request.onupgradeneeded = (event) => {
+      db = event.target.result;
+      if (!db.objectStoreNames.contains('tensors')) {
+        db.createObjectStore('tensors', { keyPath: 'id' });
+      }
+    };
+  });
+}
+
+// copied from examples/webgpu/stable_diffusion/index.html 
+function readTensorFromDb(db, id) {
+  return new Promise((resolve, reject) => {
+    if (db == null) {
+      resolve(null);
+    }
+            
+      const transaction = db.transaction(['tensors'], 'readonly');
+      const store = transaction.objectStore('tensors');
+      const request = store.get(id);
+
+      transaction.onabort = (event) => {
+        console.log("Transaction error while reading tensor: " + event.target.error);
+        resolve(null);
+      };
+
+      request.onsuccess = (event) => {
+        const result = event.target.result;
+        if (result) {
+          resolve(result);
+        } else {
+          resolve(null);
+        }
+      };
+
+      request.onerror = (event) => {
+        console.error('Tensor retrieve failed: ', event.target.error);
+        resolve(null);
+      };
+  });
+}
+
+// copied from examples/webgpu/stable_diffusion/index.html 
+function saveTensorToDb(db, id, tensor) {
+  return readTensorFromDb(db, id).then((result) => {
+    if (!result) {
+      new Promise((resolve, reject) => {
+        if (db == null) {
+          resolve(null);
+        }
+
+        const transaction = db.transaction(['tensors'], 'readwrite');
+        const store = transaction.objectStore('tensors');
+        const request = store.put({ id: id, content: tensor });
+
+        transaction.onabort = (event) => {
+          console.log("Transaction error while saving tensor: " + event.target.error);
+          resolve(null);
+        };
+
+        request.onsuccess = () => {
+          console.log('Tensor saved successfully.');
+          resolve();
+        };
+
+        request.onerror = (event) => {
+          console.error('Tensor save failed:', event.target.error);
+          resolve(null);
+        };
+      });
+    } else {
+      return null;
+    }
+  }).catch(()=> null);
+}
+
+function dequantize(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) {
+
+  if (parent.length % BYTES_PER_CHUNK_IN !== 0) {
+    throw new Error("Parent length must be a multiple of BYTES_PER_CHUNK_IN bytes.");
+  }
+  const numChunks = parent.length / BYTES_PER_CHUNK_IN;
+  const BYTES_PER_CHUNK_OUT = FLOATS_PER_CHUNK_OUT * 4;
+  const inputPtr = decomp._malloc(BYTES_PER_CHUNK_IN);
+  const outputPtr = decomp._malloc(BYTES_PER_CHUNK_OUT);
+  const inputView = new Uint8Array(decomp.HEAPU8.buffer, inputPtr, BYTES_PER_CHUNK_IN);
+  const outputViewF32 = new Float32Array(decomp.HEAPF32.buffer, outputPtr, FLOATS_PER_CHUNK_OUT);
+  const outputViewU8 = new Uint8Array(outputViewF32.buffer, outputViewF32.byteOffset, outputViewF32.byteLength);
+  const result = new Uint8Array(numChunks * BYTES_PER_CHUNK_OUT);
+
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * BYTES_PER_CHUNK_IN;
+    const end   = start + BYTES_PER_CHUNK_IN;
+    inputView.set(parent.subarray(start, end));
+    decomp._net(inputPtr, outputPtr);
+    const offset = i * BYTES_PER_CHUNK_OUT;
+    result.set(outputViewU8, offset);
+  }
+  decomp._free(inputPtr);
+  decomp._free(outputPtr);
+
+  return result;
+}
+
+const getAndDecompressGGUFChunks = async (decomp) => {
+
+  const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
+  // TODO: cache metadata
+  const state_dict = await response.json();
+
+  let db = await initDb();
+
+  // TODO: add progress tracker
+  const getPart = async(key) => {
+    let part = await readTensorFromDb(db, key);
+
+    if (part) {
+      console.log(`Cache hit: ${key}`);
+      return Promise.resolve(part.content);
+    } else {
+      console.log(`Cache miss: ${key}`);
+      //return getProgressDlForPart(`${window.MODEL_BASE_URL}/${key}.safetensors`, progressCallback);
+      return loadPart(`${window.MODEL_BASE_URL}/${key}.gguf.chunk`);
+    }
+  }
+
+  // TODO: encode netKeys in metadata
+  const netKeys = ["net_part0", "net_part1"];
+  console.log("Downloading compressed model weights")
+  const compressedBuffers = await Promise.all(netKeys.map(key => getPart(key)));
+  for (let i = 0; i < compressedBuffers.length; i++) {
+    compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
+    saveTensorToDb(db, netKeys[i], compressedBuffers[i]);
+  }
+  console.log("Compressed model chunks loaded");
+
+  for (const [k, v] of Object.entries(state_dict)) {
+    v.bytes = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
+    if (v.dtype === "Q6_K") {
+      console.log(`decompressing ${k}`)
+      v.bytes = dequantize(v.bytes, decomp, 430080, 524288);
+      v.dtype = "float32";
+      v.size = v.bytes.byteLength;
+    }
+  }
+  console.log("Decompression complete")
+
+  // FFD bin packing
+  const maxChunkSize = 1149173760; // byte size of float32 output.weight in llama-1B
+  const chunks = [];
+  const size_sorted_tensors = Object.entries(state_dict)
+    .map(([key, value]) => ({name: key, size: value.size}))
+    .sort((a, b) => b.size - a.size);
+  for (const t of size_sorted_tensors) {
+    let placed = false;
+    for (const chunk of chunks) {
+      const currentSum = chunk.reduce((sum, i) => sum + i.size, 0);
+      if (currentSum + t.size <= maxChunkSize) {
+        chunk.push(t);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) chunks.push([t]);
+  }
+
+  const decompressedBuffers = [];
+  for (let i=0; i<chunks.length; i++) {
+    const chunk = chunks[i];
+    const chunkSize = chunk.reduce((sum, j) => sum + j.size, 0);
+    decompressedBuffers.push(new Uint8Array(chunkSize));
+    let cursor = 0;
+    for (const t of chunk) {
+      decompressedBuffers[i].set(state_dict[t.name].bytes, cursor);
+      state_dict[t.name].bytes = null;
+      state_dict[t.name].chunk = i;
+      state_dict[t.name].start_pos = cursor;
+      cursor += t.size;
+    }
+  }
+
+  return {chunks: decompressedBuffers, metadata: state_dict};
+};
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
     // model
@@ -45,15 +244,7 @@ document.addEventListener("alpine:init", () => {
     async init() {
       try {
         const q6k_to_f32 = await Module();
-        const inputPtr = q6k_to_f32._malloc(430080);
-        const outputPtr = q6k_to_f32._malloc(524288 * 4);
-        const input = new Uint8Array(q6k_to_f32.HEAPU8.buffer, inputPtr, 430080);
-        input.fill(1);
-        q6k_to_f32._net(inputPtr, outputPtr);
-        const output = new Float32Array(q6k_to_f32.HEAPF32.buffer, outputPtr, 524288);
-        console.log("output:", output);
-        q6k_to_f32._free(inputPtr);
-        q6k_to_f32._free(outputPtr);
+        const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32);
 
         const wasmResponse = await fetch("./tiktoken_bg.wasm");
         const wasmBytes = await wasmResponse.arrayBuffer();
@@ -66,14 +257,9 @@ document.addEventListener("alpine:init", () => {
         const device = await getDevice();
         console.log("WebGPU device initialized")
 
-        const netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_part4", "net_part5", "net_part6", "net_part7", "net_part8"];
-        let safetensorParts = await Promise.all(netKeys.map(key => loadPart(`${window.MODEL_BASE_URL}/${key}.safetensors`)));
-        for (let i = 0; i < safetensorParts.length; i++) {safetensorParts[i] = new Uint8Array(safetensorParts[i]);}
-        console.log("Model parts loaded successfully:", safetensorParts);
-
         let models = ["transformer"];
         this.nets = await Promise.all([
-                transformer().setup(device, safetensorParts),
+                transformer().setup(device, tensorData.chunks, tensorData.metadata),
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
         console.log("Transformer setup without exceptions");
       } catch (error) {
