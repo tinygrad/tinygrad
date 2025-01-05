@@ -28,7 +28,7 @@ class HWInterface:
 
   def write(self, content, binary=False):
     with open(self.fd, "wb" if binary else "w") as file: return file.write(content)
-  def listdir(self): return os.listdir(self.fd)
+  def listdir(self): return os.listdir(self.path)
   def seek(self, offset): self.offset += offset
   @staticmethod
   def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
