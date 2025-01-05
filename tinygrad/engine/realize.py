@@ -141,16 +141,16 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def to_subbuffer(ctx:tuple[Buffer, ...], input:UOp, output:UOp):
+def to_subbuffer(ctx:tuple[Buffer, ...], src:UOp, output:UOp):
   if (buffer:=ctx[1]).device not in view_supported_devices and not buffer.device.startswith("DISK"): return None
   # some ops can be processed without a new buffer
-  view = buffer.view(output.size, output.dtype, unwrap(input.st).views[0].offset*input.dtype.itemsize)
+  view = buffer.view(output.size, output.dtype, unwrap(src.st).views[0].offset*src.dtype.itemsize)
   return ViewOp(view), [view, buffer]
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.LOAD, name="input"), name="output")),), to_subbuffer),
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="input"),)), name="output"),)), to_subbuffer),
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.LOAD, name="src"), name="output")),), to_subbuffer),
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="src"),)), name="output"),)), to_subbuffer),
   (UPat(Ops.SINK, name="sink"), lambda ctx,sink: (runner:=get_runner(ctx[0].device, sink), [ctx[x] for x in runner.p.globals])),
   (UPat(Ops.EMPTY), lambda ctx: (EmptyOp(ctx[0]), list(ctx))),
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: ((BufferXfer(copy.size, ctx[0].device, ctx[1].device) \
