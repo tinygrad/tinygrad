@@ -2097,10 +2097,10 @@ class Tensor(SimpleMathTrait):
 
     1. A single `int` that applies the same padding to all spatial dimensions.
 
-    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    2. A `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
     spatial dimension.
 
-    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    3. A `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
     The length of the `tuple` must be double the number of spatial dimensions.
 
     When `ceil_mode` is set to True, output shape will be determined using ceil division.
@@ -2142,10 +2142,10 @@ class Tensor(SimpleMathTrait):
 
     1. A single `int` that applies the same padding to all spatial dimensions.
 
-    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    2. A `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
     spatial dimension.
 
-    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    3. A `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
     The length of the `tuple` must be double the number of spatial dimensions.
 
     When `ceil_mode` is set to True, output shape will be determined using ceil division.
@@ -2178,10 +2178,10 @@ class Tensor(SimpleMathTrait):
 
     1. A single `int` that applies the same padding to all spatial dimensions.
 
-    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    2. A `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
     spatial dimension.
 
-    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    3. A `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
     The length of the `tuple` must be double the number of spatial dimensions.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d convolutions and instead works for any number of dimensions.
@@ -2249,10 +2249,10 @@ class Tensor(SimpleMathTrait):
 
     1. A single `int` that applies the same padding to all spatial dimensions.
 
-    2. `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
+    2. A `Tuple[int, ...]` with length equal to the number of spatial dimensions. Each `int` determines the amount of pad to apply to each
     spatial dimension.
 
-    3. `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+    3. A `Tuple[int, ...]` with the structure of `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
     The length of the `tuple` must be double the number of spatial dimensions.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d transposed convolutions and instead works for any number of dimensions.
