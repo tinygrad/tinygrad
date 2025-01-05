@@ -78,7 +78,7 @@ class MockHWInterface(HWInterface):
       return tracked_fds[self.fd].mmap(start, sz, prot, flags, self.fd, offset)
     return libc.mmap(start, sz, prot, self.fd, offset)
 
-  def read(self, size=None, binary=False):
+  def read(self, size=None, binary=False, newlines=False):
     if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].read_contents(size, self.offset)
