@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, sys
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
@@ -15,7 +15,7 @@ class HWInterface:
 
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.path = path
-    self.fd = os.open(path, flags) if fd is None else fd
+    self.fd = os.open(path, flags) or fd
     self.offset = 0
   def __del__(self):
     if self.fd: os.close(self.fd)
@@ -39,10 +39,7 @@ class HWInterface:
   @staticmethod
   def readlink(path): return os.readlink(path)
   @staticmethod
-  def eventfd(initval, flags=None):
-    if sys.platform == "linux":
-      ret = HWInterface("", flags, os.eventfd(initval, flags))
-      return ret
+  def eventfd(initval, flags=None): return HWInterface("", flags, os.eventfd(initval, flags)) # type: ignore[attr-defined]
 
 if MOCKGPU:=getenv("MOCKGPU"):
   from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import

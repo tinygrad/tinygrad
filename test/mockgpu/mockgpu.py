@@ -8,8 +8,6 @@ start = time.perf_counter()
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
-libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-libc.munmap.restype = ctypes.c_int
 
 drivers = [AMDDriver(), NVDriver()]
 tracked_fds = {}
@@ -61,7 +59,7 @@ class MockHWInterface(HWInterface):
   offset:int
 
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
-    self.fd = _open(path, flags) if fd is None else fd
+    self.fd = _open(path, flags) or fd
     self.offset = 0
 
   def __del__(self):
