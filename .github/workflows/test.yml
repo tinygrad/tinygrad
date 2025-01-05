@@ -577,7 +577,7 @@ jobs:
 
     name: OSX tiny tests on (${{ matrix.backend }})
     runs-on: macos-15
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -606,7 +606,7 @@ jobs:
         env:
           cache-name: cache-comgr-osx-build
         with:
-          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
+          path: ${{ github.workspace }}/llvm-project/amd/comgr
           key: macos-15-comgr-669db884972e769450470020c06a6f132a8a065b
       - name: Clone/compile comgr
         if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
@@ -632,7 +632,7 @@ jobs:
         env:
           cache-name: cache-comgr-osx-build
         with:
-          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
+          path: ${{ github.workspace }}/llvm-project/amd/comgr
           key: macos-15-comgr-669db884972e769450470020c06a6f132a8a065b
       - name: Install comgr
         if: matrix.backend == 'amd'
