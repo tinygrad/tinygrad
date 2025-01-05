@@ -570,6 +570,47 @@ jobs:
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
+  testwindows:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [gpu, python] # only gpu and python backends are supported for windows
+        
+    name: Tests on (${{ matrix.backend }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
+          key: windows-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tinygrad/downloads/
+          key: downloads-cache-windows-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+          - name: Set env
+        run: printf "${{ matrix.backend == 'python' && 'PYTHON=1' || matrix.backend == 'gpu' && 'GPU=1'}}" >> $GITHUB_ENV
+      - name: Install OpenCL
+        if: matrix.backend == 'gpu'
+        uses: intel/setup-oneapi@v1
+        with:
+          version: '2023.2.1-16'
+      - name: Install dependencies
+        run: pip install -e .[testing] --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Run pytest
+        run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
+        
   #testunicorn:
   #  name: ARM64 unicorn Test
   #  runs-on: ubuntu-latest
