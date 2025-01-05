@@ -29,3 +29,12 @@ To compile `q6k_to_f32.js` and `q6k_to_f32.wasm`:
 
 - install and activate emscripten
 - from the tinychat dir run `emcc q6k_to_f32.c -o q6k_to_f32.js -s MODULARIZE=1 -s EXPORTED_FUNCTIONS='["_net", "_malloc", "_free"]' -s EXPORTED_RUNTIME_METHODS='["cwrap", "getValue", "setValue"]'`
+
+# Hosting
+
+The following files can be hosted at `window.MODEL_BASE_URL`, separately from the index.html location:
+
+- `llama3-2.tiktoken`
+- `tiktoken_bg.wasm`
+- `net_partx.gguf.chunk` where x = 0, 1
+- `net_metadata.json`

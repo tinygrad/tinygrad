@@ -246,11 +246,12 @@ document.addEventListener("alpine:init", () => {
         const q6k_to_f32 = await Module();
         const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32);
 
-        const wasmResponse = await fetch("./tiktoken_bg.wasm");
+        const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
         const wasmBytes = await wasmResponse.arrayBuffer();
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
 
-        this.tokenizer = await createTokenizer("./llama3-2.tiktoken");
+        //this.tokenizer = await createTokenizer("./llama3-2.tiktoken");
+        this.tokenizer = await createTokenizer(`${window.MODEL_BASE_URL}/llama3-2.tiktoken`);
         tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
 
