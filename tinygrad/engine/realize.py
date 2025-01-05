@@ -142,7 +142,7 @@ class ExecItem:
     return et
 
 def to_subbuffer(ctx:tuple[Buffer, ...], input:UOp, output:UOp):
-  if (buffer:=ctx[1]).device not in view_supported_devices: return None
+  if (buffer:=ctx[1]).device not in view_supported_devices and not buffer.device.startswith("DISK"): return None
   # some ops can be processed without a new buffer
   view = buffer.view(output.size, output.dtype, unwrap(input.st).views[0].offset*input.dtype.itemsize)
   return ViewOp(view), [view, buffer]
