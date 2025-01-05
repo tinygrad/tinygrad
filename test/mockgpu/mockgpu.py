@@ -78,19 +78,17 @@ class MockHWInterface(HWInterface):
       return tracked_fds[self.fd].mmap(start, sz, prot, flags, self.fd, offset)
     return libc.mmap(start, sz, prot, self.fd, offset)
 
-  def read(self, size=None, binary=False, newlines=False):
+  def read(self, size=None, binary=False):
     if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
-      contents = tracked_fds[self.fd].read_contents(size, self.offset)
-      return contents
-    with open(self.fd, "r") as file:
-      file.seek(self.offset)
-      return file.read(size) if newlines else file.read(size).rstrip()
+      return tracked_fds[self.fd].read_contents(size, self.offset)
+    ret = os.read(self.fd, size) if size else os.read(self.fd, os.fstat(self.fd).st_size-self.offset)
+    return ret if binary else ret.decode()
 
   def listdir(self):
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].list_contents()
-    return os.listdir(self.fd)
+    return os.listdir(self.path)
 
   def write(self, content, binary=False): raise NotImplementedError()
   def seek(self, offset): self.offset += offset
