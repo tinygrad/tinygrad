@@ -96,7 +96,7 @@ class Ops(FastEnum):
   SINK = auto(); CONTIGUOUS = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
+  COPY = auto(); EMPTY = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
@@ -159,7 +159,7 @@ class GroupOp:
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
   # meta ops
-  Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
+  Meta = {Ops.COPY, Ops.EMPTY}
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
@@ -422,9 +422,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self, allow_buffer_view=True):
-    if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      if allow_buffer_view and self.can_view(): return self.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
-      return self.alu(Ops.CONTIGUOUS)
+    if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST: return self.alu(Ops.CONTIGUOUS)
     forced_realize.add(self.base)
     return self
 
@@ -454,9 +452,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, clone, (UOp(Ops.DEVICE, arg=device), src)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
-  def can_view(self):
-    return (self.st is not None and self._device is not None and self.st.consecutive and self.base.op is not Ops.CONST and
-            not isinstance(self.dtype, ImageDType) and self.device.split(":")[0] in view_supported_devices)
   @property
   def lbs(self): return [self]
   @property

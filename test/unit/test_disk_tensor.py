@@ -294,7 +294,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_bitcast_view(self):
     with open(temp('dt_bitcast_view'), "wb") as f: f.write(bytes(range(10, 24)))
     t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{temp('dt_bitcast_view')}").shrink([(0, 2)])
-    ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
+    ret = t.bitcast(dtypes.uint16).to("GPU") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
   def test_bf16_disk_write_read(self):

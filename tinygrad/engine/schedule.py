@@ -77,17 +77,6 @@ tensor_uop_spec = PatternMatcher([
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
   # TODO: this should be EMPTY(VIEW(BUFFER))
   (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
-
-  # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
-  # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
-
-  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x:
-   # BUFFER_VIEW can replace contiguous, keeping dtype the same
-   (root.dtype == x.dtype) or
-   # it can also replace bitcast, this changes the dtype, but the itemsize stays the same
-   (root.dtype != x.dtype and root.dtype.itemsize == x.dtype.itemsize) or
-   # it can also represent shape changing bitcast (only on DISK)
-   (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
 ])
 
 # **** ScheduleItem return type
@@ -379,7 +368,7 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
     if any(luop.forced_realize for tr in group for luop in ctx.tensor_uops[tr]): continue
-    kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
+    kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op is not Ops.COPY}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
   # group BUFFER uops into kernels
@@ -504,9 +493,8 @@ do_realize = PatternMatcher([
   (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
-  # realize before COPY or BUFFER_VIEW
+  # realize before COPY
   (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
 ])
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
@@ -541,10 +529,6 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
-  # BUFFER_VIEW overrides the underlying buffer
-  # TODO: this should be a shrink on the buffer
-  if op.op is Ops.BUFFER_VIEW:
-    buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 

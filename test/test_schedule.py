@@ -1583,6 +1583,7 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
 
   @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  @unittest.skip("buffer view doesn't exist")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     sched = self.check_schedule(a, 1)
