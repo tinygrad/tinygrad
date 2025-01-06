@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto, helper
+from google.protobuf.json_format import MessageToDict
 
 cache_misses = 0
 @functools.lru_cache(None)
@@ -70,6 +71,8 @@ def get_run_onnx(onnx_model: ModelProto):
   # TODO: need a better way of controlling training vs non-training
   is_onnx_preview_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in onnx_model.graph.node)
   onnx_model_version = onnx_model.opset_import[0].version
+
+  # used to check validity of user_input according to their dimension variables
   variable_dims = {}
 
   # mapping from onnx ops to tensor.py ops
@@ -121,10 +124,14 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
+    if debug >= 3: print("Model initialization data:\n" + "\n".join(f"\t{i.name} - {model_tensors[i.name]}" for i in onnx_model.graph.initializer))
 
+    if debug >= 1: print("Model input:")
     for name, value_info in model_expected_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       model_tensors[name] = prepare_input(inputs[name], value_info)
+      if debug >= 1: print(f"\t{name} - {model_tensors[name]}")
+      if debug >= 2: print(f"\t\t{MessageToDict(value_info.type)}")
 
     for num,n in enumerate(onnx_model.graph.node):
       inp_tensors = [model_tensors.get(x) for x in n.input]
