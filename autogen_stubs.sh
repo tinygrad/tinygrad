@@ -66,7 +66,7 @@ generate_hip() {
 
 generate_comgr() {
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
-    --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
+  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
   patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'" "'/usr/local/lib/libamd_comgr.dylib'"
