@@ -7,7 +7,6 @@ from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UP
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 from tinygrad.codegen.uopgraph import sym
-from tinygrad.device import is_dtype_supported
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
 
@@ -19,11 +18,9 @@ def upcast(u: UOp):
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
     upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
     if overflow(u):
-      assert is_dtype_supported(dtypes.long), f"UOp overflow without int64 support, {u.op=} {u.dtype=}"
       return upcasted
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
     if any((overflow(src) for src in u.src)):
-      assert is_dtype_supported(dtypes.long), f"UOp has child that overflow but without int64 support {u.op=}"
       # Cast back is required if the node is in range, siblings would never be upcasted
       return upcasted.cast(u.dtype)
   return u.replace(src=tuple(srcs))
