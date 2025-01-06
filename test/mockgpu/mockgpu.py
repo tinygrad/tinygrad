@@ -92,7 +92,7 @@ class MockHWInterface(HWInterface):
   def write(self, content, binary=False): raise NotImplementedError()
   def seek(self, offset):
     if self.fd in tracked_fds:
-      tracked_fds[self.fd].offset += offset
+      tracked_fds[self.fd].seek(offset)
     else:
       os.lseek(self.fd, offset, os.SEEK_CUR)
   @staticmethod
