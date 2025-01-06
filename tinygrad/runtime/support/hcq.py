@@ -1,10 +1,43 @@
 from __future__ import annotations
 from typing import cast, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
 from tinygrad.ops import sym_infer, sint, Variable
+from tinygrad.runtime.autogen import libc
+
+# all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
+class HWInterface:
+  path:str
+  fd:int
+
+  def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
+    self.path = path
+    self.fd = fd or os.open(path, flags)
+  def __del__(self): os.close(self.fd)
+  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
+  def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
+  def read(self, size=None, binary=False):
+    with open(self.fd, "rb" if binary else "r") as file:
+      file.seek(self.offset)
+      return file.read(size) if binary else file.read(size).rstrip()
+  def write(self, content, binary=False): os.write(self.fd, content) if binary else os.write(self.fd, content.encode("utf-8"))
+  def listdir(self): return os.listdir(self.path)
+  def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_CUR)
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
+  @staticmethod
+  def munmap(buf, sz): return libc.munmap(buf, sz)
+  @staticmethod
+  def exists(path): return os.path.exists(path)
+  @staticmethod
+  def readlink(path): return os.readlink(path)
+  @staticmethod
+  def eventfd(initval, flags=None): return HWInterface(":eventfd:", flags, os.eventfd(initval, flags)) # type: ignore[attr-defined]
+
+if MOCKGPU:=getenv("MOCKGPU"):
+  from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
