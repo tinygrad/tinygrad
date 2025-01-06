@@ -60,7 +60,6 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
-
 def get_run_onnx(onnx_model: ModelProto):
   # model initialization data
   model_tensors = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
@@ -102,19 +101,20 @@ def get_run_onnx(onnx_model: ModelProto):
       sequence = [Tensor(i, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(i, Tensor) else i for i in user_input]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"shapes for {model_input.name} must be homogeneous")
       # TODO: need true float16 for dtype checking
-      # if not all(t.dtype is dtype for t in sequence): raise RuntimeError(f"{model_input.name} received wrong dtype, expected {dtype}")
+      # if not all(t.dtype is dtype for t in sequence):
+      #   raise RuntimeError(f"{model_input.name} has dtype mismatch for sequence type. Expected {dtype}, received {tensor.dtype}.")
       return sequence
     if type_proto.HasField("tensor_type"):
       dtype = dtype_parse(type_proto.tensor_type.elem_type)
       tensor = Tensor(user_input, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(user_input, Tensor) else user_input
       # TODO: need true float16 for dtype checking
-      # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
+      # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} has mismatch for dtype. Expected {dtype}, received {tensor.dtype}.")
       for dim, onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
         dim_param, dim_value = onnx_dim.dim_param, onnx_dim.dim_value
         user_dim_input = user_input.shape[dim]
         if dim_param: dim_value = variable_dims[dim_param] if dim_param in variable_dims else variable_dims.setdefault(dim_param, user_dim_input)
         if user_dim_input != dim_value:
-          raise RuntimeError(f"{model_input.name} has dimension mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_dim_input}")
+          raise RuntimeError(f"{model_input.name} has mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_dim_input}.")
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
     raise NotImplementedError(f"{model_input.name} with {type_field_names=} is not supported")
