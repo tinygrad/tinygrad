@@ -5,7 +5,7 @@ from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
-from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
+from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto, helper
 
 cache_misses = 0
 @functools.lru_cache(None)
@@ -55,7 +55,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
   # HACK need true float16
   if onnx_tensor.data_type == TensorProto.FLOAT16 and onnx_tensor.HasField("raw_data"):
-    return Tensor(data, dtype=dtypes.float16).cast(dtypes.float32).reshape(shape).realize()
+    return Tensor(np.frombuffer(data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape), dtype=dtype)
   return Tensor(data, dtype=dtype).reshape(shape).realize()
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
