@@ -10,10 +10,305 @@ on:
   push:
     branches:
       - master
+      - ci-amd
   pull_request:
   workflow_dispatch:
 
+
 jobs:
+  build_llvm:
+    name: Build llvm from amd-staging branch
+    runs-on: macos-15
+    timeout-minutes: 200
+    env:
+      LLVM_COMMIT: f9dc83dca5a058a339163a3c7d1903e423f46f17
+    steps:
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake ninja llvm lld git
+
+      - name: Set llvm environment
+        run: |
+          # Set LLVM paths
+          LLVM_PREFIX=$(brew --prefix llvm)
+          {
+            echo "LLVM_PATH=$LLVM_PREFIX"
+            echo "LLVM_DIR=$LLVM_PREFIX/lib/cmake/llvm"
+            echo "CC=$LLVM_PREFIX/bin/clang"
+            echo "CXX=$LLVM_PREFIX/bin/clang++"
+            
+            # Set project paths
+            echo "INSTALL_DIR=$GITHUB_WORKSPACE/usr/local"
+            echo "HIP_PATH=$GITHUB_WORKSPACE/usr/local/hip"
+            echo "PATH=$GITHUB_WORKSPACE/usr/local/hip/bin:$PATH"
+
+            OSX_ARCH=$(uname -m)
+            echo "OSX_ARCH=$OSX_ARCH"
+
+            # Set
+            if [ "$OSX_ARCH" == "arm64" ]; then
+              CMAKE_ARCH_OPTIONS=" -DCMAKE_OSX_ARCHITECTURES=arm64 -DLLVM_TARGETS_TO_BUILD=AMDGPU;AArch64"
+            elif [ "$OSX_ARCH" == "x86_64" ]; then
+              CMAKE_ARCH_OPTIONS=" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DLLVM_TARGETS_TO_BUILD=AMDGPU;X86"
+            else
+              echo "Unsupported architecture: $OSX_ARCH"
+              exit 1
+            fi
+            echo "CMAKE_ARCH_OPTIONS=$CMAKE_ARCH_OPTIONS"
+          } >> $GITHUB_ENV
+
+      - name: Cache llvm build (with hash)
+        uses: actions/cache@v4
+        if: env.LLVM_COMMIT != ''
+        with:
+          path: |
+            llvm-project/.git
+            llvm-project/llvm
+            llvm-project/clang
+            llvm-project/lld
+            llvm-project/cmake
+            llvm-project/third-party/benchmark
+            llvm-project/third-party/unittest
+            llvm-project/build-${{ env.LLVM_COMMIT }}
+          key: llvm-build-v3-${{ env.OSX_ARCH }}-${{ env.LLVM_COMMIT }}
+          restore-keys: |
+            llvm-build-v3-${{ env.OSX_ARCH }}-
+
+      - name: Checkout and Build LLVM
+        run: |
+          if [ ! -d "llvm-project" ]; then
+            # Build LLVM project with sparse checkout
+            git clone --depth 1 --filter=blob:none --sparse -b amd-staging https://github.com/ROCm/llvm-project.git
+            cd llvm-project
+            git sparse-checkout set llvm clang lld cmake third-party/benchmark third-party/unittest
+            git checkout ${{ env.LLVM_COMMIT }}
+            mkdir -p build-${LLVM_COMMIT} && cd build-${LLVM_COMMIT}
+            cmake ../llvm \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" \
+              -DLLVM_ENABLE_RTTI=ON \
+              -DCMAKE_PREFIX_PATH=${LLVM_PATH} \
+              -DCMAKE_MODULE_PATH=${LLVM_PATH}/lib/cmake \
+              -DCMAKE_C_COMPILER=${CC} \
+              -DCMAKE_CXX_COMPILER=${CXX} \
+              -DLLVM_ENABLE_BENCHMARKS=OFF \
+              -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
+              ${CMAKE_ARCH_OPTIONS} \
+              -G Ninja
+            ninja || exit 1  # Exit if build fails
+          else
+            cd llvm-project/build-${LLVM_COMMIT}
+          fi
+          ninja install
+          cd ..
+      - name: Upload LLVM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-install
+          path: ${{ env.INSTALL_DIR }}
+
+
+  build_comgr:
+    name: Build libcomgr
+    needs: [build_llvm] # shares the llvm build
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Download LLVM (amd-staging) artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-install
+          path: ./usr/local
+      - name: Verify Downloaded LLVM Artifact
+        run: |
+          echo "Artifact downloaded to: $(pwd)/usr/local"
+          ls -R ./usr/local
+      - name: Make LLVM Binaries Executable
+        run: | 
+          chmod +x ./usr/local/bin/*
+      - name: Move LLVM Artifact to Final Location
+        run: |
+          mv ./usr/local llvm-install
+      - name: Install Dependencies
+        run: |
+          brew update
+          brew install cmake ninja llvm lld git
+      - name: Set LLVM Environment
+        run: |
+          # Set LLVM paths
+          LLVM_PREFIX=$(brew --prefix llvm)
+          {
+            echo "LLVM_PATH=$LLVM_PREFIX"
+            echo "CC=$LLVM_PREFIX/bin/clang"
+            echo "CXX=$LLVM_PREFIX/bin/clang++"
+            
+            # Set project paths
+            echo "INSTALL_DIR=$GITHUB_WORKSPACE/usr/local"
+            echo "HIP_PATH=$GITHUB_WORKSPACE/usr/local/hip"
+            echo "PATH=$GITHUB_WORKSPACE/usr/local/hip/bin:$PATH"
+          } >> $GITHUB_ENV
+      - name: Patch and Build AMD Device Libraries
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse -b amd-staging https://github.com/ROCm/llvm-project.git
+          cd llvm-project
+          git sparse-checkout set amd/device-libs 
+          git checkout ${{ env.LLVM_COMMIT }}
+          cd amd/device-libs
+          
+          patch -p1 ockl/src/wfredscan.cl -i ../../../extra/mockgpu/amd/patch/wfredscan.patch
+
+          mkdir build && cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
+            -DLLVM_DIR=${LLVM_PATH}/lib/cmake/llvm \
+            -DCMAKE_PREFIX_PATH=${LLVM_PATH} \
+            -DROCM_DIR=${INSTALL_DIR} \
+            -DCMAKE_MODULE_PATH=${LLVM_PATH}/lib/cmake \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -G Ninja
+          ninja
+          ninja install
+          cd ../../../..
+      - name: Patch and Build HIPCC
+        run: |
+          # Set paths for Homebrew's libc++
+          export BREW_LLVM_PATH=$(brew --prefix llvm)
+
+          # Then build hipcc
+          cd llvm-project
+          git sparse-checkout set amd/hipcc
+          git checkout ${{ env.LLVM_COMMIT }}
+          cd amd/hipcc
+
+          patch -p1 CMakeLists.txt -i ../../../extra/mockgpu/amd/patch/hipcc.patch
+
+          mkdir -p build && cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${LLVM_PATH} \
+            -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
+            -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -I${BREW_LLVM_PATH}/include/c++/v1 -I${BREW_LLVM_PATH}/lib/clang/17/include" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${BREW_LLVM_PATH}/lib -Wl,-rpath,${BREW_LLVM_PATH}/lib" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${BREW_LLVM_PATH}/lib -Wl,-rpath,${BREW_LLVM_PATH}/lib" \
+            -G Ninja
+          ninja || exit 1
+          ninja install
+          cd ../../..
+      - name: Set llvm (amd-staging) environment
+        run: |
+          # Set paths
+          {
+            echo "INSTALL_DIR=$GITHUB_WORKSPACE/llvm-install"
+            echo "LLVM_PATH=$GITHUB_WORKSPACE/llvm-install"
+            
+            echo "CC=$GITHUB_WORKSPACE/llvm-install/bin/clang"
+            echo "CXX=$GITHUB_WORKSPACE/llvm-install/bin/clang++"
+
+            # Set hip related paths
+            echo "HIP_PATH=$GITHUB_WORKSPACE/usr/local/hip"
+            echo "PATH=$GITHUB_WORKSPACE/usr/local/hip/bin:$PATH"
+          } >> $GITHUB_ENV
+      - name: Build libcomgr with amd-staging llvm
+        run: |
+          cd llvm-project
+          git sparse-checkout add amd/comgr
+          git sparse-checkout reapply
+          cd amd/comgr
+          mkdir build && cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-nogpuinc" \
+            -DCMAKE_CXX_FLAGS="-std=c++14 -nogpuinc" \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR} \
+            -DCMAKE_PREFIX_PATH="${LLVM_PATH};$GITHUB_WORKSPACE/usr/local/lib/cmake/AMDDeviceLibs" \
+            -DCMAKE_MODULE_PATH=${LLVM_PATH}/lib/cmake \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${INSTALL_DIR}/lib" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${INSTALL_DIR}/lib" \
+            -DROCM_DIR=${INSTALL_DIR} \
+            -DCOMGR_DISABLE_SPIRV=ON \
+            -DBUILD_TESTING=OFF \
+            -G Ninja
+          ninja || exit 1 # Exit if build fails
+          ninja install
+          cd ../../../..
+      - name: Upload libcomgr artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libcomgr
+          path: |
+            ./llvm-install/lib/libamd_comgr.2.9.0.dylib
+            ./llvm-install/lib/libamd_comgr.2.dylib
+            ./llvm-install/lib/libamd_comgr.dylib
+
+  build_remu:
+    name: Build libremu
+    needs: [build_comgr]
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout remu
+        uses: actions/checkout@v4
+        with:
+          repository: Qazalin/remu
+          path: remu
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-apple-darwin
+          profile: minimal
+          default: true
+
+      - name: Build libremu
+        working-directory: remu
+        env:
+          CC: clang
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          cp target/aarch64-apple-darwin/release/libremu.dylib $GITHUB_WORKSPACE/artifacts/
+
+      - name: Upload libremu artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libremu
+          path: artifacts/libremu.dylib
+
+  macos_tiny_tests:
+    name: OSX Tests on (amd)
+    runs-on: macos-15
+    needs: [build_comgr, build_remu]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download libcomgr
+        uses: actions/download-artifact@v4
+        with:
+          name: libcomgr
+          path: ./usr/local/lib/
+
+      - name: Download libremu
+        uses: actions/download-artifact@v4
+        with:
+          name: libremu
+          path: ./usr/local/lib/
+
+      - name: Run test/test_tiny.py
+        run: |
+          export DYLD_LIBRARY_PATH=$GITHUB_WORKSPACE/usr/local/lib:$DYLD_LIBRARY_PATH
+          PYTHONPATH=$GITHUB_WORKSPACE MOCKGPU=1 AMD=1 python3 test/test_tiny.py
+
+
   autogen:
     name: Autogen+Docs
     runs-on: ubuntu-latest

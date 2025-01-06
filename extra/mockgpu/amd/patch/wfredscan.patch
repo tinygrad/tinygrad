@@ -1,0 +1,17 @@
+--- ockl/src/wfredscan.cl
++++ ockl/src/wfredscan.cl
+@@ -9,6 +9,9 @@
+ #include "oclc.h"
+ 
+ #pragma OPENCL EXTENSION cl_khr_fp16 : enable
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wconstant-conversion"
++
+ 
+ #define AS_USHORT(X) __builtin_astype(X, ushort)
+ #define AS_INT(X) __builtin_astype(X, int)
+@@ -603,3 +606,4 @@
+ GEN(long,xor,0L,1)
+ GEN(ulong,xor,0UL,1)
+ 
++#pragma clang diagnostic pop

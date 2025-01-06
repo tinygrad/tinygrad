@@ -19,7 +19,7 @@ WAIT_REG_MEM_FUNCTION_ALWAYS = 0
 WAIT_REG_MEM_FUNCTION_EQ = 3 # ==
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-REMU_PATHS = ["libremu.so", "/usr/local/lib/libremu.so"]
+REMU_PATHS = ["libremu.so", "/usr/local/lib/libremu.so", 'libremu.dylib']
 def _try_dlopen_remu():
   for path in REMU_PATHS:
     try:
