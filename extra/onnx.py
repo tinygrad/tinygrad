@@ -6,12 +6,6 @@ from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 cache_misses = 0
 @functools.lru_cache(None)
@@ -54,13 +48,15 @@ def attribute_parse(onnx_attribute: AttributeProto):
     raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
   return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
 
-def buffer_parse(inp: TensorProto) -> Tensor:
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-    return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
-  if len(inp.raw_data) > 0:
-    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
-                  dtype=dtype_parse(inp.data_type), requires_grad=False)
-  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
+def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
+  if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
+  data = (onnx_tensor.raw_data if onnx_tensor.HasField("raw_data") else list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or
+    list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or list(onnx_tensor.uint64_data))
+  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  # HACK need true float16
+  if onnx_tensor.data_type == TensorProto.FLOAT16 and onnx_tensor.HasField("raw_data"):
+    return Tensor(data, dtype=dtypes.float16).cast(dtypes.float32).reshape(shape).realize()
+  return Tensor(data, dtype=dtype).reshape(shape).realize()
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
@@ -75,6 +71,7 @@ def get_run_onnx(onnx_model: ModelProto):
   # TODO: need a better way of controlling training vs non-training
   is_onnx_preview_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in onnx_model.graph.node)
   onnx_model_version = onnx_model.opset_import[0].version
+  variable_dims = {}
 
   # mapping from onnx ops to tensor.py ops
   tensor_methods = {
@@ -112,10 +109,12 @@ def get_run_onnx(onnx_model: ModelProto):
       tensor = Tensor(user_input, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(user_input, Tensor) else user_input
       # TODO: need true float16 for dtype checking
       # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
-      for d,onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
-        # NOTE: dim is a variable dimension when `dim_param` is specified, e.g. dim {dim_param: "N"} is a variable dim
-        if onnx_dim.dim_param is None and onnx_dim.dim_value != user_input.shape[d]:
-          raise RuntimeError(f"{model_input.name} received value {user_input.shape[d]} on dim {d}, expected {onnx_dim.dim_value}")
+      for dim, onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
+        dim_param, dim_value = onnx_dim.dim_param, onnx_dim.dim_value
+        user_val = user_input.shape[dim]
+        if (not dim_param and user_val != dim_value) or (dim_param and user_val != (dim_value:=variable_dims.get(dim_param))):
+          raise RuntimeError(f"{model_input.name} has dimension mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_val}")
+        if dim_param is not None and dim_param not in variable_dims: variable_dims[dim_param] = user_val
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
     raise NotImplementedError(f"{model_input.name} with {type_field_names=} is not supported")
