@@ -282,20 +282,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # buffer ops return the ShapeTracker from sources
     if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
-    src_sts = [x.st for x in self.src if x.st is not None]
+    if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
-    match self.op:
-      # only reduce ops are allowed to change shape
-      case Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
-      case Ops.WMMA:
-        if len(src_sts) == 0: return None
-        shape = src_sts[0].reduce(self.axis_arg)
-      # everything else derives shape from sources
-      case _:
-        if len(src_sts) == 0: return None
-        shape = src_sts[0].shape
+    # only reduce ops are allowed to change shape, everything else derives shape from sources
+    shape = src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(shape)
+
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
