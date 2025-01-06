@@ -6,27 +6,6 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
-from tinygrad.codegen.uopgraph import sym
-
-def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
-
-# If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
-# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-def upcast(u: UOp):
-  srcs = [upcast(_src) for _src in u.src]
-  if u.dtype.scalar() is dtypes.int:
-    dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-    upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u):
-      return upcasted
-    # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
-    if any((overflow(src) for src in u.src)):
-      # Cast back is required if the node is in range, siblings would never be upcasted
-      return upcasted.cast(u.dtype)
-  return u.replace(src=tuple(srcs))
-
-# pooling op may overflow before folding causing unnecessary upcast
-def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -127,7 +106,6 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
-  idx, valid = folded_upcast(idx), folded_upcast(valid)
   buf = x.src[0]
   if x.op is Ops.LOAD:
     barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is Ops.DEFINE_LOCAL else ()
@@ -140,7 +118,6 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
   if store_back:
     idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[2].src else u for u in ctx.idxs])
-    idx = folded_upcast(idx)
   if (not cast(PtrDType, x.src[0].dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
@@ -148,7 +125,7 @@ def lower_load_store(ctx: IndexContext, x: UOp):
 
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: folded_upcast(x.st_arg.to_indexed_uops(ctx.idxs)[1])),
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
