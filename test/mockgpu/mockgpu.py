@@ -56,12 +56,10 @@ def _open(path, flags):
 class MockHWInterface(HWInterface):
   path:str
   fd:int
-  offset:int
 
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.path = path
     self.fd = _open(path, flags) or fd
-    self.offset = 0
 
   def __del__(self):
     if self.fd in tracked_fds:
@@ -82,8 +80,8 @@ class MockHWInterface(HWInterface):
   def read(self, size=None, binary=False):
     if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].read_contents(size, self.offset)
-    ret = os.read(self.fd, size) if size else os.read(self.fd, os.fstat(self.fd).st_size-self.offset)
+      return tracked_fds[self.fd].read_contents(size)
+    ret = os.read(self.fd, size) if size else os.read(self.fd, os.fstat(self.fd).st_size-os.lseek(self.fd, 0, os.SEEK_CUR))
     return ret if binary else ret.decode()
 
   def listdir(self):
