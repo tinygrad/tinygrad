@@ -6,12 +6,6 @@ from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto, helper
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 cache_misses = 0
 @functools.lru_cache(None)
@@ -54,21 +48,15 @@ def attribute_parse(onnx_attribute: AttributeProto):
     raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
   return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
 
-def buffer_parse(inp: TensorProto) -> Tensor:
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-    return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
-  if len(inp.raw_data) > 0:
-    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
-                  dtype=dtype_parse(inp.data_type), requires_grad=False)
-  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
-  # if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  # data = (onnx_tensor.raw_data if onnx_tensor.HasField("raw_data") else list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or
-  #   list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or list(onnx_tensor.uint64_data))
-  # dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
-  # # HACK need true float16
-  # if onnx_tensor.data_type == TensorProto.FLOAT16 and onnx_tensor.HasField("raw_data"):
-  #   return Tensor(np.frombuffer(data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape), dtype=dtype)
-  # return Tensor(data, dtype=dtype).reshape(shape).realize()
+def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
+  if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
+  data = (onnx_tensor.raw_data if onnx_tensor.HasField("raw_data") else list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or
+    list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or list(onnx_tensor.uint64_data))
+  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  # HACK need true float16
+  if onnx_tensor.data_type == TensorProto.FLOAT16 and onnx_tensor.HasField("raw_data"):
+    return Tensor(np.frombuffer(data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape), dtype=dtype)
+  return Tensor(data, dtype=dtype).reshape(shape).realize()
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
