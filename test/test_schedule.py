@@ -1334,13 +1334,12 @@ class TestSchedule(unittest.TestCase):
     p = np.tile(p, 2)
     np.testing.assert_allclose(tiny_ret, p)
 
-  @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
-  def test_bitcast_subbufer(self):
+  def test_bitcast_fuses(self):
     x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
     a = x.alu(Ops.EXP2).cast(dtypes.int32, True)
     b = x.cast(dtypes.int32, True)
     b = a.alu(Ops.ADD, b)
-    check_schedule(b, 2) # this should fuse when it makes sense
+    check_schedule(b, 1) # this should fuse when it makes sense
 
   @unittest.skip("disabling subbuffer manually isn't supported anymore")
   def test_bitcast_disable_subbufer(self):
