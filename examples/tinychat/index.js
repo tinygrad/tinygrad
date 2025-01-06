@@ -177,7 +177,7 @@ const getAndDecompressGGUFChunks = async (decomp) => {
   }
 
   // TODO: encode netKeys in metadata
-  const netKeys = ["net_part0", "net_part1"];
+  const netKeys = ["net_part0", "net_part1", "net_part2"];
   console.log("Downloading compressed model weights")
   const compressedBuffers = await Promise.all(netKeys.map(key => getPart(key)));
   for (let i = 0; i < compressedBuffers.length; i++) {
@@ -399,20 +399,23 @@ document.addEventListener("alpine:init", () => {
         tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
       }
       tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
-      cursor = tokens.length - 1;
-      
-      // pad with mask tokens (1000000)
-      // TODO: re-enable Variable and cache_kv in llama.py, make it compile properly to webgpu js
-      if (tokens.length < this.max_context) {
-        tokens = tokens.concat(new Array(this.max_context - tokens.length).fill(1000000));
+      let start_pos = 0
+
+      let prefill_toks = tokens.slice(0, -1);
+
+      // TODO: implement whole llama3.py prefill method, here we are missing the prompt skipping logic
+      for (const tok of prefill_toks) {
+        const out = await this.nets["transformer"](new Float32Array([[tok]]), start_pos);
+        start_pos += 1;
       }
 
+      let last_tok = tokens[tokens.length - 1];
       while (true) {
-        const tok = await this.nets["transformer"](new Int32Array(tokens));
-        cursor += 1;
-        tokens[cursor] = tok[0];
-        if (this.tokenizer.stop_tokens.has(tok[0])) break;
-        yield new TextDecoder().decode(this.tokenizer.decode([tok]));
+        const tok = await this.nets["transformer"](new Float32Array([[last_tok]]), start_pos);
+        start_pos += 1;
+        last_tok = tok[0];
+        if (this.tokenizer.stop_tokens.has(last_tok)) break;
+        yield new TextDecoder().decode(this.tokenizer.decode([last_tok]));
       }
     },
   }));

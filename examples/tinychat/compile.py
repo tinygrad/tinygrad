@@ -7,36 +7,11 @@ from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata, gguf_load
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
-from tinygrad import Device, GlobalCounters
+from tinygrad import Device, GlobalCounters, Variable
 from tinygrad.helpers import fetch, prod
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 from tinygrad.helpers import flatten
-
-def split_safetensor(fn):
-  _, data_start, metadata = safe_load_metadata(fn)
-  chunk_size = 536870912
-  last_offset = 0
-  part_end_offsets = []
-
-  for k in metadata:
-    offset = metadata[k]['data_offsets'][0]
-    part_offset = offset - last_offset
-
-    if (part_offset >= chunk_size):
-      part_end_offsets.append(data_start+offset)
-      last_offset = offset
-
-  net_bytes = bytes(open(fn, 'rb').read())
-  part_end_offsets.append(len(net_bytes))
-  cur_pos = 0
-
-  for i, end_pos in enumerate(part_end_offsets):
-    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.safetensors'), "wb+") as f:
-      f.write(net_bytes[cur_pos:end_pos])
-      cur_pos = end_pos
-
-  return part_end_offsets
 
 # from nn.state.ggml_data_to_tensor
 def q_to_uint8(t: Tensor, b: int) -> Tensor:
@@ -191,7 +166,6 @@ if __name__=="__main__":
   dump_tiktoken_bpe(mergeable_ranks, bpe_path)
 
   Device.DEFAULT = "WEBGPU"
-  device = Device.DEFAULT
   model = build_transformer(model_path, model_size=model_size, max_context=max_context, load_weights=False)
   state_dict = safe_load(f32_fn)
   load_state_dict(model, state_dict, consume=True)
@@ -200,20 +174,9 @@ if __name__=="__main__":
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   GlobalCounters.reset()
 
-  """
-  Here we make concessions to get a jitted model that will compile with the current tinygrad webgpu compiler, to something that works in the browser.
-  TODO: get rid of these concessions to make the browser webgpu model fast
-
-  Concession 1: We are inferencing with our entire context length of tokens, instead of one token at a time,
-    because Variable(...).bind(start_pos) stuff doesn't properly compile to webgpu js code. Instead, to get dynamic inference with a fixed kernel shape, 
-    we use mask tokens (token = 1000000, arbitrarily chosen to be well outside of vocab range). These mask tokens affect the attention mask.
-
-  Concession 2: We are not using the attention layers' kv cache, because otherwise although the model will compile to js with each layer's kv cache 
-    in place, the currently-generated js code doesn't update the kv caches during inference as far as I can tell.
-  """
-
-  toks = toks + (max_context - len(toks)) * [1_000_000]
-  out = model.forward(Tensor([toks]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P, True)
+  # initialize stuff not included in downloaded weights: kv cache, freqs_cis, tok_embeddings.arange
+  tok = 128000
+  out = model.forward(Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
 
   # We waited to prepare the chunks until here, because model.freqs_cis and model.tok_embeddings.arange are only ready now
   metadata = prepare_browser_gguf_chunks(str(model_path), model)
@@ -224,10 +187,11 @@ if __name__=="__main__":
     input: List[Tensor] = []
     forward: Any = None
 
+  start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
     Step(
       name = "transformer", 
-      input = [Tensor([toks]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P, True], 
+      input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], 
       forward = model.forward),
   ]
 

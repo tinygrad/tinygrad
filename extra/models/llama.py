@@ -44,7 +44,7 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor], disable_cache=False) -> Tensor:
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     if getenv("WQKV"):
       if not hasattr(self, 'wqkv'): self.wqkv = Tensor.cat(self.wq.weight, self.wk.weight, self.wv.weight)
       xqkv = x @ self.wqkv.T
@@ -59,22 +59,21 @@ class Attention:
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
 
-    # TODO: re-enable kv cache, make webgpu js code update the kv cache
-    keys, values = xk, xv
-    if not disable_cache:
-      # create kv cache
-      if not hasattr(self, "cache_kv"):
-        self.cache_kv = Tensor.zeros(2, bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
-        if isinstance(x.device, tuple):
-          # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
-          self.cache_kv.shard_((x.device), axis=3 if getenv("SHARD_KVCACHE") else None).realize()
+    # create kv cache
+    if not hasattr(self, "cache_kv"):
+      self.cache_kv = Tensor.zeros(2, bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
+      if isinstance(x.device, tuple):
+        # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
+        self.cache_kv.shard_((x.device), axis=3 if getenv("SHARD_KVCACHE") else None).realize()
 
-      # update the cache
-      assert xk.dtype == xv.dtype == self.cache_kv.dtype, f"{xk.dtype=}, {xv.dtype=}, {self.cache_kv.dtype=}"
-      self.cache_kv.shrink((None, None, (start_pos, start_pos+seqlen), None, None)).assign(Tensor.stack(xk, xv)).realize()
+    # update the cache
+    assert xk.dtype == xv.dtype == self.cache_kv.dtype, f"{xk.dtype=}, {xv.dtype=}, {self.cache_kv.dtype=}"
+    self.cache_kv.shrink((None, None, (start_pos, start_pos+seqlen), None, None)).assign(Tensor.stack(xk, xv)).realize()
 
-      keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None)) if start_pos > 0 else xk
-      values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None)) if start_pos > 0 else xv
+    #keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None)) if start_pos > 0 else xk
+    #values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None)) if start_pos > 0 else xv
+    keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None))
+    values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None))
 
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
@@ -98,8 +97,8 @@ class TransformerBlock:
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor], disable_cache):
-    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask, disable_cache)
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
+    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous()
 
 # standard openai sampling
@@ -163,37 +162,16 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous()
     self.forward_jit = TinyJit(self.forward) if jit else None
 
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float, disable_cache=False):
+  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
-    #mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
-    if seqlen > 1:
-      mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=self.tok_embeddings.weight.dtype, device=self.tok_embeddings.weight.device).triu(start_pos+1)
-      # TODO: remove mask token logic, make Variable work with webgpu
-      is_token = (tokens == 1_000_000)
-      pad_mask = Tensor.zeros(1, 1, 1, seqlen) + is_token.where(-float("inf"), 0).unsqueeze(0).unsqueeze(-1)
-      mask = (mask + pad_mask).realize()
-      tokens = is_token.where(0, tokens)
-      sample_pos = (is_token.cumsum(axis=1) == 0).sum() - 1
-
     h = self.tok_embeddings(tokens)
-    if seqlen > 1:
-      # expand is_token to h.shape
-      is_token = Tensor.full((h.shape[0], 1, h.shape[2]), False) + is_token.unsqueeze(-1)
 
     self.freqs_cis = self.freqs_cis.cast(h.dtype).realize()
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
-    for layer in self.layers: 
-      h = layer(h, start_pos, freqs_cis, mask, disable_cache)
-      if seqlen > 1:
-        # remove nans arising from attention softmax on rows of -inf (mask token positions)
-        h = is_token.where(0, h)
-    
-    if seqlen > 1:
-      # the last token could be a mask token
-      logits = self.output(self.norm(h)).float()[:, sample_pos, :]
-    else:
-      logits = self.output(self.norm(h)).float()[:, -1, :]
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
+    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
+    logits = self.output(self.norm(h)).float()[:, -1, :]
 
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
