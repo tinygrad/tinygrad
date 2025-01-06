@@ -14,10 +14,7 @@ class TextFileDesc(VirtFileDesc):
     self.offset = 0
 
   def ioctl(self, fd, req, argp): return 0
-  def read_contents(self, size=None, offset=0):
-    size = len(self.content) or size
-    self.offset += size
-    return self.content[self.offset:self.offset+size]
+  def read_contents(self, size=None, offset=0): return self.content[self.offset:self.offset+(size or len(self.content))]
 class DirFileDesc(VirtFileDesc):
   def __init__(self, fd, child_names):
     super().__init__(fd)
