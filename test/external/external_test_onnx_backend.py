@@ -175,14 +175,6 @@ backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
-# asymmetric pads
-backend_test.exclude('test_averagepool_2d_same_lower_cpu')
-backend_test.exclude('test_averagepool_2d_same_upper_cpu')
-backend_test.exclude('test_convtranspose_autopad_same_cpu')
-backend_test.exclude('test_convtranspose_output_shape_cpu')
-backend_test.exclude('test_maxpool_2d_same_lower_cpu')
-backend_test.exclude('test_maxpool_2d_same_upper_cpu')
-
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
