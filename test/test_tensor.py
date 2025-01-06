@@ -792,7 +792,7 @@ class TestIdxUpcast(unittest.TestCase):
     store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
-    if idx is not None: # PTX has additional rewrite turns Ops.INDEX into buffer op in int64, so skipping asserts here
+    if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
       assert idx_val.dtype is dtype
@@ -818,7 +818,7 @@ class TestIdxUpcast(unittest.TestCase):
 
   @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
-    # This would cause an overflow before sym folding, and after upcast, the original sym fold pattern matcher won't apply
+    # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(100_000)
     prg = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in prg.uops)
