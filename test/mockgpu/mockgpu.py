@@ -59,7 +59,7 @@ class MockHWInterface(HWInterface):
 
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.path = path
-    self.fd = _open(path, flags) or fd
+    self.fd = fd or _open(path, flags)
 
   def __del__(self):
     if self.fd in tracked_fds:
