@@ -1,7 +1,7 @@
 import ctypes, time
 from typing import Literal
 from tinygrad.runtime.autogen import libpciaccess
-from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
+from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32
 
 class AM_IP:
