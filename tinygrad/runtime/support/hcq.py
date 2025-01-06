@@ -19,9 +19,9 @@ class HWInterface:
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, self.fd, offset)
   def read(self, size=None, binary=False):
-    with open(self.fd, "rb" if binary else "r") as file:
-      file.seek(self.offset)
-      return file.read(size) if binary else file.read(size).rstrip()
+    if os.lseek(self.fd, 0, os.SEEK_CUR) == os.fstat(self.fd).st_size: os.lseek(self.fd, 0, os.SEEK_SET)
+    ret = os.read(self.fd, size) if size else os.read(self.fd, os.fstat(self.fd).st_size-os.lseek(self.fd, 0, os.SEEK_CUR))
+    return ret if binary else ret.decode()
   def write(self, content, binary=False): os.write(self.fd, content) if binary else os.write(self.fd, content.encode("utf-8"))
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_CUR)
