@@ -90,6 +90,11 @@ jobs:
           /opt/rocm/lib64
         EOF
         sudo ldconfig
+    - name: Install packages (llvm)
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends llvm-14-dev
     - name: Compile EfficientNet to C and test it
       run: |
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
@@ -127,6 +132,11 @@ jobs:
         ./autogen_stubs.sh io_uring
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+    - name: Verify LLVM autogen
+      run: |
+        cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
+        ./autogen_stubs.sh llvm
+        diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
 
   uops:
     name: uops tests
@@ -546,7 +556,7 @@ jobs:
           EOF
           sudo ldconfig
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
