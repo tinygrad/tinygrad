@@ -50,7 +50,7 @@ def get_sched_bert():
       # ignore grad norm and loss scaler for now
       loss.backward()
       targets += [x for x in optim.schedule_step()]
-    sched = Tensor.schedule(targets)
+    sched = Tensor.schedule(*targets)
     print(f"schedule length {len(sched)}")
   return sched
 

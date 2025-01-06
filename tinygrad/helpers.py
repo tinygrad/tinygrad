@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
 import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
-from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard
+from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -102,11 +102,11 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
-WINO, CAPTURING, TRACEMETA, PROFILE = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("PROFILE", 0)
+WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
-PICKLE_BUFFERS = ContextVar("PICKLE_BUFFERS", 1)
+PICKLE_BUFFERS, PROFILE = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROFILE", getenv("VIZ"))
 
 @dataclass(frozen=True)
 class Metadata:
@@ -242,7 +242,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
       assert r.status == 200, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
-      progress_bar = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
+      progress_bar:tqdm = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
       with tempfile.NamedTemporaryFile(dir=_dir, delete=False) as f:
         while chunk := readfile.read(16384): progress_bar.update(f.write(chunk))
         f.close()
@@ -282,13 +282,15 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 
 # *** tqdm
 
-class tqdm:
-  def __init__(self, iterable=None, desc:str='', disable:bool=False, unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
+class tqdm(Generic[T]):
+  def __init__(self, iterable:Iterable[T]|None=None, desc:str='', disable:bool=False,
+               unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
     self.iterable, self.disable, self.unit, self.unit_scale, self.rate = iterable, disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
     self.set_description(desc)
     self.update(0)
-  def __iter__(self):
+  def __iter__(self) -> Iterator[T]:
+    assert self.iterable is not None, "need an iterable to iterate"
     for item in self.iterable:
       yield item
       self.update(1)
