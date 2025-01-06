@@ -696,7 +696,7 @@ class UPat(MathTrait):
 
     #if isinstance(src, list) and all_same(src): self.src = tuple(src)
 
-    self.allowed_len: int = -1 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
+    self.allowed_len: int = -1 if allow_any_len or isinstance(src, UPat) or src is None or (src and isinstance(src[0], tuple)) else len(src)
     self.location = location or get_location()
     self.early_reject = {}
 
@@ -737,7 +737,7 @@ class UPat(MathTrait):
     def rep(x):
       form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
       return form % (None if x.op is None else ('(%s)'%', '.join(map(str, x.op))), x.arg, repr(x.name),
-        set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and (isinstance(x.src, UPat) or len(x.src)>1) else "(%s)")
+        set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and (isinstance(x.src, UPat) or isinstance(x.src, list)) else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [x.src] if isinstance(x.src, UPat) \
                         else x.src[0] if x.src and isinstance(x.src[0], tuple) else x.src)
 
@@ -776,7 +776,7 @@ class PatternMatcher:
   def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
     self.states: dict[int, dict[tuple|int, int]] = {}
-    self.final: dict[int, list[tuple[int, list[tuple[str, list[int]]], bool, Callable]]] = {}
+    self.final: dict[int, list[tuple[int, list[tuple[str, tuple[int]]], bool, Callable]]] = {}
     self.num_states = 0
 
     for i,(pat,fxn) in enumerate(self.patterns):
@@ -798,7 +798,7 @@ class PatternMatcher:
               ret.append(self.states[st][v])
           return ret
 
-        # if src is a list all src permutations are valid TODO: add support for any src
+        # if src is a list all src permutations are valid
         all_srcs = itertools.permutations(src) if isinstance(pat.src, list) else src if std_src and isinstance(std_src[0], tuple) else (src,)
         # create transitions for srcs
         all_states = []
@@ -816,26 +816,26 @@ class PatternMatcher:
         elif pat.allow_any_len:
           for st in all_states: self.states.setdefault(st, {})[None] = st
         # create transitions for upat vals to be matched
-        states = _new_states(((pat.op, pat.dtype, pat.arg),), all_states)
+        states = _new_states(((pat.op, pat.dtype, pat.arg, pat.allowed_len),), all_states)
         return tuple(states)
       
-      def _assign_names(pat: UPat, si: int) -> list[list[tuple[str, list[int]]]]:
+      def _assign_names(pat: UPat, si: int|None) -> list[list[tuple[str, tuple[int]]]]:
         if isinstance(pat.src, list): all_src = itertools.permutations(pat.src)
         elif isinstance(pat.src, UPat): all_src = ((pat.src,),)
         elif pat.src is None: all_src = ((),)
         elif pat.src and isinstance(pat.src[0], tuple): all_src = pat.src
         else: all_src = (pat.src,)
 
-        all_names: list[list[tuple[str, list[int]]]] = []
+        all_names: list[list[tuple[str, tuple[int]]]] = []
         for src in all_src:
           names = [_assign_names(s, i) for i,s in enumerate(src)]
           names = list(itertools.product(*names))
           names = [[ll for l in tup for ll in l] for tup in names]
           all_names.extend(names)
         for nms in all_names:
-          if pat.name is not None: nms.append((pat.name, []))
+          if pat.name is not None: nms.append((pat.name, ()))
           if si is not None:
-            for nm in nms: nm[1].insert(0, si)
+            for i,nm in enumerate(nms): nms[i] = (nm[0], (si,) + nm[1])
         return all_names
 
       assert pat.op is not None
@@ -846,7 +846,7 @@ class PatternMatcher:
       # names contains the str to assign and the path to the uop to be assigned
       names = _assign_names(pat, None)
       assert len(states) == len(names)
-      for st,nm in zip(states, names): self.final.setdefault(st, []).append((i, pat, nm, has_ctx, real_fxn))
+      for st,nm in zip(states, names): self.final.setdefault(st, []).append((i, nm, has_ctx, real_fxn))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -876,15 +876,16 @@ class RewriteContext:
     # add root state to match pattern where the pat for this uop doesn't have srcs
     # TODO: get rid of root state
     if uop.src: states = states + (0,)
-    def _match(uop: UOp, ops, dtypes, arg):
-      return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes or uop.dtype.scalar() in dtypes) and (arg is None or uop.arg == arg)
+    def _match(uop: UOp, ops, dtypes, arg, allowed_len):
+      return (ops is None or uop.op in ops) and (dtypes is None or uop.dtype in dtypes or uop.dtype.scalar() in dtypes) \
+              and (arg is None or uop.arg == arg) and (allowed_len == -1 or len(uop.src) == allowed_len)
     states = tuple(self.pm.states[st][vals] for st in states for vals in self.pm.states[st] if isinstance(vals, tuple) and _match(uop, *vals))
     return states
   
   def rewrite_uop(self, uop:UOp, srcs:tuple[int]) -> UOp|None:
     states = self.advance(uop, srcs)
     sorted_matches = sorted((m for st in states if st in self.pm.final for m in self.pm.final[st]), key=lambda m: m[0])
-    for _,pat,nm,has_ctx,fxn in sorted_matches:
+    for _,nm,has_ctx,fxn in sorted_matches:
       no_match = False
       names = {}
       for name,path in nm:
