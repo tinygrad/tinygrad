@@ -111,10 +111,10 @@ def get_run_onnx(onnx_model: ModelProto):
       # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
       for dim, onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
         dim_param, dim_value = onnx_dim.dim_param, onnx_dim.dim_value
-        user_val = user_input.shape[dim]
-        if (not dim_param and user_val != dim_value) or (dim_param and user_val != (dim_value:=variable_dims.get(dim_param))):
-          raise RuntimeError(f"{model_input.name} has dimension mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_val}")
-        if dim_param is not None and dim_param not in variable_dims: variable_dims[dim_param] = user_val
+        user_dim_input = user_input.shape[dim]
+        if dim_param: dim_value = variable_dims[dim_param] if dim_param in variable_dims else variable_dims.setdefault(dim_param, user_dim_input)
+        if user_dim_input != dim_value:
+          raise RuntimeError(f"{model_input.name} has dimension mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_dim_input}")
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
     raise NotImplementedError(f"{model_input.name} with {type_field_names=} is not supported")
