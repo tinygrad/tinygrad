@@ -49,9 +49,8 @@ tensor_uop_spec = PatternMatcher([
   # ** specs with room for refactoring and improving
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("copyin"),)), lambda copy,copyin:
-   # arg (clone?) + dtype
-   isinstance(copy.arg, bool) and copy.dtype == copyin.dtype),
+  # NOTE: the arg here specifies clone=True, which prevents folding same device copy
+  (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
   # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
   # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
@@ -67,8 +66,8 @@ tensor_uop_spec = PatternMatcher([
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
-  # BUFFER and VIEW specify device and shape for meta ops
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat(GroupOp.Meta, name="uop"))),
+  # BUFFER and VIEW specify device and shape for EMPTY and BUFFER_VIEW
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat({Ops.EMPTY, Ops.BUFFER_VIEW}, name="uop"))),
    lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
 
   # DEVICE and VIEW specify device and shape for BIND
@@ -78,7 +77,7 @@ tensor_uop_spec = PatternMatcher([
   # TODO: this should be EMPTY(VIEW(BUFFER))
   (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
 
-  # TODO: BUFFER_VIEW is overloaded, can we break it into multiple well defined UOps?
+  # TODO: BUFFER_VIEW is overloaded, it should be removed.
   # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
 
   (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x:
