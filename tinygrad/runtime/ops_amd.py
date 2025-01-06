@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
@@ -269,7 +269,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def map(self, buf:HCQBuffer): self.dev.dev_iface.map(buf._base if buf._base is not None else buf)
 
-MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0x2000
+MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
 
 @dataclass
 class AMDQueueDesc:

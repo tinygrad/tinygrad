@@ -219,7 +219,8 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.UVM_ENABLE_PEER_ACCESS: pass # uvm and shared spaced are setup already, no emulation for now
     elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE:
       st = nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS.from_address(argp)
-      libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
+      ret = libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
+      assert ret != 0xffffffffffffffff, f"mmap UVM_CREATE_EXTERNAL_RANGE failed at 0x{st.base:X} with len 0x{st.length:X}"
     elif nr == nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION:
       st = nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS.from_address(argp)
       for gpu_attr_id in range(st.gpuAttributesCount):
