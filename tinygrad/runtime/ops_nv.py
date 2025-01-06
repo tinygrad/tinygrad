@@ -311,7 +311,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, tag="") -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
-    page_size = (4 << 10) if uncached or host else ((2 << 20) if size >= (8 << 20) else normal_page_size)
+    page_size = (4 << 10) if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))
     size = round_up(size, page_size)
     va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
 
