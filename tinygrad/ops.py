@@ -363,10 +363,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return ret
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType):
-    if self.can_view():
+    if self.can_view() and self.device.startswith("DISK"):
       if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
       else:
-        if not self.device.startswith("DISK") or not all_int(self.shape): raise RuntimeError(f"shape changing bitcast not supported on {self}")
         # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
         if (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
         output_shape = self.shape[:-1]+((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
@@ -451,9 +450,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
-    # copy the base and apply the shapetracker on the new device
-    if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, clone, (UOp(Ops.DEVICE, arg=device), src)).view(unwrap(self.st))
+    # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
+    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
