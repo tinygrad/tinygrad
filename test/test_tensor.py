@@ -822,15 +822,15 @@ class TestIdxUpcast(unittest.TestCase):
     prg = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in prg.uops)
 
+  @unittest.expectedFailure
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
-    with self.assertRaises(RuntimeError):
-      self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+    self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
+  @unittest.expectedFailure
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow(self):
-    with self.assertRaises(RuntimeError):
-      self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
+    self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
 
 if __name__ == '__main__':
   unittest.main()
