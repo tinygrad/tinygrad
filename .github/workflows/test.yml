@@ -646,6 +646,12 @@ jobs:
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: sudo mkdir /usr/local/lib && sudo cp ${{ github.workspace }}/llvm-project/amd/comgr/build/libamd_comgr.dylib /usr/local/lib/ 
+      - name: Upload comgr artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libcomgr
+          path: |
+            /usr/local/lib/libamd_comgr.dylib
       - name: Cache remu
         uses: actions/cache@v4
         id: cache-remu
