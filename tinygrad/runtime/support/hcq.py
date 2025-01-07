@@ -9,9 +9,6 @@ from tinygrad.runtime.autogen import libc
 
 # all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
 class HWInterface:
-  path:str
-  fd:int
-
   def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
     self.path = path
     self.fd = fd or os.open(path, flags)
