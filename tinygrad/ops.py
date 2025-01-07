@@ -363,10 +363,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return ret
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType):
-    if self.can_view():
+    if self.can_view() and self.device.startswith("DISK"):
       if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
       else:
-        if not self.device.startswith("DISK") or not all_int(self.shape): raise RuntimeError(f"shape changing bitcast not supported on {self}")
         # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
         if (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
         output_shape = self.shape[:-1]+((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
