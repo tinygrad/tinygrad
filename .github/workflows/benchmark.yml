@@ -513,7 +513,7 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: validate openpilot 0.9.7
-      run: PYTHONPATH=. FLOAT16=0 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
+      run: PYTHONPATH=. FLOAT16=0 IMAGE=0 CLANG=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_clang_0_9_7.txt
     - name: benchmark openpilot 0.9.4
       run: PYTHONPATH=. QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
     - name: benchmark openpilot 0.9.7
@@ -534,8 +534,7 @@ jobs:
       with:
         name: Speed (comma)
         path: |
-          openpilot_compile_0_9_4.txt
-          openpilot_compile_0_9_7.txt
+          openpilot_clang_0_9_7.txt
           openpilot_0_9_4.txt
           openpilot_0_9_7.txt
           openpilot_image_0_9_4.txt
