@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
@@ -419,7 +419,7 @@ class PCIIface:
 
     # Unbind the device from the kernel driver
     if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_RDWR).write(self.pcibus)
+      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
 
     # Probe device
@@ -431,21 +431,24 @@ class PCIIface:
         HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
         PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
         vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-      except OSError: PCIIface.vfio = False
+
+        HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
+        HWInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
+
+        iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+      except OSError:
+        if DEBUG >= 1: print(f"AM: failed to init vfio-pci module (not inserted or no-iommu mode is not supported).")
+        PCIIface.vfio = False
 
     # Init vfio for the device
     if PCIIface.vfio:
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override").write("vfio-pci")
-      HWInterface("/sys/bus/pci/drivers_probe").write(self.pcibus)
-
-      iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
       self.vfio_group = HWInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
 
       if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-      self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode()))
+      self.vfio_dev = HWInterface("", 0, fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
-      self.irq_fd = HWInterface.eventfd(0,0)
+      self.irq_fd = HWInterface.eventfd(0, 0)
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
@@ -509,8 +512,8 @@ class PCIIface:
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
 
   def sleep(self, timeout):
-    if PCIIface.vfio and len(self.irq_poller.poll(timeout)):
-      self.irq_fd.read(1024)
+    if PCIIface.vfio and (events_cnt:=len(self.irq_poller.poll(timeout))):
+      self.irq_fd.read(8 * events_cnt)
       self.adev.ih.interrupt_handler()
 
   def on_device_hang(self):

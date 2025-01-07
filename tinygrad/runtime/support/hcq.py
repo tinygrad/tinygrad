@@ -18,7 +18,7 @@ class HWInterface:
   def read(self, size=None, binary=False):
     with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
   def write(self, content, binary=False, overwrite=True):
-    with open(self.fd, "wb" if binary else "w", closefd=False) as file: return file.write(content)
+    with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
   @staticmethod
