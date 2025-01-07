@@ -18,8 +18,7 @@ class HWInterface:
   def read(self, size=None, binary=False):
     with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
   def write(self, content, binary=False, overwrite=True):
-    # if overwrite: os.truncate(self.fd, 0)
-    os.write(self.fd, content) if binary else os.write(self.fd, content.encode("utf-8"))
+    with open(self.fd, "wb" if binary else "w", closefd=False) as file: return file.write(content)
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
   @staticmethod
@@ -31,10 +30,9 @@ class HWInterface:
   @staticmethod
   def readlink(path): return os.readlink(path)
   @staticmethod
-  def eventfd(initval, flags=None): return HWInterface(":eventfd:", flags, os.eventfd(initval, flags)) # type: ignore[attr-defined]
+  def eventfd(initval, flags=None): return HWInterface(":eventfd:", flags, os.eventfd(initval, flags))
 
-if MOCKGPU:=getenv("MOCKGPU"):
-  from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
