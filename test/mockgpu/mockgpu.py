@@ -54,7 +54,7 @@ def _open(path, flags):
   return os.open(path, flags, 0o777) if os.path.exists(path) else None
 
 class MockHWInterface(HWInterface):
-  def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
+  def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
     self.path = path
     self.fd = fd or _open(path, flags)
 

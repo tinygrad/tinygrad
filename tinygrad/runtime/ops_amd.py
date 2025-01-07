@@ -292,6 +292,8 @@ class KFDIface:
     self.dev = dev
 
     kfd_topo_path = "/sys/devices/virtual/kfd/kfd/topology/nodes"
+
+    # Initialize KFD interface during first run
     if KFDIface.kfd is None:
       KFDIface.kfd = HWInterface("/dev/kfd", os.O_RDWR)
       gpus = [g for g in HWInterface(kfd_topo_path).listdir() if self._is_usable_gpu(HWInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
