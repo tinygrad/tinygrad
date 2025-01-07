@@ -1,6 +1,6 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 
-import os, sys, json
+import os, sys, json, hashlib
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
 from extra.models.llama import convert_from_gguf
 from examples.llama3 import build_transformer, Tokenizer
@@ -123,6 +123,16 @@ def prepare_browser_gguf_chunks(model_path, model):
   metadata = convert_from_gguf(metadata, model)
   for k,v in new_weights.items():
     metadata[k] = v["metadata"]
+
+  # compute hashes, which client app will check to determine whether to update with new weights and/or detect integrity issues
+  state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
+  metadata = {"state_dict": metadata, "state_dict_hash": state_dict_hash, "chunks": []}
+  for i in range(len(chunks)):
+    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "rb") as reader:
+      metadata["chunks"].append({"name": f'net_part{i}.gguf.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
+  metadata_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
+  metadata = {"metadata": metadata, "metadata_hash": metadata_hash}
+
   with open(os.path.join(os.path.dirname(__file__), f'./net_metadata.json'), "w") as writer: json.dump(metadata, writer, indent=4)
   return metadata
 

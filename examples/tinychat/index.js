@@ -92,7 +92,7 @@ function readTensorFromDb(db, id) {
   });
 }
 
-// copied from examples/webgpu/stable_diffusion/index.html 
+// modified from examples/webgpu/stable_diffusion/index.html 
 function saveTensorToDb(db, id, tensor) {
   return readTensorFromDb(db, id).then((result) => {
     if (!result) {
@@ -124,6 +124,44 @@ function saveTensorToDb(db, id, tensor) {
       return null;
     }
   }).catch(()=> null);
+}
+
+function deleteTensorFromDb(db, id) {
+  return new Promise((resolve, reject) => {
+    if (db == null) {
+      console.error("Database is not initialized.");
+      resolve(null);
+      return;
+    }
+
+    const transaction = db.transaction(['tensors'], 'readwrite');
+    const store = transaction.objectStore('tensors');
+    const request = store.delete(id);
+
+    transaction.oncomplete = () => {
+      console.log(`Tensor with ID '${id}' deleted successfully.`);
+      resolve();
+    };
+
+    transaction.onerror = (event) => {
+      console.error("Transaction error while deleting tensor:", event.target.error);
+      resolve(null);
+    };
+
+    request.onerror = (event) => {
+      console.error('Tensor deletion failed:', event.target.error);
+      resolve(null);
+    };
+
+    request.onsuccess = () => {
+      console.log(`Delete request for tensor with ID '${id}' succeeded.`);
+    };
+  });
+}
+
+async function hashBuffer(bytes) {
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function dequantize(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) {
@@ -162,32 +200,45 @@ const getAndDecompressGGUFChunks = async (decomp) => {
 
   const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
   // TODO: cache metadata
-  const state_dict = await response.json();
+  const data = await response.json();
+  const state_dict = data.metadata.state_dict;
 
   let db = await initDb();
 
   // TODO: add progress tracker
-  const getPart = async(key) => {
-    let part = await readTensorFromDb(db, key);
+  const getPart = async(filename, hash) => {
+    let part = await readTensorFromDb(db, hash);
 
     if (part) {
-      console.log(`Cache hit: ${key}`);
+      console.log(`Cache hit: ${filename}, hash: ${hash}`);
       return Promise.resolve(part.content);
     } else {
-      console.log(`Cache miss: ${key}`);
+      console.log(`Cache miss: ${filename}, hash: ${hash}`);
       //return getProgressDlForPart(`${window.MODEL_BASE_URL}/${key}.safetensors`, progressCallback);
-      return loadPart(`${window.MODEL_BASE_URL}/${key}.gguf.chunk`);
+      return loadPart(`${window.MODEL_BASE_URL}/${filename}`);
     }
   }
 
-  // TODO: encode netKeys in metadata
-  const netKeys = ["net_part0", "net_part1", "net_part2"];
-  console.log("Downloading compressed model weights")
-  const compressedBuffers = await Promise.all(netKeys.map(key => getPart(key)));
+  const correctHashes = data.metadata.chunks.map(chunk => chunk.hash)
+  const compressedBuffers = await Promise.all(data.metadata.chunks.map(chunk => getPart(chunk.name, chunk.hash)));
+
+  // check integrity of buffers, replace invalid cached buffers
   for (let i = 0; i < compressedBuffers.length; i++) {
     compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
-    saveTensorToDb(db, netKeys[i], compressedBuffers[i]);
+    checked_hash = await hashBuffer(compressedBuffers[i]);
+    if (checked_hash !== correctHashes[i]) {
+      console.log(`Replacing invalid buffer with name: ${data.metadata.chunks[i].name}, expected hash: ${correctHashes[i]}, actual hash: ${checked_hash}`)
+      await deleteTensorFromDb(db, correctHashes[i]);
+      compressedBuffers[i] = await getPart(data.metadata.chunks[i].name, correctHashes[i]);
+      compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
+    }
+    saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
+
+  // TODO: encode netKeys in metadata
+  //const netKeys = ["net_part0", "net_part1", "net_part2"];
+  //console.log("Downloading compressed model weights")
+  //const compressedBuffers = await Promise.all(netKeys.map(key => getPart(key)));
   console.log("Compressed model chunks loaded");
 
   for (const [k, v] of Object.entries(state_dict)) {
