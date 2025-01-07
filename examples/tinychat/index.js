@@ -126,7 +126,7 @@ function saveTensorToDb(db, id, tensor) {
   }).catch(()=> null);
 }
 
-function dequantize(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) {
+async function dequantize(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) {
 
   if (parent.length % BYTES_PER_CHUNK_IN !== 0) {
     throw new Error("Parent length must be a multiple of BYTES_PER_CHUNK_IN bytes.");
@@ -147,6 +147,10 @@ function dequantize(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) {
     decomp._net(inputPtr, outputPtr);
     const offset = i * BYTES_PER_CHUNK_OUT;
     result.set(outputViewU8, offset);
+
+    // prevent browser lag 
+    // TODO: use workers
+    if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0));
   }
   decomp._free(inputPtr);
   decomp._free(outputPtr);
@@ -190,7 +194,7 @@ const getAndDecompressGGUFChunks = async (decomp) => {
     v.bytes = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
     if (v.dtype === "Q6_K") {
       console.log(`decompressing ${k}`)
-      v.bytes = dequantize(v.bytes, decomp, 430080, 524288);
+      v.bytes = await dequantize(v.bytes, decomp, 430080, 524288);
       v.dtype = "float32";
       v.size = v.bytes.byteLength;
     }
@@ -215,6 +219,7 @@ const getAndDecompressGGUFChunks = async (decomp) => {
     }
     if (!placed) chunks.push([t]);
   }
+  console.log("binning complete");
 
   const decompressedBuffers = [];
   for (let i=0; i<chunks.length; i++) {
@@ -222,15 +227,18 @@ const getAndDecompressGGUFChunks = async (decomp) => {
     const chunkSize = chunk.reduce((sum, j) => sum + j.size, 0);
     decompressedBuffers.push(new Uint8Array(chunkSize));
     let cursor = 0;
-    for (const t of chunk) {
+    for (let j=0; j<chunk.length; j++) {
+      const t = chunk[j];
       decompressedBuffers[i].set(state_dict[t.name].bytes, cursor);
       state_dict[t.name].bytes = null;
       state_dict[t.name].chunk = i;
       state_dict[t.name].start_pos = cursor;
       cursor += t.size;
+      if (j % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0)); // prevent browser lag
     }
   }
 
+  console.log("chunking complete");
   return {chunks: decompressedBuffers, metadata: state_dict};
 };
 
