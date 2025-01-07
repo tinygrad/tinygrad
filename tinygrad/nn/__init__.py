@@ -325,6 +325,12 @@ class Embedding:
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
     return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
 
+  def attend(self, x:Tensor) -> Tensor:
+    """
+    Re-project embeddings into the vocab space for models with shared in/out embeds.
+    """
+    return x @ self.weight.T
+
 class LSTMCell:
   """
   A long short-term memory (LSTM) cell.
