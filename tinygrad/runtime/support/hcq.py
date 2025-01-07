@@ -7,11 +7,14 @@ from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, Profil
 from tinygrad.ops import sym_infer, sint, Variable
 from tinygrad.runtime.autogen import libc
 
-# all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
 class HWInterface:
-  def __init__(self, path:str, flags=os.O_RDONLY, fd=None):
-    self.path = path
-    self.fd = fd or os.open(path, flags)
+  """
+  Hardware Abstraction Layer for HCQ devices. The class provides a unified interface for interacting with hardware devices.
+  """
+
+  def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
+    self.path:str = path
+    self.fd:int = fd or os.open(path, flags)
   def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
@@ -30,7 +33,7 @@ class HWInterface:
   @staticmethod
   def readlink(path): return os.readlink(path)
   @staticmethod
-  def eventfd(initval, flags=None): return HWInterface(":eventfd:", flags, os.eventfd(initval, flags))
+  def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))
 
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
