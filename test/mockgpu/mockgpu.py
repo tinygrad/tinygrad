@@ -78,6 +78,7 @@ class MockHWInterface(HWInterface):
     if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
       return tracked_fds[self.fd].read_contents(size)
+    if os.lseek(self.fd, 0, os.SEEK_CUR) >= os.fstat(self.fd).st_size: os.lseek(self.fd, 0, os.SEEK_SET)
     ret = os.read(self.fd, size) if size else os.read(self.fd, os.fstat(self.fd).st_size-os.lseek(self.fd, 0, os.SEEK_CUR))
     return ret if binary else ret.decode()
 
