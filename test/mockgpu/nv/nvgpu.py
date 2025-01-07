@@ -55,7 +55,7 @@ class GPFIFO:
 
   def _reset_buf_state(self): self.buf, self.buf_ptr = None, 0
   def _set_buf_state(self, gpfifo_entry):
-    ptr = ((gpfifo_entry >> 2) & 0x3fffffffff) << 2
+    ptr = ((gpfifo_entry >> 2) & 0xfffffffff) << 2
     sz = ((gpfifo_entry >> 42) & 0x1fffff) << 2
     self.buf = to_mv(ptr, sz).cast("I")
     self.buf_sz = sz // 4
