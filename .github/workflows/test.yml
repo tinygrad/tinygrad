@@ -605,7 +605,7 @@ jobs:
         id: cache-comgr-restore
         uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}/llvm-project
+          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
           key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Clone LLVM and AMD projects
         if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
@@ -641,13 +641,11 @@ jobs:
         id: cache-comgr-save
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/llvm-project
+          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
           key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Install comgr
         if: matrix.backend == 'amd'
-        run: |
-          cd ${{ github.workspace }}/llvm-project/amd/comgr/build
-          sudo make install
+        run: sudo cp ${{ github.workspace }}/llvm-project/amd/comgr/build/libamd_comgr.dylib /usr/local/lib/ 
       - name: Cache remu
         uses: actions/cache@v4
         id: cache-remu
