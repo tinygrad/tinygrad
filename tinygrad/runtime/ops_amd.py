@@ -431,8 +431,9 @@ class PCIIface:
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:
       try:
-        HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
-        PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
+        if first_dev:
+          HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
+          PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
         vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
         HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
