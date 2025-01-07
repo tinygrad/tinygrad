@@ -92,6 +92,24 @@ function readTensorFromDb(db, id) {
   });
 }
 
+function getAllKeysFromDb(db) {
+  return new Promise((resolve, reject) => {
+    if (db == null) {resolve([]);}
+    const transaction = db.transaction(['tensors'], 'readonly');
+    const store = transaction.objectStore('tensors');
+    const request = store.getAllKeys();
+    transaction.onabort = (event) => {
+      console.log("Transaction error while reading IndexedDB keys: " + event.target.error);
+      resolve([]);
+    };
+    request.onsuccess = function (event) {resolve(event.target.result);};
+    request.onerror = (event) => {
+      console.error('Retrieval of IndexedDB keys failed: ', event.target.error);
+      resolve([]);
+    };
+  });
+}
+
 // modified from examples/webgpu/stable_diffusion/index.html 
 function saveTensorToDb(db, id, tensor) {
   return readTensorFromDb(db, id).then((result) => {
@@ -221,6 +239,12 @@ const getAndDecompressGGUFChunks = async (decomp) => {
 
   const correctHashes = data.metadata.chunks.map(chunk => chunk.hash)
   const compressedBuffers = await Promise.all(data.metadata.chunks.map(chunk => getPart(chunk.name, chunk.hash)));
+
+  // delete unused cached buffers to free disk space
+  const dbKeys = await getAllKeysFromDb(db);
+  const correctHashesSet = new Set(correctHashes);
+  const notInCorrectHashes = dbKeys.filter(key => !correctHashesSet.has(key));
+  for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
 
   // check integrity of buffers, replace invalid cached buffers
   for (let i = 0; i < compressedBuffers.length; i++) {
