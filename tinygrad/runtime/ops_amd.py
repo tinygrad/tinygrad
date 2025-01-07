@@ -437,7 +437,7 @@ class PCIIface:
 
         iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
       except OSError:
-        if DEBUG >= 1: print(f"AM: failed to init vfio-pci module (not inserted or no-iommu mode is not supported).")
+        if DEBUG >= 1: print("AM: failed to init vfio-pci module (not inserted or no-iommu mode is not supported).")
         PCIIface.vfio = False
 
     # Init vfio for the device
