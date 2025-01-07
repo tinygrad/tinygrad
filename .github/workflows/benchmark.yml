@@ -136,7 +136,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash -o pipefail {0}
