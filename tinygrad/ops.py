@@ -230,8 +230,6 @@ buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # t
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
-becomes_map: weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()
-
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -284,20 +282,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # buffer ops return the ShapeTracker from sources
     if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
-    src_sts = [x.st for x in self.src if x.st is not None]
+    if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
-    match self.op:
-      # only reduce ops are allowed to change shape
-      case Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
-      case Ops.WMMA:
-        if len(src_sts) == 0: return None
-        shape = src_sts[0].reduce(self.axis_arg)
-      # everything else derives shape from sources
-      case _:
-        if len(src_sts) == 0: return None
-        shape = src_sts[0].shape
+    # only reduce ops are allowed to change shape, everything else derives shape from sources
+    shape = src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(shape)
+
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
@@ -356,8 +347,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True):
-    if bitcast: return self.bitcast(dtype, allow_buffer_view)
+  def cast(self, dtype:DType, bitcast=False):
+    if bitcast: return self.bitcast(dtype)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
@@ -371,11 +362,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
       return ret
     return UOp(Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType, allow_buffer_view=True):
-    if self.can_view() and allow_buffer_view:
+  def bitcast(self, dtype:DType):
+    if self.can_view() and self.device.startswith("DISK"):
       if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
       else:
-        if not self.device.startswith("DISK") or not all_int(self.shape): raise RuntimeError(f"shape changing bitcast not supported on {self}")
         # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
         if (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
         output_shape = self.shape[:-1]+((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
@@ -460,9 +450,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
-    # copy the base and apply the shapetracker on the new device
-    if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, (device, clone), (src,)).view(unwrap(self.st))
+    # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
+    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
@@ -474,10 +463,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metadata(self): return all_metadata.get(self, None)
   @property
   def forced_realize(self): return self in forced_realize
-
-  # *** less danger zone ***
-
-  def become(self, u:UOp): becomes_map[self] = u
 
   # *** uop movement ops ***
 
@@ -514,8 +499,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _device(self) -> Optional[str]:
     if self.op is Ops.DEVICE: return self.arg
-    # TODO: why does this fail?
-    #if self.op is Ops.COPY: return self.arg[0]
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
@@ -991,10 +974,8 @@ spec = PatternMatcher([
 def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
   specs = [spec, *extra_specs]
   for i,u in enumerate(uops):
-    results = [cast(bool|None, s.rewrite(u)) for s in specs]
-    # none of the specs should return False
-    # at least one spec should return True
-    if any(ret is False for ret in results) or all(ret is None for ret in results):
+    spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
+    if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 

@@ -69,7 +69,7 @@ generate_comgr() {
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
-  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'"
+  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'" "'/usr/local/lib/libamd_comgr.dylib'"
   sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\_try_dlopen_amd_comgr()\g" $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
@@ -79,6 +79,10 @@ generate_kfd() {
 
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
+  sed -i "s\import fcntl, functools\import functools" $BASE/kfd.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/kfd.py
+  sed -i "s\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, **kwargs):\g" $BASE/kfd.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
@@ -263,6 +267,10 @@ generate_vfio() {
     /usr/include/linux/vfio.h \
     -o $BASE/vfio.py
   fixup $BASE/vfio.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
+  sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/vfio.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
 }
 
 generate_am() {
