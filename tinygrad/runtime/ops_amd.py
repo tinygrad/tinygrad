@@ -430,7 +430,7 @@ class PCIIface:
       try:
         HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
         PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
-        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd.fd, vfio.VFIO_NOIOMMU_IOMMU)
+        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
       except OSError: PCIIface.vfio = False
 
     # Init vfio for the device
@@ -454,7 +454,8 @@ class PCIIface:
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
     else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
 
-    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC).fd for bar in [0, 2, 5]}
+    self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
+    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
 
     self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
@@ -476,10 +477,9 @@ class PCIIface:
       va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      f = HWInterface("/proc/self/pagemap", os.O_RDONLY)
       for off in range(0, size, mmap.PAGESIZE):
-        f.seek(((va + off) // mmap.PAGESIZE) * 8)
-        pt_entry = struct.unpack("Q", f.read(8, binary=True))[0] & ((1 << 55) - 1)
+        self.pagemap.seek(((va + off) // mmap.PAGESIZE) * 8)
+        pt_entry = struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)
         self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=pt_entry * mmap.PAGESIZE, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
