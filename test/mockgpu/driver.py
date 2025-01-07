@@ -14,7 +14,6 @@ class TextFileDesc(VirtFileDesc):
 
   def ioctl(self, fd, req, argp): return 0
   def read_contents(self, size=None):
-    if self.off == len(self.content): self.off = 0
     ret = self.content[self.off:self.off+(size or len(self.content))]
     self.off += (size or len(self.content))
     return ret
