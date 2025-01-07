@@ -55,6 +55,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
              list(onnx_tensor.uint64_data):
     return Tensor(data, dtype=dtype).reshape(shape).realize()
+  assert onnx_tensor.HasField("raw_data")
   return Tensor(np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape), dtype=dtype)
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
