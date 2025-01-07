@@ -9,7 +9,8 @@ from typing import List, Union
 
 def realize(x: Union[UOp, List[UOp]]):
   x = x if isinstance(x, list) else [x]
-  run_schedule(*create_schedule_with_vars(x))
+  schedule, var_vals, _ = create_schedule_with_vars(x)
+  run_schedule(schedule, var_vals)
   for lb in x: Device[lb.device].synchronize()
 
 def test(devs: List[str], N: int, iters:int = 10):
