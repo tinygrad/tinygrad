@@ -280,8 +280,8 @@ class AMDQueueDesc:
   put_value: int = 0
 
 class KFDIface:
-  kfd:HWInterface
-  event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
+  kfd:HWInterface|None = None
+  event_page:HCQBuffer|None = None
   gpus:list[HWInterface] = []
 
   def _is_usable_gpu(self, gpu_id):
@@ -291,17 +291,18 @@ class KFDIface:
   def __init__(self, dev, device_id):
     self.dev = dev
 
-    BASE_DIR = "/sys/devices/virtual/kfd/kfd/topology/nodes"
-    KFDIface.kfd = HWInterface("/dev/kfd", os.O_RDWR)
-    gpus = [g for g in HWInterface(BASE_DIR).listdir() if self._is_usable_gpu(HWInterface(f"{BASE_DIR}/{g}/gpu_id"))]
-    gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
-    visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-    KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
+    kfd_topo_path = "/sys/devices/virtual/kfd/kfd/topology/nodes"
+    if KFDIface.kfd is None:
+      KFDIface.kfd = HWInterface("/dev/kfd", os.O_RDWR)
+      gpus = [g for g in HWInterface(kfd_topo_path).listdir() if self._is_usable_gpu(HWInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
+      gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
+      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
+      KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
-    self.gpu_id = int(HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/gpu_id").read())
-    self.props = {l.split()[0]: int(l.split()[1]) for l in HWInterface(f"{BASE_DIR}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
+    self.gpu_id = int(HWInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/gpu_id").read())
+    self.props = {l.split()[0]: int(l.split()[1]) for l in HWInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
     self.drm_fd = HWInterface(f"/dev/dri/renderD{self.props['drm_render_minor']}", os.O_RDWR)
 
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd.fd, gpu_id=self.gpu_id)
