@@ -645,7 +645,7 @@ jobs:
           key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Install comgr
         if: matrix.backend == 'amd'
-        run: sudo cp ${{ github.workspace }}/llvm-project/amd/comgr/build/libamd_comgr.dylib /usr/local/lib/ 
+        run: sudo mkdir /usr/local/lib && sudo cp ${{ github.workspace }}/llvm-project/amd/comgr/build/libamd_comgr.dylib /usr/local/lib/ 
       - name: Cache remu
         uses: actions/cache@v4
         id: cache-remu
