@@ -7,7 +7,7 @@ from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
   graph_rewrite, track_rewrites, view_left
-from tinygrad.device import Device
+from tinygrad.device import Device, is_dtype_supported
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put
@@ -663,6 +663,11 @@ class Kernel:
     verify_ast(modified_ast)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    for u in self.uops:
+      # Doing this in type_verify would require importing device.py in ops.py and complicate `ctx`
+      if not is_dtype_supported(u.dtype.base.scalar(), self.opts.device):
+        print_uops(self.uops)
+        raise RuntimeError(f"Unsupported dtype {u.dtype} for device {self.opts.device}")
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
