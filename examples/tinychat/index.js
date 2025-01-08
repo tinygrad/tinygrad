@@ -12,25 +12,6 @@ const getDevice = async () => {
   });
 };
 
-function updateProgressBar(percentage, message) {
-  const progressBar = document.querySelector('.progress');
-  const progressText = document.getElementById('progress-percentage');
-  const messageText = document.getElementById('loading-message');
-  
-  // Update the progress bar width
-  progressBar.style.width = `${percentage}%`;
-  
-  // Update the percentage text
-  progressText.textContent = `${percentage}%`;
-
-  // Update the dynamic loading message
-  if (message) {
-    loadingMessage = message; // Update the global variable if a new message is passed
-    messageText.textContent = loadingMessage;
-  }
-}
-
-
 // copied from examples/webgpu/stable_diffusion/index.html 
 function initDb() {
   return new Promise((resolve, reject) => {
@@ -178,19 +159,10 @@ async function hashBuffer(bytes) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const getAndDecompressGGUFChunks = async (decomp, loadingMessage) => {
+const getAndDecompressGGUFChunks = async (decomp, progress) => {
   let totalLoaded = 0;
   let totalSize = 0;
   let partSize = {};
-
-  const progress = (loaded, total, message) => {
-    document.querySelector('.progress').style.width = `${loaded/total * 100}%`;
-    document.getElementById('progress-percentage').textContent = `${Math.trunc((loaded/total) * 100)}%`;
-    if (message) {
-      loadingMessage = message;
-      document.getElementById('loading-message').textContent = loadingMessage;
-    }
-  }
 
   const progressCallback = (part, loaded, total, message) => {
     totalLoaded += loaded;
@@ -249,15 +221,16 @@ const getAndDecompressGGUFChunks = async (decomp, loadingMessage) => {
   const correctHashes = data.metadata.chunks.map(chunk => chunk.hash)
   const compressedBuffers = await Promise.all(data.metadata.chunks.map(chunk => getPart(chunk.name, chunk.hash)));
 
-  // delete unused cached buffers to free disk space
+  // delete unused cached buffers to free disk space -- if we update weights, user will otherwise have obsolete cached buffers
   const dbKeys = await getAllKeysFromDb(db);
   const correctHashesSet = new Set(correctHashes);
   const notInCorrectHashes = dbKeys.filter(key => !correctHashesSet.has(key));
   for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
 
-  // check integrity of buffers, replace invalid cached buffers
   for (let i = 0; i < compressedBuffers.length; i++) {
     compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
+    // check integrity of buffers, replace invalid cached buffers
+    // may not be necessary, and takes time
     checked_hash = await hashBuffer(compressedBuffers[i]);
     if (checked_hash !== correctHashes[i]) {
       console.log(`Replacing invalid buffer with name: ${data.metadata.chunks[i].name}, expected hash: ${correctHashes[i]}, actual hash: ${checked_hash}`)
@@ -374,10 +347,20 @@ document.addEventListener("alpine:init", () => {
     tokenizer: null,
     max_context: 1024,
 
+    progress(loaded, total, message) {
+      const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
+      document.querySelector('.progress').style.width = `${percentage}%`;
+      document.getElementById('progress-percentage').textContent = `${percentage}%`;
+      if (message) {
+        this.loadingMessage = message;
+        document.getElementById('loading-message').textContent = this.loadingMessage;
+      }
+    },
+
     async init() {
       try {
         const q6k_to_f32 = await Module();
-        const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32, this.loadingMessage);
+        const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32, this.progress.bind(this));
 
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
         const wasmBytes = await wasmResponse.arrayBuffer();
