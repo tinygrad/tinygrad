@@ -231,6 +231,7 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
     compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
     // check integrity of buffers, replace invalid cached buffers
     // may not be necessary, and takes time
+    /*
     checked_hash = await hashBuffer(compressedBuffers[i]);
     if (checked_hash !== correctHashes[i]) {
       console.log(`Replacing invalid buffer with name: ${data.metadata.chunks[i].name}, expected hash: ${correctHashes[i]}, actual hash: ${checked_hash}`)
@@ -238,6 +239,7 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
       compressedBuffers[i] = await getPart(data.metadata.chunks[i].name, correctHashes[i]);
       compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
     }
+    */
     saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
 
