@@ -163,6 +163,7 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
   let totalLoaded = 0;
   let totalSize = 0;
   let partSize = {};
+  const bytesPerIteration = 430080;
 
   const progressCallback = (part, loaded, total, message) => {
     totalLoaded += loaded;
@@ -211,6 +212,9 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
 
     if (part) {
       console.log(`Cache hit: ${filename}, hash: ${hash}`);
+      totalLoaded += part.content.byteLength;
+      totalSize += part.content.byteLength;
+      progress(totalLoaded, totalSize, "Downloading model:")
       return Promise.resolve(part.content);
     } else {
       console.log(`Cache miss: ${filename}, hash: ${hash}`);
@@ -243,12 +247,12 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
     saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
 
-  console.log("Compressed model chunks loaded");
-
   totalLoaded = 0;
-  totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0) / 430080;
+  totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0) / bytesPerIteration;
   const numCheckpoints = 100;
   let nextCheckpoint = totalSize / numCheckpoints;
+  const decompProgressFraction = 0.90;
+  totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
 
   const dequantize = async(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) => {
     if (parent.length % BYTES_PER_CHUNK_IN !== 0) {
@@ -274,7 +278,7 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
       totalLoaded += 1;
       if (totalLoaded >= nextCheckpoint) {
         progress(totalLoaded, totalSize, "Decompressing model:");
-        nextCheckpoint += totalSize / numCheckpoints;
+        nextCheckpoint += totalSize * decompProgressFraction / numCheckpoints;
       }
 
       // prevent browser lag 
@@ -290,13 +294,11 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
   for (const [k, v] of Object.entries(state_dict)) {
     v.bytes = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
     if (v.dtype === "Q6_K") {
-      console.log(`decompressing ${k}`)
-      v.bytes = await dequantize(v.bytes, decomp, 430080, 524288);
+      v.bytes = await dequantize(v.bytes, decomp, bytesPerIteration, bytesPerIteration * 256 / 210);
       v.dtype = "float32";
       v.size = v.bytes.byteLength;
     }
   }
-  console.log("Decompression complete")
 
   // FFD bin packing
   const maxChunkSize = 1149173760; // byte size of float32 output.weight in llama-1B
@@ -316,7 +318,7 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
     }
     if (!placed) chunks.push([t]);
   }
-  console.log("binning complete");
+  progress(totalSize * 0.95, totalSize, "Decompressing model:");
 
   const decompressedBuffers = [];
   for (let i=0; i<chunks.length; i++) {
@@ -335,7 +337,7 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
     }
   }
 
-  console.log("chunking complete");
+  progress(totalSize * 1.0, totalSize, "Decompressing model:");
   return {chunks: decompressedBuffers, metadata: state_dict};
 };
 
@@ -364,23 +366,27 @@ document.addEventListener("alpine:init", () => {
         const q6k_to_f32 = await Module();
         const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32, this.progress.bind(this));
 
+        this.progress(0, 100, "Loading tokenizer:");
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
+        this.progress(10, 100, "Loading tokenizer:");
         const wasmBytes = await wasmResponse.arrayBuffer();
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
+        this.progress(20, 100, "Loading tokenizer:");
 
         //this.tokenizer = await createTokenizer("./llama3-2.tiktoken");
         this.tokenizer = await createTokenizer(`${window.MODEL_BASE_URL}/llama3-2.tiktoken`);
         tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
+        this.progress(30, 100, "Loading tokenizer:");
 
         const device = await getDevice();
-        console.log("WebGPU device initialized")
-
+        console.log("WebGPU device initialized");
+        this.progress(40, 100, "Launching WebGPU model:");
         let models = ["transformer"];
         this.nets = await Promise.all([
-                transformer().setup(device, tensorData.chunks, tensorData.metadata),
+                transformer().setup(device, tensorData.chunks, tensorData.metadata, this.progress.bind(this)),
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
-        console.log("Transformer setup without exceptions");
+        this.progress(100, 100, "Launching WebGPU model:");
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
       } catch (error) {
         console.error("Error initializing model:", error);
