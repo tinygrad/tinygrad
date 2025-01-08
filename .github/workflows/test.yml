@@ -595,11 +595,6 @@ jobs:
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
-      - name: Install packages
-        if: matrix.backend == 'amd'
-        run: |
-          brew update
-          brew install cmake rust
       - name: Restore comgr from cache
         if: matrix.backend == 'amd'
         id: cache-comgr-restore
@@ -614,6 +609,11 @@ jobs:
           cd ${{ github.workspace }}/llvm-project
           git checkout 669db884972e769450470020c06a6f132a8a065b
           rm -rf .git
+      - name: Install build dependencies
+        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
+        run: |
+          brew update
+          brew install --formula cmake rust
       # Comgr depends on LLVM, clang, lld, and device-libs. (https://github.com/ROCm/llvm-project/tree/rocm-6.1.x/amd/comgr)
       - name: Build LLVM
         if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
