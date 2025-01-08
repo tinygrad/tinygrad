@@ -595,78 +595,21 @@ jobs:
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
-      - name: Cache comgr
-        if: matrix.backend == 'amd'
-        id: cache-comgr
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
-          key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
-      - name: Cache remu
-        uses: actions/cache@v4
-        id: cache-remu
-        with:
-          path: ${{ github.workspace }}/remu/target
-          key: remu-osx-b873f2d254ebfdc81fc113e311c80efaedf061f8
-      - name: Clone LLVM and AMD projects
-        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true' && steps.cache-remu.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 10 -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
-          cd ${{ github.workspace }}/llvm-project
-          git checkout 669db884972e769450470020c06a6f132a8a065b
-          rm -rf .git
-      - name: Install build dependencies
-        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
-        run: |
-          brew update
-          brew install --formula cmake rust
-      # Comgr depends on LLVM, clang, lld, and device-libs. (https://github.com/ROCm/llvm-project/tree/rocm-6.1.x/amd/comgr)
-      - name: Build LLVM
-        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
-        run: |
-          cd ${{ github.workspace }}/llvm-project
-          mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" -DLLVM_TARGETS_TO_BUILD="AMDGPU;AArch64" ../llvm
-          make -j$(sysctl -n hw.ncpu)
-      - name: Build device-libs
-        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
-        run: |
-          cd ${{ github.workspace }}/llvm-project/amd/device-libs
-          mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build" ..
-          make -j$(sysctl -n hw.ncpu)
-      - name: Build comgr
-        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
-        run: |
-          cd ${{ github.workspace }}/llvm-project/amd/comgr
-          mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build;${{ github.workspace }}/llvm-project/amd/device-libs/build" -DCOMGR_DISABLE_SPIRV=1 -DBUILD_TESTING=OFF ..
-          make -j$(sysctl -n hw.ncpu)
       - name: Install comgr
         if: matrix.backend == 'amd'
-        run: sudo mkdir /usr/local/lib && sudo cp ${{ github.workspace }}/llvm-project/amd/comgr/build/libamd_comgr.dylib /usr/local/lib/ 
-      - name: Clone remu
-        if: matrix.backend == 'amd' && steps.cache-remu.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/Qazalin/remu ${{ github.workspace }}/remu
-          cd ${{ github.workspace }}/remu
-          git checkout b873f2d254ebfdc81fc113e311c80efaedf061f8
-      - name: Compile remu
-        if: matrix.backend == 'amd' && steps.cache-remu.outputs.cache-hit != 'true'
-        run: |
-          cd ${{ github.workspace }}/remu
-          cargo build --release
+          sudo mkdir -p /usr/local/lib
+          curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
+            xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
       - name: Install remu
         if: matrix.backend == 'amd'
-        run: sudo cp ${{ github.workspace }}/remu/target/release/libremu.dylib /usr/local/lib/
+        run: |
+          curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
+            xargs curl -L -o $INSTALL_PATH/libremu.dylib
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: libamd_comgr
-          path: |
-            /usr/local/lib/libamd_comgr.dylib
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
