@@ -1,6 +1,6 @@
 #!/bin/bash
 INSTALL_PATH="${1:-/opt/homebrew/lib}"
-[ ! -d "$INSTALL_PATH" ] && sudo mkdir -p "$INSTALL_PATH"
+[ ! -d "$INSTALL_PATH" ] && mkdir -p "$INSTALL_PATH"
 
 curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
     jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
