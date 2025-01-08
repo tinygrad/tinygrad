@@ -837,7 +837,7 @@ class TrackedPatternMatcher(PatternMatcher):
           if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p, et))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
+    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0 and len(tracked_ctxs[-1]) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
     return None
 
 if TRACK_MATCH_STATS:
@@ -971,10 +971,11 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
-def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
-  spec_pm = spec if extra_spec is None else spec+extra_spec
+def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
+  specs = [spec, *extra_specs]
   for i,u in enumerate(uops):
-    if not spec_pm.rewrite(u):
+    spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
+    if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 

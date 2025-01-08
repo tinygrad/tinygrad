@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
@@ -2220,6 +2220,21 @@ class TestCopyFolding(unittest.TestCase):
     b = (a*zeros).to("CLANG")
     run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
+
+class TestTensorUOpSpec(unittest.TestCase):
+  def test_const_must_be_unmasked(self):
+    a = Tensor.ones((4, 4)).pad((2, 2))
+    unsafe_push_views = PatternMatcher([
+      (UPat.cvar("root").view(name="view"), lambda root,view: root.replace(src=tuple(x.view(view.st) for x in root.src))),
+    ])
+    t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_push_views)
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      create_schedule_with_vars(list(t.src))
+
+  def test_expanded_const_ok(self):
+    a = Tensor.ones((4, 4))
+    t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
+    create_schedule_with_vars(list(t.src))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
