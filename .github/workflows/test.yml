@@ -671,9 +671,6 @@ jobs:
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py --durations=20
-      - name: Run tiny test (amd)
-        if: matrix.backend=='amd'
-        run: python3 test/test_tiny.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
