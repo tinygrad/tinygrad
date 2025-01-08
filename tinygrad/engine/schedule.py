@@ -39,9 +39,12 @@ tensor_uop_spec = PatternMatcher([
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
-  # Tensor const and variable have an unmasked ShapeTracker of stride 0 and a device
-  (UPat({Ops.CONST, Ops.DEFINE_VAR}, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
+  # Tensor const has an unmasked ShapeTracker of stride 0 and a device
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
    lambda st: len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides) and st.st.views[0].mask is None),
+
+  # Tensor variable has an empty shape
+  (UPat(Ops.DEFINE_VAR, src=(UPat(Ops.VIEW, arg=ShapeTracker.from_shape(())))), lambda:True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -509,9 +512,8 @@ do_realize = PatternMatcher([
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
-  ret = var.replace(src=())
   assert isinstance(val.src[1].const_arg, int), f"expected BIND value to be int {val}"
-  ctx.var_vals[ret] = val.src[1].const_arg
+  ctx.var_vals[ret:=var.replace(src=())] = val.src[1].const_arg
   return ret.valid(unwrap(bind.st))
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
