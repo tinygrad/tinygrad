@@ -364,31 +364,32 @@ document.addEventListener("alpine:init", () => {
     async init() {
       try {
         var q6k_to_f32 = await Module();
-      } catch (error) {this.loadingMessage="Error loading decompressor"; console.log(error); return;}
+      } catch (error) {this.progress(0, 100, "Error loading decompressor"); console.log(error); return;}
 
       try {
         var tensorData = await getAndDecompressGGUFChunks(q6k_to_f32, this.progress.bind(this));
-      } catch (error) {this.loadingMessage="Error decompressing model"; console.log(error); return;}
+      } catch (error) {this.progress(0, 100, "Error decompressing model"); console.log(error); return;}
 
+      var p = 0;
       try {
-        this.progress(0, 100, "Loading tokenizer:");
+        this.progress(p, 100, "Loading tokenizer:");
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
-        this.progress(10, 100, "Loading tokenizer:");
+        p = 10; this.progress(p, 100, "Loading tokenizer:");
         const wasmBytes = await wasmResponse.arrayBuffer();
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
-        this.progress(20, 100, "Loading tokenizer:");
+        p = 20; this.progress(p, 100, "Loading tokenizer:");
 
         this.tokenizer = await createTokenizer(`${window.MODEL_BASE_URL}/llama3-2.tiktoken`);
         const tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
-        this.progress(30, 100, "Loading tokenizer:");
-      } catch (error) {this.loadingMessage="Error launching tokenizer"; console.log(error); return;}
+        p = 30; this.progress(p, 100, "Loading tokenizer:");
+      } catch (error) {this.progress(p, 100, "Error launching tokenizer"); console.log(error); return;}
 
       try {
         var device = await getDevice();
         console.log("WebGPU device initialized");
-        this.progress(40, 100, "Launching WebGPU model:");
-      } catch (error) {this.loadingMessage="Error launching WebGPU"; console.log(error); return;}
+        p = 40; this.progress(p, 100, "Launching WebGPU model:");
+      } catch (error) {this.progress(p, 100, "Error launching WebGPU"); console.log(error); return;}
 
       try {
         let models = ["transformer"];
@@ -397,7 +398,7 @@ document.addEventListener("alpine:init", () => {
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
         this.progress(100, 100, "Launching WebGPU model:");
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
-      } catch (error) {this.loadingMessage="Error launching model"; console.log(error); return;}
+      } catch (error) {this.progress(p, 100, "Error launching model"); console.log(error); return;}
     },
 
     // current state
