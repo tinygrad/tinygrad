@@ -12,28 +12,24 @@ const getDevice = async () => {
   });
 };
 
-// modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
-const loadPart = async (part) => {
-    const response = await fetch(part);
-    // const contentLength = response.headers.get('content-length');
-    // const total = parseInt(contentLength, 10);
+function updateProgressBar(percentage, message) {
+  const progressBar = document.querySelector('.progress');
+  const progressText = document.getElementById('progress-percentage');
+  const messageText = document.getElementById('loading-message');
+  
+  // Update the progress bar width
+  progressBar.style.width = `${percentage}%`;
+  
+  // Update the percentage text
+  progressText.textContent = `${percentage}%`;
 
-    const res = new Response(new ReadableStream({
-        async start(controller) {
-            const reader = response.body.getReader();
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                //progressCallback(part, value.byteLength, total);
-                controller.enqueue(value);
-            }
-                    
-            controller.close();
-        },
-    }));
-        
-    return res.arrayBuffer();
-};
+  // Update the dynamic loading message
+  if (message) {
+    loadingMessage = message; // Update the global variable if a new message is passed
+    messageText.textContent = loadingMessage;
+  }
+}
+
 
 // copied from examples/webgpu/stable_diffusion/index.html 
 function initDb() {
@@ -182,39 +178,53 @@ async function hashBuffer(bytes) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function dequantize(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) {
+const getAndDecompressGGUFChunks = async (decomp, loadingMessage) => {
+  let totalLoaded = 0;
+  let totalSize = 0;
+  let partSize = {};
 
-  if (parent.length % BYTES_PER_CHUNK_IN !== 0) {
-    throw new Error("Parent length must be a multiple of BYTES_PER_CHUNK_IN bytes.");
+  const progress = (loaded, total, message) => {
+    document.querySelector('.progress').style.width = `${loaded/total * 100}%`;
+    document.getElementById('progress-percentage').textContent = `${Math.trunc((loaded/total) * 100)}%`;
+    if (message) {
+      loadingMessage = message;
+      document.getElementById('loading-message').textContent = loadingMessage;
+    }
   }
-  const numChunks = parent.length / BYTES_PER_CHUNK_IN;
-  const BYTES_PER_CHUNK_OUT = FLOATS_PER_CHUNK_OUT * 4;
-  const inputPtr = decomp._malloc(BYTES_PER_CHUNK_IN);
-  const outputPtr = decomp._malloc(BYTES_PER_CHUNK_OUT);
-  const inputView = new Uint8Array(decomp.HEAPU8.buffer, inputPtr, BYTES_PER_CHUNK_IN);
-  const outputViewF32 = new Float32Array(decomp.HEAPF32.buffer, outputPtr, FLOATS_PER_CHUNK_OUT);
-  const outputViewU8 = new Uint8Array(outputViewF32.buffer, outputViewF32.byteOffset, outputViewF32.byteLength);
-  const result = new Uint8Array(numChunks * BYTES_PER_CHUNK_OUT);
 
-  for (let i = 0; i < numChunks; i++) {
-    const start = i * BYTES_PER_CHUNK_IN;
-    const end   = start + BYTES_PER_CHUNK_IN;
-    inputView.set(parent.subarray(start, end));
-    decomp._net(inputPtr, outputPtr);
-    const offset = i * BYTES_PER_CHUNK_OUT;
-    result.set(outputViewU8, offset);
+  const progressCallback = (part, loaded, total, message) => {
+    totalLoaded += loaded;
 
-    // prevent browser lag 
-    // TODO: use workers
-    if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0));
-  }
-  decomp._free(inputPtr);
-  decomp._free(outputPtr);
+    if (!partSize[part]) {
+      totalSize += total;
+      partSize[part] = true;
+    }
+                
+    progress(totalLoaded, totalSize, message);
+  };
 
-  return result;
-}
+  // modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
+  const loadPart = async (part, progressCallback) => {
+      const response = await fetch(part);
+      const contentLength = response.headers.get('content-length');
+      const total = parseInt(contentLength, 10);
 
-const getAndDecompressGGUFChunks = async (decomp) => {
+      const res = new Response(new ReadableStream({
+          async start(controller) {
+              const reader = response.body.getReader();
+              for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  progressCallback(part, value.byteLength, total, "Downloading model:");
+                  controller.enqueue(value);
+              }
+                    
+              controller.close();
+          },
+      }));
+        
+      return res.arrayBuffer();
+  };
 
   const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
   // TODO: cache metadata
@@ -232,8 +242,7 @@ const getAndDecompressGGUFChunks = async (decomp) => {
       return Promise.resolve(part.content);
     } else {
       console.log(`Cache miss: ${filename}, hash: ${hash}`);
-      //return getProgressDlForPart(`${window.MODEL_BASE_URL}/${key}.safetensors`, progressCallback);
-      return loadPart(`${window.MODEL_BASE_URL}/${filename}`);
+      return loadPart(`${window.MODEL_BASE_URL}/${filename}`, progressCallback);
     }
   }
 
@@ -259,11 +268,49 @@ const getAndDecompressGGUFChunks = async (decomp) => {
     saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
 
-  // TODO: encode netKeys in metadata
-  //const netKeys = ["net_part0", "net_part1", "net_part2"];
-  //console.log("Downloading compressed model weights")
-  //const compressedBuffers = await Promise.all(netKeys.map(key => getPart(key)));
   console.log("Compressed model chunks loaded");
+
+  totalLoaded = 0;
+  totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0) / 430080;
+  const numCheckpoints = 100;
+  let nextCheckpoint = totalSize / numCheckpoints;
+
+  const dequantize = async(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) => {
+    if (parent.length % BYTES_PER_CHUNK_IN !== 0) {
+      throw new Error("Parent length must be a multiple of BYTES_PER_CHUNK_IN bytes.");
+    }
+    const numChunks = parent.length / BYTES_PER_CHUNK_IN;
+    const BYTES_PER_CHUNK_OUT = FLOATS_PER_CHUNK_OUT * 4;
+    const inputPtr = decomp._malloc(BYTES_PER_CHUNK_IN);
+    const outputPtr = decomp._malloc(BYTES_PER_CHUNK_OUT);
+    const inputView = new Uint8Array(decomp.HEAPU8.buffer, inputPtr, BYTES_PER_CHUNK_IN);
+    const outputViewF32 = new Float32Array(decomp.HEAPF32.buffer, outputPtr, FLOATS_PER_CHUNK_OUT);
+    const outputViewU8 = new Uint8Array(outputViewF32.buffer, outputViewF32.byteOffset, outputViewF32.byteLength);
+    const result = new Uint8Array(numChunks * BYTES_PER_CHUNK_OUT);
+
+    for (let i = 0; i < numChunks; i++) {
+      const start = i * BYTES_PER_CHUNK_IN;
+      const end   = start + BYTES_PER_CHUNK_IN;
+      inputView.set(parent.subarray(start, end));
+      decomp._net(inputPtr, outputPtr);
+      const offset = i * BYTES_PER_CHUNK_OUT;
+      result.set(outputViewU8, offset);
+
+      totalLoaded += 1;
+      if (totalLoaded >= nextCheckpoint) {
+        progress(totalLoaded, totalSize, "Decompressing model:");
+        nextCheckpoint += totalSize / numCheckpoints;
+      }
+
+      // prevent browser lag 
+      // TODO: use workers
+      if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    decomp._free(inputPtr);
+    decomp._free(outputPtr);
+
+    return result;
+  }
 
   for (const [k, v] of Object.entries(state_dict)) {
     v.bytes = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
@@ -319,6 +366,9 @@ const getAndDecompressGGUFChunks = async (decomp) => {
 
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
+    // loadingMessage updates the user on page load progress, including weights download and decompression
+    // if loadingMessage is not '', then prompt box will be hidden: this is default behavior on page load
+    loadingMessage: 'Loading...',
     // model
     nets: {},
     tokenizer: null,
@@ -327,7 +377,7 @@ document.addEventListener("alpine:init", () => {
     async init() {
       try {
         const q6k_to_f32 = await Module();
-        const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32);
+        const tensorData = await getAndDecompressGGUFChunks(q6k_to_f32, this.loadingMessage);
 
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
         const wasmBytes = await wasmResponse.arrayBuffer();
@@ -346,6 +396,7 @@ document.addEventListener("alpine:init", () => {
                 transformer().setup(device, tensorData.chunks, tensorData.metadata),
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
         console.log("Transformer setup without exceptions");
+        this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
       } catch (error) {
         console.error("Error initializing model:", error);
       }

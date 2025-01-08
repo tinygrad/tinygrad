@@ -151,7 +151,14 @@
           <p class="megrim-regular">TOKENS</p>
         </span>
       </div>
-      <div class="input">
+      <div class="loading-bar" x-show="loadingMessage !== ''">
+        <p class="loading-text" id="loading-message">Loading:</p>
+        <span id="progress-percentage">0%</span>
+        <div class="progress-bar">
+          <div class="progress"></div>
+        </div>
+      </div>
+      <div class="input" x-show="loadingMessage === ''">
         <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows=1 x-autosize
           :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
             home = (home === 0) ? 1 : home
