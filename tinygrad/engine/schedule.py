@@ -39,8 +39,8 @@ tensor_uop_spec = PatternMatcher([
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
 
-  # Tensor const has an unmasked ShapeTracker of stride 0 and a device
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
+  # Tensor const and variable have an unmasked ShapeTracker of stride 0 and a device
+  (UPat({Ops.CONST, Ops.DEFINE_VAR}, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
    lambda st: len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides) and st.st.views[0].mask is None),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
@@ -70,9 +70,6 @@ tensor_uop_spec = PatternMatcher([
   # BUFFER and VIEW specify device and shape for EMPTY and BUFFER_VIEW
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat({Ops.EMPTY, Ops.BUFFER_VIEW}, name="uop"))),
    lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
-
-  # DEVICE and VIEW specify device and shape for BIND
-  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND))), lambda: True),
 
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
   # TODO: this should be EMPTY(VIEW(BUFFER))
@@ -511,9 +508,9 @@ do_realize = PatternMatcher([
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
 
-def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
-  ctx.var_vals.update([bind.unbind()])
-  return UOp.const(bind.dtype, bind).valid(unwrap(st.st))
+def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
+  ctx.var_vals[var.replace(src=())] = val.src[1].const_arg
+  return var.replace(src=()).valid(unwrap(bind.st))
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
@@ -528,7 +525,7 @@ def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
 break_sched = PatternMatcher([
   # CONST is always fused and generated
   (UPat(Ops.CONST, name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: UOp.const(x.dtype.base, x.const_arg).valid(st.st)),
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.BIND, name="bind"))), unbind_variable),
+  (UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.var("val"))), unbind_variable),
   # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),

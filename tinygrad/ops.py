@@ -434,15 +434,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
+    # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
-      # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
-    # TOOD: Tensor variable bindings need device and shape from sources
+    # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST)
     if op is Ops.BIND:
-      assert isinstance(arg, UOp) and arg.op is Ops.BIND and shape == (), f"trying to create BIND with {arg=} {shape=}"
-      return UOp(Ops.VIEW, dtype, (UOp(Ops.DEVICE, arg=device), arg), ShapeTracker.from_shape(()))
+      var, val = arg.unbind()
+      var = var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
+                                 ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
+      return var.bind(val)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
