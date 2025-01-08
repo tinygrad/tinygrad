@@ -4,17 +4,14 @@
   <title>tinygrad viz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap" rel="stylesheet">
-  <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
-  <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/1.0.3/purify.min.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
+  <script src="assets/d3js.org/d3.v5.min.js" charset="utf-8"></script>
+  <script src="assets/dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <link rel="stylesheet" href="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
+  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
+  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
+  <script src="assets/cdnjs.cloudflare.com/ajax/libs/dompurify/1.0.3/purify.min.js"></script>
+  <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
     box-sizing: border-box;
@@ -131,21 +128,49 @@
     right: 0;
   }
   #metadata-resize-handle {
+    margin-top: 0;
     left: 0;
   }
-  .collapse-btn {
+  .floating-container {
     position: fixed;
     top: 10px;
     left: 20px;
+    z-index: 4;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+  }
+  .nav-btn {
     background-color: #1a1b26;
     border: 1px solid #4a4b56;
     color: #f0f0f5;
-    width: 32px;
     height: 32px;
-    padding: 6px;
     border-radius: 8px;
     cursor: pointer;
-    z-index: 4;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    font-weight: bold;
+  }
+  .collapse-btn {
+    width: 32px;
+    padding: 6px;
+  }
+  .btn {
+    height: 32px;
+    background-color: #1a1b26;
+    border: 1px solid #4a4b56;
+    color: #f0f0f5;
+    border-radius: 8px;
+    cursor: pointer;
+    transition-duration: .5s;
+  }
+  .btn:hover {
+    background-color: #2a2b36;
+    border-color: #5a5b66;
+    color: #ffffff;
+    transform: translateY(-1px);
   }
   .collapsed .kernel-list, .collapsed .metadata {
     width: 0;
@@ -163,9 +188,9 @@
     word-wrap: break-word;
     white-space: pre-wrap;
   }
-  .code-block {
-    max-height: 30%;
+  .code-block.hljs {
     overflow-y: auto;
+    max-height: 30vh;
     border-radius: 8px;
     padding: 8px;
   }
@@ -173,9 +198,12 @@
 </head>
 <body>
   <div class="main-container">
-    <button class="collapse-btn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
-    </button>
+    <div class="floating-container">
+      <button class="btn collapse-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <a class="btn nav-btn" href="/profiler">Profiler</a>
+    </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
     <div class="graph">
       <svg id="graph-svg">
@@ -246,6 +274,13 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
+  const highlightedCodeBlock = (code, lang, wrap) => {
+    const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
+    const codeEl= Object.assign(document.createElement("code"), {className: `language-${lang} code-block`, textContent: DOMPurify.sanitize(code)});
+    pre.appendChild(codeEl);
+    hljs.highlightElement(codeEl);
+    return pre;
+  };
 
   // **** main loop
   var ret = {};
@@ -305,7 +340,8 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
-    if (currentKernel != -1) {
+    if (currentKernel == -1) return;
+    else {
       const cacheKey = `${currentKernel}-${currentUOp}`;
       if (cacheKey in cache) {
         ret = cache[cacheKey];
@@ -320,10 +356,9 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
-      className: "wrap code-block language-python" });
+    const pre = highlightedCodeBlock(ret.code_line, "python", true)
     metadata.appendChild(pre);
-    hljs.highlightElement(pre);
+
     // ** code blocks
     let code = ret.uops[currentRewrite];
     let lang = "python"
@@ -331,9 +366,7 @@
       code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       lang = "cpp";
     }
-    const codeBlock = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`,
-      className: `code-block language-${lang}` });
-    hljs.highlightElement(codeBlock);
+    const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
     if (ret.graphs.length > 1) {
@@ -351,10 +384,8 @@
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             const link = vsCodeOpener(parts);
             div.appendChild(link);
-            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
-            pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
+            const pre = highlightedCodeBlock(pattern, "python", true);
             div.appendChild(pre);
-            hljs.highlightElement(pre);
             metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
               const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";

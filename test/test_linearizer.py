@@ -6,20 +6,20 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, Ops, BinaryOps, TernaryOps, UnaryOps, GroupOp
-from tinygrad.device import Device, Buffer
+from tinygrad.ops import UOp, Ops, GroupOp
+from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.ops import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.schedule import BUF_LIMIT, create_schedule
+from tinygrad.engine.schedule import BUF_LIMIT
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
   if isinstance(r, Tensor): r = [r]
-  s = create_schedule([x.lazydata for x in r])
+  s = Tensor.schedule(*r)
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
   # create fresh buffers for the output buffer
@@ -30,7 +30,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, acc_dtype=dtype_out)
-  sched = create_schedule([r.lazydata])
+  sched = r.schedule()
   realized_ast = sched[-1].ast
   run_schedule(sched)
   out = r.numpy()
@@ -40,15 +40,15 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   np_c = np_a @ np_b
-  if dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
-  elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 3e-3
+  if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
+  elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
 def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0, ensure_triggered:bool=True):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   r = a.matmul(b, acc_dtype=dtype_out)
-  sched = create_schedule([r.lazydata])
+  sched = r.schedule()
   realized_ast = sched[-1].ast
   k = Kernel(realized_ast)
   k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
@@ -67,7 +67,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    lowered = list(lower_schedule(create_schedule([c.lazydata])))
+    lowered = list(lower_schedule(c.schedule()))
     for ei in lowered: ei.run()
     rawbufs = lowered[-1].bufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
@@ -96,9 +96,36 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
 
     stores = [u for u in lin.uops if u.op is Ops.STORE]
-    mutable_bufs = dedup(flatten([[x for x in u.src[0].sparents if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
+    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     assert [u.arg for u in mutable_bufs] == [0, 1]
+
+  def _test_no_nested_ranges(self, lins, skip=None):
+    for l in lins:
+      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_ACC])
+      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.ENDRANGE and u.src[0] in range_in_acc)]
+      for i,u in enumerate(ranges):
+        if skip and i in skip: continue
+        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+
+  @unittest.expectedFailure
+  def test_const_alu_indexing(self):
+    st = ShapeTracker.from_shape((4,)).to_uop()
+    load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
+    op = load+UOp.const(dtypes.float, 1.0)*UOp.const(dtypes.float, -1)
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()), st, op)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4,).realize()
+    helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1*-1], opts=[])
+
+  def test_const_alu_indexing_one_const_fine(self):
+    st = ShapeTracker.from_shape((4,)).to_uop()
+    load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
+    op = load+UOp.const(dtypes.float, 1.0)
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()), st, op)
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4,).realize()
+    helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1], opts=[])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -109,10 +136,10 @@ class TestLinearizer(unittest.TestCase):
     st_x = x.lazydata.st
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, st_x.reshape((1, 32)).expand((32, 32)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (1,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (1,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, st_x.reshape((32, 1)).to_uop()))
     diff = second_x + first_reduce*ast_const(dtypes.float, -1, (32, 1))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (0,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (0,)))
     store = UOp(Ops.STORE, dtypes.void, (g0, ShapeTracker.from_shape((1, 1)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [
@@ -130,11 +157,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
-    for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u.arg[1]) or (u.op is Ops.ENDRANGE and u.src[0].arg[1])]
-      for i,u in enumerate(ranges):
-        if i == 0: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+    self._test_no_nested_ranges(lins, [0])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -145,10 +168,10 @@ class TestLinearizer(unittest.TestCase):
     st_x = x.lazydata.st
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5)).to_uop()))
     diff = second_x + first_reduce*ast_const(dtypes.float, -1, (27, 32, 1, 5))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [
@@ -194,11 +217,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
-    for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u.arg[1]) or (u.op is Ops.ENDRANGE and u.src[0].arg[1])]
-      for i,u in enumerate(ranges):
-        if i == 0: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+    self._test_no_nested_ranges(lins, [0])
 
   def test_triple_multireduce(self):
     Tensor.manual_seed(0)
@@ -207,22 +226,18 @@ class TestLinearizer(unittest.TestCase):
     x2 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
     g0, g1, g2, g3 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(4)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x0.lazydata.st.reshape((27, 1, 1, 32, 5)).expand((27, 32, 32, 32, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (3,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g2, x1.lazydata.st.reshape((27, 1, 32, 1, 5)).expand((27, 32, 32, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 32, 32, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (2,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (2,)))
     third_x = UOp(Ops.LOAD, dtypes.float, (g3, x2.lazydata.st.reshape((27, 32, 1, 1, 5)).to_uop()))
     mul = (third_x*second_reduce)
-    third_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (mul,), (BinaryOps.ADD, (1,)))
+    third_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (mul,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 1, 5)).to_uop(), third_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     wanna_output = (x2.numpy()*(x1.numpy()-x0.numpy().sum(axis=1, keepdims=True)).sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,1,5)
     lins = helper_linearizer_ast(sink, [x0,x1,x2], wanna_output=[wanna_output])
-    for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u.arg[1]) or (u.op is Ops.ENDRANGE and u.src[0].arg[1])]
-      for i,u in enumerate(ranges):
-        if i == 0: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+    self._test_no_nested_ranges(lins, [0])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -234,11 +249,11 @@ class TestLinearizer(unittest.TestCase):
     st = x.lazydata.st
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2, 5)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2, 5)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, st.reshape((8, 32, 1, 8, 16, 1)).to_uop()))
     neg_first_reduce = first_reduce * ast_const(dtypes.float, -1, (8, 32, 1, 8, 16, 1))
     squares = (second_x+neg_first_reduce)
-    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1, 4)))
+    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (Ops.ADD, (1, 4)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
     sink = UOp(Ops.SINK, src=(store,))
     wanna_output = (x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
@@ -270,11 +285,7 @@ class TestLinearizer(unittest.TestCase):
        Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
     ]
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
-    for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u.arg[1]) or (u.op is Ops.ENDRANGE and u.src[0].arg[1])]
-      for i,u in enumerate(ranges):
-        if i < 2: continue
-        assert ranges[i-2] != u or ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-2], ranges[i-1], {u}}"
+    self._test_no_nested_ranges(lins, [0, 1])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -285,10 +296,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).softmax(1).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [
@@ -301,11 +312,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
-    for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u.arg[1]) or (u.op is Ops.ENDRANGE and u.src[0].arg[1])]
-      for i,u in enumerate(ranges):
-        if i == 0: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+    self._test_no_nested_ranges(lins, [0])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -317,11 +324,11 @@ class TestLinearizer(unittest.TestCase):
     g0, g1, g2 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(3)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
     first_x_p = UOp(Ops.LOAD, dtypes.float, (g2, x_p.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
-    first_reduce_p = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
+    first_reduce_p = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x_p.alu(Ops.EXP2),), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1)).to_uop()))
     diff = (second_x+(first_reduce + first_reduce_p)*ast_const(dtypes.float, -1, (4, 32, 1)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((4, 1, 1)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [
@@ -339,11 +346,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     wanna_output = (x.numpy()-(x.numpy().sum(-1, keepdims=True)+np.exp2(x_p.numpy()).sum(-1, keepdims=True))).sum(-1).reshape(4, 1,1)
     lins = helper_linearizer_ast(sink, [x,x_p], wanna_output=[wanna_output], opts=opts)
-    for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u.arg[1]) or (u.op is Ops.ENDRANGE and u.src[0].arg[1])]
-      for i,u in enumerate(ranges):
-        if i == 0: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+    self._test_no_nested_ranges(lins, [0])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   def test_multiout_multireduce(self):
@@ -352,10 +355,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(3)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store0 = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     second_out = second_reduce * ast_const(dtypes.float, 1/15, (27, 1, 1, 5))
     store1 = UOp(Ops.STORE, src=(g1, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_out))
@@ -375,10 +378,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 15, 5, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(3)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store0 = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     store1 = UOp(Ops.STORE, src=(g1, ShapeTracker(views=(View(shape=(27,15,1,5), strides=(5,0,1,1), offset=0, mask=None, contiguous=False),)).to_uop(), first_reduce)) # noqa: E501
     wanna_output0 = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
@@ -386,7 +389,7 @@ class TestLinearizer(unittest.TestCase):
 
     ast = UOp(Ops.SINK, src=(store0, store1))
     k = Kernel(ast)
-    prg = CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+    prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
     inbufs = [x.lazydata.base.buffer]
     outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
     prg.exec(outbufs+inbufs)
@@ -399,10 +402,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 3, 5)).expand((27, 3, 3, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 3, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 3, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [[Opt(OptOps.UNROLL, 0, 3), Opt(OptOps.UNROLL, 0, 3)]]
@@ -415,10 +418,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 3, 5, dtype=dtypes.float).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 3, 5)).expand((27, 3, 3, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 3, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 3, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [[Opt(OptOps.UPCAST, 0, 3)]]
@@ -434,10 +437,10 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(27, 12, 5, dtype=dtypes.float).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 12, 1, 5)).to_uop()))
     diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 12, 1, 5)))
-    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(Ops.SINK, src=(store,))
     opts = [[Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 3)]]
@@ -450,13 +453,13 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -1/35, (15, 25, 35, 1))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 35, 1)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
+    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (Ops.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
-    std = variance.alu(UnaryOps.SQRT)
+    std = variance.alu(Ops.SQRT)
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store,))
     wanna_output = x.numpy().std(axis=2, ddof=0).reshape((15,25,1,1))
@@ -468,13 +471,13 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 1, 25, 35)).expand((15, 25, 25, 35)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (2,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -0.04, (15, 25, 1, 35))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((15, 25, 1, 35)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1,)))
+    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (Ops.ADD, (1,)))
     variance = squares_sum * ast_const(dtypes.float, 0.04, (15, 1, 1, 35))
-    std = variance.alu(UnaryOps.SQRT)
+    std = variance.alu(Ops.SQRT)
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 1, 1, 35)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store,))
     wanna_output = x.numpy().std(axis=1, ddof=0).reshape((15,1,1,35))
@@ -488,13 +491,13 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(15, 25, 35, dtype=dtypes.float).realize()
     g0, g1, g2 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(3)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 1, 35)).expand((15, 25, 35, 35)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -1/35, (15, 25, 35, 1))
     second_x = UOp(Ops.LOAD, dtypes.float, (g2, x.lazydata.st.reshape((15, 25, 35, 1)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
+    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (Ops.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
-    std = variance.alu(UnaryOps.SQRT)
+    std = variance.alu(Ops.SQRT)
     store_mean = UOp(Ops.STORE, src=(g1, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), neg_mean))
     store_std = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store_std, store_mean))
@@ -511,13 +514,13 @@ class TestLinearizer(unittest.TestCase):
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     # push reduce (3, 27, 32) -> (3, 27, 1) -> (3, 27, 32) expand to LOAD
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((3, 27, 1, 32)).expand((3, 27, 32, 32)).to_uop()))
-    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (3,)))
+    first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.ADD, (3,)))
     neg_mean = first_reduce * ast_const(dtypes.float, -0.03125, (3, 27, 32, 1))
     # store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((3, 27, 32, 1)).to_uop(), mean))
     # verify_lazyop(store)
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((3, 27, 32, 1)).to_uop()))
     squares = (second_x+neg_mean)*(second_x+neg_mean)
-    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
+    squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (Ops.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 0.03125, (3, 27, 1, 1))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((3, 27, 1, 1)).to_uop(), variance))
     sink = UOp(Ops.SINK, src=(store,))
@@ -532,13 +535,13 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.rand(4, 32).realize()
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32,)).expand((4, 32, 32)).to_uop()))
-    max_x = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.MAX, (2,)))
+    max_x = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (Ops.MAX, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1,)).to_uop()))
     centered_x = second_x+max_x*ast_const(dtypes.float, -1, (4, 32, 1))
-    exp_x = centered_x.alu(UnaryOps.EXP2)
-    sum_exp_x = UOp(Ops.REDUCE_AXIS, dtypes.float, (exp_x,), (BinaryOps.ADD, (1,)))
-    # y = exp_x * sum_exp_x.alu(UnaryOps.RECIP) # kernels cannot do a return to full shape
-    recip_sum_exp_x = sum_exp_x.alu(UnaryOps.RECIP)
+    exp_x = centered_x.alu(Ops.EXP2)
+    sum_exp_x = UOp(Ops.REDUCE_AXIS, dtypes.float, (exp_x,), (Ops.ADD, (1,)))
+    # y = exp_x * sum_exp_x.alu(Ops.RECIP) # kernels cannot do a return to full shape
+    recip_sum_exp_x = sum_exp_x.alu(Ops.RECIP)
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((4,1,1)).to_uop(), recip_sum_exp_x))
     sink = UOp(Ops.SINK, src=(store,))
     expected = 1/np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)).sum(axis=-1, keepdims=True).reshape(4,1,1)
@@ -556,7 +559,7 @@ class TestLinearizer(unittest.TestCase):
         View(shape=(16384, 16384), strides=(1, 32768), offset=0, mask=None, contiguous=False)))
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
-    arange = UOp(Ops.REDUCE_AXIS, dtypes.int, (ast_const(dtypes.int, 1, st=arange_input_st),), (BinaryOps.ADD, arange_axis))
+    arange = UOp(Ops.REDUCE_AXIS, dtypes.int, (ast_const(dtypes.int, 1, st=arange_input_st),), (Ops.ADD, arange_axis))
     output_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
     out = arange+ast_const(dtypes.int, -1, output_shape)
     store = UOp(Ops.STORE, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0), ShapeTracker.from_shape(output_shape).to_uop(), out))
@@ -573,7 +576,7 @@ class TestLinearizer(unittest.TestCase):
     # TODO: do this arange broadcast in the scheduler
     arange_input_st = arange_input_st.reshape((1, 16384, 1, 16384)).expand((4, 16384, 256, 16384))
     arange_axis = (3,)
-    arange = UOp(Ops.REDUCE_AXIS, dtypes.int, (ast_const(dtypes.int, 1, st=arange_input_st),), (BinaryOps.ADD, arange_axis))
+    arange = UOp(Ops.REDUCE_AXIS, dtypes.int, (ast_const(dtypes.int, 1, st=arange_input_st),), (Ops.ADD, arange_axis))
     arange_out_shape = tuple(1 if i in arange_axis else s for i,s in enumerate(arange_input_st.shape))
     arange = arange+ast_const(dtypes.int, -1, arange_out_shape)
     # p2: the indexing
@@ -581,10 +584,10 @@ class TestLinearizer(unittest.TestCase):
     data1 = (g1, ShapeTracker.from_shape(dataset.shape).reshape((1, 16384, 256, 1)).expand(arange_out_shape).to_uop())
     idxs = Tensor([0,3,5,6]).realize()
     data2 = (g2, ShapeTracker.from_shape((4,)+(1,)*(len(arange_out_shape)-1)).expand(arange_out_shape).to_uop())
-    arange_eq = arange.alu(BinaryOps.CMPNE, UOp(Ops.LOAD, dtypes.int, data2)).alu(BinaryOps.CMPNE, ast_const(dtypes.bool, True, arange_out_shape))
+    arange_eq = arange.alu(Ops.CMPNE, UOp(Ops.LOAD, dtypes.int, data2)).alu(Ops.CMPNE, ast_const(dtypes.bool, True, arange_out_shape))
     reduce_input = UOp(Ops.LOAD, dataset.dtype, data1)*UOp(Ops.CAST, dataset.dtype.scalar(), src=(arange_eq,))
     out_axis = (1,)
-    out = UOp(Ops.REDUCE_AXIS, reduce_input.dtype, (reduce_input,), (BinaryOps.ADD, out_axis))
+    out = UOp(Ops.REDUCE_AXIS, reduce_input.dtype, (reduce_input,), (Ops.ADD, out_axis))
     output_shape = tuple(1 if i in out_axis else s for i,s in enumerate(arange_out_shape))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape(output_shape).to_uop(), out))
     sink = UOp(Ops.SINK, src=(store,))
@@ -605,7 +608,7 @@ class TestLinearizer(unittest.TestCase):
             ast_const(dtypes.int, st=ShapeTracker(views=(View(shape=(1, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), val=10),
             UOp(Ops.MUL, dtypes.int, arg=None, src=(
               ast_const(dtypes.int, -1, (1, 20, 1)),
-              UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
+              UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.MAX, (0,)), src=(
                 UOp(Ops.MUL, dtypes.int, arg=None, src=(
                   UOp(Ops.CAST, dtypes.int, arg=None, src=(
                     UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
@@ -618,7 +621,7 @@ class TestLinearizer(unittest.TestCase):
                           UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)), # noqa E501
                       ast_const(dtypes.bool, True, st=ShapeTracker(views=(View(shape=(10, 20, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),))),)),)), # noqa E501
                   UOp(Ops.ADD, dtypes.int, arg=None, src=(
-                    UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (2,)), src=(
+                    UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (2,)), src=(
                       ast_const(dtypes.int, -1, st=ShapeTracker(views=(View(shape=(11, 19), strides=(0, 0), offset=0, mask=((0, 11), (9, 19)), contiguous=False), View(shape=(10, 20, 10), strides=(1, 0, 20), offset=0, mask=None, contiguous=False)))),)), # noqa E501
                     ast_const(dtypes.int, 10, (10, 20, 1)))),)),)),)),)),
           ast_const(dtypes.int, -1, (1, 20, 1)),)),)),))
@@ -637,7 +640,7 @@ class TestLinearizer(unittest.TestCase):
             ast_const(dtypes.int, 200, (1, 1)),
             UOp(Ops.MUL, dtypes.int, arg=None, src=(
               ast_const(dtypes.int, -1, (1, 1)),
-              UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.MAX, (0,)), src=(
+              UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.MAX, (0,)), src=(
                 UOp(Ops.MUL, dtypes.int, arg=None, src=(
                   UOp(Ops.CAST, dtypes.int, arg=None, src=(
                     UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
@@ -650,7 +653,7 @@ class TestLinearizer(unittest.TestCase):
                           UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(200, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)), # noqa: E501
                       ast_const(dtypes.bool, True, (200, 1)),)),)),
                   UOp(Ops.ADD, dtypes.int, arg=None, src=(
-                    UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (1,)), src=(
+                    UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (1,)), src=(
                       ast_const(dtypes.int, -1, st=ShapeTracker(views=(View(shape=(201, 399), strides=(0, 0), offset=0, mask=((0, 201), (199, 399)), contiguous=False), View(shape=(200, 200), strides=(1, 400), offset=0, mask=None, contiguous=False)))),)), # noqa: E501
                     ast_const(dtypes.int, 200, (200, 1)),)),)),)),)),)),
           ast_const(dtypes.int, -1, (1, 1)),)),)),))
@@ -672,16 +675,16 @@ class TestLinearizer(unittest.TestCase):
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     x_ld0 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((1, N, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).to_uop()))
-    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.ADD, (1,)))
-    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),),(BinaryOps.ADD, (0,)))
+    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (Ops.ADD, (1,)))
+    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),),(Ops.ADD, (0,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((1,1,N)).to_uop(), r1))
     sink = UOp(Ops.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=0, keepdims=True)).sum(axis=0).reshape(1,1,N)], opts=opts)
 
     x_ld0 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, N, 1)).to_uop()))
-    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.ADD, (2,)))
-    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (BinaryOps.ADD, (1,)))
+    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (Ops.ADD, (2,)))
+    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (Ops.ADD, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((N,1,1)).to_uop(), r1))
     sink = UOp(Ops.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(N,1,1)], opts=opts)
@@ -699,16 +702,16 @@ class TestLinearizer(unittest.TestCase):
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(2)]
     x_ld0 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((1, N, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).to_uop()))
-    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.MAX, (1,)))
-    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),), (BinaryOps.MAX, (0,)))
+    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (Ops.MAX, (1,)))
+    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, 1, N)),), (Ops.MAX, (0,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((1,1,N)).to_uop(), r1))
     sink = UOp(Ops.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().max(axis=0, keepdims=True)).max(axis=0).reshape(1,1,N)], opts=opts)
 
     x_ld0 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, 1, N)).expand((N,N,N)).to_uop()))
     x_ld1 = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((N, N, 1)).to_uop()))
-    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (BinaryOps.MAX, (2,)))
-    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (BinaryOps.MAX, (1,)))
+    r0 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld0,), (Ops.MAX, (2,)))
+    r1 = UOp(Ops.REDUCE_AXIS, dtypes.float, (x_ld1+r0*ast_const(dtypes.float, -1, (N, N, 1)),), (Ops.MAX, (1,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((N,1,1)).to_uop(), r1))
     sink = UOp(Ops.SINK, src=(store,))
     helper_linearizer_ast(sink, [x], wanna_output=[(x.numpy()-x.numpy().max(axis=1, keepdims=True)).max(axis=1).reshape(N,1,1)], opts=opts)
@@ -735,7 +738,7 @@ class TestLinearizer(unittest.TestCase):
         UOp(Ops.WHERE, dtypes.float, arg=None, src=(
           UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
             ast_const(dtypes.float, 0.5*N, (N, 1, 1)),
-            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (1,)), src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
               UOp(Ops.ADD, dtypes.float, arg=None, src=(
                 UOp(Ops.LOAD, dtypes.float, src=(
                   UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
@@ -743,7 +746,7 @@ class TestLinearizer(unittest.TestCase):
                 UOp(Ops.WHERE, dtypes.float, arg=None, src=(
                   UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
                     ast_const(dtypes.float, 0.75*N, (N, N, 1)),
-                    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (2,)), src=(
+                    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
                       UOp(Ops.LOAD, dtypes.float, src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
                         ld0.to_uop(),)),)),)),
@@ -768,7 +771,7 @@ class TestLinearizer(unittest.TestCase):
         UOp(Ops.WHERE, dtypes.float, arg=None, src=(
           UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
             ast_const(dtypes.float, 0.5*N, (1, 1, N)),
-            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0,)), src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
               UOp(Ops.ADD, dtypes.float, arg=None, src=(
                 UOp(Ops.LOAD, dtypes.float, src=(
                   UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
@@ -776,7 +779,7 @@ class TestLinearizer(unittest.TestCase):
                 UOp(Ops.WHERE, dtypes.float, arg=None, src=(
                   UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
                     ast_const(dtypes.float, 0.75*N, (N, 1, N)),
-                    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (1,)), src=(
+                    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
                       UOp(Ops.LOAD, dtypes.float, src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
                         ld0.to_uop(),)),)),)),
@@ -804,7 +807,7 @@ class TestLinearizer(unittest.TestCase):
         UOp(Ops.WHERE, dtypes.float, arg=None, src=(
           UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
             ast_const(dtypes.float, 0.5*N, (1, 1, 1, 1)),
-            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0, 1)), src=(
+            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0, 1)), src=(
               UOp(Ops.ADD, dtypes.float, arg=None, src=(
                 UOp(Ops.LOAD, dtypes.float, src=(
                   UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
@@ -812,7 +815,7 @@ class TestLinearizer(unittest.TestCase):
                 UOp(Ops.WHERE, dtypes.float, arg=None, src=(
                   UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
                   ast_const(dtypes.float, 0.75*N, (N, N, 1, 1)),
-                    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (2, 3)), src=(
+                    UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2, 3)), src=(
                       UOp(Ops.LOAD, dtypes.float, src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
                         UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(N, N, N, N), strides=(0, 0, N, 1), offset=0, mask=None, contiguous=False),))),)),)),)), # noqa: E501
@@ -831,7 +834,7 @@ class TestLinearizer(unittest.TestCase):
   def test_end_local(self):
     g0, g1 = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=i) for i in range(2)]
     load = UOp(Ops.LOAD, dtypes.int, (g1, ShapeTracker.from_shape((32,)).to_uop()))
-    reduce = UOp(Ops.REDUCE_AXIS, dtypes.int, (load,), (BinaryOps.ADD, (0,)))
+    reduce = UOp(Ops.REDUCE_AXIS, dtypes.int, (load,), (Ops.ADD, (0,)))
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((1,)).to_uop(), reduce))
     sink = UOp(Ops.SINK, src=(store,))
     load_t = Tensor.full(load.st_arg.shape, 1).contiguous().realize()
@@ -861,7 +864,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
-    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
+    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
@@ -902,7 +905,8 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
     # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
-    assert lin.uops[end+1].op in GroupOp.ALU
+    # the INDEX can be first
+    assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
 
   def test_range_outer_op_after_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -910,7 +914,8 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
     # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
-    assert lin.uops[end+1].op in GroupOp.ALU
+    # the INDEX can be first
+    assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -919,7 +924,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    k = Kernel(create_schedule([r.lazydata])[-1].ast)
+    k = Kernel(r.schedule()[-1].ast)
     k.upcast()
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.op is Ops.LOAD])
@@ -950,10 +955,10 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    k = Kernel(create_schedule([r.lazydata])[-1].ast)
+    k = Kernel(r.schedule()[-1].ast)
     k.upcast()
     k.linearize()
-    num_ops = len([uop for uop in k.uops if uop.op is Ops.ALU])
+    num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -961,7 +966,7 @@ class TestLinearizer(unittest.TestCase):
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
-    k = Kernel(create_schedule([r.lazydata])[-1].ast)
+    k = Kernel(r.schedule()[-1].ast)
     k.upcast()
     k.upcast()
     k.linearize()
@@ -978,7 +983,7 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    k = Kernel(create_schedule([r.lazydata])[-1].ast)
+    k = Kernel(r.schedule()[-1].ast)
     k.hand_coded_optimizations()
     k.linearize()
 
@@ -986,33 +991,34 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
-    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].sparents)
+    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort)
     # the second store is to gds with no upcasts
     assert stores[1].src[-1].dtype == dtypes.float
-    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].sparents)
+    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort)
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
 
-    k = Kernel(create_schedule([r.lazydata])[-1].ast)
+    k = Kernel(r.schedule()[-1].ast)
     k.upcast()
     k.linearize()
-    num_ops = len([uop for uop in k.uops if uop.op is Ops.ALU])
+    num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
-      a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-      k = Kernel(create_schedule([a.lazydata])[-1].ast)
-      k.linearize()
-      local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
-      assert local[0].dtype == acc_dtype
+      if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
+        a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
+        k = Kernel(a.schedule()[-1].ast)
+        k.linearize()
+        local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
+        assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
-      k = Kernel(create_schedule([c.lazydata])[-1].ast)
+      k = Kernel(c.schedule()[-1].ast)
       k.linearize()
       local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
       assert local[0].dtype == expected_dtype
@@ -1026,24 +1032,28 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float, dtypes.float16, dtypes.float16),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
-      a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
-      helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
-      helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
-      helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, acc_dtype=acc_dtype), expected_dtype)
-      d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
-      helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
+      if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype) and is_dtype_supported(expected_dtype):
+        a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
+        helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, acc_dtype=acc_dtype), expected_dtype)
+        d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
+        helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL")) and \
+        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
 
       # check that TC is triggered for TC_OPT=2
@@ -1150,7 +1160,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
       idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
-      loop_idxs = dedup(flatten([[y for y in x.sparents if y.op is Ops.SPECIAL] for x in idxs]))
+      loop_idxs = dedup(flatten([[y for y in x.toposort if y.op is Ops.SPECIAL] for x in idxs]))
       loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[1] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
@@ -1215,28 +1225,28 @@ class TestLinearizer(unittest.TestCase):
 
   def test_div_collapse(self):
     def helper(t, msg, max_ops=0):
-      sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is Ops.SINK]
+      sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
-      assert sum(u.op is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
+      assert sum(u.op in {Ops.RECIP, Ops.FDIV} for u in lin.linearize().uops) == max_ops, msg
 
     a = Tensor.empty((4,4))
     b = Tensor.empty((4,4))
     d = Tensor.empty((4,4))
 
     c = (a*b)/b
-    helper(c, "found UnaryOps.RECIP in (a*b)/b operation")
+    helper(c, "found Ops.RECIP in (a*b)/b operation")
 
     c = a/a
-    helper(c, "found UnaryOps.RECIP in (a/a) operation")
+    helper(c, "found Ops.RECIP in (a/a) operation")
 
     c = (a/b)/d
-    helper(c, "found multiple UnaryOps.RECIP in (a/b)/d operation", 1)
+    helper(c, "found multiple Ops.RECIP in (a/b)/d operation", 1)
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is Ops.SINK]
+    sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
     assert len(sched) == 1
     lin = Kernel(sched[0].ast)
     assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
@@ -1252,7 +1262,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None))
     a.assign(b.where(2, a))
-    sched = create_schedule([a.lazydata])
+    sched = a.schedule()
     assert len(sched) == 1
     sched_copy = sched[:]
     run_schedule(sched)
@@ -1260,7 +1270,7 @@ class TestLinearizer(unittest.TestCase):
     lin = Kernel(sched_copy[-1].ast)
     lin.hand_coded_optimizations()
     lin.linearize()
-    assert not any(u.op == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
+    assert not any(u.op == Ops.WHERE for u in lin.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
@@ -1272,7 +1282,7 @@ class TestLinearizer(unittest.TestCase):
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
       assert len([u for u in uops if u.op is Ops.ASSIGN]) == 0, "ASSIGN should have been simplified"
       # TODO: once uops track min/max this will be fixed
-      #assert len([u for u in uops if u.op is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
+      #assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 
     helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
     helper(Tensor.arange(-1, -100, -5), max_ops=2)
@@ -1414,7 +1424,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(2, 8).realize()
     c = a + b
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.hand_coded_optimizations()
     k.linearize()
@@ -1427,7 +1437,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(2, 8).realize()
     c = a + b
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.shift_to(0, 4)  # float4 dimension
     k.shift_to(0, 2, insert_before=k.shape_len-1)
@@ -1445,7 +1455,7 @@ class TestFloat4(unittest.TestCase):
       b = Tensor.rand(2, size).realize()
       c = a + b
 
-      s = create_schedule([c.lazydata])[0]
+      s = c.schedule()[0]
       k = Kernel(s.ast)
       k.shift_to(0, 4)
       k.shift_to(0, shift, insert_before=k.shape_len-1)
@@ -1469,7 +1479,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(9).realize().shrink(((1, 9),))
     c = a + b
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.hand_coded_optimizations()  # implicit trigger float4 dim
     k.linearize()
@@ -1482,7 +1492,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     c = a + b
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
     k.upcast()
@@ -1500,7 +1510,7 @@ class TestFloat4(unittest.TestCase):
       b = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
       c = a + b
 
-      s = create_schedule([c.lazydata])[0]
+      s = c.schedule()[0]
       k = Kernel(s.ast)
       k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
       k.upcast()
@@ -1525,7 +1535,7 @@ class TestFloat4(unittest.TestCase):
     # only the first and last conv dot products are aligned in a, and b is never aligned, so no
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.upcast()
     k.linearize()
@@ -1541,7 +1551,7 @@ class TestFloat4(unittest.TestCase):
     # don't.
     # UPDATE: now we do this fusion
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.upcast()
     k.upcast()
@@ -1557,7 +1567,7 @@ class TestFloat4(unittest.TestCase):
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
     # since the top axis is not contiguous.
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.shift_to(0, 4, top=True)  # top axes are float4 axes
     k.upcast()
@@ -1573,7 +1583,7 @@ class TestFloat4(unittest.TestCase):
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
     # since the top axis is not contiguous.
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
@@ -1588,7 +1598,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 b but not a
 
-    s = create_schedule([c.lazydata])[0]
+    s = c.schedule()[0]
     k = Kernel(s.ast)
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
@@ -1602,7 +1612,7 @@ class TestFloat4(unittest.TestCase):
       UOp(Ops.STORE, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
         UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),))),  # noqa: E501
-        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (3,)), src=(
+        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,)), src=(
           UOp(Ops.CAST, dtypes.float, src=(
             UOp(Ops.MUL, dtypes.half, arg=None, src=(
               UOp(Ops.LOAD, dtypes.half, src=(
@@ -1632,7 +1642,7 @@ class TestFloat4(unittest.TestCase):
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
         UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 262144, 512, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),))),  # noqa: E501
         UOp(Ops.ADD, dtypes.float, arg=None, src=(
-          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (5, 6, 7)), src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (5, 6, 7)), src=(
             UOp(Ops.MUL, dtypes.float, arg=None, src=(
               UOp(Ops.LOAD, dtypes.float, src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
@@ -1662,7 +1672,7 @@ class TestFloat4(unittest.TestCase):
         UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0),
         UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1, 256, 1, 64, 1, 114, 1, 114), strides=(0, 831744, 0, 12996, 0, 114, 0, 1), offset=0, mask=None, contiguous=True),))), # noqa: E501
         UOp(Ops.CAST, dtypes.half, src=(
-          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (4, 6)), src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4, 6)), src=(
             UOp(Ops.CAST, dtypes.float, src=(
               UOp(Ops.LOAD, dtypes.half, src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1),
@@ -1682,7 +1692,7 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
 
-    s = create_schedule([layer_2.lazydata])[-1]
+    s = layer_2.schedule()[-1]
     k = Kernel(s.ast)
     k.hand_coded_optimizations()
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
@@ -1695,7 +1705,7 @@ class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast_wino(self):
     monster = Tensor.stack(*[Tensor.stack(*[Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
-    s = create_schedule([monster.lazydata])[-1]
+    s = monster.schedule()[-1]
     k = Kernel(s.ast)
     k.hand_coded_optimizations()
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
@@ -1706,8 +1716,10 @@ class TestHandCodedOpts(unittest.TestCase):
     with Context(WINO=1):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
       out = Tensor.conv2d(x,w, padding=1)
+      out.mean().backward()
+
       upcasts = []
-      wino_schedule = create_schedule([out.lazydata])
+      wino_schedule = out.schedule()
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
         k = Kernel(si.ast)
@@ -1720,8 +1732,7 @@ class TestHandCodedOpts(unittest.TestCase):
       # this test case's inputs are too small, so one of the 4-stacks became a local, which is fine i guess
       assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
 
-      out.mean().backward()
-      backward_schedule = create_schedule([x.grad.lazydata, w.grad.lazydata])
+      backward_schedule = Tensor.schedule(x.grad, w.grad)
       for si in backward_schedule:
         k = Kernel(si.ast)
         k.hand_coded_optimizations()
@@ -1780,7 +1791,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[]
   lins: List[Kernel] = []
   outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
@@ -1949,7 +1960,7 @@ class TestKernelOpts(unittest.TestCase):
       UOp(Ops.STORE, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
         UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1, 256), strides=(0, 1), offset=0, mask=None, contiguous=True),))),
-        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0,)), src=(
+        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
           UOp(Ops.MUL, dtypes.float, arg=None, src=(
             UOp(Ops.CAST, dtypes.float, src=(
               UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
@@ -2011,7 +2022,8 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]: self.skipTest("super slow on CUDA and AMD because of the big grid dims")
+    if (CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]) or Device.DEFAULT == "WEBGPU":
+      self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -2048,7 +2060,7 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_sum_ok(self):
     N = 18 * 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
-    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
+    a = Tensor.rand(N, N).realize().shrink(((0, 17), (0, 17))) * 100
     b = (Tensor.rand(N, N) < 0.5).realize().shrink(((0, 17), (0, 17)))
 
     helper_linearizer_opt(a.sum(0), [
@@ -2111,6 +2123,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "max dimensions exceeded on WebGPU")
   def test_padto_where(self):
     Tensor.manual_seed(0)
     N = 17 * 17
@@ -2120,6 +2133,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "max dimensions exceeded on WebGPU")
   def test_padto_where_multioutput(self):
     Tensor.manual_seed(0)
     N = 17 * 17
@@ -2138,7 +2152,7 @@ class TestKernelOpts(unittest.TestCase):
     g0, g1, g2 = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=i) for i in range(3)]
     ld0 = UOp(Ops.LOAD, dtypes.float, (g1, ShapeTracker(views=(View(shape=(2, 1, 4, 1, 3, 4, 2, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=False),)).to_uop())) # noqa: E501
     ld1 = UOp(Ops.LOAD, dtypes.float, (g2, ShapeTracker(views=(View(shape=(2, 1, 4, 1, 3, 4, 2, 6, 1, 3), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)).to_uop())) # noqa: E501
-    store = UOp(Ops.STORE, src=(g0, ShapeTracker(views=(View(shape=(1, 1, 1, 1, 1, 4, 1, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=True),)).to_uop(), UOp(Ops.REDUCE_AXIS, dtypes.float, (ld0*ld1,), (BinaryOps.ADD, (0, 2, 4, 6)),))) # noqa: E501
+    store = UOp(Ops.STORE, src=(g0, ShapeTracker(views=(View(shape=(1, 1, 1, 1, 1, 4, 1, 6, 1, 3), strides=(0, 0, 0, 0, 0, 18, 0, 3, 0, 1), offset=0, mask=None, contiguous=True),)).to_uop(), UOp(Ops.REDUCE_AXIS, dtypes.float, (ld0*ld1,), (Ops.ADD, (0, 2, 4, 6)),))) # noqa: E501
     sink = UOp(Ops.SINK, src=(store,))
     data1 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
     data2 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()

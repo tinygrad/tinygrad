@@ -5,6 +5,7 @@
 ::: tinygrad.Tensor.ones
 ::: tinygrad.Tensor.full
 ::: tinygrad.Tensor.arange
+::: tinygrad.Tensor.linspace
 ::: tinygrad.Tensor.eye
 ::: tinygrad.Tensor.full_like
 ::: tinygrad.Tensor.zeros_like

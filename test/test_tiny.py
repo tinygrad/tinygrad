@@ -1,6 +1,6 @@
 # basic self-contained tests of the external functionality of tinygrad
-import unittest
-from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device
+import unittest, random
+from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
 from tinygrad.helpers import IMAGE
 
 class TestTiny(unittest.TestCase):
@@ -29,17 +29,34 @@ class TestTiny(unittest.TestCase):
     self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
+  # *** randomness ***
+
+  def test_random(self):
+    out = Tensor.rand(10)
+    for x in out.tolist():
+      self.assertGreaterEqual(x, 0.0)
+      self.assertLessEqual(x, 1.0)
+
   # *** JIT (for Python speed) ***
 
   def test_jit(self):
     cnt = 0
+    random.seed(0)
+    def new_rand_list(ln=10): return [random.randint(0, 100000) for _ in range(ln)]
+
     @TinyJit
-    def fxn(a,b):
+    def fxn(a,b) -> Tensor:
       nonlocal cnt
       cnt += 1
       return a+b
-    fa,fb = Tensor([1.,2,3]), Tensor([4.,5,6])
-    for _ in range(3): fxn(fa, fb)
+
+    for _ in range(3):
+      la,lb = new_rand_list(), new_rand_list()
+      fa,fb = Tensor(la), Tensor(lb)
+      ret = fxn(fa, fb)
+      # math is correct
+      self.assertListEqual(ret.tolist(), [a+b for a,b in zip(la, lb)])
+
     # function is only called twice
     self.assertEqual(cnt, 2)
 
@@ -61,6 +78,25 @@ class TestTiny(unittest.TestCase):
     for s in [2,5]:
       ret = Tensor.ones(s).contiguous().reshape(i.bind(s)).sum()
       self.assertEqual(ret.item(), s)
+
+  # *** a model ***
+
+  def test_mnist_model(self):
+    layers = [
+      nn.Conv2d(1, 32, 5), Tensor.relu,
+      nn.Conv2d(32, 32, 5), Tensor.relu,
+      nn.BatchNorm(32), Tensor.max_pool2d,
+      nn.Conv2d(32, 64, 3), Tensor.relu,
+      nn.Conv2d(64, 64, 3), Tensor.relu,
+      nn.BatchNorm(64), Tensor.max_pool2d,
+      lambda x: x.flatten(1), nn.Linear(576, 10)]
+
+    # replace random weights with ones
+    for p in nn.state.get_parameters(layers): p.replace(Tensor.ones_like(p).contiguous()).realize()
+
+    # run model inference
+    probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
+    self.assertEqual(len(probs[0]), 10)
 
   # *** image ***
 

@@ -38,6 +38,7 @@ def helper_test_speed(f1, *args):
 
     # operation cache defeats
     args = [(x+1).realize() if isinstance(x, Tensor) else (None if x is None else (x+1)) for x in args]
+    args = [(x-1).realize() if isinstance(x, Tensor) else (None if x is None else (x-1)) for x in args]
 
     # force syncing
     [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
@@ -91,8 +92,9 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
-  np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-3, rtol=1e-3)
+  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:9.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:9.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
+  atol, rtol = (1e-2, 1e-2) if torch_dt == torch.float16 else (1e-3, 1e-3)
+  np.testing.assert_allclose(val_tinygrad, val_torch, atol=atol, rtol=rtol)
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
@@ -135,7 +137,6 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a-b
     helper_test_generic_square('sub', 4096, f, f)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "breaking on webgpu CI")
   def test_pow(self):
     def f(a, b): return a.pow(b)
     helper_test_generic_square('pow', 2048, f, f)

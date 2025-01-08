@@ -5,7 +5,8 @@ import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
 from tinygrad.helpers import getenv, CI
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
+from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -75,7 +76,7 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "gpuocelot doesn't support certain ops needed for threefry")
+  @unittest.skipIf(CI and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
   def test_threefry_against_reference(self):
     Tensor.manual_seed(1337)
 
@@ -92,9 +93,16 @@ class TestRandomness(unittest.TestCase):
 
     counts = Tensor.arange(20, dtype=dtypes.uint32)
     counts0, counts1 = counts.chunk(2)
-    r = Tensor._threefry_random_bits(1337 << 32, counts0, counts1).numpy()
+    r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
+
+  @unittest.skipIf(getenv("PTX"), "fails with PTX")
+  def test_threefry_doesnt_use_long(self):
+    for ei in lower_schedule(Tensor.rand(20).schedule()):
+      if isinstance(ei.prg, CompiledRunner):
+        for u in ei.prg.p.uops:
+          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
@@ -227,11 +235,15 @@ class TestRandomness(unittest.TestCase):
 
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
-    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
+    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5),
+                                       numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
+    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5, dtype="int32"),
+                                       numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
     self.assertTrue(Tensor.randint(1, device="CLANG").device=="CLANG")
     # check types of args
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0.1, high=3)
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)
+    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=1, high=3, dtype="float")
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
 
   def test_normal(self):

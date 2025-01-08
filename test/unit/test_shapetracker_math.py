@@ -1,5 +1,4 @@
 import unittest
-from typing import List
 from tinygrad.helpers import prod
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -7,7 +6,7 @@ from tinygrad import Variable
 from test.unit.test_shapetracker import shapetracker_getitem
 
 class MultiShapeTracker:
-  def __init__(self, sts:List[ShapeTracker]): self.sts = sts
+  def __init__(self, sts:list[ShapeTracker]): self.sts = sts
   @property
   def shape(self): return self.sts[0].shape
   def reshape(self, arg): self.sts = [x.reshape(arg) for x in self.sts]
@@ -109,7 +108,6 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
     vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
     ShapeTracker((vm1,)) + ShapeTracker((vm2,))
 
-  @unittest.skip("two vars not supported")
   def test_merge_symbolic_views_2(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('j', 1, 10)
@@ -183,4 +181,3 @@ class TestShapeTrackerInvert(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
-

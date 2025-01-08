@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
-from tinygrad.ops import GroupOp, UOp, Ops, BinaryOps, exec_alu
+from tinygrad.ops import GroupOp, UOp, Ops, exec_alu
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 
 # Helper function to apply the graph rewrite
@@ -56,7 +56,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     const1 = UOp.const(dtypes.int32, 5)
     const2 = UOp.const(dtypes.int32, 10)
     const3 = UOp.const(dtypes.int32, 20)
-    optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(BinaryOps.ADD))
+    optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(Ops.ADD))
     expected_sum = 5 + 10 + 20
     self.assertEqual(optimized_sink.arg, expected_sum)
 
@@ -65,14 +65,14 @@ class TestFoldingAndReduction(unittest.TestCase):
     const1 = UOp.const(dtypes.int32, 15)
     const2 = UOp.const(dtypes.int32, 25)
     rng = UOp.range(dtypes.int32, 0, 10, idx=0)
-    optimized_sink = apply_rewrite((const1 + const2).reduce(BinaryOps.ADD, rng))
+    optimized_sink = apply_rewrite((const1 + const2).reduce(Ops.ADD, rng))
     expected_sum = 10 * (15 + 25)
     self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_range_reduction(self):
     simple_range = UOp.range(dtypes.int32, 0, 5, idx=0)
-    optimized_sink = apply_rewrite(simple_range.reduce(BinaryOps.ADD, simple_range))
+    optimized_sink = apply_rewrite(simple_range.reduce(Ops.ADD, simple_range))
     expected_sum = sum(range(5))
     self.assertEqual(optimized_sink.arg, expected_sum)
 
@@ -80,7 +80,7 @@ class TestFoldingAndReduction(unittest.TestCase):
   def test_full_graph_rewrite_simple_reduction_folding(self):
     simple_range = UOp.range(dtypes.int32, 0, 4, idx=0)
     add_uop = simple_range + UOp.const(dtypes.int32, 1)
-    optimized_sink = apply_rewrite(add_uop.reduce(BinaryOps.ADD, simple_range))
+    optimized_sink = apply_rewrite(add_uop.reduce(Ops.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
     self.assertEqual(optimized_sink.arg, expected_sum)
 
@@ -89,7 +89,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     outer_range = UOp.range(dtypes.int32, 0, 8, 0)
     inner_range = UOp.range(dtypes.int32, 0, 4, 1)
     expr = (outer_range * 10) + inner_range
-    optimized_reduce_uop = apply_rewrite(expr.reduce(BinaryOps.ADD, outer_range, inner_range))
+    optimized_reduce_uop = apply_rewrite(expr.reduce(Ops.ADD, outer_range, inner_range))
     self.assertEqual(optimized_reduce_uop.op, Ops.CONST)
     self.assertEqual(optimized_reduce_uop.arg, sum((i * 10) + j for i in range(8) for j in range(4)))
 
@@ -104,7 +104,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_division_folding_with_define_var(self):
     n_var_uop = UOp.variable('n', 1, 1000)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
-    self.assertEqual(optimized_div_uop.op, BinaryOps.MUL)
+    self.assertEqual(optimized_div_uop.op, Ops.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
@@ -118,7 +118,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
       UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
       UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
     rhs = UOp.const(dtypes.int.vec(4), 2)
-    unopt = lhs.lt(rhs)
+    unopt = lhs<rhs
     opt = apply_rewrite(unopt)
     print(unopt)
     print(opt)
@@ -201,6 +201,78 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
     optimized_uop = apply_rewrite(vectorized_uop)
     self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [5.0, 10.0, 15.0, 20.0])
 
+
+import inspect
+from tinygrad.ops import graph_rewrite, _substitute, track_rewrites, symbolic_simple
+
+class TestBottomUpRewrite(unittest.TestCase):
+  def test_const_folding(self):
+    a = UOp.const(dtypes.int, 5)
+    ret = (a*3) + (a*7)
+    gt = graph_rewrite(ret, symbolic_simple)
+    ret = graph_rewrite(ret, symbolic_simple, bottom_up=True)
+    self.assertIs(gt, ret)
+
+# normally .substitute would be fine, but it's not tracked
+@track_rewrites()
+def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
+def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
+
+class TestSubstitute(unittest.TestCase):
+  # these work because the substituted things don't have parents
+  def test_simple(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = a + 4
+    ret = substitute(ret, {a:b})
+    self.assertIs(ret, b+4)
+
+  def test_double(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    ret = (a + 4) + b
+    ret = substitute(ret, {a:c, b:c})
+    self.assertIs(ret, (c + 4) + c)
+
+  def test_diamond(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = (a + 4) + (a + 5)
+    ret = substitute(ret, {a:b})
+    self.assertIs(ret, (b + 4) + (b + 5))
+
+  # this works because there's nothing above the substituted node
+  def test_sin(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = a.sin().sin()
+    ret = substitute(ret, {a.sin():b})
+    self.assertIs(ret, b.sin())
+
+  # broken due to infinite recursion
+  # NOTE: VIZ hangs and doesn't recover if you click this one
+  def test_assert_inf_recurse(self):
+    a = UOp.variable('a', 0, 10)
+    n1 = a.sin()
+    ret = n1
+    with self.assertRaises(RecursionError):
+      ret = substitute(ret, {n1:n1.sqrt()})
+
+  def test_sin_to_sqrt(self):
+    a = UOp.variable('a', 0, 10)
+    n1 = a.sin()
+    ret = n1.sin()
+    ret = substitute(ret, {a.sin():a.sqrt()})
+    self.assertIs(ret, a.sqrt().sin())
+
+  def test_double_sin_to_sqrt(self):
+    a = UOp.variable('a', 0, 10)
+    n1 = a.sin()
+    ret = n1.sin()
+    # NOTE: this would work if it had gone in the opposite order
+    ret = substitute(ret, {a.sin():a.sqrt(), n1.sin():n1.sqrt()})
+    self.assertIs(ret, a.sqrt().sqrt())
 
 if __name__ == '__main__':
   unittest.main()

@@ -7,7 +7,7 @@
 
 print("******** first, the runtime ***********")
 
-from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler, MallocAllocator
+from tinygrad.runtime.ops_clang import ClangJITCompiler, MallocAllocator, CPUProgram
 
 # allocate some buffers
 out = MallocAllocator.alloc(4)
@@ -15,20 +15,20 @@ a = MallocAllocator.alloc(4)
 b = MallocAllocator.alloc(4)
 
 # load in some values (little endian)
-MallocAllocator.copyin(a, memoryview(bytearray([2,0,0,0])))
-MallocAllocator.copyin(b, memoryview(bytearray([3,0,0,0])))
+MallocAllocator._copyin(a, memoryview(bytearray([2,0,0,0])))
+MallocAllocator._copyin(b, memoryview(bytearray([3,0,0,0])))
 
 # compile a program to a binary
-lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+lib = ClangJITCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
 
-# create a runtime for the program (ctypes.CDLL)
-fxn = ClangProgram("add", lib)
+# create a runtime for the program
+fxn = CPUProgram("add", lib)
 
 # run the program
 fxn(out, a, b)
 
 # check the data out
-print(val := MallocAllocator.as_buffer(out).cast("I").tolist()[0])
+print(val := MallocAllocator._as_buffer(out).cast("I").tolist()[0])
 assert val == 5
 
 
@@ -39,7 +39,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import BinaryOps, MetaOps, UOp, Ops
+from tinygrad.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
@@ -65,7 +65,7 @@ kernel = get_kernel(Device[DEVICE].renderer, s).linearize()
 # compile a program (and print the source)
 fxn = CompiledRunner(kernel.to_program())
 print(fxn.p.src)
-# NOTE: fxn.clprg is the ClangProgram
+# NOTE: fxn.clprg is the CPUProgram
 
 # run the program
 fxn.exec([out, a, b])
@@ -76,24 +76,25 @@ assert out.as_buffer().cast('I')[0] == 5
 
 print("******** third, the LazyBuffer ***********")
 
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.schedule import create_schedule_with_vars
 
 # allocate some values + load in values
-a = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
-b = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+a = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
+b = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
-del a.srcs
-del b.srcs
+a = a.buf_uop_view()
+b = b.buf_uop_view()
 
 # describe the computation
-out = a.alu(BinaryOps.ADD, b)
+out = a.alu(Ops.ADD, b)
 
 # schedule the computation as a list of kernels
-sched = create_schedule([out])
+sched, _, becomes_map = create_schedule_with_vars([out])
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
+# NOTE: UOps are no longer mutable, the scheduler gives you a map to lookup which BUFFER the result was written to
+out = becomes_map[out]
 
 # DEBUGGING: print the compute ast
 print(sched[-1].ast)

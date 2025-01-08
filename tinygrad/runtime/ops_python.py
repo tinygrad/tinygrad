@@ -2,12 +2,12 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, struct
+from typing import Optional, Any, TYPE_CHECKING
+import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
-from tinygrad.helpers import all_same, getenv, flatten
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, Ops, UOp, GroupOp
+from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
@@ -26,18 +26,18 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[Ops, Optional[DType], List[int], Any]] = pickle.loads(lib)
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    self.uops: list[tuple[Ops, Optional[DType], list[int], Any]] = pickle.loads(lib)
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      ul: Dict[int, Any] = {}
-      dl: Dict[int, DType] = {}
-      pbufs: List[memoryview] = list(bufs)
-      pvals: List[int] = list(vals)
+      ul: dict[int, Any] = {}
+      dl: dict[int, DType] = {}
+      pbufs: list[memoryview] = list(bufs)
+      pvals: list[int] = list(vals)
       i = 0
-      loop_ends: Dict[int, int] = {}
+      loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF}
@@ -66,13 +66,11 @@ class PythonProgram:
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
-        if uop is Ops.DEFINE_GLOBAL:
+        if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
           assert dtype.fmt is not None
-          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
-        elif uop is Ops.DEFINE_LOCAL:
-          assert dtype.fmt is not None
-          lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
-          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
+          buf = memoryview(bytearray(arg[1]*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
+          ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -115,18 +113,13 @@ class PythonProgram:
         elif uop is Ops.ASSIGN:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
           ul[i] = inp[0]
-        elif uop is Ops.GEP:
-          assert len(arg) == 1
-          ul[i] = inp[0][arg[0]]
+        elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]
         elif uop is Ops.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
-            assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread, it has {len(inp[0])}"
-            assert len(inp[1]) == NUM_B, f"B must have {NUM_B} elements per thread, it has {len(inp[1])}"
-            assert len(inp[2]) == NUM_C, f"C must have {NUM_C} elements per thread, it has {len(inp[2])}"
-            assert len(flatten(inp[0])) == NUM_A * warp_size, f"WMMA must have {NUM_A * warp_size} total elements for A in WMMA"
-            assert len(flatten(inp[1])) == NUM_B * warp_size, f"WMMA must have {NUM_B * warp_size} total elements for B in WMMA"
-            assert len(flatten(inp[2])) == NUM_C * warp_size, f"WMMA must have {NUM_C * warp_size} total elements for C in WMMA"
+            for cc, tinp, num in zip(("A", "B", "C"), inp, (NUM_A, NUM_B, NUM_C)):
+              assert len(tinp) == num, f"{cc} must have {num} elements per thread, it has {len(tinp)}"
+              assert len(flatten(tinp)) == num * warp_size, f"WMMA must have {num * warp_size} total elements for {cc} in WMMA"
             assert warp_size > 0 and warp_size % WARP_THREADS == 0, f"must have multiples of {WARP_THREADS} warp threads"
             out = [inp[2][elem_idx][:] for elem_idx in range(NUM_C)]
             for goff in range(0, warp_size, WARP_THREADS):
@@ -175,7 +168,7 @@ class PythonProgram:
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop in GroupOp.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {uop}"
-          assert all_same([dtype] + dtp) or uop in {BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {uop}"
+          assert all_same([dtype] + dtp) or uop in {Ops.CMPNE, Ops.CMPLT, Ops.WHERE}, f"dtype mismatch on {uop}"
           ul[i] = [exec_alu(uop, dtype, p) for p in zip(*inp)]
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
@@ -190,7 +183,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
-  def render(self, name:str, uops:List[UOp]) -> str:
+  def render(self, name:str, uops:list[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
@@ -199,9 +192,8 @@ class PythonCompiler(Compiler):
 
 class PythonAllocator(Allocator):
   def _alloc(self, size, options): return memoryview(bytearray(size))
-  def copyin(self, dest, src:memoryview): dest[:] = src
-  def copyout(self, dest:memoryview, src): dest[:] = src
+  def _copyin(self, dest, src:memoryview): dest[:] = src
+  def _copyout(self, dest:memoryview, src): dest[:] = src
 
 class PythonDevice(Compiled):
-  def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(), PythonRenderer(), PythonCompiler(), PythonProgram)
+  def __init__(self, device:str): super().__init__(device, PythonAllocator(), PythonRenderer(), PythonCompiler(), PythonProgram)

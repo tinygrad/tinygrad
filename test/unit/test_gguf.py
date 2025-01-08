@@ -2,7 +2,7 @@ import os, unittest, ctypes
 from tinygrad import dtypes, Tensor, fetch, Device
 import numpy as np
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 try:
   import ggml
 except ModuleNotFoundError:
@@ -102,3 +102,6 @@ class TestGGUF(unittest.TestCase):
       if (get_fn := gguf_val_getters[v_type]) is not None: self.assertEqual(get_fn(gguf_ctx, gguf_key_id), v)
 
     ggml.gguf_free(gguf_ctx)
+
+if __name__ == '__main__':
+  unittest.main()

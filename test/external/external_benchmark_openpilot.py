@@ -22,6 +22,7 @@ if __name__ == "__main__":
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
   new_inputs_junk = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
+  new_inputs_junk_numpy = {k:v.numpy() for k,v in new_inputs_junk.items()}
 
   # benchmark
   for _ in range(5):
@@ -35,7 +36,10 @@ if __name__ == "__main__":
   for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(run_onnx_jit(**new_inputs_junk).values())).cast(dtypes.float32).numpy()
+    # Need to cast non-image inputs from numpy, this is only realistic way to run model
+    inputs = {**{k:v for k,v in new_inputs_junk.items() if 'img' in k},
+              **{k:Tensor(v) for k,v in new_inputs_junk_numpy.items() if 'img' not in k}}
+    ret = next(iter(run_onnx_jit(**inputs).values())).cast(dtypes.float32).numpy()
     print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   suffix = ""

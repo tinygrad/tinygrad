@@ -3,8 +3,7 @@ import unittest
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOp, Ops, BinaryOps
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.ops import UOp, Ops
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
@@ -16,15 +15,17 @@ from tinygrad.shape.view import View
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is Ops.SINK][0]
+    a = Tensor([1,2,3,4]).realize()
+    si = (a+1).schedule()[0]
     out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
-    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.parents if x.op is Ops.LOAD}
+    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.toposort if x.op is Ops.LOAD}
     rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
     tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 
   def test_bufs_from_lin(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is Ops.SINK][0]
+    a = Tensor([1,2,3,4]).realize()
+    si = (a+1).schedule()[0]
     rawbufs = bufs_from_lin(lin:=Kernel(si.ast))
     assert len(rawbufs) == len(lin.membufs) == 2
     assert all(r is not None for r in rawbufs)
@@ -34,7 +35,7 @@ class TestTimeLinearizer(unittest.TestCase):
   def test_bufs_from_lin_alt(self):
     a = Tensor.randn(4, 4).realize()
     b = a+a[0]
-    si = [si for si in b.schedule() if si.ast.op is Ops.SINK][0]
+    si = b.schedule()[0]
     rawbufs = bufs_from_lin(k:=Kernel(si.ast))
     assert len(rawbufs) == len(k.membufs) == 2
     assert all(r is not None for r in rawbufs)
@@ -107,7 +108,7 @@ class TestBEAM(unittest.TestCase):
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 256), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
-        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.MAX, (1,)), src=(
+        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (1,)), src=(
           UOp(Ops.MUL, dtypes.float, arg=None, src=(
             UOp(Ops.ADD, dtypes.float, arg=None, src=(
               UOp(Ops.ADD, dtypes.float, arg=None, src=(
