@@ -664,10 +664,9 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mockgpu_macos_utils
+          name: libamd_comgr
           path: |
             /usr/local/lib/libamd_comgr.dylib
-            /usr/local/lib/libremu.dylib
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
