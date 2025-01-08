@@ -595,54 +595,47 @@ jobs:
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
-      - name: Restore comgr from cache
+      - name: Cache comgr
         if: matrix.backend == 'amd'
-        id: cache-comgr-restore
-        uses: actions/cache/restore@v4
+        id: cache-comgr
+        uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/llvm-project/amd/comgr/build
           key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Clone LLVM and AMD projects
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
+        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
           git clone --depth 10 -b rocm-6.1.x https://github.com/ROCm/llvm-project ${{ github.workspace }}/llvm-project
           cd ${{ github.workspace }}/llvm-project
           git checkout 669db884972e769450470020c06a6f132a8a065b
           rm -rf .git
       - name: Install build dependencies
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
+        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
           brew update
           brew install --formula cmake rust
       # Comgr depends on LLVM, clang, lld, and device-libs. (https://github.com/ROCm/llvm-project/tree/rocm-6.1.x/amd/comgr)
       - name: Build LLVM
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
+        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
           cd ${{ github.workspace }}/llvm-project
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="llvm;clang;lld" -DLLVM_TARGETS_TO_BUILD="AMDGPU;AArch64" ../llvm
           make -j$(sysctl -n hw.ncpu)
       - name: Build device-libs
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
+        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
           cd ${{ github.workspace }}/llvm-project/amd/device-libs
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build" ..
           make -j$(sysctl -n hw.ncpu)
       - name: Build comgr
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
+        if: matrix.backend == 'amd' && steps.cache-comgr.outputs.cache-hit != 'true'
         run: |
           cd ${{ github.workspace }}/llvm-project/amd/comgr
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/llvm-project/build;${{ github.workspace }}/llvm-project/amd/device-libs/build" -DCOMGR_DISABLE_SPIRV=1 -DBUILD_TESTING=OFF ..
           make -j$(sysctl -n hw.ncpu)
-      - name: Cache comgr
-        if: matrix.backend == 'amd' && steps.cache-comgr-restore.outputs.cache-hit != 'true'
-        id: cache-comgr-save
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ github.workspace }}/llvm-project/amd/comgr/build
-          key: macos-15-comgr-aarch64-669db884972e769450470020c06a6f132a8a065b
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: sudo mkdir /usr/local/lib && sudo cp ${{ github.workspace }}/llvm-project/amd/comgr/build/libamd_comgr.dylib /usr/local/lib/ 
