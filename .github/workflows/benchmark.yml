@@ -570,7 +570,7 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: benchmark openpilot 0.9.7 on CPU
-      run: PYTHONPATH=. FLOAT16=0 IMAGE=0 CLANG=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_clang_0_9_7.txt
+      run: PYTHONPATH=. FLOAT16=0 IMAGE=0 CLANG=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_clang_0_9_7.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (comma cpu)
