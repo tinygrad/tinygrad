@@ -18,35 +18,28 @@ BUF_LIMIT = {"METAL":32}
 # **** big graph spec
 
 tensor_uop_spec = PatternMatcher([
-  # ** stable and well understood specs
-
-  # DEVICE and BUFFER
   (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"), lambda buf:
-   # arg: (number, size)
-   isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and \
-   # dtype
-   isinstance(buf.dtype, (DType, ImageDType))),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
+   lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
 
-  # movement ops
-  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
+  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
-   (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
+   lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
+  (UPat(Ops.DEFINE_VAR, src=(UPat(Ops.VIEW, arg=ShapeTracker.from_shape(()))), arg=None), lambda: True),
 
-  # Tensor const has a ShapeTracker of shape=() and a device
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
+  # Tensor const has an unmasked ShapeTracker of stride 0 and a device
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
+   lambda st: len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides) and st.st.views[0].mask is None),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
-
-  # ** specs with room for refactoring and improving
 
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
@@ -57,21 +50,15 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
    lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
-  # ASSIGN changes the value of an existing buffer
-  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val:
-   # target must be a realized device buffer
-   (target.op is Ops.BUFFER or target.is_realized) and
-   # dtype
-   (assign.dtype == target.dtype == new_val.dtype)),
+  # ASSIGN changes the value of a realized buffer
+  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
+   lambda assign,target,new_val: (target.op is Ops.BUFFER or target.is_realized) and (assign.dtype == target.dtype == new_val.dtype)),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
   # BUFFER and VIEW specify device and shape for EMPTY and BUFFER_VIEW
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat({Ops.EMPTY, Ops.BUFFER_VIEW}, name="uop"))),
    lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
-
-  # DEVICE and VIEW specify device and shape for BIND
-  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND))), lambda: True),
 
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
   # TODO: this should be EMPTY(VIEW(BUFFER))
@@ -510,9 +497,10 @@ do_realize = PatternMatcher([
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
 
-def unbind_variable(ctx:ScheduleContext, bind:UOp, st:UOp):
-  ctx.var_vals.update([bind.unbind()])
-  return UOp.const(bind.dtype, bind).valid(unwrap(st.st))
+def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
+  assert isinstance(val.src[1].const_arg, int), f"expected BIND value to be int {val}"
+  ctx.var_vals[ret:=var.replace(src=())] = val.src[1].const_arg
+  return ret.valid(unwrap(bind.st))
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
@@ -527,7 +515,7 @@ def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
 break_sched = PatternMatcher([
   # CONST is always fused and generated
   (UPat(Ops.CONST, name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: UOp.const(x.dtype.base, x.const_arg).valid(st.st)),
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE), UPat(Ops.BIND, name="bind"))), unbind_variable),
+  (UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.var("val"))), unbind_variable),
   # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),
@@ -564,7 +552,7 @@ remove_movement_ops = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  if not skip_check: type_verify(list(UOp.sink(*outs).toposort), extra_spec=tensor_uop_spec)
+  if not skip_check: type_verify(list(UOp.sink(*outs).toposort), tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
   sink = add_buffers(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
   # const folding and fusion
