@@ -18,20 +18,13 @@ BUF_LIMIT = {"METAL":32}
 # **** big graph spec
 
 tensor_uop_spec = PatternMatcher([
-  # ** stable and well understood specs
-
-  # DEVICE and BUFFER
   (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"), lambda buf:
-   # arg: (number, size)
-   isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and \
-   # dtype
-   isinstance(buf.dtype, (DType, ImageDType))),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
+   lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
 
-  # movement ops
-  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x:
+  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
-   (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
+   lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
@@ -48,8 +41,6 @@ tensor_uop_spec = PatternMatcher([
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
 
-  # ** specs with room for refactoring and improving
-
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
@@ -59,12 +50,9 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
    lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
-  # ASSIGN changes the value of an existing buffer
-  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))), lambda assign,target,new_val:
-   # target must be a realized device buffer
-   (target.op is Ops.BUFFER or target.is_realized) and
-   # dtype
-   (assign.dtype == target.dtype == new_val.dtype)),
+  # ASSIGN changes the value of a realized buffer
+  (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
+   lambda assign,target,new_val: (target.op is Ops.BUFFER or target.is_realized) and (assign.dtype == target.dtype == new_val.dtype)),
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
