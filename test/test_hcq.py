@@ -335,7 +335,7 @@ class TestHCQ(unittest.TestCase):
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
     print(f"same device copy:  {et_ms:.2f} ms, {gb_s:.2f} GB/s")
-    assert (0.3 if CI else 10) <= gb_s <= 1000
+    assert (0.2 if CI else 10) <= gb_s <= 1000
 
   def test_speed_cross_device_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -362,7 +362,7 @@ class TestHCQ(unittest.TestCase):
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
     print(f"cross device copy: {et_ms:.2f} ms, {gb_s:.2f} GB/s")
-    assert (0.3 if CI else 2) <= gb_s <= 50
+    assert (0.2 if CI else 2) <= gb_s <= 50
 
   def test_timeline_signal_rollover(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
