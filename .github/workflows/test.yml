@@ -599,13 +599,13 @@ jobs:
         if: matrix.backend == 'amd'
         run: |
           sudo mkdir -p /usr/local/lib
-          curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
             jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
       - name: Install remu
         if: matrix.backend == 'amd'
         run: |
-          curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libremu.dylib
       - name: Install dependencies
