@@ -607,7 +607,7 @@ jobs:
         run: |
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            sudo xargs curl -L -o $INSTALL_PATH/libremu.dylib
+            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
