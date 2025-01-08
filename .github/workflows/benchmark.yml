@@ -13,6 +13,9 @@ on:
       - master
       - update_benchmark
       - update_benchmark_staging
+  pull_request:
+    branches:
+      - master # TEST
   workflow_dispatch:
     inputs:
       run_process_replay:
