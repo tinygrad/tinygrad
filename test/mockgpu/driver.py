@@ -31,9 +31,19 @@ class VirtFile:
   path: str
   fdcls: Any # TODO: fix this Union[VirtFileDesc, functools.partial[VirtFileDesc]]
 
+class PCIRegion:
+  def __init__(self, size): self.size = size
+
+class PCIDesc:
+  def __init__(self, driver, vendor, device, domain, bus, slot, func, regions):
+    self.driver = driver
+    self.vendor, self.device, self.domain, self.bus, self.slot, self.func = vendor, device, domain, bus, slot, func
+    self.regions = regions
+
 class VirtDriver:
   def __init__(self):
     self.tracked_files = []
     self.tracked_addresses = []
+    self.pci_devs = []
   def track_address(self, staddr, enaddr, rcb, wcb): self.tracked_addresses.append((staddr, enaddr, rcb, wcb))
   def open(self, name, flags, mode, fdcls): raise NotImplementedError()

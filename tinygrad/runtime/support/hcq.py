@@ -34,6 +34,24 @@ class HWInterface:
   def readlink(path): return os.readlink(path)
   @staticmethod
   def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))
+  @staticmethod
+  def pci_scan(vendor_id, device_id):
+    libpciaccess.pci_system_init()
+    pci_devices, pci_iter = {}, libpciaccess.pci_id_match_iterator_create(None)
+    while pcidev:=libpciaccess.pci_device_next(pci_iter):
+      if pcidev.contents.vendor_id == vendor_id and pcidev.contents.device_id == device_id:
+        pci_devices[f"{pcidev.contents.domain_16:04x}:{pcidev.contents.bus:02x}:{pcidev.contents.dev:02x}.{pcidev.contents.func:d}"] = pcidev.contents
+    return pci_devices
+  @staticmethod
+  def pci_probe(pci_device) -> int: return libpciaccess.pci_device_probe(ctypes.byref(pci_device))
+  @staticmethod
+  def pci_enable(pci_device) -> int: return libpciaccess.pci_device_enable(device, 0)
+  @staticmethod
+  def pci_cfg_read(pci_device, cmd) -> int:
+    libpciaccess.pci_device_cfg_read_u32(pci_device, ctypes.byref(value:=ctypes.c_uint32()), cmd)
+    return value.value
+  @staticmethod
+  def pci_cfg_write(pci_device, offset, size, value) -> int: libpciaccess.pci_device_cfg_write_u32(pci_device, value, offset)
 
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 

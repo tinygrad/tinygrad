@@ -2,6 +2,7 @@ import ctypes, ctypes.util, time, os, builtins, fcntl
 from tinygrad.runtime.support.hcq import HWInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
+from test.mockgpu.am.amdevice import AMDriver
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -9,7 +10,7 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-drivers = [AMDDriver(), NVDriver()]
+drivers = [AMDriver()]
 tracked_fds = {}
 
 orignal_memoryview = builtins.memoryview
@@ -87,7 +88,11 @@ class MockHWInterface(HWInterface):
       return tracked_fds[self.fd].list_contents()
     return os.listdir(self.path)
 
-  def write(self, content, binary=False): raise NotImplementedError()
+  def write(self, content, binary=False):
+    if self.fd in tracked_fds:
+      return tracked_fds[self.fd].write(content)
+    return os.write(self.fd, content)
+
   def seek(self, offset):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].seek(offset)
@@ -99,3 +104,25 @@ class MockHWInterface(HWInterface):
   def readlink(path): raise NotImplementedError()
   @staticmethod
   def eventfd(initval, flags=None): NotImplementedError()
+  @staticmethod
+  def pci_scan(vendor_id, device_id):
+    pci_devices = {}
+    for d in drivers:
+      for pcidev in d.pci_devs:
+        if pcidev.vendor == vendor_id and pcidev.device == device_id:
+          pci_devices[f"{pcidev.domain:04x}:{pcidev.bus:02x}:{pcidev.slot:02x}.{pcidev.func:d}"] = pcidev
+    return pci_devices
+  @staticmethod
+  def pci_probe(pci_device) -> int:
+    pci_device.driver.probe(pci_device)
+    return 0
+  @staticmethod
+  def pci_enable(pci_device) -> int: 
+    pci_device.driver.enable(pci_device)
+    return 0
+  @staticmethod
+  def pci_cfg_read(pci_device, cmd) -> int:
+    return pci_device.driver.cfg_read(pci_device, cmd)
+  @staticmethod
+  def pci_cfg_write(pci_device, cmd, value) -> int:
+    return pci_device.driver.cfg_write(pci_device, cmd, value)
