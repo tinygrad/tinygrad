@@ -598,16 +598,16 @@ jobs:
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: |
-          mkdir -p /usr/local/lib
+          sudo mkdir -p /usr/local/lib
           curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
             jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-            xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
       - name: Install remu
         if: matrix.backend == 'amd'
         run: |
           curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            xargs curl -L -o $INSTALL_PATH/libremu.dylib
+            sudo xargs curl -L -o $INSTALL_PATH/libremu.dylib
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
