@@ -1758,16 +1758,18 @@ def _load_buffer(ctx:list[UOp], buf:UOp):
   ctx.append(buf)
   return UOp(Ops.LOAD, buf.dtype, (glbl, ShapeTracker.from_shape((buf.size,)).to_uop()))
 load_buffers = PatternMatcher([
-  (UPat(Ops.BUFFER, name="buf"), _load_buffer)
+  (UPat(Ops.BUFFER, name="buf"), _load_buffer),
+  (UPat(Ops.DETACH, name="root"), lambda root: root.src[0]),
 ])
 
 # put the entire schedule of the tensor in a single ScheduleItem
 @track_rewrites(named=True)
 def run_tensor_ast(r:Tensor):
   output = UOp.new_buffer(r.device, r.lazydata.size, r.dtype)
-  ast = graph_rewrite(r.lazydata.base, remove_movement_ops+load_buffers+view_left, bufs:=[output])
-  ast = graph_rewrite(ast, view_right).base
-  sink = UOp.store(UOp(Ops.DEFINE_GLOBAL, ast.dtype.ptr(size=ast.size), (), 0), ShapeTracker.from_shape(ast.shape).to_uop(), ast).sink()
+  glbl = UOp(Ops.DEFINE_GLOBAL, output.dtype.ptr(size=output.size), (), 0)
+  sink = UOp(Ops.STORE, src=(glbl, ShapeTracker.from_shape(r.lazydata.base.shape).to_uop(), r.lazydata.base)).sink()
+  sink = graph_rewrite(sink, remove_movement_ops+load_buffers+view_left, bufs:=[output])
+  sink = graph_rewrite(sink, remove_movement_ops+view_right)
   si = ScheduleItem(sink, tuple(x.buffer for x in bufs), (), ())
   run_schedule([si])
   return output.realized.as_buffer().cast(output.dtype.fmt).tolist()
@@ -1784,7 +1786,7 @@ class TestSwizzle(unittest.TestCase):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
       a = Tensor.randint(4, 1).realize()
       b = Tensor.ones((1, 1), dtype=a.dtype).contiguous().realize()
-    # ADD(REDUCE(RESHAPE), LOAD) to RESHPAE(ADD(REDUCE), RESHAPE(LOAD))
+    # ADD(REDUCE(RESHAPE(LOAD)), LOAD) to ADD(REDUCE(RESHAPE(LOAD))), RESHAPE(LOAD)
     r = a.sum(0)+b
     self.assertEqual(run_tensor_ast(r), a.numpy().sum(0)+1)
 
@@ -1796,6 +1798,15 @@ class TestSwizzle(unittest.TestCase):
     # parallel reduce!
     add = a.sum(0)+b.sum(0)
     self.assertEqual(run_tensor_ast(add), a.numpy().sum(0)+b.numpy().sum(0))
+
+  # TODO: this is failing because it cannot resolve the final shape of two swizzled sources
+  @unittest.expectedFailure
+  def test_softmax(self):
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0):
+      Tensor.manual_seed(0)
+      a = Tensor.randn(32, 32).realize()
+    t = a.softmax()
+    run_tensor_ast(t)
 
   def test_swizzle_rewrite_alt(self):
     swizzle = UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65), strides=(103788, 34596, 3, 558, 1, 9), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62)), contiguous=False), View(shape=(2, 3, 256, 256), strides=(114075, 38025, 195, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64), strides=(0, 196608, 0, 65536, 16384, 256, 64, 1), offset=0, mask=None, contiguous=True))), src=( # noqa: E501
