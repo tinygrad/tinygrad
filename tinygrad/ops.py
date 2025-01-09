@@ -287,9 +287,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER_VIEW:
       shape = src_sts[0].shape
       if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-    # reduce ops can change shape
-    elif self.op is Ops.REDUCE_AXIS: shape = src_sts[0].reduce(self.axis_arg)
-    # shape is passthrough for all other ops
+    # only reduce ops are allowed to change shape, everything else derives shape from sources
+    elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
     else: shape = src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(shape)
