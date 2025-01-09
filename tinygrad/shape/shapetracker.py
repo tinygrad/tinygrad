@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import functools
 from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid
 
@@ -13,11 +13,7 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
   idx, valid = views[-1].to_indexed_uops(_idxs)
   for view in reversed(views[0:-1]):
     view = view.minify()
-    acc, idxs = 1, []
-    for d in reversed(view.shape):
-      idxs.append((idx//acc)%d)
-      acc *= d
-    idx, valid = view.to_indexed_uops(idxs[::-1], valid)
+    idx, valid = view.to_indexed_uops(unravel(view.shape, idx), valid)
   return idx, valid
 
 @functools.lru_cache(None)
