@@ -48,6 +48,34 @@ class TestPickle(unittest.TestCase):
     np.testing.assert_equal(t_values, t2.numpy())
     self.assertEqual(GlobalCounters.kernel_count-init, 0)
 
+  def test_pickle_realized_tensor_alt2(self):
+    print("** init")
+    t = Tensor.rand(10, 10).to("CLANG").realize()
+    tensor_uop = t.lazydata
+    assert tensor_uop.is_realized, f"expected {tensor_uop} to be realized"
+    t_values = t.numpy()
+    # pickle
+    st = pickle.dumps(t)
+    # free buffers
+    del t
+    del tensor_uop
+    print("** post pickle")
+    t2:Tensor = pickle.loads(st)
+    assert t2.lazydata.is_realized, f"expected {t2.lazydata} to be realized"
+    np.testing.assert_equal(t_values, t2.numpy())
+
+  # NOTE: currently Buffer exists on the uop, not tensor
+  def test_pickle_buffer_uop(self):
+    t = Tensor.arange(4).realize()
+    a = t.lazydata.buf_uop
+    self.assertIsNotNone(buffer:=a.realized)
+    s = pickle.dumps(a)
+    # free buffers
+    del a
+    del buffer
+    a2:UOp = pickle.loads(s)
+    self.assertListEqual(a2.realized.as_buffer().cast("I").tolist(), [0, 1, 2, 3])
+
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)
     st = pickle.dumps(t)

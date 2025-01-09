@@ -65,7 +65,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
     else:
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
-      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return None
+      if mask != (0, old_dim) and l != r and next_mask[1] - next_mask[0] != 1: return None
       mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
   return tuple(reversed(new_mask))
