@@ -46,7 +46,6 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
       rel_pg = (tgt & ~0xFFF) - (ploc & ~0xFFF)
       return instr | (getbits(rel_pg, 12, 13) << 29) | (getbits(rel_pg, 14, 32) << 5)
     case libc.R_AARCH64_ADD_ABS_LO12_NC: return instr | (getbits(tgt, 0, 11) << 10)
-    case libc.R_AARCH64_CALL26: return instr | getbits(tgt, 2, 27)
     case libc.R_AARCH64_LDST16_ABS_LO12_NC: return instr | (getbits(tgt, 1, 11) << 10)
     case libc.R_AARCH64_LDST32_ABS_LO12_NC: return instr | (getbits(tgt, 2, 11) << 10)
     case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
