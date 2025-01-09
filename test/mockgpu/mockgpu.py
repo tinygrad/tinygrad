@@ -3,6 +3,7 @@ from tinygrad.runtime.support.hcq import HWInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdevice import AMDriver
+import tinygrad.helpers
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -20,8 +21,9 @@ class TrackedMemoryView:
     self.rcb, self.wcb = rcb, wcb
 
   def __getitem__(self, index):
-    self.rcb(self.mv, index)
-    return self.mv[index]
+    x = self.mv[index]
+    y = self.rcb(self.mv, index)
+    return y or x
 
   def __setitem__(self, index, value):
     self.mv[index] = value
@@ -44,6 +46,13 @@ def _memoryview(cls, mem):
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
+
+original_mv_address = tinygrad.helpers.mv_address
+def _tracked_mv_address(mv):
+  if isinstance(mv, TrackedMemoryView): return original_mv_address(mv.mv)
+  return original_mv_address(mv)
+
+tinygrad.helpers.mv_address = _tracked_mv_address
 
 def _open(path, flags):
   for d in drivers:
@@ -76,9 +85,10 @@ class MockHWInterface(HWInterface):
     return libc.mmap(start, sz, prot, flags, self.fd, offset)
 
   def read(self, size=None, binary=False):
-    if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].read_contents(size)
+      cts = tracked_fds[self.fd].read_contents(size)
+      if binary: return cts.encode()
+      return cts
     with open(self.fd, "rb" if binary else "r", closefd=False) as file:
       if file.tell() >= os.fstat(self.fd).st_size: file.seek(0)
       return file.read(size)
@@ -97,7 +107,11 @@ class MockHWInterface(HWInterface):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].seek(offset)
     else:
-      os.lseek(self.fd, offset, os.SEEK_CUR)
+      os.lseek(self.fd, offset, os.SEEK_SET)
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset):
+    if hasattr(drivers[0], "anon_mmap"): return drivers[0].anon_mmap(start, sz, prot, flags, offset)
+    return libc.mmap(start, sz, prot, flags, -1, offset)
   @staticmethod
   def exists(path): return _open(path, os.O_RDONLY) is not None
   @staticmethod

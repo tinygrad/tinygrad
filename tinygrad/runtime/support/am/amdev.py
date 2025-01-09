@@ -4,6 +4,7 @@ from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.hcq import HWInterface
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -92,8 +93,8 @@ class AMFirmware:
     self.descs += [self.desc(am.GFX_FW_TYPE_RLC_G, blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes)]
 
   def load_fw(self, fname:str, *headers):
-    fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
-    blob = memoryview(bytearray(fpath.read_bytes()))
+    fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if HWInterface.exists(f:=loc + fname))
+    blob = memoryview(bytearray(HWInterface(fpath).read(binary=True)))
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
   def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> tuple[int, memoryview]: return (typ, blob[offset:offset+size])
@@ -258,21 +259,22 @@ class AMDev:
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
-    self.fw = AMFirmware()
+    # self.fw = AMFirmware()
 
     # Initialize IP blocks
     self.soc21:AM_SOC21 = AM_SOC21(self)
     self.gmc:AM_GMC = AM_GMC(self)
     self.ih:AM_IH = AM_IH(self)
-    self.psp:AM_PSP = AM_PSP(self)
+    # self.psp:AM_PSP = AM_PSP(self)
     self.smu:AM_SMU = AM_SMU(self)
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.psp.is_sos_alive(): self.smu.mode1_reset()
+    # if self.psp.is_sos_alive(): self.smu.mode1_reset()
 
     # Initialize all blocks
-    for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
+    # for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
+    for ip in [self.soc21, self.gmc, self.ih, self.smu, self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
@@ -334,6 +336,7 @@ class AMDev:
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id: self.regs_offset[hw_ip][ip.instance_number] = list(ba)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
+    print(self.regs_offset)
 
   def _build_regs(self):
     mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]
