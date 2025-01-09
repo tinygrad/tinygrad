@@ -217,12 +217,16 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
+    # NOTE: this value is set by pickle when pickling a realized tensor
+    if _buffer is not None:
+      assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
+      buffers[created] = _buffer
     return created
 
 # some uops map to other stuff
@@ -245,7 +249,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
-    if (_device_buffer:=self.realized) is not None and PICKLE_BUFFERS: args.extend([_device_buffer])
+    if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
@@ -284,8 +288,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Buffer: return vsrc[0] if len(vsrc:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0 else None
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    if self.op is Ops.BUFFER_VIEW:
+      shape = src_sts[0].shape
+      if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
     # only reduce ops are allowed to change shape, everything else derives shape from sources
-    shape = src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape
+    elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
+    else: shape = src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(shape)
 
@@ -363,14 +371,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return ret
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType):
-    if self.can_view():
-      if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
-      else:
-        if not self.device.startswith("DISK") or not all_int(self.shape): raise RuntimeError(f"shape changing bitcast not supported on {self}")
-        # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
-        if (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
-        output_shape = self.shape[:-1]+((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-      return UOp.metaop(Ops.BUFFER_VIEW, output_shape, dtype, self.device, None, (self,))
+    if self.st is not None and self.shape and ((self.shape[-1]*self.dtype.itemsize)%dtype.itemsize != 0):
+      raise RuntimeError(f"unsupported size in bitcast {dtype}")
+    # shape changing bitcast can use a subbuffer on DISK
+    # TODO: this should be moved to realize.py
+    if self.can_view() and self.device.startswith("DISK"): return UOp(Ops.BUFFER_VIEW, dtype, (self,))
     return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
@@ -425,8 +430,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self, allow_buffer_view=True):
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      if allow_buffer_view and self.can_view(): return self.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
-      return self.alu(Ops.CONTIGUOUS)
+      return self.alu(Ops.BUFFER_VIEW if allow_buffer_view and self.can_view() else Ops.CONTIGUOUS)
     forced_realize.add(self.base)
     return self
 
@@ -435,15 +439,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
+    # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
-      # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
       return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
-    # TOOD: Tensor variable bindings need device and shape from sources
+    # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     if op is Ops.BIND:
-      assert isinstance(arg, UOp) and arg.op is Ops.BIND and shape == (), f"trying to create BIND with {arg=} {shape=}"
-      return UOp(Ops.VIEW, dtype, (UOp(Ops.DEVICE, arg=device), arg), ShapeTracker.from_shape(()))
+      var, val = arg.unbind()
+      return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
@@ -451,9 +455,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
-    # copy the base and apply the shapetracker on the new device
-    if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, clone, (UOp(Ops.DEVICE, arg=device), src)).view(unwrap(self.st))
+    # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
+    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
@@ -521,8 +524,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Optional[Buffer]:
-    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return buffers[self.src[0]]
-    return None
+    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return self.src[0].realized
+    return buffers.get(self) if self.op is Ops.BUFFER else None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
@@ -839,7 +842,7 @@ class TrackedPatternMatcher(PatternMatcher):
           if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p, et))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
+    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0 and len(tracked_ctxs[-1]) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
     return None
 
 if TRACK_MATCH_STATS:
@@ -851,7 +854,7 @@ if TRACK_MATCH_STATS:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    launch_viz("VIZ", temp("rewrites.pkl"))
+    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl"))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -973,10 +976,11 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
-def type_verify(uops:list[UOp], extra_spec:Optional[PatternMatcher]=None):
-  spec_pm = spec if extra_spec is None else spec+extra_spec
+def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
+  specs = [spec, *extra_specs]
   for i,u in enumerate(uops):
-    if not spec_pm.rewrite(u):
+    spec_ret = [cast(bool|None, s.rewrite(u)) for s in specs]
+    if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 

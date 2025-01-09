@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, to_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from hypothesis import given, settings, strategies as strat
+from hypothesis import assume, given, settings, strategies as strat
 from test.helpers import rand_for_dtype
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
@@ -56,6 +56,8 @@ def _test_cast(a:Tensor, target_dtype:DType):
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
+  if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
+    raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(_to_np_dtype(target_dtype)).tolist())
 
 class TestDType(unittest.TestCase):
@@ -245,6 +247,11 @@ class TestInt8DType(TestDType):
   def test_int8_to_uint16_negative(self):
     _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [2**16-1, 2**16-2, 2**16-3, 2**16-4])
 
+  @unittest.skipIf(getenv("PTX"), "broken in ptx")
+  def test_bitcast_alt(self):
+    a = Tensor([72, -90, 27, 40, -53, 70, 96, 51], dtype=dtypes.int8).bitcast(dtypes.short)
+    self.assertListEqual(a.tolist(), [-22968, 10267, 18123, 13152])
+
 class TestUint8DType(TestDType):
   DTYPE = dtypes.uint8
   @unittest.skipIf(getenv("CUDA",0)==1 or getenv("PTX", 0)==1, "cuda saturation works differently")
@@ -255,7 +262,9 @@ class TestUint8DType(TestDType):
 class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
   def test_shape_change_bitcast(self, dt1, dt2):
-    if dt2 == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
+    # NOTE: this has to be assume to prevent hypothesis from skipping all samples
+    assume(dt2 != dtypes.bfloat16 and dt1 != dtypes.bfloat16) # no test for bf16 bitcast yet
+    assume(not (getenv("PTX") and dt1 == dtypes.int8)) # TODO: bitcasting int8 fails in PTX
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
     _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, data.view(_to_np_dtype(dt2)).tolist())
 

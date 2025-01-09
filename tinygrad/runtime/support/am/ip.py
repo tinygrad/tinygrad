@@ -1,7 +1,7 @@
 import ctypes, time
 from typing import Literal
 from tinygrad.runtime.autogen import libpciaccess
-from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
+from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32
 
 class AM_IP:
@@ -108,7 +108,7 @@ class AM_SMU(AM_IP):
 
   def mode1_reset(self):
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
-    time.sleep(0.5)
+    time.sleep(0.5) # 500ms
 
   def _smu_cmn_poll_stat(self): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1)
   def _smu_cmn_send_msg(self, msg, param=0):
@@ -125,7 +125,9 @@ class AM_SMU(AM_IP):
 
 class AM_GFX(AM_IP):
   def init(self):
-    self._wait_for_rlc_autoload()
+    # Wait for RLC autoload to complete
+    while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read(bootload_complete=1) != 0: pass
+
     self._config_gfx_rs64()
     self.adev.gmc.init_hub("GC")
 
@@ -154,7 +156,7 @@ class AM_GFX(AM_IP):
                                          mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
-    time.sleep(0.5)
+    time.sleep(0.05)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
@@ -203,11 +205,6 @@ class AM_GFX(AM_IP):
     self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1)
 
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0): self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue)
-
-  def _wait_for_rlc_autoload(self):
-    while True:
-      bootload_ready = (self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read() & gc_11_0_0.RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE_MASK) != 0
-      if self.adev.regCP_STAT.read() == 0 and bootload_ready: break
 
   def _config_gfx_rs64(self):
     def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0):
@@ -351,7 +348,7 @@ class AM_PSP(AM_IP):
     self.adev.regMP0_SMN_C2PMSG_64.write(am.PSP_RING_TYPE__KM << 16)
 
     # There might be handshake issue with hardware which needs delay
-    time.sleep(0.1)
+    time.sleep(0.02)
 
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x8000FFFF, value=0x80000000)
 
@@ -369,7 +366,7 @@ class AM_PSP(AM_IP):
     self.adev.regMP0_SMN_C2PMSG_67.write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
 
     while self.fence_pm.cpu_view().cast('I')[0] != prev_wptr: pass
-    time.sleep(0.05)
+    time.sleep(0.005)
 
     resp = am.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
