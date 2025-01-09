@@ -2,6 +2,8 @@ import ctypes, ctypes.util, time, os, builtins, fcntl
 from tinygrad.runtime.support.hcq import HWInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
+from test.mockgpu.am.amdevice import AMDriver
+import tinygrad.helpers
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -9,7 +11,7 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-drivers = [AMDDriver(), NVDriver()]
+drivers = [AMDriver()]
 tracked_fds = {}
 
 orignal_memoryview = builtins.memoryview
@@ -19,8 +21,9 @@ class TrackedMemoryView:
     self.rcb, self.wcb = rcb, wcb
 
   def __getitem__(self, index):
-    self.rcb(self.mv, index)
-    return self.mv[index]
+    x = self.mv[index]
+    y = self.rcb(self.mv, index)
+    return y or x
 
   def __setitem__(self, index, value):
     self.mv[index] = value
@@ -43,6 +46,13 @@ def _memoryview(cls, mem):
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
+
+original_mv_address = tinygrad.helpers.mv_address
+def _tracked_mv_address(mv):
+  if isinstance(mv, TrackedMemoryView): return original_mv_address(mv.mv)
+  return original_mv_address(mv)
+
+tinygrad.helpers.mv_address = _tracked_mv_address
 
 def _open(path, flags):
   for d in drivers:
@@ -75,9 +85,10 @@ class MockHWInterface(HWInterface):
     return libc.mmap(start, sz, prot, flags, self.fd, offset)
 
   def read(self, size=None, binary=False):
-    if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
-      return tracked_fds[self.fd].read_contents(size)
+      cts = tracked_fds[self.fd].read_contents(size)
+      if binary: return cts.encode()
+      return cts
     with open(self.fd, "rb" if binary else "r", closefd=False) as file:
       if file.tell() >= os.fstat(self.fd).st_size: file.seek(0)
       return file.read(size)
@@ -87,15 +98,45 @@ class MockHWInterface(HWInterface):
       return tracked_fds[self.fd].list_contents()
     return os.listdir(self.path)
 
-  def write(self, content, binary=False): raise NotImplementedError()
+  def write(self, content, binary=False):
+    if self.fd in tracked_fds:
+      return tracked_fds[self.fd].write(content)
+    return os.write(self.fd, content)
+
   def seek(self, offset):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].seek(offset)
     else:
-      os.lseek(self.fd, offset, os.SEEK_CUR)
+      os.lseek(self.fd, offset, os.SEEK_SET)
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset):
+    if hasattr(drivers[0], "anon_mmap"): return drivers[0].anon_mmap(start, sz, prot, flags, offset)
+    return libc.mmap(start, sz, prot, flags, -1, offset)
   @staticmethod
   def exists(path): return _open(path, os.O_RDONLY) is not None
   @staticmethod
   def readlink(path): raise NotImplementedError()
   @staticmethod
   def eventfd(initval, flags=None): NotImplementedError()
+  @staticmethod
+  def pci_scan(vendor_id, device_id):
+    pci_devices = {}
+    for d in drivers:
+      for pcidev in d.pci_devs:
+        if pcidev.vendor == vendor_id and pcidev.device == device_id:
+          pci_devices[f"{pcidev.domain:04x}:{pcidev.bus:02x}:{pcidev.slot:02x}.{pcidev.func:d}"] = pcidev
+    return pci_devices
+  @staticmethod
+  def pci_probe(pci_device) -> int:
+    pci_device.driver.probe(pci_device)
+    return 0
+  @staticmethod
+  def pci_enable(pci_device) -> int: 
+    pci_device.driver.enable(pci_device)
+    return 0
+  @staticmethod
+  def pci_cfg_read(pci_device, cmd) -> int:
+    return pci_device.driver.cfg_read(pci_device, cmd)
+  @staticmethod
+  def pci_cfg_write(pci_device, cmd, value) -> int:
+    return pci_device.driver.cfg_write(pci_device, cmd, value)

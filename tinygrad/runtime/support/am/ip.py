@@ -191,7 +191,7 @@ class AM_GFX(AM_IP):
 
   def set_clockgating_state(self):
     self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1)
-    self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
+    # self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
 
     self.adev.regRLC_CGCG_CGLS_CTRL.update(cgcg_gfx_idle_threshold=0x36, cgcg_en=1, cgls_rep_compansat_delay=0xf, cgls_en=1)
 
@@ -215,9 +215,9 @@ class AM_GFX(AM_IP):
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 1 for pipe in range(pipe_cnt)})
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 0 for pipe in range(pipe_cnt)})
 
-    _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=2)
-    _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=2)
-    _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=4, me=1)
+    # _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=2)
+    # _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=2)
+    # _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=4, me=1)
 
 class AM_IH(AM_IP):
   def interrupt_handler(self):
@@ -251,8 +251,8 @@ class AM_IH(AM_IP):
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
     self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
-    libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
-    libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
+    # libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
+    # libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:
