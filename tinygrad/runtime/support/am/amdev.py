@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib
+import ctypes, collections, time, dataclasses, pathlib, signal
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -269,10 +269,14 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.psp.is_sos_alive(): self.smu.mode1_reset()
+    try:
+      signal.signal(signal.SIGINT, signal.SIG_IGN)
+      if self.psp.is_sos_alive(): self.smu.mode1_reset()
+      for ip in [self.soc21, self.gmc, self.ih, self.psp]: ip.init()
+    finally: signal.signal(signal.SIGINT, signal.default_int_handler)
 
     # Initialize all blocks
-    for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
+    for ip in [self.smu, self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
