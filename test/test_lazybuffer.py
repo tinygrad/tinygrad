@@ -78,12 +78,11 @@ class TestLazyBuffer(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
-  def test_forced_realized_metaop(self):
+  # NOTE: contiguous on a buffer collapses
+  def test_contiguous_empty(self):
     empty = Tensor.empty(1).contiguous()
     sched = empty.schedule()
-    self.assertEqual(len(sched), 1)
-    self.assertIs(sched[0].ast.op, Ops.EMPTY)
-    run_schedule(sched)
+    self.assertEqual(len(sched), 0)
 
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
