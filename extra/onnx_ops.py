@@ -408,7 +408,7 @@ def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
-def _prepare_quantize_linear(x, scale, zero_point, axis, block_size):
+def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
   if axis < 0: axis += x.ndim
   if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point, dtype=dtypes.uint8)._broadcast_to(scale.shape)
   if block_size == 0:
@@ -418,12 +418,30 @@ def _prepare_quantize_linear(x, scale, zero_point, axis, block_size):
 
 def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
   out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
-  y_scale, y_zero_point = _prepare_quantize_linear(x, y_scale, y_zero_point, axis, block_size)
+  y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
   return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype)
 
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
-  x_scale, x_zero_point = _prepare_quantize_linear(x, x_scale, x_zero_point, axis, block_size)
-  return ((x.float() - x_zero_point) * x_scale).cast(x_scale.dtype)
+  x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
+  return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
+
+def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
+                y_zero_point: Tensor|int, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:int|list[int]=1, group:int=1,
+                kernel_shape:list[int]|None=None, pads:int|list[int]=0, strides:int|list[int]=1):
+  x = x.int() - x_zero_point
+  w = w.int() - w_zero_point
+  y = Conv(x, w, B, auto_pad, dilations, group, kernel_shape, pads, strides)
+  y = ((y * (x_scale * w_scale / y_scale)) + y_zero_point).round()
+  return y.cast(y_zero_point.dtype)
+
+def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
+                  y_zero_point:Tensor|int) -> Tensor:
+  a = a.int() - a_zero_point
+  b = b.int() - b_zero_point
+  y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
+  y = ((y * (a_scale * b_scale / y_scale)) + y_zero_point).round()
+  # cast to int first because result expects overflow/underflow wrap around
+  return y.int().cast(y_zero_point.dtype)
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
@@ -518,6 +536,21 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present if past is not None else out
+
+def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+  a = a.int() - a_zero_point
+  b = b.int() - b_zero_point
+  c = (a * a_scale + b * b_scale)
+  c = ((c / c_scale) + c_zero_point).round()
+  return c.cast(c_zero_point.dtype)
+
+def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
+  assert channels_last in {0, 1}
+  if channels_last == 1: X = X.permute(0, 2, 3, 1)
+  X = (X.int() - x_zero_point) * x_scale
+  y = GlobalAveragePool(X)
+  y = (y / y_scale + y_zero_point).round()
+  return y.cast(y_zero_point.dtype)
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
