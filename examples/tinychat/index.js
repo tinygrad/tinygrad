@@ -554,6 +554,7 @@ document.addEventListener("alpine:init", () => {
       let lastTok = tokens[tokens.length - 1];
       while (true) {
         const tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos);
+        this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
         startPos += 1;
         lastTok = tok[0];
         if (this.tokenizer.stop_tokens.has(lastTok)) break;
