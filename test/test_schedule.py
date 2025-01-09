@@ -110,7 +110,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
-    check_schedule(a, 2, filter_sink=False)
+    check_schedule(a, 1, filter_sink=False)
 
   def tests_constants_are_folded(self):
     a = Tensor(2)
@@ -242,9 +242,9 @@ class TestSchedule(unittest.TestCase):
   def test_no_dedup_empty(self):
     a = Tensor.empty((4,))
     b = Tensor.empty((4,))
-    sched = check_schedule([a, b], 2, filter_sink=False)
-    run_schedule(sched)
-    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+    # NOTE: empty does not have any schedule
+    check_schedule([a, b], 0, filter_sink=False)
+    self.assertIsNot(a.lazydata.buffer, b.lazydata.buffer)
 
   def test_dedup_outputs(self):
     a = Tensor.full((4, 4), 1.).contiguous().realize()
@@ -506,12 +506,12 @@ class TestSchedule(unittest.TestCase):
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.contiguous()
-    check_schedule(out, 1, filter_sink=False)
+    check_schedule(out, 0, filter_sink=False)
 
   def test_contiguous_while_not_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.permute(0,2,3,1).contiguous()
-    check_schedule(out, 2, filter_sink=False)
+    check_schedule(out, 1, filter_sink=False)
 
   def test_fold_with_contiguous(self):
     a = Tensor.randn(16, 16, 16).realize()
