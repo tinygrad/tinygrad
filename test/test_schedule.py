@@ -1793,7 +1793,7 @@ class TestSwizzle(unittest.TestCase):
       Tensor.manual_seed(0)
       a = Tensor.randint(4,).realize()
       b = Tensor.randint(4,).realize()
-    # multi reduce!
+    # parallel reduce!
     add = a.sum(0)+b.sum(0)
     self.assertEqual(run_tensor_ast(add), a.numpy().sum(0)+b.numpy().sum(0))
 
