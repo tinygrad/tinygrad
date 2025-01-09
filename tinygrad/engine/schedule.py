@@ -56,10 +56,9 @@ tensor_uop_spec = PatternMatcher([
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
-  # BUFFER and VIEW specify device and shape for EMPTY and BUFFER_VIEW
+  # BUFFER and VIEW specify device and shape for EMPTY
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.EMPTY, name="uop"))),
    lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
-
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
   # TODO: this should be EMPTY(VIEW(BUFFER))
   (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
