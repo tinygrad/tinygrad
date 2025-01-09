@@ -56,10 +56,9 @@ tensor_uop_spec = PatternMatcher([
 
   # ** TODO: these UOps need new specs, the current representation relies on hacks
 
-  # BUFFER and VIEW specify device and shape for EMPTY and BUFFER_VIEW
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat({Ops.EMPTY, Ops.BUFFER_VIEW}, name="uop"))),
+  # BUFFER and VIEW specify device and shape for EMPTY
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.EMPTY, name="uop"))),
    lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
-
   # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
   # TODO: this should be EMPTY(VIEW(BUFFER))
   (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
@@ -262,7 +261,8 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # capture process replay
-  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, ContextVar._cache, sink))
+  if getenv("RUN_PROCESS_REPLAY"):
+    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, ContextVar._cache, sink))
   return ScheduleItem(sink, tuple(u.buffer for u in si_ctx.bufs if u.size != 0), tuple(si_ctx.metadata),
                       tuple(ubuf for ubuf,ops in si_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops)))
 
