@@ -262,8 +262,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # capture process replay
   if getenv("RUN_PROCESS_REPLAY"):
-    with Context(PICKLE_BUFFERS=0):
-      PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, ContextVar._cache, sink))
+    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, ContextVar._cache, sink))
   return ScheduleItem(sink, tuple(u.buffer for u in si_ctx.bufs if u.size != 0), tuple(si_ctx.metadata),
                       tuple(ubuf for ubuf,ops in si_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops)))
 
