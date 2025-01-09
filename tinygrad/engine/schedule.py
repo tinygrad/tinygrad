@@ -54,15 +54,6 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
    lambda assign,target,new_val: (target.op is Ops.BUFFER or target.is_realized) and (assign.dtype == target.dtype == new_val.dtype)),
 
-  # ** TODO: these UOps need new specs, the current representation relies on hacks
-
-  # BUFFER and VIEW specify device and shape for EMPTY
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.EMPTY, name="uop"))),
-   lambda view,buf,uop: view.dtype == buf.dtype == uop.dtype and view.size == buf.size),
-  # NOTE: EMPTY just ensures the source BUFFER is allocated before children run
-  # TODO: this should be EMPTY(VIEW(BUFFER))
-  (UPat(Ops.EMPTY, src=(), arg=None), lambda: True),
-
   # TODO: BUFFER_VIEW is overloaded, it should be removed.
   # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
 
@@ -119,7 +110,7 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
-  if buf.st is None or buf.base.is_realized or is_constant(buf.base): return buf
+  if buf.st is None or buf.base.is_realized or buf.base.op is Ops.VIEW or is_constant(buf.base): return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
@@ -129,11 +120,9 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
-  # meta ops and assign already have a target buffer, otherwise we create a new one
-  buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, Ops.VIEW} else UOp.new_buffer(buf.device, buf.size, dtype)
-  # TODO: we need to rethink meta ops having buffers at creation time
-  if buf.op is Ops.VIEW: op = buf.src[1].replace(src=tuple(add_buffers(x, ctx, cache) for x in buf.src[1].src))
-  else: op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
+  # ASSIGN already has a target buffer, otherwise we create a new one
+  buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
+  op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this op
   ctx.tensor_uops[buf_uop] = [buf]
   # (early) bufferize
@@ -531,7 +520,7 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   # BUFFER_VIEW overrides the underlying buffer
   # TODO: this should be a shrink on the buffer
   if op.op is Ops.BUFFER_VIEW:
-    buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+    buffers[buf_uop] = (x:=op.src[0]).buf_uop.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
