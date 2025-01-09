@@ -67,7 +67,7 @@
             updateTotalTokens(cstate.messages);
             home = 1;
             // ensure that going back in history will go back to home
-            window.history.pushState({}, '', '/');
+            window.history.pushState({}, '', window.TINYCHAT_ROOT || '/');
           " @touchstart="
             otx = $event.changedTouches[0].clientX;
           " @touchmove="

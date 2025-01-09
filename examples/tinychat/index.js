@@ -1,3 +1,4 @@
+window.TINYCHAT_ROOT = "/";
 
 // copied from examples/webgpu/stable_diffusion/index.html
 const getDevice = async () => {
@@ -440,7 +441,7 @@ document.addEventListener("alpine:init", () => {
       if (this.home === 0) this.home = 1;
 
       // ensure that going back in history will go back to home
-      window.history.pushState({}, "", "/");
+      window.history.pushState({}, "", window.TINYCHAT_ROOT || "/");
 
       // add message to list
       this.cstate.messages.push({ role: "user", content: value });
@@ -467,6 +468,8 @@ document.addEventListener("alpine:init", () => {
         }
 
         // add chunk to the last message
+        // TODO: handle errors with localStorage overflow
+        //   possible example: this.cstate.messages[...] was undefined when trying to prompt within an old cstate (chat session)
         this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
 
         // calculate performance tracking
