@@ -39,6 +39,7 @@ class TestPickle(unittest.TestCase):
   def test_pickle_realized_tensor_alt(self):
     print("** init")
     t = Tensor.rand(10, 10).to("CLANG").realize()
+    tensor_uop = t.lazydata
     st = pickle.dumps(t)
     t_values = t.numpy()
     del t # free buffers
@@ -47,6 +48,23 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t_values, t2.numpy())
     self.assertEqual(GlobalCounters.kernel_count-init, 0)
+    # NOTE: this uop still exists in the method cache
+    self.assertIs(tensor_uop.buf_uop, t2.lazydata.buf_uop)
+
+  def test_pickle_realized_tensor_alt2(self):
+    print("** init")
+    t = Tensor.rand(10, 10).to("CLANG").realize()
+    assert t.lazydata.is_realized, f"expected {t2.lazydata} to be realized"
+    tensor_uop = t.lazydata
+    t_values = t.numpy()
+    # pickle
+    st = pickle.dumps(t)
+    del t
+    # NOTE: this removes the UOp from the uop cache
+    del tensor_uop # free tensor uop
+    print("** post pickle")
+    t2:Tensor = pickle.loads(st)
+    assert t2.lazydata.is_realized, f"expected {t2.lazydata} to be realized"
 
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)
