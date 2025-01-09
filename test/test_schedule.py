@@ -1782,10 +1782,10 @@ class TestSwizzle(unittest.TestCase):
 
   def test_single_swizzle(self):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
-      a = Tensor.randint(4,).realize()
-      b = Tensor.ones((1,), dtype=a.dtype).contiguous().realize()
-    # simple ADD(REDUCE(REDUCE)) to RESHPAE(ADD(REDUCE))
-    r = a.sum()+b
+      a = Tensor.randint(4, 1).realize()
+      b = Tensor.ones((1, 1), dtype=a.dtype).contiguous().realize()
+    # ADD(REDUCE(RESHAPE), LOAD) to RESHPAE(ADD(REDUCE), RESHAPE(LOAD))
+    r = a.sum(0)+b
     self.assertEqual(run_tensor_ast(r), a.numpy().sum(0)+1)
 
   def test_double_swizzle_possible(self):
