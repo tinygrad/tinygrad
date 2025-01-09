@@ -857,7 +857,7 @@ if TRACK_MATCH_STATS:
       with open(fn:=temp("rewrites.pkl"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    launch_viz("VIZ", temp("rewrites.pkl"))
+    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl"))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):

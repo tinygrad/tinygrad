@@ -308,7 +308,7 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   double_reduces: list[UOp] = []
   for r, r_uop in ctx.allbufs.items():
     if (r_uop:=uval(r_uop)).op is not Ops.REDUCE_AXIS: continue
-    if FUSE_CONV_BW and is_scheduled(x:=r_uop.src[0].base) and uval(x).op is r_uop.op and x.base is not x: double_reduces.append(r)
+    if FUSE_CONV_BW and is_scheduled((x:=r_uop.src[0]).base) and uval(x.base).op is r_uop.op and x.base is not x: double_reduces.append(r)
     if r in ctx.realizes: continue
     group: dict[UOp, None] = {}
     recursive_group(r, unwrap(r_uop.st), r, ctx.children, ctx.allbufs, ctx.realizes, reduce_for_op, group, cache={})
