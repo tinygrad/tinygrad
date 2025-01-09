@@ -350,6 +350,7 @@ document.addEventListener("alpine:init", () => {
     // model
     nets: {},
     tokenizer: null,
+    // TODO: implement context sliding; model currently outputs gibberish past max_context
     max_context: 1024,
     lastSeenToks: [],
 
@@ -437,6 +438,7 @@ document.addEventListener("alpine:init", () => {
       if (!value) return;
 
       if (this.generating) return;
+      // TODO: fix bug: if we switch to another chat session during generation, prompt bar locks up with "Generating..."
       this.generating = true;
       if (this.home === 0) this.home = 1;
 
