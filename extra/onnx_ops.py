@@ -198,19 +198,11 @@ def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
   return x.pad(padding=_onnx_pads_to_tiny_pads(real_pads), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
-# NOTE: just to make sure that the pool pads are symmetric
-def assert_symmetric_pads(pads):
-  # pads: (padding_left, padding_right, padding_top, padding_bottom, ...)
-  if not all(pB == pA for pB, pA in zip(pads[::2], pads[1::2])): raise ValueError("Pads must be symmetric")
-  # use symmetric pads
-  return pads[::-2]
-
-def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS, allow_asymmetric=False):
-  def _apply_assertion(pads): return pads if allow_asymmetric else assert_symmetric_pads(pads)
+def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
   i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
-  if auto_pad == "NOTSET": return _apply_assertion(_onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2))
+  if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
   o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
-  return _apply_assertion(_onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)))
+  return _onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))
 
 def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
                 dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
@@ -228,7 +220,7 @@ def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET
 
 def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
          kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
-  pads = _resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad, allow_asymmetric=True)
+  pads = _resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad)
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=tuple(pads))
 
 # src: https://github.com/onnx/onnx/blob/main/docs/Operators.md#ConvTranspose
@@ -245,7 +237,7 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OP
     output_shape = output_shape or [X.shape[i+2] * strides[i] for i in range(len(strides))]
     pads = [strides[i]*(input_shape[i]-1) + output_padding[i] + ((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
     pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape) * 2
-  pads = assert_symmetric_pads(_onnx_pads_to_tiny_pads(pads))
+  pads = _onnx_pads_to_tiny_pads(pads)
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=None, pads:list[int]|int=0, strides:list[int]|int=1):

@@ -136,7 +136,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -168,6 +168,8 @@ jobs:
       run: NV=1 RUN_PROCESS_REPLAY=0 HALF=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test speed vs theoretical
       run: NV=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
+    - name: Test benchmark allreduce
+      run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
       run: |
         NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
