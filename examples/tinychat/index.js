@@ -364,6 +364,11 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       try {
+        var device = await getDevice();
+        console.log("WebGPU device initialized");
+      } catch (error) {this.progress(0, 100, "Failed to launch WebGPU. Please check if WebGPU is enabled and reload the page. || Loading:"); console.log(error); return;}
+
+      try {
         var q6k_to_f32 = await Module();
       } catch (error) {this.progress(0, 100, "Error loading decompressor"); console.log(error); return;}
 
@@ -387,12 +392,7 @@ document.addEventListener("alpine:init", () => {
       } catch (error) {this.progress(p, 100, "Error launching tokenizer"); console.log(error); return;}
 
       try {
-        var device = await getDevice();
-        console.log("WebGPU device initialized");
         p = 40; this.progress(p, 100, "Launching WebGPU model:");
-      } catch (error) {this.progress(p, 100, "Error launching WebGPU"); console.log(error); return;}
-
-      try {
         let models = ["transformer"];
         this.nets = await Promise.all([
                 transformer().setup(device, tensorData.chunks, tensorData.metadata, this.progress.bind(this)),
