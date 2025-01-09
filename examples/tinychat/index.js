@@ -350,6 +350,7 @@ document.addEventListener("alpine:init", () => {
     nets: {},
     tokenizer: null,
     max_context: 1024,
+    lastSeenToks: [],
 
     progress(loaded, total, message) {
       const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
@@ -532,23 +533,31 @@ document.addEventListener("alpine:init", () => {
         tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
       }
       tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
-      let start_pos = 0
+      let startPos = 0
+      let prefillToks = tokens.slice(0, -1);
 
-      let prefill_toks = tokens.slice(0, -1);
+      // Skip the largest possible sequence of tokens already represented at the beginning of the model's kv caches
+      for (let i=0; i <= prefillToks.length; i++) {
+        startPos = i;
+        if (i == prefillToks.length) break;
+        if (i == this.lastSeenToks.length) break;
+        if (prefillToks[i] !== this.lastSeenToks[i]) break;
+      }
+      this.lastSeenToks = prefillToks;
+      prefillToks = prefillToks.slice(startPos);
 
-      // TODO: implement whole llama3.py prefill method, here we are missing the prompt skipping logic
-      for (const tok of prefill_toks) {
-        const out = await this.nets["transformer"](new Float32Array([[tok]]), start_pos);
-        start_pos += 1;
+      for (const tok of prefillToks) {
+        await this.nets["transformer"](new Float32Array([[tok]]), startPos);
+        startPos += 1;
       }
 
-      let last_tok = tokens[tokens.length - 1];
+      let lastTok = tokens[tokens.length - 1];
       while (true) {
-        const tok = await this.nets["transformer"](new Float32Array([[last_tok]]), start_pos);
-        start_pos += 1;
-        last_tok = tok[0];
-        if (this.tokenizer.stop_tokens.has(last_tok)) break;
-        yield new TextDecoder().decode(this.tokenizer.decode([last_tok]));
+        const tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos);
+        startPos += 1;
+        lastTok = tok[0];
+        if (this.tokenizer.stop_tokens.has(lastTok)) break;
+        yield new TextDecoder().decode(this.tokenizer.decode([lastTok]));
       }
     },
   }));
