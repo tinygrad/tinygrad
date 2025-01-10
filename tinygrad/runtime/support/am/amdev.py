@@ -243,9 +243,6 @@ class AMMemoryManager:
     if vm.paddr is not None: self.pa_allocator.free(vm.paddr)
 
   def palloc(self, size, align=0x1000, zero=True, boot=False) -> AMPhysicalMemoryBlock:
-    if boot: print("ALLOC Boot memory allocation")
-
-    # assert not boot or not self.adev.fast_boot or zero is False, "Boot memory must be zeroed"
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     pm = AMPhysicalMemoryBlock(self.adev, (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align), size)
     if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
@@ -261,10 +258,17 @@ class AMDev:
     self._run_discovery()
     self._build_regs()
 
-    # AM boot sequence:
-    # TODO: write up
+    # AM boot Process:
+    # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
+    # The 1st and 2nd states require a full GPU setup since their states are unknown. The 2nd state also requires a mode1 reset to
+    # reinitialize all components.
+    #
+    # The 3rd state can be set up partially to optimize boot time. In this case, only the GFX and SDMA IPs need to be initialized.
+    # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
+    # all blocks that are initialized only during the initial AM boot.
+    # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting = True
-    self.fast_boot = (self.regSCRATCH_REG1.read() == (am_version:=0xE0000001)) and (getenv("AM_FULL_BOOT", 0) != 1)
+    self.partial_boot = (self.regSCRATCH_REG7.read() == (am_version:=0xA0000001)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -279,14 +283,11 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    # print(hex(self.regSCRATCH_REG1.read()))
+    if self.partial_boot and (self.regCP_MEC_RS64_CNTL.read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
+      print("am: AM inited GPU and MEC is active. Somebody might use the GPU? Issue a full reset.")
+      self.partial_boot = False
 
-    # print(self.regCP_MEC_RS64_CNTL.read(mec_pipe0_active=1))
-    # if self.fast_boot and self.regCP_MEC_RS64_CNTL.read(mec_pipe0_active=1):
-    #   print("am: Fast boot enabled, but MEC is active. Somebody might use the GPU.")
-    #   self.fast_boot = False
-
-    if not self.fast_boot:
+    if not self.partial_boot:
       if self.psp.is_sos_alive(): self.smu.mode1_reset()
       for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]: ip.init()
 
@@ -296,11 +297,7 @@ class AMDev:
     # Re-initialize main blocks
     for ip in [self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
-    self.regSCRATCH_REG1.write(am_version)
-
-  def fini(self):
-    print("AMDev fini")
-    for ip in [self.sdma, self.gfx]: ip.fini()
+    self.regSCRATCH_REG7.write(am_version)
 
   def fini(self):
     for ip in [self.sdma, self.gfx]: ip.fini()

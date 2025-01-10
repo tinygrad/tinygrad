@@ -26,8 +26,8 @@ class AM_GMC(AM_IP):
     self.vm_base = self.adev.mm.va_allocator.base
     self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
 
-    self.memscratch_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.fast_boot, boot=True)
-    self.dummy_page_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.fast_boot, boot=True)
+    self.memscratch_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
+    self.dummy_page_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
     self.hub_initted = {"MM": False, "GC": False}
 
   def init(self): self.init_hub("MM")
@@ -169,15 +169,6 @@ class AM_GFX(AM_IP):
                                          mec_pipe0_active=0, mec_pipe1_active=0, mec_pipe2_active=0, mec_pipe3_active=0, mec_halt=1)
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
-  def fini(self):
-    self._grbm_select(me=1, pipe=0, queue=0)
-    self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2)
-    self.adev.regSPI_COMPUTE_QUEUE_RESET.write(0x1)
-    self._grbm_select()
-    self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=1, mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1,
-                                         mec_pipe0_active=0, mec_pipe1_active=0, mec_pipe2_active=0, mec_pipe3_active=0, mec_halt=1)
-    self.adev.regGCVM_CONTEXT0_CNTL.write(0)
-
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
 
@@ -296,12 +287,6 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
-    # self.adev.regSDMA0_F32_CNTL.update(halt=1)
-    # self.adev.reg(f"regSDMA0_QUEUE0_RB_CNTL").update(rb_enable=0)
-    # self.adev.reg(f"regSDMA0_QUEUE0_IB_CNTL").update(ib_enable=0)
-    # self.adev.regSDMA0_F32_CNTL.update(halt=1)
-    # self.adev.regSDMA0_F32_CNTL.update(halt=1, th1_reset=1)
-
     self.adev.regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0)
     self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
     self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
@@ -318,16 +303,13 @@ class AM_SDMA(AM_IP):
     self.adev.regGRBM_SOFT_RESET.write(0x0)
 
 class AM_PSP(AM_IP):
-  def __init__(self, adev):
-    super().__init__(adev)
-
-    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.fast_boot, boot=True)
-    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.fast_boot, boot=True)
-    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.fast_boot, boot=True)
-    self.ring_pm = self.adev.mm.palloc(0x10000, zero=not self.adev.fast_boot, boot=True)
-
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
+    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=True, boot=True)
+    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=True, boot=True)
+    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=True, boot=True)
+    self.ring_pm = self.adev.mm.palloc(0x10000, zero=True, boot=True)
+
     sos_components_load_order = [
       (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
       (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),

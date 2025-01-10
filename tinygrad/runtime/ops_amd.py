@@ -504,13 +504,13 @@ class PCIIface:
     mem.meta[1].append(self.dev)
     self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
 
-  def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0, queue=0):
+  def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
-                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=queue)
+                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
     else:
       self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
-        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=queue)
+        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
     return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"), doorbell=to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"),
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
@@ -574,12 +574,12 @@ class AMDDevice(HCQCompiled):
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
     atexit.register(self.device_fini)
 
-  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, queue=0):
+  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
     eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
     return self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, debug_memory_size=debug_memory_size,
-                                       ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, queue=queue)
+                                       ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
 
   def invalidate_caches(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
