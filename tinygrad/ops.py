@@ -227,8 +227,6 @@ class UOpMetaClass(type):
     # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
-    if created.op is Ops.VIEW and created.shape == (2, 1, 5, 1, 8) and created.arg.views[0].strides == (40, 0, 8, 0, 1):
-      print(created)
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer

@@ -147,8 +147,10 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     if buf not in buf_tensors: buf_tensors[buf] = []
     tensor_refs = [t for t,v2 in tensor_map.items() if v2 is k]
     for t in tensor_refs:
+      # these uops realize srcs
       if t.op is Ops.CONTIGUOUS: buf_tensors[buf].extend([t, t.src[0]])
       if t.op is Ops.SINK: buf_tensors[buf].extend([x for x in t.src if x.op is not Ops.SINK])
+      # otherwise it's just itself
       else: buf_tensors[buf].append(t)
 
   becomes_map: dict[UOp, UOp] = {}
