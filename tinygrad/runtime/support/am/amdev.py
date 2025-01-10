@@ -268,7 +268,7 @@ class AMDev:
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting = True
-    self.partial_boot = (self.regSCRATCH_REG7.read() == (am_version:=0xA0000001)) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000001)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -283,7 +283,7 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.partial_boot and (self.regCP_MEC_RS64_CNTL.read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
+    if self.partial_boot and (self.reg("regCP_MEC_RS64_CNTL").read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
       print("am: MEC is active. Someone might be using the GPU? Issue a full reset.")
       self.partial_boot = False
 
@@ -297,7 +297,7 @@ class AMDev:
     # Re-initialize main blocks
     for ip in [self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
-    self.regSCRATCH_REG7.write(am_version)
+    self.reg("regSCRATCH_REG7").write(am_version)
 
   def fini(self):
     for ip in [self.sdma, self.gfx]: ip.fini()
