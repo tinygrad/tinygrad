@@ -44,7 +44,7 @@ class ShapeTracker:
 
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[ShapeTracker]:
     inverted_views:list[View] = []
-    for v,s in zip(self.views[-1].minify()+self.views[-2::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
+    for v,s in zip((self.views[-1].minify(),)+self.views[-2::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
       if (inverted:= v.invert(s)) is None: return None
       inverted_views.append(inverted)
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
