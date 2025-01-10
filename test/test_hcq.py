@@ -1,6 +1,6 @@
 import unittest, ctypes, struct
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import getenv
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner, CompiledRunner
