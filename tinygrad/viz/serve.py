@@ -86,7 +86,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
                           kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None, graphs=[])
   replaces: dict[UOp, UOp] = {}
   g.graphs.append(uop_to_json(sink:=g.uops[0]))
-  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
+  for i,(u0,u1,upat,_) in enumerate(tqdm(ctx.matches)):
     # if the match didn't result in a rewrite we move forward
     if u1 is None: continue
     replaces[u0] = u1
@@ -150,7 +150,11 @@ class Handler(BaseHTTPRequestHandler):
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
-        jret: Any = {**asdict(g), "uops": [pcall(str,x) for x in g.uops]}
+        # TODO: this is O(n^2)!
+        uops_strs = [pcall(str,x) for x in tqdm(g.uops)]
+        # NOTE: don't use asdict because it's reserializing the uops
+        jret: Any = {"loc": g.loc, "code_line": g.code_line, "kernel_name": g.kernel_name, "upats": g.upats,
+                     "uops": uops_strs, "graphs": g.graphs, "diffs": g.diffs, "changed_nodes": g.changed_nodes, "kernel_code": g.kernel_code}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
