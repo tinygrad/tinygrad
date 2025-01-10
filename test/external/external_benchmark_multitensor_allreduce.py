@@ -6,7 +6,7 @@ def test(devs: list[str], N: int, iters:int = 10):
   def f(t: Tensor) -> Tensor: t.sum(0).realize()
 
   secs, gflops, gbs = 0, 0, 0
-  for i in range(-2, iters):
+  for i in range(-3, iters):
     t = Tensor.empty((len(devs), N))
     t = t.shard(devs, 0).realize()
     GlobalCounters.reset()
@@ -27,7 +27,7 @@ def test(devs: list[str], N: int, iters:int = 10):
 def run(sz, n_gpus=6, iters=10, use_ring=False):
   devs = tuple([f"{Device.DEFAULT}:{x}" for x in range(n_gpus)])
   N = sz // dtypes.float32.itemsize
-  with Context(RING=(2 if use_ring else 0), DEBUG=max(DEBUG, 2)): return test(devs, N, iters=iters)
+  with Context(RING=(2 if use_ring else 0), DEBUG=max(DEBUG.value, 2)): return test(devs, N, iters=iters)
 
 def main():
   n_gpus = getenv("GPUS", 6)
