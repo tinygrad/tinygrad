@@ -201,7 +201,7 @@ class HCQSignal(Generic[DeviceType]):
     Optional function which can implement sleep functionality for the signal.
     """
 
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 7000)):
     """
     Waits the signal is greater than or equal to a specific value.
 

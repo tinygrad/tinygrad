@@ -26,8 +26,8 @@ class AM_GMC(AM_IP):
     self.vm_base = self.adev.mm.va_allocator.base
     self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
 
-    self.memscratch_pm = self.adev.mm.palloc(0x1000, boot=True)
-    self.dummy_page_pm = self.adev.mm.palloc(0x1000, boot=True)
+    self.memscratch_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.fast_boot, boot=True)
+    self.dummy_page_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.fast_boot, boot=True)
     self.hub_initted = {"MM": False, "GC": False}
 
   def init(self): self.init_hub("MM")
@@ -158,6 +158,15 @@ class AM_GFX(AM_IP):
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.5)
 
+  def fini(self):
+    self._grbm_select(me=1, pipe=0, queue=0)
+    self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2)
+    self.adev.regSPI_COMPUTE_QUEUE_RESET.write(0x1)
+    self._grbm_select()
+    self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=1, mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1,
+                                         mec_pipe0_active=0, mec_pipe1_active=0, mec_pipe2_active=0, mec_pipe3_active=0, mec_halt=1)
+    self.adev.regGCVM_CONTEXT0_CNTL.write(0)
+
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
 
@@ -267,9 +276,9 @@ class AM_IH(AM_IP):
 class AM_SDMA(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Stop if something is running...
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").update(rb_enable=0)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=0)
-    while not self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_CONTEXT_STATUS").read(idle=1): pass
+    # self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").update(rb_enable=0)
+    # self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=0)
+    # while not self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_CONTEXT_STATUS").read(idle=1): pass
 
     # Setup the ring
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_MINOR_PTR_UPDATE").write(0x1)
@@ -299,14 +308,22 @@ class AM_SDMA(AM_IP):
     self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
     self.adev.regSDMA0_CNTL.update(ctxempty_int_enable=1, trap_enable=1)
 
+  def fini(self):
+    self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
+    self.adev.regSDMA0_QUEUE0_IB_CNTL.update(ib_enable=0)
+    self.adev.regSDMA0_F32_CNTL.update(halt=1, th1_reset=1)
+    self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
+    time.sleep(0.01)
+    self.adev.regGRBM_SOFT_RESET.write(0x0)
+
 class AM_PSP(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, boot=True)
-    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, boot=True)
-    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, boot=True)
-    self.ring_pm = self.adev.mm.palloc(0x10000, boot=True)
+    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.fast_boot, boot=True)
+    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.fast_boot, boot=True)
+    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.fast_boot, boot=True)
+    self.ring_pm = self.adev.mm.palloc(0x10000, zero=not self.adev.fast_boot, boot=True)
 
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):

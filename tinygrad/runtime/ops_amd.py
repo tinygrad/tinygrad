@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional
-import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, select, struct
+import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, select, struct, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
@@ -498,13 +498,13 @@ class PCIIface:
     mem.meta[1].append(self.dev)
     self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
 
-  def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
+  def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0, queue=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
-                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
+                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=queue)
     else:
       self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
-        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
+        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=queue)
 
     return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"), doorbell=to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"),
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))
@@ -518,13 +518,15 @@ class PCIIface:
     for d in self.dev.devices: d.dev_iface.adev.gmc.on_interrupt()
     raise RuntimeError("Device hang detected")
 
+  def device_stop(self): self.adev.fini()
+
 class AMDDevice(HCQCompiled):
   driverless:bool = not os.path.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
   signals_page:Any = None
   signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
+    self.device_id = int(device.split(":")[1]) if ":" in device else 1
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
 
     self.target = int(self.dev_iface.props['gfx_target_version'])
@@ -562,26 +564,48 @@ class AMDDevice(HCQCompiled):
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
+    # self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
+    atexit.register(self.device_stop)
+
+    # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+    #                                        eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+
+    # AMDCopyQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # self.synchronize()
+    # print("ok")
+
+    # self.dev_iface.adev.sdma.fini()
+    # self.dev_iface.adev.gfx.fini()
+    # self.dev_iface.adev.gfx.init()
+    # self.dev_iface.adev.sdma.init()
+
+    # self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000, queue=0)
+
+    # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+    #                                        eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     AMDComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
     self.synchronize()
     print("ok")
-    
+
     AMDCopyQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
     self.synchronize()
     print("ok")
 
-  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
+    exit(1)
+
+  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, queue=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
     eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
     return self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, debug_memory_size=debug_memory_size,
-                                       ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
+                                       ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, queue=queue)
 
   def invalidate_caches(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
@@ -589,3 +613,7 @@ class AMDDevice(HCQCompiled):
     self.synchronize()
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
+
+  def device_stop(self):
+    self.synchronize()
+    if hasattr(self.dev_iface, 'device_stop'): self.dev_iface.device_stop()

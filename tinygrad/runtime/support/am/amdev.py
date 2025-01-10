@@ -128,7 +128,7 @@ class AMMemoryManager:
 
   def __init__(self, adev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
-    self.boot_allocator = TLSFAllocator(vram_size - (32 << 20), base=vram_size - (64 << 20)) # per device
+    self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
 
@@ -256,6 +256,9 @@ class AMMemoryManager:
     if vm.paddr is not None: self.pa_allocator.free(vm.paddr)
 
   def palloc(self, size, align=0x1000, zero=True, boot=False) -> AMPhysicalMemoryBlock:
+    if boot: print("ALLOC Boot memory allocation")
+
+    # assert not boot or not self.adev.fast_boot or zero is False, "Boot memory must be zeroed"
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     pm = AMPhysicalMemoryBlock(self.adev, (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align), size)
     if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
@@ -274,6 +277,7 @@ class AMDev:
     # AM boot sequence:
     # TODO: write up
     self.is_booting = True
+    self.fast_boot = (self.regSCRATCH_REG1.read() == (am_version:=0xE0000001)) and (getenv("AM_FULL_BOOT", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -288,9 +292,14 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    print(hex(self.regSCRATCH_REG1.read()))
+    # print(hex(self.regSCRATCH_REG1.read()))
 
-    if self.regSCRATCH_REG1.read() != (am_version:=0xE0000003):
+    # print(self.regCP_MEC_RS64_CNTL.read(mec_pipe0_active=1))
+    # if self.fast_boot and self.regCP_MEC_RS64_CNTL.read(mec_pipe0_active=1):
+    #   print("am: Fast boot enabled, but MEC is active. Somebody might use the GPU.")
+    #   self.fast_boot = False
+
+    if not self.fast_boot:
       if self.psp.is_sos_alive(): self.smu.mode1_reset()
       for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]: ip.init()
 
@@ -301,6 +310,10 @@ class AMDev:
     for ip in [self.gfx, self.sdma]: ip.init()
     self.gfx.set_clockgating_state()
     self.regSCRATCH_REG1.write(am_version)
+
+  def fini(self):
+    print("AMDev fini")
+    for ip in [self.sdma, self.gfx]: ip.fini()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
