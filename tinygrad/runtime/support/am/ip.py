@@ -1,6 +1,6 @@
 import ctypes, time
 from typing import Literal
-from tinygrad.runtime.autogen import libpciaccess
+# from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32
 
@@ -251,8 +251,12 @@ class AM_IH(AM_IP):
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
     self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
-    libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
-    libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
+    # print(self.adev.cfg.cast('I')[libpciaccess.PCI_COMMAND//4])
+    # self.adev.cfg.cast('I')[libpciaccess.PCI_COMMAND//4] |= libpciaccess.PCI_COMMAND_MASTER
+    # print(self.adev.cfg.cast('I')[libpciaccess.PCI_COMMAND//4])
+
+    # libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
+    # libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:

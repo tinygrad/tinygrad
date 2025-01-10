@@ -400,7 +400,6 @@ class KFDIface:
     raise RuntimeError("\n".join(report))
 
 class PCIIface:
-  vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
   vfio_fd:HWInterface
   gpus:list[Any] = []
 
@@ -420,63 +419,46 @@ class PCIIface:
     self.pcidev = PCIIface.gpus[dev_id]
     self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
 
-    # Unbind the device from the kernel driver
-    if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
+    assert HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/driver").find("/vfio-pci") != -1, "Device is not bound to vfio-pci"
 
-    # Probe device
-    libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
+    # Open VFIO device
+    if first_dev:
+      PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
+      vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
-    # Try to init vfio. Use it if success.
-    if PCIIface.vfio:
-      try:
-        if first_dev:
-          HWInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
-          PCIIface.vfio_fd = HWInterface("/dev/vfio/vfio", os.O_RDWR)
-        vfio.VFIO_CHECK_EXTENSION(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+    iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
 
-        HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
-        HWInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
+    self.vfio_group = HWInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
+    vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
 
-        iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
-      except OSError:
-        if DEBUG >= 1: print("AM: failed to init vfio-pci module (not inserted or no-iommu mode is not supported).")
-        PCIIface.vfio = False
+    if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+    self.vfio_dev = HWInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
-    # Init vfio for the device
-    if PCIIface.vfio:
-      self.vfio_group = HWInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(PCIIface.vfio_fd.fd))
+    self.irq_fd = HWInterface.eventfd(0, 0)
+    self.irq_poller = select.poll()
+    self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
-      if first_dev: vfio.VFIO_SET_IOMMU(PCIIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-      self.vfio_dev = HWInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
-
-      self.irq_fd = HWInterface.eventfd(0, 0)
-      self.irq_poller = select.poll()
-      self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
-
-      irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
-      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
-    else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
-
-    self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
-    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+    irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
+      argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
+    vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
 
     self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
+
+    vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev,
+      cfg_region:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=vfio.VFIO_PCI_CONFIG_REGION_INDEX))
+    self.vfio_dev.write(ctypes.c_uint16(0x7), binary=True, offset=cfg_region.offset + libpciaccess.PCI_COMMAND)
+
+    self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
 
     # TODO: this is for 7900xtx, the only tested card.
     self.props = {'simd_count': 192, 'simd_per_cu': 2, 'max_waves_per_simd': 16, 'gfx_target_version': 110000, 'max_slots_scratch_cu': 32,
                   'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
-  def _map_pci_range(self, bar, off=0, addr=0, size=None):
-    if PCIIface.vfio:
-      vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
-      fd, sz, off = self.vfio_dev, size or reg.size, reg.offset + off
-    else: fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
-    return to_mv(fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz)
+  def _map_pci_range(self, bar, off=0, addr=0, size=None, fd=None):
+    vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
+    sz, off = size or reg.size, reg.offset + off
+    return to_mv(self.vfio_dev.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host:
@@ -525,7 +507,7 @@ class PCIIface:
     raise RuntimeError("Device hang detected")
 
 class AMDDevice(HCQCompiled):
-  driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
+  driverless:bool = not HWInterface.exists('/sys/module/amdgpu')
   signals_page:Any = None
   signals_pool:list[int] = []
 
