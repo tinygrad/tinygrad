@@ -2259,5 +2259,16 @@ class TestTensorUOpSpec(unittest.TestCase):
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule_with_vars(list(t.src))
 
+class TestBufferCreation(unittest.TestCase):
+  def test_simple_sink(self):
+    a = Tensor([1])+Tensor([2])
+    a.realize()
+    self.assertIsNotNone(a.lazydata.base.realized)
+
+  def test_resolve_view(self):
+    a = Tensor([[1], [2]])+Tensor([[3], [4]])
+    a.realize()
+    self.assertIsNotNone(a.lazydata.base.realized)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
