@@ -443,6 +443,18 @@ def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b
   # cast to int first because result expects overflow/underflow wrap around
   return y.int().cast(y_zero_point.dtype)
 
+def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None,
+                auto_pad: AUTO_PAD_OPTIONS = "NOTSET", dilations: int | list[int] = 1, group: int = 1, kernel_shape: list[int] | None = None,
+                pads: int | list[int] = 0, strides: int | list[int] = 1) -> Tensor:
+  x_int = x.int() - x_zero_point
+  w_int = w.int() - w_zero_point
+  return Conv(x_int, w_int, B, auto_pad, dilations, group, kernel_shape, pads, strides)
+
+def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_point: Tensor | int = 0) -> Tensor:
+  A_int = A.int() - a_zero_point
+  B_int = B.int() - b_zero_point
+  return Tensor.matmul(A_int, B_int, acc_dtype=dtypes.int32)
+
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   try: import PIL.Image
