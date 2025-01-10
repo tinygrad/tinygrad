@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, struct
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, struct, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
@@ -524,6 +524,8 @@ class PCIIface:
     for d in self.dev.devices: d.dev_iface.adev.gmc.on_interrupt()
     raise RuntimeError("Device hang detected")
 
+  def device_fini(self): self.adev.fini()
+
 class AMDDevice(HCQCompiled):
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
   signals_page:Any = None
@@ -570,6 +572,7 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
+    atexit.register(self.device_fini)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
@@ -584,3 +587,7 @@ class AMDDevice(HCQCompiled):
     self.synchronize()
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
+
+  def device_fini(self):
+    self.synchronize()
+    if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()
