@@ -7,6 +7,7 @@ from tinygrad.helpers import to_mv, data64, lo32, hi32
 class AM_IP:
   def __init__(self, adev): self.adev = adev
   def init(self): raise NotImplementedError("IP block init must be implemeted")
+  def fini(self): pass
 
 class AM_SOC21(AM_IP):
   def init(self):
