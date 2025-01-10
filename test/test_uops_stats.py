@@ -1,7 +1,6 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, ProgramSpec
 from tinygrad.renderer import Estimates
 from tinygrad.codegen.linearize import linearize_uop
@@ -16,7 +15,7 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  si = create_schedule([x.lazydata])[-1]
+  si = x.schedule()[-1]
   ei = lower_schedule_item(si)
   return ei.prg.estimates.ops, ei.prg.estimates.mem
 

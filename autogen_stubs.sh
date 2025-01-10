@@ -69,7 +69,7 @@ generate_comgr() {
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
-  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'"
+  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'" "'/usr/local/lib/libamd_comgr.dylib'" "'/opt/homebrew/lib/libamd_comgr.dylib'"
   sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\_try_dlopen_amd_comgr()\g" $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
@@ -79,6 +79,10 @@ generate_kfd() {
 
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
+  sed -i "s\import fcntl, functools\import functools" $BASE/kfd.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/kfd.py
+  sed -i "s\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, **kwargs):\g" $BASE/kfd.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
@@ -247,6 +251,87 @@ generate_qcom() {
   python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
 }
 
+generate_pciaccess() {
+  clang2py -k cdefstum \
+    /usr/include/pciaccess.h \
+    /usr/include/linux/pci_regs.h \
+    -l /usr/lib/x86_64-linux-gnu/libpciaccess.so \
+    -o $BASE/libpciaccess.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libpciaccess.py
+  fixup $BASE/libpciaccess.py
+  sed -i "s/ctypes\.CDLL('\([^']*\)')/ctypes.CDLL('\1') if os.path.exists('\1') else None/g" $BASE/libpciaccess.py
+}
+
+generate_vfio() {
+  clang2py -k cdefstum \
+    /usr/include/linux/vfio.h \
+    -o $BASE/vfio.py
+  fixup $BASE/vfio.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
+  sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/vfio.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
+}
+
+generate_am() {
+  clang2py -k cdefstum \
+    extra/amdpci/headers/v11_structs.h \
+    extra/amdpci/headers/amdgpu_vm.h \
+    extra/amdpci/headers/discovery.h \
+    extra/amdpci/headers/amdgpu_ucode.h \
+    extra/amdpci/headers/soc21_enum.h \
+    extra/amdpci/headers/psp_gfx_if.h \
+    extra/amdpci/headers/amdgpu_psp.h \
+    extra/amdpci/headers/amdgpu_irq.h \
+    extra/amdpci/headers/amdgpu_doorbell.h \
+    extra/amdpci/headers/soc15_ih_clientid.h \
+    -o $BASE/am/am.py
+  fixup $BASE/am/am.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_13_0_0_offset.h \
+    extra/amdpci/headers/mp_13_0_0_sh_mask.h \
+    -o $BASE/am/mp_13_0_0.py
+  fixup $BASE/am/mp_13_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_11_0_offset.h \
+    extra/amdpci/headers/mp_11_0_sh_mask.h \
+    -o $BASE/am/mp_11_0.py
+  fixup $BASE/am/mp_11_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/gc_11_0_0_offset.h \
+    extra/amdpci/headers/gc_11_0_0_sh_mask.h \
+    -o $BASE/am/gc_11_0_0.py
+  fixup $BASE/am/gc_11_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mmhub_3_0_0_offset.h \
+    extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
+    -o $BASE/am/mmhub_3_0_0.py
+  fixup $BASE/am/mmhub_3_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/nbio_4_3_0_offset.h \
+    extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
+    -o $BASE/am/nbio_4_3_0.py
+  fixup $BASE/am/nbio_4_3_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/osssys_6_0_0_offset.h \
+    extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
+    -o $BASE/am/osssys_6_0_0.py
+  fixup $BASE/am/osssys_6_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
+    extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
+    extra/amdpci/headers/amdgpu_smu.h \
+    -o $BASE/am/smu_v13_0_0.py
+  fixup $BASE/am/smu_v13_0_0.py
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -256,11 +341,14 @@ elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
+elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
+elif [ "$1" == "pci" ]; then generate_pciaccess
+elif [ "$1" == "vfio" ]; then generate_vfio
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am
 else echo "usage: $0 <type>"
 fi

@@ -15,7 +15,7 @@ from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCom
 
 def derandomize_model(model):
   for p in get_parameters(model):
-    p.lazydata = Tensor.empty(p.shape, device=p.device, dtype=p.dtype).lazydata
+    p.replace(Tensor.empty(p.shape, device=p.device, dtype=p.dtype))
     p.realize()
 
 def assert_jit_cache_len(fxn, expected_len):

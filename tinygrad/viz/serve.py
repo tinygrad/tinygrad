@@ -34,8 +34,9 @@ class GraphRewriteMetadata:
 @dataclass
 class GraphRewriteDetails(GraphRewriteMetadata):
   """Full details about a single call to graph_rewrite"""
-  graphs: list[UOp]
-  """Sink at every step of graph_rewrite"""
+  uops: list[UOp]
+  graphs: list[dict]
+  """Sink at every step of graph_rewrite + the json serialized version"""
   diffs: list[list[str]]
   """.diff style before and after of the rewritten UOp child"""
   changed_nodes: list[list[int]]
@@ -55,7 +56,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
   for k,ctxs in tqdm(zip(keys, contexts), desc="preparing kernels"):
     name = to_function_name(k.name) if isinstance(k, Kernel) else str(k)
     for ctx in ctxs:
-      if pickle.loads(ctx.sink).op is Ops.CONST: continue
+      if ctx.sink.op is Ops.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       kernels.setdefault(name, []).append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
@@ -78,35 +79,26 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
         else: label += f"\n{x.op.name}{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
-def _replace_uop(base:UOp, replaces:dict[UOp, UOp]) -> UOp:
-  if (found:=replaces.get(base)) is not None: return found
-  ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
-  if (final := replaces.get(ret)) is not None:
-      return final
-  replaces[base] = ret
-  return ret
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[pickle.loads(ctx.sink)], diffs=[], changed_nodes=[],
-                          kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None)
+  g = GraphRewriteDetails(**asdict(metadata), uops=[ctx.sink], diffs=[], changed_nodes=[],
+                          kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None, graphs=[])
   replaces: dict[UOp, UOp] = {}
-  sink = g.graphs[0]
-  for i,(u0_b,u1_b,upat,_) in enumerate(ctx.matches):
-    u0 = pickle.loads(u0_b)
+  g.graphs.append(uop_to_json(sink:=g.uops[0]))
+  for i,(u0,u1,upat,_) in enumerate(tqdm(ctx.matches)):
     # if the match didn't result in a rewrite we move forward
-    if u1_b is None:
-      replaces[u0] = u0
-      continue
-    replaces[u0] = u1 = pickle.loads(u1_b)
+    if u1 is None: continue
+    replaces[u0] = u1
     # first, rewrite this UOp with the current rewrite + all the matches in replaces
-    new_sink = _replace_uop(sink, {**replaces})
+    new_sink = sink.substitute(replaces)
     # sanity check
     if new_sink is sink: raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
-    g.changed_nodes.append([id(x) for x in u1.toposort if x.op is not Ops.CONST])
+    g.graphs.append(new_sink_js:=uop_to_json(new_sink))
+    g.changed_nodes.append([id(x) for x in u1.toposort if id(x) in new_sink_js])
     g.diffs.append(list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())))
-    g.graphs.append(sink:=new_sink)
+    g.uops.append(sink:=new_sink)
   return g
 
 # Profiler API
@@ -158,7 +150,11 @@ class Handler(BaseHTTPRequestHandler):
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
-        jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
+        # TODO: this is O(n^2)!
+        uops_strs = [pcall(str,x) for x in tqdm(g.uops)]
+        # NOTE: don't use asdict because it's reserializing the uops
+        jret: Any = {"loc": g.loc, "code_line": g.code_line, "kernel_name": g.kernel_name, "upats": g.upats,
+                     "uops": uops_strs, "graphs": g.graphs, "diffs": g.diffs, "changed_nodes": g.changed_nodes, "kernel_code": g.kernel_code}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
