@@ -1479,7 +1479,7 @@ class TestSchedule(unittest.TestCase):
     add = Tensor([[1], [2]])+Tensor([[3], [4]])
     add.realize()
     self.assertIsNotNone(add.lazydata.base.realized)
-    self.assertEqual(add.shape, ((1, 1)))
+    self.assertEqual(add.shape, ((2, 1)))
 
   def test_realize_sink_sym(self):
     a = Tensor([1])

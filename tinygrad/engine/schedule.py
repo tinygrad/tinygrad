@@ -61,13 +61,13 @@ sym = symbolic_simple+PatternMatcher([
   # ** sink folding **
   # passthrough
   (UPat(Ops.SINK, src=(UPat(Ops.VIEW, src=(UPat.var("x"),)),)), lambda x:x.sink()),
-  (UPat(Ops.SINK, src=(UPat(Ops.SINK, name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(Ops.BUFFER, name="x"),)), lambda x:x),
+  (UPat(Ops.SINK, src=(UPat(Ops.SINK, name="x"),)), lambda x:x),
   # NOOP
   (UPat(Ops.SINK, src=(UPat(Ops.CONST),)), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.SINK, src=(UPat(Ops.NOOP),)), lambda: UOp(Ops.NOOP)),
   # realize
-  (UPat(Ops.SINK, src=(UPat.var("x"),)), lambda x: x.contiguous() if x.op is not Ops.CONTIGUOUS else None),
+  (UPat(Ops.SINK, src=(UPat.var("x"),)), lambda x: x.contiguous().sink() if x.op is not Ops.CONTIGUOUS else None),
 
   # ** view folding **
   (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), sym_view),
@@ -135,7 +135,7 @@ def make_schedule_item(sink:UOp, output_buf:UOp) -> ScheduleItem:
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  sink = UOp.sink(*outs)
+  sink = UOp.sink(*[x.sink() for x in outs])
   type_verify(list(sink.toposort), tensor_uop_spec)
 
   realizes: dict[UOp, UOp] = {}
@@ -146,7 +146,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   for k,v in buffer_map.items():
     if (b:=v.base).op is not Ops.BUFFER: continue
     if b not in buffer_tensors: buffer_tensors[b] = []
-    buffer_tensors[b].extend([t for t,v2 in tensor_map.items() if v2 is k])
+    local_tensors = [t for t,v2 in tensor_map.items() if v2 is k]
+    buffer_tensors[b].extend(local_tensors)
 
   becomes_map: dict[UOp, UOp] = {}
   schedule: list[ScheduleItem] = []
@@ -155,6 +156,8 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     si = make_schedule_item(v.sink(), k)
     schedule.append(si)
     for buffer in si.bufs: buffer.ref(1)
-    for tensor in buffer_tensors[k]: becomes_map[tensor] = k.view(unwrap(tensor.st))
+    for tensor in buffer_tensors[k]:
+      if tensor.op is not Ops.SINK:
+        becomes_map[tensor] = k.view(unwrap(tensor.st))
   var_vals: dict[Variable, int] = {}
   return schedule, var_vals, becomes_map
