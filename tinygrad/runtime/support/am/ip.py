@@ -152,7 +152,6 @@ class AM_GFX(AM_IP):
     self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x450)
 
     # Enable MEC
-    self.adev.regCP_ME_CNTL.update(me_halt=0, pfp_halt=0)
     self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0,
                                          mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
 
@@ -189,7 +188,6 @@ class AM_GFX(AM_IP):
     self.adev.gmc.flush_hdp()
 
     self._grbm_select(me=1, pipe=pipe, queue=queue)
-    self.adev.regCP_HQD_ACTIVE.write(0x0)
 
     mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
     for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.reg_off, self.adev.regCP_HQD_PQ_WPTR_HI.reg_off + 1)):
