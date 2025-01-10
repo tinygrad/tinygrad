@@ -62,6 +62,7 @@ sym = symbolic_simple+PatternMatcher([
   # passthrough
   (UPat(Ops.SINK, src=(UPat(Ops.VIEW, src=(UPat.var("x"),)),)), lambda x:x.sink()),
   (UPat(Ops.SINK, src=(UPat(Ops.BUFFER, name="x"),)), lambda x:x),
+  (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(Ops.SINK, name="x"),)), lambda x:x),
   # NOOP
   (UPat(Ops.SINK, src=(UPat(Ops.CONST),)), lambda: UOp(Ops.NOOP)),
@@ -156,6 +157,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     si = make_schedule_item(v.sink(), k)
     schedule.append(si)
     for buffer in si.bufs: buffer.ref(1)
-    for tensor in buffer_tensors[k]: becomes_map[tensor] = k.view(unwrap(tensor.st))
+    for tensor in buffer_tensors[k]:
+      becomes_map[tensor] = k.view(unwrap(tensor.st))
   var_vals: dict[Variable, int] = {}
   return schedule, var_vals, becomes_map
