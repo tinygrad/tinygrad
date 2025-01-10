@@ -148,7 +148,9 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     if (b:=v.base).op is not Ops.BUFFER: continue
     if b not in buffer_tensors: buffer_tensors[b] = []
     local_tensors = [t for t,v2 in tensor_map.items() if v2 is k]
-    buffer_tensors[b].extend(local_tensors)
+    for t in local_tensors:
+      if t.op is Ops.SINK: buffer_tensors[b].extend(t.src)
+      else: buffer_tensors[b].append(t)
 
   becomes_map: dict[UOp, UOp] = {}
   schedule: list[ScheduleItem] = []
@@ -158,6 +160,7 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     schedule.append(si)
     for buffer in si.bufs: buffer.ref(1)
     for tensor in buffer_tensors[k]:
-      becomes_map[tensor] = k.view(unwrap(tensor.st))
+      if tensor.op is not Ops.SINK:
+        becomes_map[tensor] = k.view(unwrap(tensor.st))
   var_vals: dict[Variable, int] = {}
   return schedule, var_vals, becomes_map
