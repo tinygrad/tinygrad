@@ -434,6 +434,15 @@ def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_s
   y = ((y * (x_scale * w_scale / y_scale)) + y_zero_point).round()
   return y.cast(y_zero_point.dtype)
 
+def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
+                  y_zero_point:Tensor|int) -> Tensor:
+  a = a.int() - a_zero_point
+  b = b.int() - b_zero_point
+  y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
+  y = ((y * (a_scale * b_scale / y_scale)) + y_zero_point).round()
+  # cast to int first because result expects overflow/underflow wrap around
+  return y.int().cast(y_zero_point.dtype)
+
 def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None,
                 auto_pad: AUTO_PAD_OPTIONS = "NOTSET", dilations: int | list[int] = 1, group: int = 1, kernel_shape: list[int] | None = None,
                 pads: int | list[int] = 0, strides: int | list[int] = 1) -> Tensor:
@@ -445,15 +454,6 @@ def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_p
   A_int = A.int() - a_zero_point
   B_int = B.int() - b_zero_point
   return Tensor.matmul(A_int, B_int, acc_dtype=dtypes.int32)
-
-def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
-                  y_zero_point:Tensor|int) -> Tensor:
-  a = a.int() - a_zero_point
-  b = b.int() - b_zero_point
-  y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
-  y = ((y * (a_scale * b_scale / y_scale)) + y_zero_point).round()
-  # cast to int first because result expects overflow/underflow wrap around
-  return y.int().cast(y_zero_point.dtype)
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):

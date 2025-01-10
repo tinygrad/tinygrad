@@ -17,25 +17,14 @@ from tinygrad.helpers import fetch, getenv
 #  https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
 #  ~35% - https://github.com/axinc-ai/onnx-quantization/raw/refs/heads/main/models/mobilenev2_quantized.onnx
 
-if __name__ == "__main__":
-  fn = sys.argv[1]
-  if getenv("QUANT"):
-    from onnxruntime.quantization import quantize_dynamic
-    model_fp32 = fetch(fn)
-    fn = '/tmp/model.quant.onnx'
-    quantized_model = quantize_dynamic(model_fp32, fn)
-  run_onnx_jit, input_shapes, input_types = load_onnx_model(fn)
-  t_name, shape = list(input_shapes.items())[0]
-  assert shape[1:] == (3,224,224), f"shape is {shape}"
-
+def imagenet_dataloader(cnt=0):
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-
   files = get_val_files()
   random.shuffle(files)
+  if cnt != 0: files = files[:cnt]
   cir = get_imagenet_categories()
-  hit = 0
-  for i,fn in enumerate(files):
+  for fn in files:
     img = Image.open(fn)
     img = img.convert('RGB') if img.mode != "RGB" else img
     img = center_crop(img)
@@ -43,6 +32,34 @@ if __name__ == "__main__":
     img = Tensor(img).permute(2,0,1).reshape(1,3,224,224)
     img = ((img.cast(dtypes.float32)/255.0) - input_mean) / input_std
     y = cir[fn.split("/")[-2]]
+    yield img,y
+
+if __name__ == "__main__":
+  fn = sys.argv[1]
+  if getenv("QUANT"):
+    from onnxruntime.quantization import quantize_dynamic, quantize_static, QuantFormat, QuantType, CalibrationDataReader
+    model_fp32 = fetch(fn)
+    fn = '/tmp/model.quant.onnx'
+    if getenv("DYNAMIC"):
+      quantize_dynamic(model_fp32, fn)
+    else:
+      class ImagenetReader(CalibrationDataReader):
+        def __init__(self):
+          self.iter = imagenet_dataloader(cnt=1000)
+        def get_next(self) -> dict:
+          try:
+            img,y = next(self.iter)
+          except StopIteration:
+            return None
+          return {"input": img.numpy()}
+      quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False, weight_type=QuantType.QInt8)
+
+  run_onnx_jit, input_shapes, input_types = load_onnx_model(fn)
+  t_name, shape = list(input_shapes.items())[0]
+  assert shape[1:] == (3,224,224), f"shape is {shape}"
+
+  hit = 0
+  for i,(img,y) in enumerate(imagenet_dataloader()):
     p = run_onnx_jit(**{t_name:img})
     assert p.shape == (1,1000)
     t = p.argmax().item()
