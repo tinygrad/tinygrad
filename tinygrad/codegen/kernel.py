@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, PatternMatcher, UPat, can_pad, print_uops, type_verify, resolve, Variable, sint, \
   graph_rewrite, track_rewrites, view_left
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
@@ -647,7 +647,7 @@ class Kernel:
 
       return ret
 
-    return graph_rewrite(fixup_ast(self.ast), view_left)
+    return graph_rewrite(fixup_ast(self.ast), view_left+kernel_pm)
 
   # **** this is the lowerer ****
 
@@ -682,6 +682,11 @@ class Kernel:
     return ProgramSpec(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
+# these are for some reason required by kernel otherwise it codegens wrong.
+kernel_pm = PatternMatcher([
+  (UPat(Ops.CONST, name="x", src=(UPat(),)), lambda x:x.replace(src=())),
+])
+
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> None:
@@ -697,14 +702,14 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> 
   if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to VIEW
   elif uop.op is Ops.VIEW:
-    assert len(uop.src) == 0, f"can't swizzle in kernel yet {uop}"
+    assert len(uop.src) == 0 or uop.src[0].op is Ops.DEVICE, f"can't swizzle in kernel yet {uop}"
     st = uop.arg
   # everything else inherits shape
   else:
     if len(src_sts:=[sts[x] for x in uop.src if x in sts]) == 0: return None
     st = src_sts[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
-      if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
+      if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes} {[x.op for x in uop.src]} {uop.op}")
       raise AssertionError(f"found implicit expand {sizes} {shapes}")
   sts[uop] = st
 

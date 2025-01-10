@@ -292,7 +292,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # BUFFER is a contiguous piece of memory with shape=(size,) and stride=(1,)
     if self.op is Ops.BUFFER: return ShapeTracker.from_shape((self.size,))
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
-    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    if not all_same([x.shape for x in src_sts]):
+      # SINK with sources of different shapes has an unresolved shape
+      if self.op is Ops.SINK: return None
+      raise AssertionError(f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}")
     if self.op is Ops.BUFFER_VIEW:
       shape = src_sts[0].shape
       if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
@@ -423,7 +426,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self, allow_buffer_view=True):
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      if allow_buffer_view and self.can_view: return self.alu(Ops.BUFFER_VIEW)
+      if allow_buffer_view and self.can_view(): return self.alu(Ops.BUFFER_VIEW)
     return self.alu(Ops.CONTIGUOUS)
 
   # *** from LazyBuffer ***
@@ -515,7 +518,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def realized(self) -> Optional[Buffer]: return buffers.get(self) if self.op is Ops.BUFFER else None
   @property
-  def is_realized(self) -> bool: return self.base.realized is not None
+  def is_realized(self) -> bool: return self.base.op is Ops.BUFFER
 
   # *** uop Variable stuff ***
 
@@ -884,6 +887,13 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp
   if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
     tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
+
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None) -> dict[UOp, UOp]:
+  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
+    frm = sys._getframe(1)
+    tracked_ctxs[-1].append(TrackedGraphRewrite((frm.f_code.co_filename, frm.f_lineno), sink))
+  rewrite_ctx = RewriteContext(pm, ctx)
+  return {k:rewrite_ctx.rewrite(k) for k in list(sink.toposort)[::-1]}
 
 # ***** uop type spec *****
 
