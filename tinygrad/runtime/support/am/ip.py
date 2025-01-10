@@ -1,6 +1,5 @@
 import ctypes, time
 from typing import Literal
-from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32
 
@@ -232,9 +231,14 @@ class AM_GFX(AM_IP):
     _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=4, me=1)
 
 class AM_IH(AM_IP):
+  def __init__(self, adev):
+    super().__init__(adev)
+    self.rings = [(self.adev.mm.palloc(512 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "", 0),
+      (self.adev.mm.palloc(512 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
+
   def interrupt_handler(self):
     ring_vm, rwptr_vm, suf, _ = self.rings[0]
-    wptr = to_mv(rwptr_vm.cpu_addr, 8).cast('Q')[0]
+    wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
 
     if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
@@ -243,9 +247,6 @@ class AM_IH(AM_IP):
     self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
 
   def init(self):
-    self.rings = [(self.adev.mm.palloc(512 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "", 0),
-      (self.adev.mm.palloc(512 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
-
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.mc_addr() >> 8)
 
@@ -262,9 +263,6 @@ class AM_IH(AM_IP):
     self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
     self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
-
-    libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
-    libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:
