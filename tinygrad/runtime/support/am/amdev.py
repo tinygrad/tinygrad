@@ -284,7 +284,7 @@ class AMDev:
     self.sdma:AM_SDMA = AM_SDMA(self)
 
     if self.partial_boot and (self.regCP_MEC_RS64_CNTL.read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
-      print("am: AM inited GPU and MEC is active. Somebody might use the GPU? Issue a full reset.")
+      print("am: MEC is active. Someone might be using the GPU? Issue a full reset.")
       self.partial_boot = False
 
     if not self.partial_boot:
