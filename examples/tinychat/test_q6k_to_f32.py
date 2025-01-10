@@ -32,6 +32,15 @@ if __name__=="__main__":
   Tensor.no_grad = True
   max_context=1024
 
+  # byte location of token_embd.weight in the model_path file
+  data_start = 7831552
+  start = data_start + 128
+  end = data_start + 215470208
+  x = bytes(open(model_path, 'rb').read())[start:end]
+  y = Tensor.stack(*[q6k_to_f32(Tensor(x[i: i+430080], device="WEBGPU"), target="WEBGPU").realize() for i in range(0, len(x), 430080)])
+
+  """
+  # For CLANG
   lib_path = os.path.join(os.path.dirname(__file__), "q6k_to_f32.so")
   lib = ctypes.CDLL(lib_path)
   lib.net.restype = None
@@ -39,12 +48,6 @@ if __name__=="__main__":
     ctypes.POINTER(ctypes.c_ubyte),
     ctypes.POINTER(ctypes.c_float)
   ]
-
-  # byte location of token_embd.weight in the model_path file
-  data_start = 7831552
-  start = data_start + 128
-  end = data_start + 215470208
-  x = bytes(open(model_path, 'rb').read())[start:end]
 
   input_chunk_size = 430080
   output_chunk_size = 524288
@@ -58,20 +61,20 @@ if __name__=="__main__":
     output_ptr = output_chunk.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
     lib.net(input_ptr, output_ptr)
     final_output[i * output_chunk_size:(i + 1) * output_chunk_size] = output_chunk
+  """
 
   # say "hi" to the model
   toks = [128000, 128006, 882, 128007, 271, 6151, 128009, 128006, 78191, 128007, 271]
-  toks = toks + (max_context - len(toks)) * [1_000_000]
+  #toks = toks + (max_context - len(toks)) * [1_000_000]
 
   model = build_transformer(model_path, model_size=model_size, max_context=max_context)
-  out1 = model.forward(Tensor([toks]), 0, 1e-7, 0, 0.0, 0.0, 0.0, True).item() # low temp for non-random output
+  out1 = model.forward(Tensor([toks]), 0, 1e-7, 0, 0.0, 0.0, 0.0).item() # low temp for non-random output
   assert out1 == 4438
 
   emb_shape = model.tok_embeddings.weight.shape
-  #y = q6k_to_f32(Tensor(x)).reshape(emb_shape).realize()
-  y = Tensor(final_output).reshape(emb_shape).realize()
+  y = y.reshape(emb_shape).to(Device.DEFAULT)
   model.tok_embeddings.weight.assign(y).realize()
-  out2 = model.forward(Tensor([toks]), 0, 1e-7, 0, 0.0, 0.0, 0.0, True).item() # low temp for non-random output
+  out2 = model.forward(Tensor([toks]), 0, 1e-7, 0, 0.0, 0.0, 0.0).item() # low temp for non-random output
   assert out2 == out1
 
   # confirm we get different output when reassigning with bad weights:

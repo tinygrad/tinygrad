@@ -1,15 +1,17 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 
 import os, sys, json, hashlib
+from functools import partial
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
 from extra.models.llama import convert_from_gguf
+from extra.f16_decompress import u32_to_f16
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata, gguf_load
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters, Variable
 from tinygrad.helpers import fetch, prod
-from typing import NamedTuple, Any, List
+from typing import NamedTuple, Any, List, Literal
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 from tinygrad.helpers import flatten
 
@@ -21,11 +23,15 @@ def q_to_uint8(t: Tensor, b: int) -> Tensor:
 
 # adapted from nn.state.ggml_data_to_tensor
 # uint8 (256 elements per 210 bytes) to float32
-def q6k_to_f32(x: Tensor) -> Tensor:
+def q6k_to_f32(x: Tensor, target: Literal["WEBGPU", "CLANG"] = "WEBGPU") -> Tensor:
   blocks = x.reshape((-1, 210))
   xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
   scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
-  d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
+  if target == "WEBGPU":
+    # hack to avoid fp16 which isn't supported by wgpu adapter
+    d = u32_to_f16(blocks[:,-2:].cat(Tensor.zeros(blocks.shape[0], 2, dtype=dtypes.uint8), dim=1).bitcast(dtypes.uint32)).reshape(-1, 2)[:,0:1].expand((-1,256))
+  elif target == "CLANG":
+    d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
   return (d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales).cast(dtypes.float32).flatten()
 
 def clang_export_q6k_to_f32():
@@ -40,7 +46,7 @@ def clang_export_q6k_to_f32():
   step = Step(
     name = "q6k_to_f32", 
     input = [Tensor.randn(430_080, dtype=dtypes.uint8).realize()], # llama-3.2-1B Q6_K weights are multiples of 430_080 bytes
-    forward = q6k_to_f32,
+    forward = partial(q6k_to_f32, target="CLANG"),
   )
   
   run, special_names = jit_model(step, *step.input)
@@ -199,10 +205,12 @@ if __name__=="__main__":
 
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
-    Step(
-      name = "transformer", 
-      input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], 
-      forward = model.forward),
+    Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward),
+    # TODO: output transformer pipeline doesn't work unless we manually fix the start_pos instantiation and usage throughout entire pipeline
+    # TODO: Fix compiler to not have above issue
+    Step(name = "q6k_to_f32", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f32),
+    # TODO: output q6k_to_f32 pipeline doesn't work unless we manually fix the uint32 buffer size allocation
+    # TODO: Fix compiler to not have above issue
   ]
 
   prg = ""
