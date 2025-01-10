@@ -1,32 +1,20 @@
-import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import Ops, UOp
-from tinygrad.multi import MultiLazyBuffer, all_reduce
-from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.realize import run_schedule
 from tinygrad.helpers import getenv, Context, RING, DEBUG
 
-def realize(x: UOp|list[UOp]):
-  x = x if isinstance(x, list) else [x]
-  schedule, var_vals, _ = create_schedule_with_vars(x)
-  run_schedule(schedule, var_vals)
-  for lb in x: Device[lb.device].synchronize()
-
 def test(devs: list[str], N: int, iters:int = 10):
-  def _wrapped(op: Ops, t: Tensor) -> Tensor:
-    return Tensor(MultiLazyBuffer(all_reduce(op, t.lazydata.lbs), 0), device=devs)
-  _jitted = TinyJit(_wrapped) if getenv("USEJIT", 1) == 1 else _wrapped
+  @TinyJit
+  def f(t: Tensor) -> Tensor: t.sum(0).realize()
 
   secs, gflops, gbs = 0, 0, 0
   for i in range(-2, iters):
-    lbs = [Tensor.empty((N,), device=d).lazydata for d in devs]
+    t = Tensor.empty((len(devs), N))
+    t = t.shard(devs, 0).realize()
     GlobalCounters.reset()
-    start = time.time()
-    realize(_jitted(Ops.ADD, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
-    if i < 0: continue # warm up jit
-    i_secs = time.time() - start
+    f(t)
+    for d in devs: Device[d].synchronize()
 
-    if DEBUG >= 2: i_secs = GlobalCounters.time_sum_s
+    if i < 0: continue # warm up jit
+    i_secs = GlobalCounters.time_sum_s
     i_gflops = GlobalCounters.global_ops/i_secs/10**9
     i_gbs = (N*4)/i_secs/10**9
     print(f"{'ring_allreduce' if RING >= 2 else 'naive_allreduce'} iter {i+1}/{iters}: {i_secs:.6f} sec {i_gflops:.2f} GFLOP/s {i_gbs:.2f} GB/s")
@@ -39,7 +27,7 @@ def test(devs: list[str], N: int, iters:int = 10):
 def run(sz, n_gpus=6, iters=10, use_ring=False):
   devs = tuple([f"{Device.DEFAULT}:{x}" for x in range(n_gpus)])
   N = sz // dtypes.float32.itemsize
-  with Context(RING=(2 if use_ring else 0)): return test(devs, N, iters=iters)
+  with Context(RING=(2 if use_ring else 0), DEBUG=max(DEBUG, 2)): return test(devs, N, iters=iters)
 
 def main():
   n_gpus = getenv("GPUS", 6)
