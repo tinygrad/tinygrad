@@ -526,7 +526,7 @@ class AMDDevice(HCQCompiled):
   signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 1
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
 
     self.target = int(self.dev_iface.props['gfx_target_version'])
@@ -564,7 +564,6 @@ class AMDDevice(HCQCompiled):
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
-    # self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
@@ -588,17 +587,17 @@ class AMDDevice(HCQCompiled):
     # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
     #                                        eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
-    AMDComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
-    self.synchronize()
-    print("ok")
+    # AMDComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # self.synchronize()
+    # print("ok")
 
-    AMDCopyQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
-    self.synchronize()
-    print("ok")
+    # AMDCopyQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # self.synchronize()
+    # print("ok")
 
-    exit(1)
+    # exit(1)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, queue=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
