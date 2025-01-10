@@ -406,9 +406,6 @@ ops_folding = symbolic_simple+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
   (UPat(Ops.COPY, src=(UPat(), UPat.cvar("x"),)), lambda x: x),
-  # no double COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("dest"), UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, src=(UPat(), UPat.var("x"),))),))),
-   lambda dest,copy,x: copy.replace(src=(dest, x))),
   # no COPY to same device, except clone (arg is True)
   (UPatScheduled(Ops.COPY, src=(UPat(), UPat(Ops.VIEW, name="copyin")), name="copy"),
    lambda base,b,copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
