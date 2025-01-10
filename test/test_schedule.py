@@ -1475,6 +1475,12 @@ class TestSchedule(unittest.TestCase):
     add.realize()
     self.assertIsNotNone(add.lazydata.base.realized)
 
+  def test_realize_sink_shape(self):
+    add = Tensor([[1], [2]])+Tensor([[3], [4]])
+    add.realize()
+    self.assertIsNotNone(add.lazydata.base.realized)
+    self.assertEqual(add.shape, ((1, 1)))
+
   def test_realize_sink_sym(self):
     a = Tensor([1])
     mul = a*1

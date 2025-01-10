@@ -6,8 +6,6 @@ from tinygrad.helpers import Metadata, all_int, unwrap, DEBUG, prod
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 
-def cooking(*args, **kwargs): raise Exception(f"cooking! {args} {kwargs}")
-
 BUF_LIMIT = {"METAL":32}
 
 @dataclass(frozen=True)
@@ -64,10 +62,10 @@ sym = symbolic_simple+PatternMatcher([
   # passthrough
   (UPat(Ops.SINK, src=(UPat(Ops.VIEW, src=(UPat.var("x"),)),)), lambda x:x.sink()),
   (UPat(Ops.SINK, src=(UPat(Ops.SINK, name="x"),)), lambda x:x),
+  (UPat(Ops.SINK, src=(UPat(Ops.BUFFER, name="x"),)), lambda x:x),
   # NOOP
   (UPat(Ops.SINK, src=(UPat(Ops.CONST),)), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.SINK, src=(UPat(Ops.NOOP),)), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.SINK, src=(UPat(Ops.BUFFER),)), lambda: UOp(Ops.NOOP)),
   # realize
   (UPat(Ops.SINK, src=(UPat.var("x"),)), lambda x: x.contiguous() if x.op is not Ops.CONTIGUOUS else None),
 
@@ -86,15 +84,11 @@ remove_movement_ops = merge_views+PatternMatcher([
   (UPat(Ops.VIEW, name="vm", src=(UPat.var("x"),)), lambda vm,x:x if vm.st.contiguous and x.st is not None and vm.shape == x.shape else None),
 ])
 
-def create_copy_kernel(ctx:dict[UOp, UOp], root:UOp, copyin:UOp):
-  ctx[output_buf:=UOp.new_buffer(root.device, copyin.size, copyin.dtype)] = root
-  return output_buf.view(unwrap(copyin.st))
-
-def create_kernel(ctx:dict[UOp, UOp], root:UOp):
+def create_buffer(ctx:dict[UOp, UOp], root:UOp):
   ctx[output_buf:=UOp.new_buffer(root.device, root.size, root.dtype)] = root
   return output_buf.view(unwrap(root.st))
 
-def create_buffer_view(ctx:dict[UOp, UOp], root:UOp, src:UOp):
+def create_subbuffer(ctx:dict[UOp, UOp], root:UOp, src:UOp):
   if src.base.op is Ops.BUFFER:
     ctx[output_buf:=UOp.new_buffer(root.device, root.size, root.dtype)] = root
     buffers[output_buf] = src.base.buffer.view(root.size, root.dtype, unwrap(src.st).views[0].offset*src.dtype.itemsize)
@@ -103,10 +97,9 @@ def create_buffer_view(ctx:dict[UOp, UOp], root:UOp, src:UOp):
   return root.replace(op=Ops.CONTIGUOUS)
 
 bufferize = PatternMatcher([
-  (UPat(Ops.COPY, name="root", src=(UPat(), UPat.var("copyin"),)), create_copy_kernel),
-  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("src"),)), create_buffer_view),
-  (UPat(Ops.CONTIGUOUS, name="root"), create_kernel),
-  (UPat(Ops.REDUCE_AXIS, name="root"), create_kernel),
+  (UPat({Ops.COPY, Ops.CONTIGUOUS}, name="root"), create_buffer),
+  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("src"),)), create_subbuffer),
+  (UPat(Ops.REDUCE_AXIS, name="root"), create_buffer),
 ])
 
 def add_buffer(ctx:list[UOp], buf:UOp):
@@ -142,7 +135,7 @@ def make_schedule_item(sink:UOp, output_buf:UOp) -> ScheduleItem:
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  sink = UOp.sink(*[x.sink() for x in outs])
+  sink = UOp.sink(*outs)
   type_verify(list(sink.toposort), tensor_uop_spec)
 
   realizes: dict[UOp, UOp] = {}

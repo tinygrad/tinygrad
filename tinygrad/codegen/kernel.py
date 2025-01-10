@@ -683,8 +683,12 @@ class Kernel:
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
 # these are for some reason required by kernel otherwise it codegens wrong.
+
+def rm_st_const(const:UOp, st:UOp):
+  assert st.views[-1].mask is None, f"found mask in CONST when it should've been VALID {const}"
+  return const.replace(src=())
 kernel_pm = PatternMatcher([
-  (UPat(Ops.CONST, name="x", src=(UPat(),)), lambda x:x.replace(src=())),
+  (UPat(Ops.CONST, name="const", src=(UPat.var("st"),)), rm_st_const),
 ])
 
 # the living definition of intermediate UOps

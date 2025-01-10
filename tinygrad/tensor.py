@@ -247,10 +247,7 @@ class Tensor(SimpleMathTrait):
 
     # potentially rewrite all the discovered Tensors
     sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
-    # NOTE: sink is not a lazydata on a tensor, so we don't rewrite it since it'll rewrite its parent (real) tensors wrongly
-    # is there a better way to check which values of the becomes_map have a tensor?
-    new_sink = sink.substitute({k:v for k,v in becomes_map.items() if k.op is not Ops.SINK})
-    assert new_sink.op is Ops.SINK, f"sink itself cannot become {sink.op} {new_sink.op}"
+    new_sink = sink.substitute(becomes_map)
 
     # set the relevant lazydata to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
