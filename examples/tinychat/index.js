@@ -233,17 +233,6 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
 
   for (let i = 0; i < compressedBuffers.length; i++) {
     compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
-    // check integrity of buffers, replace invalid cached buffers
-    // may not be necessary, and takes time
-    /*
-    checked_hash = await hashBuffer(compressedBuffers[i]);
-    if (checked_hash !== correctHashes[i]) {
-      console.log(`Replacing invalid buffer with name: ${data.metadata.chunks[i].name}, expected hash: ${correctHashes[i]}, actual hash: ${checked_hash}`)
-      await deleteTensorFromDb(db, correctHashes[i]);
-      compressedBuffers[i] = await getPart(data.metadata.chunks[i].name, correctHashes[i]);
-      compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
-    }
-    */
     saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
 
@@ -260,21 +249,13 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
     }
     const numChunks = parent.length / BYTES_PER_CHUNK_IN;
     const BYTES_PER_CHUNK_OUT = FLOATS_PER_CHUNK_OUT * 4;
-    //const inputPtr = decomp._malloc(BYTES_PER_CHUNK_IN);
-    //const outputPtr = decomp._malloc(BYTES_PER_CHUNK_OUT);
-    //const inputView = new Uint8Array(decomp.HEAPU8.buffer, inputPtr, BYTES_PER_CHUNK_IN);
-    //const outputViewF32 = new Float32Array(decomp.HEAPF32.buffer, outputPtr, FLOATS_PER_CHUNK_OUT);
-    //const outputViewU8 = new Uint8Array(outputViewF32.buffer, outputViewF32.byteOffset, outputViewF32.byteLength);
     const result = new Uint8Array(numChunks * BYTES_PER_CHUNK_OUT);
 
     for (let i = 0; i < numChunks; i++) {
       const start = i * BYTES_PER_CHUNK_IN;
       const end   = start + BYTES_PER_CHUNK_IN;
       const out = await decomp(parent.subarray(start, end));
-      //inputView.set(parent.subarray(start, end));
-      //decomp._net(inputPtr, outputPtr);
       const offset = i * BYTES_PER_CHUNK_OUT;
-      //result.set(outputViewU8, offset);
       result.set(new Uint8Array(out.buffer), offset);
 
       totalLoaded += 1;
@@ -286,8 +267,6 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
       // prevent browser lag 
       if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0));
     }
-    //decomp._free(inputPtr);
-    //decomp._free(outputPtr);
 
     return result;
   }
@@ -369,12 +348,6 @@ document.addEventListener("alpine:init", () => {
         var device = await getDevice();
         console.log("WebGPU device initialized");
       } catch (error) {this.progress(0, 100, "Failed to launch WebGPU. Please check if WebGPU is enabled and reload the page. || Loading:"); console.log(error); return;}
-
-      /*
-      try {
-        var q6k_to_f32 = await Module();
-      } catch (error) {this.progress(0, 100, "Error loading decompressor"); console.log(error); return;}
-       */
 
       try {
         const decomp = await q6k_to_f32().setup(device);
