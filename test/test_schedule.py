@@ -1470,6 +1470,31 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     self.assertListEqual(realized_const_view.tolist(), [[0], [1], [0]])
 
+  def test_realize_sink(self):
+    add = Tensor([1])+Tensor([2])
+    add.realize()
+    self.assertIsNotNone(add.lazydata.base.realized)
+
+  def test_realize_sink_sym(self):
+    a = Tensor([1])
+    mul = a*1
+    mul.realize()
+    self.assertIsNotNone(mul.lazydata.base.realized)
+    self.assertIs(a.lazydata.base.realized, mul.lazydata.base.realized)
+
+  def test_realize_sink_view(self):
+    add = Tensor([1])+Tensor([2])
+    v1 = a.expand((4,))
+    v2 = a.expand((5,))
+    child1 = v1.sum()
+    child2 = v2.sum()
+    Tensor.realize(v1, v2)
+    self.assertIsNotNone(add.lazydata.base.realized)
+    self.assertIsNotNone(v1.lazydata.base.realized)
+    self.assertIsNotNone(v2.lazydata.base.realized)
+    self.assertEqual(child1.item(), 4)
+    self.assertEqual(child2.item(), 5)
+
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):

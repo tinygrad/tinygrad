@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Ops, Variable, type_verify, PatternMatcher, UPat, graph_rewrite_map, symbolic_simple, merge_views, track_rewrites
-from tinygrad.ops import graph_rewrite, GroupOp, view_left, buffers, identity_element
+from tinygrad.ops import graph_rewrite, GroupOp, view_left, buffers, identity_element, resolve
 from tinygrad.device import Buffer
 from tinygrad.helpers import Metadata, all_int, unwrap, DEBUG, prod
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 
 def cooking(*args, **kwargs): raise Exception(f"cooking! {args} {kwargs}")
+
+BUF_LIMIT = {"METAL":32}
 
 @dataclass(frozen=True)
 class ScheduleItem:
@@ -23,10 +25,6 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x: True),
 ])
 
-def collapse_size0_op(root:UOp):
-  if root.base.st is None or root.size != 0: return None
-  return None if root.base.op is Ops.CONST and root.const_arg == 0 else root.const_like(0)
-
 def collapse_const_reduce(root:UOp, x:UOp):
   if not all_int(x.shape): return None
   prshape = prod(unwrap(x.st).shape[i] for i in root.arg[1])
@@ -38,16 +36,43 @@ def collapse_const_reduce(root:UOp, x:UOp):
     case _: return None
   return root.const_like(ret)
 
-sym = symbolic_simple+PatternMatcher([
-  (UPat(set(Ops), name="root"), collapse_size0_op),
+def sym_view(x:UOp, mv:UOp):
+  if x.op in {Ops.CONTIGUOUS, Ops.BUFFER, Ops.DEVICE}: return None
+  if len(mv.views) == 1 and mv.views[-1].mask is not None and all_int(x.shape) and resolve(prod(x.shape)>=prod([y-x for x,y in mv.views[-1].mask])):
+    unsafe = [u for u in x.toposort if u.op in GroupOp.UnsafePad]
+    if unsafe: return x.contiguous().view(mv.st)
+  if resolve(prod(x.shape) < prod(mv.shape)): return x.contiguous().view(mv.st)
+  if any(x.mask is not None for x in mv.views) and len([u for u in x.toposort if u.op in GroupOp.UnsafePad]) != 0: return x.contiguous().view(mv.st)
+  return None
 
-  # reduce folding
+sym = symbolic_simple+PatternMatcher([
+  (UPat(set(Ops), name="root"),
+   lambda root: root.const_like(0) if (r:=root.base).st is not None and root.size == 0 and (r.op is not Ops.CONST or r.const_arg != 0) else None),
+  (UPat(Ops.DETACH, name="detach"), lambda detach:detach.src[0]),
+
+  # ** reduce folding **
   (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat(Ops.CONST, arg=0),)),
    lambda root: root.const_like(identity_element(root.arg[0], root.dtype)) if root.size != 0 else None),
   (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat(Ops.CONST, name="x"),)), collapse_const_reduce),
 
+  # ** contiguous folding **
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, name="vm", src=(UPat.var("x"),)),)),
    lambda vm,x:x.contiguous().view(vm.st) if vm.st.contiguous and vm.size == x.size and x.op is not Ops.CONST else None),
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.BUFFER, name="x"),)), lambda x:x),
+
+  # ** sink folding **
+  # passthrough
+  (UPat(Ops.SINK, src=(UPat(Ops.VIEW, src=(UPat.var("x"),)),)), lambda x:x.sink()),
+  (UPat(Ops.SINK, src=(UPat(Ops.SINK, name="x"),)), lambda x:x),
+  # NOOP
+  (UPat(Ops.SINK, src=(UPat(Ops.CONST),)), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.SINK, src=(UPat(Ops.NOOP),)), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.SINK, src=(UPat(Ops.BUFFER),)), lambda: UOp(Ops.NOOP)),
+  # realize
+  (UPat(Ops.SINK, src=(UPat.var("x"),)), lambda x: x.contiguous() if x.op is not Ops.CONTIGUOUS else None),
+
+  # ** view folding **
+  (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), sym_view),
 ])
 
 def mv_const(x:UOp, vm1:UOp, vm2:UOp):
@@ -108,13 +133,16 @@ to_ast = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x:x),
 ])
 
+view_right = merge_views+PatternMatcher([
+])
+
 def make_schedule_item(sink:UOp, output_buf:UOp) -> ScheduleItem:
   sink = graph_rewrite(sink, load_buffers+view_left+remove_movement_ops+to_ast, bufs:=[output_buf])
   return ScheduleItem(sink, tuple(b.buffer for b in bufs), ())
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  sink = UOp.sink(*outs)
+  sink = UOp.sink(*[x.sink() for x in outs])
   type_verify(list(sink.toposort), tensor_uop_spec)
 
   realizes: dict[UOp, UOp] = {}
@@ -125,11 +153,12 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
   for k,v in buffer_map.items():
     if (b:=v.base).op is not Ops.BUFFER: continue
     if b not in buffer_tensors: buffer_tensors[b] = []
-    buffer_tensors[b] = [t for t,v2 in tensor_map.items() if v2 is k]
+    buffer_tensors[b].extend([t for t,v2 in tensor_map.items() if v2 is k])
 
   becomes_map: dict[UOp, UOp] = {}
   schedule: list[ScheduleItem] = []
   for k,v in realizes.items():
+    assert k.op is Ops.BUFFER
     si = make_schedule_item(v.sink(), k)
     schedule.append(si)
     for buffer in si.bufs: buffer.ref(1)

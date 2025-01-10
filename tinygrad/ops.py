@@ -227,6 +227,8 @@ class UOpMetaClass(type):
     # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
+    if created.op is Ops.VIEW and created.shape == (2, 1, 5, 1, 8) and created.arg.views[0].strides == (40, 0, 8, 0, 1):
+      print(created)
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
@@ -340,6 +342,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
     return unwrap(self.st)
   @property
+  def views(self):
+    assert self.op is Ops.VIEW
+    return unwrap(self.st).views
+  @property
   def const_arg(self) -> ConstType:
     match self.base.op:
       case Ops.CONST: ret = self.base.arg
@@ -446,12 +452,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
-    # no COPY
+    # no COPY, TODO: delete this
     if self.device == device and not clone: return self
-    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
-    # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
-    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
+    return UOp(Ops.COPY, self.dtype, (UOp(Ops.DEVICE, arg=device), self), clone)
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
