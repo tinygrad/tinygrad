@@ -156,8 +156,6 @@ def create_schedule_with_vars(outs:list[UOp]) -> tuple[list[ScheduleItem], dict[
     si = make_schedule_item(v.sink(), k)
     schedule.append(si)
     for buffer in si.bufs: buffer.ref(1)
-    for tensor in buffer_tensors[k]:
-      if tensor.op is not Ops.SINK:
-        becomes_map[tensor] = k.view(unwrap(tensor.st))
+    for tensor in buffer_tensors[k]: becomes_map[tensor] = k.view(unwrap(tensor.st))
   var_vals: dict[Variable, int] = {}
   return schedule, var_vals, becomes_map
