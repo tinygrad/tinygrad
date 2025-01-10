@@ -79,13 +79,6 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
         else: label += f"\n{x.op.name}{idx} {x.arg}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
-def _replace_uop(base:UOp, replaces:dict[UOp, UOp]) -> UOp:
-  if (found:=replaces.get(base)) is not None: return found
-  ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
-  if (final := replaces.get(ret)) is not None:
-      return final
-  replaces[base] = ret
-  return ret
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
@@ -93,14 +86,12 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -
                           kernel_code=pcall(_prg, k) if isinstance(k, Kernel) else None, graphs=[])
   replaces: dict[UOp, UOp] = {}
   g.graphs.append(uop_to_json(sink:=g.uops[0]))
-  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
+  for i,(u0,u1,upat,_) in enumerate(tqdm(ctx.matches)):
     # if the match didn't result in a rewrite we move forward
-    if u1 is None:
-      replaces[u0] = u0
-      continue
+    if u1 is None: continue
     replaces[u0] = u1
     # first, rewrite this UOp with the current rewrite + all the matches in replaces
-    new_sink = _replace_uop(sink, {**replaces})
+    new_sink = sink.substitute(replaces)
     # sanity check
     if new_sink is sink: raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
@@ -159,7 +150,11 @@ class Handler(BaseHTTPRequestHandler):
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
-        jret: Any = {**asdict(g), "uops": [pcall(str,x) for x in g.uops]}
+        # TODO: this is O(n^2)!
+        uops_strs = [pcall(str,x) for x in tqdm(g.uops)]
+        # NOTE: don't use asdict because it's reserializing the uops
+        jret: Any = {"loc": g.loc, "code_line": g.code_line, "kernel_name": g.kernel_name, "upats": g.upats,
+                     "uops": uops_strs, "graphs": g.graphs, "diffs": g.diffs, "changed_nodes": g.changed_nodes, "kernel_code": g.kernel_code}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"

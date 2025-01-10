@@ -40,11 +40,9 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# TODO: there isn't an AttributeProto for `epsilon` in the NodeProto for 'test_adam_multiple_cpu'
-# [x.name for x in n.attribute] -> ['alpha', 'beta', 'norm_coefficient']
-# but in their documentation https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-176, it states there being an epsilon of 1e-2
-# test passes with epsilon = 1e-2
+# BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
+backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
@@ -74,11 +72,22 @@ backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_max_float16_cpu')
 backend_test.exclude('test_min_float16_cpu')
 
-backend_test.exclude('test_convinteger_*')
-backend_test.exclude('test_matmulinteger_*')
-
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
+backend_test.exclude('test_quantizelinear_int4_cpu')
+backend_test.exclude('test_quantizelinear_uint4_cpu')
+
+# no support for FLOAT8
+backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
+backend_test.exclude('test_dequantizelinear_e5m2_cpu')
+
+# TODO: unsure. The number is off by 1. and it's not because of float16
+backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
@@ -99,9 +108,6 @@ backend_test.exclude('test_regex_*')
 
 # no quantize
 backend_test.exclude('test_dynamicquantizelinear_*')
-backend_test.exclude('test_qlinearmatmul_*')
-backend_test.exclude('test_qlinearconv_*')
-backend_test.exclude('test_quantizelinear_*')
 
 # no rnn
 backend_test.exclude('test_gru_*')
