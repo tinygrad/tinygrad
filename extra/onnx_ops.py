@@ -419,7 +419,7 @@ def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
 def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
   out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
   y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
-  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype)
+  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype).contiguous()
 
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
   x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
