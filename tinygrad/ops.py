@@ -453,7 +453,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
-  def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
+  def copy_to_device(self, device:str, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
