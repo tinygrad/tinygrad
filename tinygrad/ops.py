@@ -1265,8 +1265,8 @@ symbolic = symbolic_simple+PatternMatcher([
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.MOD) if 0 < c.arg else None),
   # simple variable denominator cases
-  (UPat.var("x") // UPat.var("y"), lambda x,y: q if (q:=x.vmin//y.vmin) == x.vmax//y.vmin == x.vmin//y.vmax == x.vmax//y.vmax else None),
-  (UPat.var("x") % UPat.var("y"), lambda x,y: x-y*q if (q:=x.vmin//y.vmin) == x.vmax//y.vmin == x.vmin//y.vmax == x.vmax//y.vmax else None),
+  (UPat.var("x") // UPat.var("y"), lambda x,y: q if y.vmin!=0!=y.vmax and (q:=x.vmin//y.vmin)==x.vmax//y.vmin==x.vmin//y.vmax==x.vmax//y.vmax else None),
+  (UPat.var("x") % UPat.var("y"), lambda x,y: x-y*q if y.vmin!=0!=y.vmax and (q:=x.vmin//y.vmin)==x.vmax//y.vmin==x.vmin//y.vmax==x.vmax//y.vmax else None),
 ])
 
 
