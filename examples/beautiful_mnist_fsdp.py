@@ -21,8 +21,7 @@ class Model:
 
 if __name__ == "__main__":
   default_device = Device.DEFAULT
-  #GPUS = tuple(f'{default_device}:{i}' for i in range(getenv("GPUS", 2)))
-  GPUS = ("CLANG", "CUDA")
+  GPUS = tuple(f'{default_device}:{i}' for i in range(getenv("GPUS", 2)))
   X_train, Y_train, X_test, Y_test = mnist()
 
   Device.DEFAULT = "CLANG" #initialize the parameters on CPU 
