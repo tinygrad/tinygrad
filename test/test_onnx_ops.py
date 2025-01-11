@@ -11,9 +11,8 @@ from tinygrad import Tensor
 from tinygrad.helpers import CI, getenv
 from extra.onnx import get_run_onnx
 
-import onnx
 import onnxruntime.backend
-from onnx import TensorProto, helper
+from onnx import helper
 
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 CONTRIB_OPERATORS = "com.microsoft"
