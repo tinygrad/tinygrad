@@ -178,3 +178,20 @@ class MultiLazyBuffer(MathTrait):
   def stride(self, arg:tuple[int, ...]):
     assert self.axis is None or arg[self.axis] == 1, "flipping not supported on sharded axis"
     return MultiLazyBuffer([x.stride(arg) for x in self.lbs], self.axis, self.real)
+
+  # Communication ops
+  def all_gather(self) -> 'MultiLazyBuffer':
+    if self.axis is None: return self
+    return MultiLazyBuffer(
+      [self.copy_to_device(lb.device) for lb in self.lbs],
+      None,
+      self.real
+    )
+
+  def scatter(self, axis: int | None = None, bounds: tuple[tuple[int, int], ...] | None = None) -> 'MultiLazyBuffer':
+    if axis is None or bounds is None: return self
+    return MultiLazyBuffer(
+      to_sharded(self.lbs, axis, bounds),
+      axis,
+      self.real
+    )
