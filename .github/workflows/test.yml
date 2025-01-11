@@ -230,7 +230,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
+      run: PYTHONPATH="." python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
