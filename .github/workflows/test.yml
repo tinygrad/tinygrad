@@ -4,7 +4,6 @@ env:
   DOWNLOAD_CACHE_VERSION: '8'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PYTHONPATH: .
 
 on:
   push:
