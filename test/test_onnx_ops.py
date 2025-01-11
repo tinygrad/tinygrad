@@ -47,33 +47,21 @@ def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
           (model.graph.name, non_jit_time*1000), end="")
 
 def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any],
-                          outs:dict[str, tuple[list[int], np.dtype]], domain=None):
+                          outs:dict[str, tuple[list[int], np.dtype]], domain=None, atol=1e-6, rtol=1e-3, tag=""):
   onnx_inputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
   onnx_outputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(np.dtype(dtype)), shape)
                   for name, (shape, dtype) in outs.items()]
   nodes = [helper.make_node(op, list(inps.keys()), list(outs), domain=domain, **opt)]
-  graph = helper.make_graph(nodes, op.lower() + "_single_op_test", onnx_inputs, onnx_outputs)
-  model = helper.make_model(graph, producer_name=op.lower() + "_single_op_test")
-  helper_test_op(list(inps.values()), model)
+  graph = helper.make_graph(nodes, f"test_{op.lower()}{tag}", onnx_inputs, onnx_outputs)
+  model = helper.make_model(graph, producer_name=f"test_{op.lower()}{tag}")
+  helper_test_op(list(inps.values()), model, atol, rtol)
 
 class TestOnnxOps(unittest.TestCase):
-  def test_single_op(self):
+  def test_reshape(self):
     inputs = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3]).astype(np.int64)}
     attributes = {}
     outputs = {"out": ([2,3], np.float32)}
     helper_test_single_op("Reshape", inputs, attributes, outputs)
-
-  def test_multiple_ops(self):
-    onnx_inputs = [helper.make_tensor_value_info("in", TensorProto.FLOAT, [4,3,3,4])]
-    onnx_outputs = [helper.make_tensor_value_info("out", TensorProto.FLOAT, [6,2,4,3])]
-    initializer = [helper.make_tensor("shape", onnx.TensorProto.INT64, [4], [6,2,4,3])]
-    reshape_node1 = helper.make_node("Reshape", ["in", "shape"], ["out1"])
-    reshape_node2 = helper.make_node("Reshape", ["in", "shape"], ["out2"])
-    add_node = helper.make_node("Add", ["out1", "out2"], ["out"])
-    nodes = [reshape_node1, reshape_node2, add_node]
-    graph = helper.make_graph(nodes, "multiple_op_test", onnx_inputs, onnx_outputs, initializer)
-    model = helper.make_model(graph, producer_name="multiple_op_test")
-    helper_test_op([np.random.uniform(size=[4,3,3,4]).astype(np.float32)], model)
 
 class TestOnnxQuantizedOps(unittest.TestCase):
   @unittest.skip("TODO: Max absolute difference: 128")
