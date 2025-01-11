@@ -8,7 +8,6 @@ from tinygrad.engine.schedule import ScheduleContext, schedule_uop
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
-from test.helpers import print_diff
 
 # *** process replay settings
 
@@ -34,7 +33,7 @@ class ProcessReplayWarning(Warning): pass
 def recreate_sched(ast:UOp, assigns:Set[UOp]) -> UOp:
   # NOTE: process replay isn't meant to actually schedule anything
   return schedule_uop(ast, ScheduleContext(assigns=assigns, tensor_uops=defaultdict(list))).ast
-def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
+def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master
@@ -74,7 +73,6 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       changed += 1
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       for x in args[:-1]: logging.info(x)
-      print_diff(good, args[-1])
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       additions += len([x for x in changes if x.startswith("+")])
       deletions += len([x for x in changes if x.startswith("-")])
