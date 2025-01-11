@@ -110,7 +110,7 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
-  if buf.st is None or buf.base.is_realized or buf.base.op is Ops.VIEW or is_constant(buf.base): return buf
+  if buf.st is None or buf.base.is_realized or is_constant(buf.base): return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
