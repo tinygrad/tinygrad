@@ -6,7 +6,7 @@ from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, Variable, sym_infer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
+from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     current_device = None
 
   for ji in jit_cache:
-    if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
+    if isinstance(ji.prg, ViewOp): continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
     if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD"}:

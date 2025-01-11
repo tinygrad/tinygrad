@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up
+from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
@@ -127,8 +127,9 @@ class AMMemoryManager:
 
   def __init__(self, adev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
+    self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
-    self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=am.AMDGPU_VM_PDB1)
+    self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False, creat_pt=True):
     """
@@ -241,20 +242,33 @@ class AMMemoryManager:
     self.va_allocator.free(vm.va_addr)
     if vm.paddr is not None: self.pa_allocator.free(vm.paddr)
 
-  def palloc(self, size, align=0x1000, zero=True) -> AMPhysicalMemoryBlock:
-    pm = AMPhysicalMemoryBlock(self.adev, self.pa_allocator.alloc(round_up(size, 0x1000), align), size)
+  def palloc(self, size, align=0x1000, zero=True, boot=False) -> AMPhysicalMemoryBlock:
+    assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
+    pm = AMPhysicalMemoryBlock(self.adev, (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align), size)
     if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
     return pm
 
   def pfree(self, pm:AMPhysicalMemoryBlock): self.pa_allocator.free(pm.paddr)
 
 class AMDev:
-  def __init__(self, pcidev, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
-    self.pcidev = pcidev
+  def __init__(self, pcidev, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+    self.pcidev, self.devfmt = pcidev, devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
     self._run_discovery()
     self._build_regs()
+
+    # AM boot Process:
+    # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
+    # The 1st and 2nd states require a full GPU setup since their states are unknown. The 2nd state also requires a mode1 reset to
+    # reinitialize all components.
+    #
+    # The 3rd state can be set up partially to optimize boot time. In this case, only the GFX and SDMA IPs need to be initialized.
+    # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
+    # all blocks that are initialized only during the initial AM boot.
+    # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
+    self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000001)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -269,11 +283,30 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.psp.is_sos_alive(): self.smu.mode1_reset()
+    if self.partial_boot and (self.reg("regCP_MEC_RS64_CNTL").read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
+      print(f"am {self.devfmt}: MEC is active. Someone might be using the GPU? Issue a full reset.")
+      self.partial_boot = False
 
-    # Initialize all blocks
-    for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init()
+    if not self.partial_boot:
+      if self.psp.is_sos_alive(): self.smu.mode1_reset()
+      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+        ip.init()
+        if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+
+    # Booting done
+    self.is_booting = False
+
+    # Re-initialize main blocks
+    for ip in [self.gfx, self.sdma]:
+      ip.init()
+      if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+
     self.gfx.set_clockgating_state()
+    self.reg("regSCRATCH_REG7").write(am_version)
+    if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
+
+  def fini(self):
+    for ip in [self.sdma, self.gfx]: ip.fini()
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
@@ -281,12 +314,12 @@ class AMDev:
 
   def rreg(self, reg:int) -> int:
     val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
-    if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"Reading register {reg:#x} with value {val:#x}")
+    if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
-    if AM_DEBUG >= 4: print(f"Writing register {reg:#x} with value {val:#x}")
+    if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
     if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
     else: self.mmio[reg] = val
 

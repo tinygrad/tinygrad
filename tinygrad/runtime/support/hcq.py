@@ -15,7 +15,8 @@ class HWInterface:
   def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
     self.path:str = path
     self.fd:int = fd or os.open(path, flags)
-  def __del__(self): os.close(self.fd)
+  def __del__(self):
+    if hasattr(self, 'fd'): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
   def read(self, size=None, binary=False):
@@ -33,7 +34,7 @@ class HWInterface:
   @staticmethod
   def readlink(path): return os.readlink(path)
   @staticmethod
-  def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))
+  def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
 
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 

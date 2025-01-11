@@ -11,6 +11,7 @@ PATHS_TO_TRY = [
   '/opt/rocm/lib/libamd_comgr.so',
   os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so',
   '/usr/local/lib/libamd_comgr.dylib',
+  '/opt/homebrew/lib/libamd_comgr.dylib',
 ]
 def _try_dlopen_amd_comgr():
   library = ctypes.util.find_library("amd_comgr")
