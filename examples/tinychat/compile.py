@@ -208,7 +208,7 @@ if __name__=="__main__":
     Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward),
     # TODO: output transformer pipeline doesn't work unless we manually fix the start_pos instantiation and usage throughout entire pipeline
     # TODO: Fix compiler to not have above issue
-    Step(name = "q6k_to_f32", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f32),
+    Step(name = "q6k_to_f32", input = [Tensor.randn(3_144_960, dtype=dtypes.uint8)], forward = q6k_to_f32), # throws exceptions with all larger sizes tried
     # TODO: output q6k_to_f32 pipeline doesn't work unless we manually fix the uint32 buffer size allocation
     # TODO: Fix compiler to not have above issue
   ]

@@ -12,6 +12,7 @@ import numpy as np
 # from inspecting llama-3.2-1B q6_k gguf weights
 q6k_min_size = 860160
 q6k_max_size = 215470080 # token_embd.weight
+all q6k sizes: {215470080: 1, 13762560: 48, 860160: 32, 3440640: 32}
 q6k_size = Variable("q6k_size", q6k_min_size, q6k_max_size).bind(q6k_max_size)
 q6k_shape1_min = 512
 q6k_shape1_max = 128256

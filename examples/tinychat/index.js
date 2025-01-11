@@ -160,7 +160,7 @@ async function hashBuffer(bytes) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const getAndDecompressGGUFChunks = async (decomp, progress) => {
+const getAndDecompressGGUFChunks = async (device, progress) => {
   let totalLoaded = 0;
   let totalSize = 0;
   let partSize = {};
@@ -236,49 +236,125 @@ const getAndDecompressGGUFChunks = async (decomp, progress) => {
     saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
 
-  totalLoaded = 0;
-  totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0) / bytesPerIteration;
-  const numCheckpoints = 100;
-  let nextCheckpoint = totalSize / numCheckpoints;
-  const decompProgressFraction = 0.90;
-  totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
+  //totalLoaded = 0;
+  //totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0) / bytesPerIteration;
+  //const numCheckpoints = 100;
+  //let nextCheckpoint = totalSize / numCheckpoints;
+  //const decompProgressFraction = 0.90;
+  //totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
 
-  const dequantize = async(parent, decomp, BYTES_PER_CHUNK_IN, FLOATS_PER_CHUNK_OUT) => {
-    if (parent.length % BYTES_PER_CHUNK_IN !== 0) {
-      throw new Error("Parent length must be a multiple of BYTES_PER_CHUNK_IN bytes.");
-    }
-    const numChunks = parent.length / BYTES_PER_CHUNK_IN;
-    const BYTES_PER_CHUNK_OUT = FLOATS_PER_CHUNK_OUT * 4;
-    const result = new Uint8Array(numChunks * BYTES_PER_CHUNK_OUT);
+  //const inChunkSize = 8388450; // divisible by 210
+  const inChunkSize = 3144960; // divisible by 210
+  let inChunk = new Uint8Array(inChunkSize);
+  const byteFactor = 1 / 210 * 256 * 4;
+  //const outChunk = new Uint8Array(inChunkSize * byteFactor);
+  let chunkContents = {};
+  let freeSpace = inChunkSize;
 
-    for (let i = 0; i < numChunks; i++) {
-      const start = i * BYTES_PER_CHUNK_IN;
-      const end   = start + BYTES_PER_CHUNK_IN;
-      const out = await decomp(parent.subarray(start, end));
-      const offset = i * BYTES_PER_CHUNK_OUT;
-      result.set(new Uint8Array(out.buffer), offset);
+  const num_decomposers = 0;
 
-      totalLoaded += 1;
-      if (totalLoaded >= nextCheckpoint) {
-        progress(totalLoaded, totalSize, "Decompressing model:");
-        nextCheckpoint += totalSize * decompProgressFraction / numCheckpoints;
+  const t0 = performance.now();
+  const pipelinePool = await Promise.all(
+    Array
+      .from({ length: num_decomposers }, () => q6k_to_f32().setup(device))
+      .map(async (promise) => {
+        return {
+          pipeline: await promise,
+          busy: false
+        };
+      })
+  );
+
+  async function getFreePipeline() {
+    for (;;) {
+      const idx = pipelinePool.findIndex(obj => !obj.busy);
+      if (idx >= 0) {
+        pipelinePool[idx].busy = true;
+        return pipelinePool[idx].pipeline;
       }
-
-      // prevent browser lag 
-      if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise(r => setTimeout(r, 1));
     }
-
-    return result;
   }
+
+  function releasePipeline(pipeline) {
+    const obj = pipelinePool.find(obj => obj.pipeline === pipeline);
+    if (obj) obj.busy = false;
+  }
+
+  const dequantize = async(inChunk, chunkContents, decomp) => {
+    let outChunk = await decomp(inChunk);
+    outChunk = new Uint8Array(outChunk.buffer);
+    for (const [t, start_end_tOffset] of Object.entries(chunkContents)) {
+      const start = parseInt(start_end_tOffset[0] * byteFactor);
+      const end = parseInt(start_end_tOffset[1] * byteFactor);
+      const offset = parseInt(start_end_tOffset[2] * byteFactor);
+      state_dict[t].bytes.set(outChunk.subarray(start, end), offset)
+    }
+  }
+
+  //const gpuJobs = [];
+
+  const d = await q6k_to_f32().setup(device);
 
   for (const [k, v] of Object.entries(state_dict)) {
-    v.bytes = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
+    const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
+
     if (v.dtype === "Q6_K") {
-      v.bytes = await dequantize(v.bytes, decomp, bytesPerIteration, bytesPerIteration * 256 / 210);
+      v.bytes = new Uint8Array(v.size * byteFactor);
+
+      for (i=0; i<tensor.byteLength; i += inChunkSize) {
+        if (!(k in chunkContents)) {chunkContents[k] = [inChunkSize - freeSpace, inChunkSize - freeSpace, i]}
+
+        const end = Math.min(i + freeSpace, i + inChunkSize, tensor.byteLength);
+        freeSpace -= (end - i);
+        inChunk.set(tensor.subarray(i, end));
+        chunkContents[k][1] += (end - i);
+
+        if (freeSpace === 0) {
+          const reserved_inChunk = inChunk;
+          const reserved_chunkContents = chunkContents;
+          freeSpace = inChunkSize;
+          inChunk = new Uint8Array(inChunkSize);
+          chunkContents = {};
+          await dequantize(reserved_inChunk, reserved_chunkContents, d);
+          /*const d = await getFreePipeline();
+          gpuJobs.push(
+            (async () => {
+              await dequantize(reserved_inChunk, reserved_chunkContents, d);
+              releasePipeline(d);
+            })()
+          );*/
+        }
+      }
       v.dtype = "float32";
       v.size = v.bytes.byteLength;
+
+    } else {
+      v.bytes = tensor;
+    }
+
+    if (freeSpace < inChunkSize) {
+      inChunk.set(new Uint8Array(freeSpace), inChunkSize - freeSpace); // pad last partial chunk with zeroes
+      const reserved_inChunk = inChunk;
+      const reserved_chunkContents = chunkContents;
+      freeSpace = inChunkSize;
+      inChunk = new Uint8Array(inChunkSize);
+      chunkContents = {};
+      await dequantize(reserved_inChunk, reserved_chunkContents, d);
+      /*const d = await getFreePipeline();
+      gpuJobs.push(
+        (async () => {
+          await dequantize(reserved_inChunk, reserved_chunkContents, d);
+          releasePipeline(d);
+        })()
+      );*/
     }
   }
+
+  //await Promise.all(gpuJobs);
+
+  const t1 = performance.now();
+  console.log(`decompression elapsed seconds: ${(t1 - t0) / 1000}`)
 
   // FFD bin packing
   const maxChunkSize = 1149173760; // byte size of float32 output.weight in llama-1B
@@ -350,8 +426,9 @@ document.addEventListener("alpine:init", () => {
       } catch (error) {this.progress(0, 100, "Failed to launch WebGPU. Please check if WebGPU is enabled and reload the page. || Loading:"); console.log(error); return;}
 
       try {
-        const decomp = await q6k_to_f32().setup(device);
-        var tensorData = await getAndDecompressGGUFChunks(decomp, this.progress.bind(this));
+        //const decomp = await q6k_to_f32().setup(device);
+        //var tensorData = await getAndDecompressGGUFChunks(decomp, this.progress.bind(this));
+        var tensorData = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
       } catch (error) {this.progress(0, 100, "Error decompressing model"); console.log(error); return;}
 
       var p = 0;
