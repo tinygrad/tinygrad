@@ -797,24 +797,24 @@ class TestIdxUpcast(unittest.TestCase):
       idx_val = idx.src[1]
       assert idx_val.dtype is dtype
 
-  # This prevents kernel.py from combining the dims into 1
-  def _permute_expand_contig(self, dtype: dtypes, dim1, dim2, dim3):
-    self._assert(dtype, Tensor.empty(dim1, dim2, 1).permute((2, 1, 0)).expand(dim3, -1, -1).contiguous())
+  # use expand to generate kernel that uses large idx
+  def _expand(self, dtype: dtypes, dim1, dim2, dim3):
+    self._assert(dtype, Tensor.empty(dim1, dim2, 1).expand(-1, -1, dim3).contiguous())
 
   @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_overflow(self):
     # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
-    self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
+    self._expand(dtypes.long, 2048, 2048, 2048)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_overflow_sym(self):
-    self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+    self._expand(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
   def test_regular(self):
-    self._permute_expand_contig(dtypes.int, 64, 64, 64)
+    self._expand(dtypes.int, 64, 64, 64)
 
   def test_regular_sym(self):
-    self._permute_expand_contig(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+    self._expand(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
 
   @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
@@ -826,12 +826,12 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
     with self.assertRaises(RuntimeError):
-      self._permute_expand_contig(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+      self._expand(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow(self):
     with self.assertRaises(RuntimeError):
-      self._permute_expand_contig(dtypes.long, 2048, 2048, 2048)
+      self._expand(dtypes.long, 2048, 2048, 2048)
 
 if __name__ == '__main__':
   unittest.main()
