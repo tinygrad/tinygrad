@@ -2262,5 +2262,16 @@ class TestBufferUOp(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
       merged.buffer # cannot access Buffer of a non contiguous VIEW
 
+  def test_buffer_only_after_realize(self):
+    a = Tensor([1])+Tensor([2])
+    # accessing realized will return None
+    self.assertIsNone(a.lazydata.realized)
+    # accessing Buffer will assert
+    with self.assertRaisesRegex(AssertionError, "must be BUFFER"):
+      a.lazydata.buffer # there is no BUFFER on an unrealized ADD
+    # Buffer only exists once we realize it
+    a.realize()
+    self.assertIsNotNone(a.lazydata.buffer)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
