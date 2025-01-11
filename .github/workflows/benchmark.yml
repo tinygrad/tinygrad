@@ -4,6 +4,7 @@ env:
   # TODO: very slow for llama 70B and resnet training 6 GPU
   CAPTURE_PROCESS_REPLAY: "1"
   ASSERT_PROCESS_REPLAY: "0"
+  PYTHONPATH: .
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
