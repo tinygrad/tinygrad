@@ -7,12 +7,11 @@ from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import get_kernel
-from tinygrad.ops import Ops, sym_infer, UOp
+from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
-from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -776,15 +775,13 @@ class TestIdxUpcast(unittest.TestCase):
     for src in ast.src:
       if (ret:=self._find_op(src, op)) is not None: return ret
   def _schedule_render(self, a: Tensor):
-    schedule, var_vals = a.schedule_with_vars()
+    schedule, _ = a.schedule_with_vars()
     for s in schedule:
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
-
         uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
-        src = renderer.render("test", uops)
+        renderer.render("test", uops)
         return uops
-        # Test everything except the actual run (including sym_infer)
 
   def _assert(self, dtype: dtypes, a: Tensor):
     uops = self._schedule_render(a)
