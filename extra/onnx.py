@@ -2,7 +2,7 @@ from typing import Callable, Any, Sequence
 import importlib, functools
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import getenv, DEBUG, all_same, get_single_element
+from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto, helper
@@ -54,10 +54,12 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
   if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
              list(onnx_tensor.uint64_data):
-    if shape == (): return Tensor(get_single_element(data), dtype=dtype).reshape(shape).realize()
+    if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
   assert onnx_tensor.HasField("raw_data")
-  return Tensor(np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape), dtype=dtype)
+  np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+  if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
+  return Tensor(np_buffer, dtype=dtype)
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
