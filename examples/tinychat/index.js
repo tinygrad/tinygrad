@@ -251,7 +251,7 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   let chunkContents = {};
   let freeSpace = inChunkSize;
 
-  const num_decomposers = 0;
+  const num_decomposers = 8;
 
   const t0 = performance.now();
   const pipelinePool = await Promise.all(
@@ -292,9 +292,8 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
     }
   }
 
-  //const gpuJobs = [];
-
-  const d = await q6k_to_f32().setup(device);
+  const gpuJobs = [];
+  //const d = await q6k_to_f32().setup(device);
 
   for (const [k, v] of Object.entries(state_dict)) {
     const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
@@ -316,14 +315,14 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
           freeSpace = inChunkSize;
           inChunk = new Uint8Array(inChunkSize);
           chunkContents = {};
-          await dequantize(reserved_inChunk, reserved_chunkContents, d);
-          /*const d = await getFreePipeline();
+          //await dequantize(reserved_inChunk, reserved_chunkContents, d);
+          const d = await getFreePipeline();
           gpuJobs.push(
             (async () => {
               await dequantize(reserved_inChunk, reserved_chunkContents, d);
               releasePipeline(d);
             })()
-          );*/
+          );
         }
       }
       v.dtype = "float32";
@@ -340,18 +339,18 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
       freeSpace = inChunkSize;
       inChunk = new Uint8Array(inChunkSize);
       chunkContents = {};
-      await dequantize(reserved_inChunk, reserved_chunkContents, d);
-      /*const d = await getFreePipeline();
+      //await dequantize(reserved_inChunk, reserved_chunkContents, d);
+      const d = await getFreePipeline();
       gpuJobs.push(
         (async () => {
           await dequantize(reserved_inChunk, reserved_chunkContents, d);
           releasePipeline(d);
         })()
-      );*/
+      );
     }
   }
 
-  //await Promise.all(gpuJobs);
+  await Promise.all(gpuJobs);
 
   const t1 = performance.now();
   console.log(`decompression elapsed seconds: ${(t1 - t0) / 1000}`)
