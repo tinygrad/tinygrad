@@ -1,11 +1,10 @@
 from typing import Optional, Union, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, print_uops
+from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
-from tinygrad.device import is_dtype_supported
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
@@ -138,9 +137,6 @@ class CStyleLanguage(Renderer):
                   Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
 
-      if not is_dtype_supported(u.dtype.base.scalar(), self.device):
-        print_uops(uops)
-        raise RuntimeError(f"dtype not supported {u.dtype=} on {self.device}")
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
