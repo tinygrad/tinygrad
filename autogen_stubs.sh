@@ -223,10 +223,11 @@ generate_libc() {
 }
 
 generate_kgsl() {
-  clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
-  fixup $BASE/kgsl.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/kgsl.py
-  sed -nE 's/#define ([A-Za-z0-9_]+)_SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1_SHIFT) \& \1_MASK/p' extra/qcom_gpu_driver/msm_kgsl.h >> $BASE/kgsl.py
+  # clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
+  # fixup $BASE/kgsl.py
+  # sed -i "s\import ctypes\import ctypes, os\g" $BASE/kgsl.py
+  # sed -nE 's/#define ([A-Za-z0-9_]+)_SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1_SHIFT) \& \1_MASK/p' extra/qcom_gpu_driver/msm_kgsl.h >> $BASE/kgsl.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kgsl.py
   python3 -c "import tinygrad.runtime.autogen.kgsl"
 }
 

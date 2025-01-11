@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
+from tinygrad.runtime.support.hcq import HWInterface
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -325,7 +326,7 @@ class QCOMDevice(HCQCompiled):
   dummy_addr: int = 0
 
   def __init__(self, device:str=""):
-    self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
+    self.fd = HWInterface('/dev/kgsl-3d0', os.O_RDWR)
     QCOMDevice.dummy_addr = cast(int, self._gpu_alloc(0x1000).va_addr)
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
     QCOMDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
@@ -359,14 +360,14 @@ class QCOMDevice(HCQCompiled):
     if uncached: flags |= kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED)
 
     alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=(bosz:=round_up(size, 1<<alignment_hint)), flags=flags, mmapsize=bosz)
-    va_addr = libc.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.fd, alloc.id * 0x1000)
+    va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
     return HCQBuffer(va_addr=va_addr, size=size, meta=alloc)
 
   def _gpu_free(self, mem:HCQBuffer):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)
-    libc.munmap(mem.va_addr, mem.meta.mmapsize)
+    HWInterface.munmap(mem.va_addr, mem.meta.mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)
