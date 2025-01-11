@@ -38,7 +38,7 @@ class ShapeTracker:
   views: tuple[View, ...]
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    ret = ShapeTracker(self.views[:-1] + (self.views[-1].minify(),))
+    ret = self
     for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
     return ret
 
@@ -96,7 +96,7 @@ class ShapeTracker:
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
       return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-    return self
+    return ShapeTracker(self.views[:-2] + ((self.views[-2].minify(),) if len(self.views)>1 else ()) + (self.views[-1],))
 
   # *** under this line are the movement ops ***
 
@@ -108,7 +108,7 @@ class ShapeTracker:
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
-    return ShapeTracker(self.views) + ShapeTracker((View.create(new_shape),))
+    return ShapeTracker(self.views[:-1] + (self.views[-1].minify(),) + (View.create(new_shape),))
 
   def mop(self, op, arg): return mops[op](self, arg)
 
