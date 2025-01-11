@@ -409,6 +409,9 @@ ops_folding = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
+  # sink folding
+  (UPat(Ops.SINK, name="s"),
+   lambda s:s.replace(src=a) if (a:=tuple(x.base for x in s.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != s.src else None),
 ])
 
 # ** buffer merging
@@ -459,10 +462,8 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
-def sink_outputs(ctx:ScheduleContext, sink:UOp) -> UOp|None:
-  new_src = tuple(x.base for x in sink.src if x.base.realized is None and x.base.op not in {Ops.CONST, Ops.BIND})
-  for x in new_src: realize(ctx, x.buf_uop, x)
-  return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
+def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
+  for x in sink.src: realize(ctx, x.buf_uop, x)
 
 do_realize = PatternMatcher([
   # always realize sinked ops
