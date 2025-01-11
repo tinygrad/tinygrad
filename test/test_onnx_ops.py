@@ -1,0 +1,91 @@
+from typing import Any
+import unittest
+import time
+import numpy as np
+
+from tinygrad import Tensor
+from tinygrad.helpers import CI, getenv
+from extra.onnx import get_run_onnx
+
+import onnx
+import onnxruntime.backend
+from onnx import TensorProto, helper
+
+PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
+
+def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
+  # prepare input
+  input_names = [inp.name for inp in model.graph.input]
+  if not isinstance(inputs, list): inputs = [inputs]
+  inp = dict(zip(input_names, inputs))
+
+  # prepare runners
+  rep = onnxruntime.backend.prepare(model.SerializeToString(), "CPU")
+  tinygrad_runner = get_run_onnx(model)
+
+  ort_out = rep.run(inputs)
+  st = time.monotonic()
+  tinygrad_out = tinygrad_runner(inp)
+  tinygrad_out = [out.numpy() if isinstance(out, Tensor) else out for out in tinygrad_out.values()]
+  non_jit_time = time.monotonic() - st
+
+  for tinygrad_val, ort_val in zip(tinygrad_out, ort_out):
+    if PRINT_TENSORS: print(tinygrad_val, ort_val)
+    assert tinygrad_val.dtype == ort_val.dtype, f"dtype mismatch: tinygrad={tinygrad_val.dtype} | onnxruntime={ort_val.dtype}"
+    if np.issubdtype(tinygrad_val.dtype, np.floating):
+      np.testing.assert_allclose(tinygrad_val, ort_val, rtol=rtol, atol=atol)
+    else:
+      np.testing.assert_equal(tinygrad_val, ort_val)
+
+  if not CI:
+    print("\ntesting %40r   tinygrad run: %.2f ms" % \
+          (model.graph.name, non_jit_time*1000), end="")
+
+def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any],
+                          out_names:list[str], out_shapes:list[list[int]], out_dtypes:list[np.dtype]):
+  onnx_inputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
+  onnx_outputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(np.dtype(dtype)), shape)
+                  for name, shape, dtype in zip(out_names, out_shapes, out_dtypes)]
+  nodes = [helper.make_node(op, list(inps.keys()), out_names, **opt)]
+  graph = helper.make_graph(nodes, op.lower() + "_single_op_test", onnx_inputs, onnx_outputs)
+  model = helper.make_model(graph, producer_name=op.lower() + "_single_op_test")
+  helper_test_op(list(inps.values()), model)
+
+class TestOnnxOps(unittest.TestCase):
+  def test_single_op(self):
+    inps = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3]).astype(np.int64)}
+    helper_test_single_op("Reshape", inps, {}, ["out"], [[2,3]], [np.float32])
+
+  def test_multiple_ops(self):
+    onnx_inputs = [helper.make_tensor_value_info("in", TensorProto.FLOAT, [4,3,3,4])]
+    onnx_outputs = [helper.make_tensor_value_info("out", TensorProto.FLOAT, [6,2,4,3])]
+    initializer = [helper.make_tensor("shape", onnx.TensorProto.INT64, [4], [6,2,4,3])]
+    reshape_node1 = helper.make_node("Reshape", ["in", "shape"], ["out1"])
+    reshape_node2 = helper.make_node("Reshape", ["in", "shape"], ["out2"])
+    add_node = helper.make_node("Add", ["out1", "out2"], ["out"])
+    nodes = [reshape_node1, reshape_node2, add_node]
+    graph = helper.make_graph(nodes, "multiple_op_test", onnx_inputs, onnx_outputs, initializer)
+    model = helper.make_model(graph, producer_name="multiple_op_test")
+    helper_test_op([np.random.uniform(size=[4,3,3,4]).astype(np.float32)], model)
+
+class TestOnnxQuantizedOps(unittest.TestCase):
+  @unittest.skip("TODO: Max absolute difference: 128")
+  def test_qlinear_conv(self):
+    # https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
+    # first qlinear_conv from mobilnet but with x, w, and b randomized
+    inps = {
+      "x": np.random.randint(0, 256, [1, 3, 224, 224]).astype(np.uint8),
+      "x_scale": np.array(0.01865844801068306, dtype=np.float32),
+      "x_zero_point": np.array(114).astype(np.uint8),
+      "w": np.random.randint(0, 256, [32, 3, 3, 3]).astype(np.uint8),
+      "w_scale": np.array(0.00205775024369359).astype(np.float32),
+      "w_zero_point": np.array(133).astype(np.uint8),
+      "y_scale": np.array(0.015050271525979042).astype(np.float32),
+      "y_zero_point": np.array(0).astype(np.uint8),
+      "b": np.random.randint(-12667, 25215, [32]).astype(np.int32)
+    }
+    opt = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
+    helper_test_single_op("QLinearConv", inps, opt, ["out"], [[1,32,112,112]], [np.uint8])
+
+if __name__ == "__main__":
+  unittest.main()
