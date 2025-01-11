@@ -12,6 +12,7 @@ import onnxruntime.backend
 from onnx import TensorProto, helper
 
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
+CONTRIB_OPERATORS = "com.microsoft"
 
 def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
   # prepare input
@@ -42,11 +43,11 @@ def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
           (model.graph.name, non_jit_time*1000), end="")
 
 def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any],
-                          out_names:list[str], out_shapes:list[list[int]], out_dtypes:list[np.dtype]):
+                          out_names:list[str], out_shapes:list[list[int]], out_dtypes:list[np.dtype], domain=None):
   onnx_inputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
   onnx_outputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(np.dtype(dtype)), shape)
                   for name, shape, dtype in zip(out_names, out_shapes, out_dtypes)]
-  nodes = [helper.make_node(op, list(inps.keys()), out_names, **opt)]
+  nodes = [helper.make_node(op, list(inps.keys()), out_names, domain=domain, **opt)]
   graph = helper.make_graph(nodes, op.lower() + "_single_op_test", onnx_inputs, onnx_outputs)
   model = helper.make_model(graph, producer_name=op.lower() + "_single_op_test")
   helper_test_op(list(inps.values()), model)
@@ -54,7 +55,8 @@ def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any]
 class TestOnnxOps(unittest.TestCase):
   def test_single_op(self):
     inps = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3]).astype(np.int64)}
-    helper_test_single_op("Reshape", inps, {}, ["out"], [[2,3]], [np.float32])
+    opt = {}
+    helper_test_single_op("Reshape", inps, opt, ["out"], [[2,3]], [np.float32])
 
   def test_multiple_ops(self):
     onnx_inputs = [helper.make_tensor_value_info("in", TensorProto.FLOAT, [4,3,3,4])]
@@ -86,6 +88,47 @@ class TestOnnxQuantizedOps(unittest.TestCase):
     }
     opt = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
     helper_test_single_op("QLinearConv", inps, opt, ["out"], [[1,32,112,112]], [np.uint8])
+
+  @unittest.skip("TODO: Max absolute difference: 110")
+  def test_qlinear_add(self):
+    inps = {
+      "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
+      "A_scale": np.array(0.05, dtype=np.float32),
+      "A_zero_point": np.array(128).astype(np.uint8),
+      "B": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
+      "B_scale": np.array(0.05, dtype=np.float32),
+      "B_zero_point": np.array(128).astype(np.uint8),
+      "C_scale": np.array(0.05, dtype=np.float32),
+      "C_zero_point": np.array(128).astype(np.uint8)
+    }
+    opt = {}
+    helper_test_single_op("QLinearAdd", inps, opt, ["C"], [[10, 10]], [np.uint8], domain=CONTRIB_OPERATORS)
+
+  @unittest.skip("TODO: Max absolute difference: 127")
+  def test_qlinear_matmul(self):
+    inps = {
+      "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
+      "A_scale": np.array(0.05, dtype=np.float32),
+      "A_zero_point": np.array(128).astype(np.uint8),
+      "B": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
+      "B_scale": np.array(0.05, dtype=np.float32),
+      "B_zero_point": np.array(128).astype(np.uint8),
+      "Y_scale": np.array(0.05, dtype=np.float32),
+      "Y_zero_point": np.array(128).astype(np.uint8)
+    }
+    opt = {}
+    helper_test_single_op("QLinearMatMul", inps, opt, ["Y"], [[10, 10]], [np.uint8])
+
+  def test_qlinear_global_average_pool(self):
+    inps = {
+      "X": np.random.randint(0, 256, [1, 3, 10, 10]).astype(np.uint8),
+      "x_scale": np.array(0.05, dtype=np.float32),
+      "x_zero_point": np.array(128).astype(np.uint8),
+      "y_scale": np.array(0.05, dtype=np.float32),
+      "y_zero_point": np.array(128).astype(np.uint8)
+    }
+    opt = {"channels_last": 0}
+    helper_test_single_op("QLinearGlobalAveragePool", inps, opt, ["Y"], [[1, 3, 1, 1]], [np.uint8], domain=CONTRIB_OPERATORS)
 
 if __name__ == "__main__":
   unittest.main()
