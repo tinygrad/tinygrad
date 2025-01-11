@@ -40,16 +40,6 @@ def rand_for_dtype(dt:DType, size:int):
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
 
-def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
-  if not logging.getLogger().hasHandlers(): logging.basicConfig(level=logging.INFO, format="%(message)s")
-  if unified:
-    lines = list(difflib.unified_diff(str(s0).splitlines(), str(s1).splitlines()))
-    diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in lines)
-  else:
-    import ocdiff
-    diff = ocdiff.console_diff(str(s0), str(s1))
-  logging.info(diff)
-
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
   if st_src is None:
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
