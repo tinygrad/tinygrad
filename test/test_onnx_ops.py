@@ -1,3 +1,7 @@
+# Spec (inputs, attributes, outputs) for tests found here:
+# https://github.com/onnx/onnx/blob/main/docs/Operators.md
+# https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md
+
 from typing import Any
 import unittest
 import time
@@ -43,20 +47,21 @@ def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
           (model.graph.name, non_jit_time*1000), end="")
 
 def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any],
-                          out_names:list[str], out_shapes:list[list[int]], out_dtypes:list[np.dtype], domain=None):
+                          outs:dict[str, tuple[list[int], np.dtype]], domain=None):
   onnx_inputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
   onnx_outputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(np.dtype(dtype)), shape)
-                  for name, shape, dtype in zip(out_names, out_shapes, out_dtypes)]
-  nodes = [helper.make_node(op, list(inps.keys()), out_names, domain=domain, **opt)]
+                  for name, (shape, dtype) in outs.items()]
+  nodes = [helper.make_node(op, list(inps.keys()), list(outs), domain=domain, **opt)]
   graph = helper.make_graph(nodes, op.lower() + "_single_op_test", onnx_inputs, onnx_outputs)
   model = helper.make_model(graph, producer_name=op.lower() + "_single_op_test")
   helper_test_op(list(inps.values()), model)
 
 class TestOnnxOps(unittest.TestCase):
   def test_single_op(self):
-    inps = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3]).astype(np.int64)}
-    opt = {}
-    helper_test_single_op("Reshape", inps, opt, ["out"], [[2,3]], [np.float32])
+    inputs = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3]).astype(np.int64)}
+    attributes = {}
+    outputs = {"out": ([2,3], np.float32)}
+    helper_test_single_op("Reshape", inputs, attributes, outputs)
 
   def test_multiple_ops(self):
     onnx_inputs = [helper.make_tensor_value_info("in", TensorProto.FLOAT, [4,3,3,4])]
@@ -75,7 +80,7 @@ class TestOnnxQuantizedOps(unittest.TestCase):
   def test_qlinear_conv(self):
     # https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
     # first qlinear_conv from mobilnet but with x, w, and b randomized
-    inps = {
+    inputs = {
       "x": np.random.randint(0, 256, [1, 3, 224, 224]).astype(np.uint8),
       "x_scale": np.array(0.01865844801068306, dtype=np.float32),
       "x_zero_point": np.array(114).astype(np.uint8),
@@ -86,27 +91,13 @@ class TestOnnxQuantizedOps(unittest.TestCase):
       "y_zero_point": np.array(0).astype(np.uint8),
       "b": np.random.randint(-12667, 25215, [32]).astype(np.int32)
     }
-    opt = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
-    helper_test_single_op("QLinearConv", inps, opt, ["out"], [[1,32,112,112]], [np.uint8])
-
-  @unittest.skip("TODO: Max absolute difference: 110")
-  def test_qlinear_add(self):
-    inps = {
-      "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
-      "A_scale": np.array(0.05, dtype=np.float32),
-      "A_zero_point": np.array(128).astype(np.uint8),
-      "B": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
-      "B_scale": np.array(0.05, dtype=np.float32),
-      "B_zero_point": np.array(128).astype(np.uint8),
-      "C_scale": np.array(0.05, dtype=np.float32),
-      "C_zero_point": np.array(128).astype(np.uint8)
-    }
-    opt = {}
-    helper_test_single_op("QLinearAdd", inps, opt, ["C"], [[10, 10]], [np.uint8], domain=CONTRIB_OPERATORS)
+    attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
+    outputs = {"out": ([1,32,112,112], np.uint8)}
+    helper_test_single_op("QLinearConv", inputs, attributes, outputs)
 
   @unittest.skip("TODO: Max absolute difference: 127")
   def test_qlinear_matmul(self):
-    inps = {
+    inputs = {
       "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
       "A_scale": np.array(0.05, dtype=np.float32),
       "A_zero_point": np.array(128).astype(np.uint8),
@@ -116,19 +107,37 @@ class TestOnnxQuantizedOps(unittest.TestCase):
       "Y_scale": np.array(0.05, dtype=np.float32),
       "Y_zero_point": np.array(128).astype(np.uint8)
     }
-    opt = {}
-    helper_test_single_op("QLinearMatMul", inps, opt, ["Y"], [[10, 10]], [np.uint8])
+    attributes = {}
+    outputs = {"Y": ([10,10], np.uint8)}
+    helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
+
+  @unittest.skip("TODO: Max absolute difference: 110")
+  def test_qlinear_add(self):
+    inputs = {
+      "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
+      "A_scale": np.array(0.05, dtype=np.float32),
+      "A_zero_point": np.array(128).astype(np.uint8),
+      "B": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
+      "B_scale": np.array(0.05, dtype=np.float32),
+      "B_zero_point": np.array(128).astype(np.uint8),
+      "C_scale": np.array(0.05, dtype=np.float32),
+      "C_zero_point": np.array(128).astype(np.uint8)
+    }
+    attributes = {}
+    outputs = {"C": ([10,10], np.uint8)}
+    helper_test_single_op("QLinearAdd", inputs, attributes, outputs, domain=CONTRIB_OPERATORS)
 
   def test_qlinear_global_average_pool(self):
-    inps = {
+    inputs = {
       "X": np.random.randint(0, 256, [1, 3, 10, 10]).astype(np.uint8),
       "x_scale": np.array(0.05, dtype=np.float32),
       "x_zero_point": np.array(128).astype(np.uint8),
       "y_scale": np.array(0.05, dtype=np.float32),
       "y_zero_point": np.array(128).astype(np.uint8)
     }
-    opt = {"channels_last": 0}
-    helper_test_single_op("QLinearGlobalAveragePool", inps, opt, ["Y"], [[1, 3, 1, 1]], [np.uint8], domain=CONTRIB_OPERATORS)
+    attributes = {"channels_last": 0}
+    outputs = {"Y": ([1,3,1,1], np.uint8)}
+    helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs, domain=CONTRIB_OPERATORS)
 
 if __name__ == "__main__":
   unittest.main()
