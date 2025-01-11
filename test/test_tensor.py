@@ -10,6 +10,9 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_kernel
 from tinygrad.ops import Ops, sym_infer, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -777,19 +780,16 @@ class TestIdxUpcast(unittest.TestCase):
     for s in schedule:
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
-        kernel = get_kernel(renderer, s.ast)
-        # If render succeeds, it means types were propagated correctly when upcasting
-        prg = kernel.to_program()
-        print(prg.src)
+
+        uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
+        src = renderer.render("test", uops)
+        return uops
         # Test everything except the actual run (including sym_infer)
-        sym_infer(prg.estimates.ops, var_vals)
-        sym_infer(prg.estimates.mem, var_vals)
-        return prg
 
   def _assert(self, dtype: dtypes, a: Tensor):
-    prg = self._schedule_render(a)
+    uops = self._schedule_render(a)
     # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
-    store = next(uop for uop in prg.uops if uop.op is Ops.STORE)
+    store = next(uop for uop in uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
     if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
@@ -820,8 +820,8 @@ class TestIdxUpcast(unittest.TestCase):
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)
-    prg = self._schedule_render(a)
-    assert all(uop.dtype is not dtypes.long for uop in prg.uops)
+    uops = self._schedule_render(a)
+    assert all(uop.dtype is not dtypes.long for uop in uops)
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
