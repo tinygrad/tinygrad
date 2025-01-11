@@ -11,7 +11,9 @@ from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Vari
 @functools.lru_cache(None)
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
   idx, valid = views[-1].to_indexed_uops(_idxs)
-  for view in reversed(views[0:-1]): idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
+  for view in reversed(views[0:-1]):
+    view = view.minify()
+    idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
   return idx, valid
 
 @functools.lru_cache(None)
@@ -44,7 +46,7 @@ class ShapeTracker:
 
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[ShapeTracker]:
     inverted_views:list[View] = []
-    for v,s in zip((self.views[-1].minify(),)+self.views[-2::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
+    for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
       if (inverted:= v.invert(s)) is None: return None
       inverted_views.append(inverted)
     return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
@@ -96,7 +98,7 @@ class ShapeTracker:
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
       return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-    return ShapeTracker(self.views[:-2] + ((self.views[-2].minify(),) if len(self.views)>1 else ()) + (self.views[-1],))
+    return self
 
   # *** under this line are the movement ops ***
 
@@ -108,7 +110,7 @@ class ShapeTracker:
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
-    return ShapeTracker(self.views[:-1] + (self.views[-1].minify(),) + (View.create(new_shape),))
+    return ShapeTracker(self.views + (View.create(new_shape), ))
 
   def mop(self, op, arg): return mops[op](self, arg)
 
