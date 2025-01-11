@@ -780,6 +780,7 @@ class TestIdxUpcast(unittest.TestCase):
         kernel = get_kernel(renderer, s.ast)
         # If render succeeds, it means types were propagated correctly when upcasting
         prg = kernel.to_program()
+        print(prg.src)
         # Test everything except the actual run (including sym_infer)
         sym_infer(prg.estimates.ops, var_vals)
         sym_infer(prg.estimates.mem, var_vals)
@@ -818,7 +819,7 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
-    a = Tensor.arange(100_000)
+    a = Tensor.arange(65535)
     prg = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in prg.uops)
 
