@@ -1,4 +1,4 @@
-import time, logging, difflib
+import time
 from typing import Callable, Optional, Tuple
 import numpy as np
 from tinygrad import Tensor, dtypes
@@ -8,7 +8,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, getenv, colored
+from tinygrad.helpers import T
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
