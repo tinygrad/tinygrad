@@ -2262,5 +2262,23 @@ class TestBufferUOp(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
       merged.buffer # cannot access Buffer of a non contiguous VIEW
 
+  def test_const_does_not_realize(self):
+    a = Tensor(1)+Tensor(2)
+    run_schedule(check_schedule(a, 0))
+    self.assertEqual(len([x for x in a.lazydata.toposort if x.op is Ops.BUFFER]), 0)
+    self.assertIsNone(a.lazydata.base.realized)
+
+  def test_var_does_not_realize(self):
+    a = Tensor(UOp.variable("a", 0, 10).bind(1))
+    run_schedule(check_schedule(a, 0))
+    self.assertEqual(len([x for x in a.lazydata.toposort if x.op is Ops.BUFFER]), 0)
+    self.assertIsNone(a.lazydata.base.realized)
+
+  def test_view_does_not_realize(self):
+    a = Tensor.randn(1, 4).expand(4, 4)
+    a.realize()
+    self.assertIsNone(a.lazydata.realized)
+    self.assertIsNotNone(a.lazydata.base.realized)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
