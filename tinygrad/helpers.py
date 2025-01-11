@@ -218,6 +218,10 @@ def diskcache(func):
     return diskcache_put(table, key, func(*args, **kwargs))
   return wrapper
 
+# *** process replay ***
+
+CAPTURE_PROCESS_REPLAY = getenv("RUN_PROCESS_REPLAY") or getenv("CAPTURE_PROCESS_REPLAY")
+
 # *** http support ***
 
 def _ensure_downloads_dir() -> pathlib.Path:
