@@ -441,7 +441,7 @@ class PCIIface:
 
         iommu_group = HWInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
       except OSError:
-        if DEBUG >= 1: print("AM: failed to init vfio-pci module (not inserted or no-iommu mode is not supported).")
+        if DEBUG >= 1: print(f"am {self.pcibus}: failed to init vfio-pci module (not inserted or no-iommu mode is not supported).")
         PCIIface.vfio = False
 
     # Init vfio for the device
@@ -464,7 +464,7 @@ class PCIIface:
     self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
     self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
 
-    self.adev = AMDev(self.pcidev, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
+    self.adev = AMDev(self.pcidev, self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
 
     libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
