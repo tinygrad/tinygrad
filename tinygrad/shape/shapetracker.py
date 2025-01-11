@@ -96,7 +96,7 @@ class ShapeTracker:
   def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
-  def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None, int64_support: Optional[bool]=True) -> tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None, int64_support: bool=True) -> tuple[UOp, UOp]:
     idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
     return folded_upcast(idx, int64_support), folded_upcast(valid, int64_support)
 
