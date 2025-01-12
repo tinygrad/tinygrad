@@ -243,14 +243,14 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   //const decompProgressFraction = 0.90;
   //totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
 
-  //const inChunkSize = 8388450; // divisible by 210
-  const inChunkSize = 3144960; // divisible by 210
+  const inChunkSize = 3144960; // max size that tinygrad compiled without exceptions; divisible by 210
   let inChunk = new Uint8Array(inChunkSize);
   const byteFactor = 1 / 210 * 256 * 4;
-  //const outChunk = new Uint8Array(inChunkSize * byteFactor);
   let chunkContents = {};
   let freeSpace = inChunkSize;
 
+  // decompression time goes from 15sec to 10sec by scheduling GPU jobs like below
+  // TODO: can we get tinygrad to give us bigger kernels? currently throws exceptions when trying to compile them
   const num_decomposers = 8;
 
   const t0 = performance.now();
@@ -272,7 +272,7 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
         pipelinePool[idx].busy = true;
         return pipelinePool[idx].pipeline;
       }
-      await new Promise(r => setTimeout(r, 1));
+      await new Promise(r => setTimeout(r, 5));
     }
   }
 
@@ -292,8 +292,20 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
     }
   }
 
+  function scheduleDequantizeJob() {
+    const reserved_inChunk = inChunk;
+    const reserved_chunkContents = chunkContents;
+    freeSpace = inChunkSize;
+    inChunk = new Uint8Array(inChunkSize);
+    chunkContents = {};
+    return (async () => {
+      const d = await getFreePipeline();
+      await dequantize(reserved_inChunk, reserved_chunkContents, d);
+      releasePipeline(d);
+    })();
+  }
+
   const gpuJobs = [];
-  //const d = await q6k_to_f32().setup(device);
 
   for (const [k, v] of Object.entries(state_dict)) {
     const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
@@ -309,21 +321,7 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
         inChunk.set(tensor.subarray(i, end));
         chunkContents[k][1] += (end - i);
 
-        if (freeSpace === 0) {
-          const reserved_inChunk = inChunk;
-          const reserved_chunkContents = chunkContents;
-          freeSpace = inChunkSize;
-          inChunk = new Uint8Array(inChunkSize);
-          chunkContents = {};
-          //await dequantize(reserved_inChunk, reserved_chunkContents, d);
-          const d = await getFreePipeline();
-          gpuJobs.push(
-            (async () => {
-              await dequantize(reserved_inChunk, reserved_chunkContents, d);
-              releasePipeline(d);
-            })()
-          );
-        }
+        if (freeSpace === 0) {gpuJobs.push(scheduleDequantizeJob());}
       }
       v.dtype = "float32";
       v.size = v.bytes.byteLength;
@@ -334,19 +332,7 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
 
     if (freeSpace < inChunkSize) {
       inChunk.set(new Uint8Array(freeSpace), inChunkSize - freeSpace); // pad last partial chunk with zeroes
-      const reserved_inChunk = inChunk;
-      const reserved_chunkContents = chunkContents;
-      freeSpace = inChunkSize;
-      inChunk = new Uint8Array(inChunkSize);
-      chunkContents = {};
-      //await dequantize(reserved_inChunk, reserved_chunkContents, d);
-      const d = await getFreePipeline();
-      gpuJobs.push(
-        (async () => {
-          await dequantize(reserved_inChunk, reserved_chunkContents, d);
-          releasePipeline(d);
-        })()
-      );
+      gpuJobs.push(scheduleDequantizeJob());
     }
   }
 
