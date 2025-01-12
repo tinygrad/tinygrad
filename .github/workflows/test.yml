@@ -2,9 +2,8 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '8'
-  RUN_PROCESS_REPLAY: 1
+  CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PYTHONPATH: .
 
 on:
   push:
@@ -231,7 +230,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
+      run: PYTHONPATH="." python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
