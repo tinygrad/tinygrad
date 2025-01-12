@@ -409,9 +409,10 @@ ops_folding = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
-  # sink folding
-  (UPat(Ops.SINK, name="s"),
-   lambda s:s.replace(src=a) if (a:=tuple(x.base for x in s.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != s.src else None),
+  # remove CONST/BUFFER/VIEW from SINK
+  (UPat(Ops.SINK, name="root"),
+    lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
+      if (new_src:=tuple(x.base for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST,Ops.BIND})) != root.src else None),
 ])
 
 # ** buffer merging
