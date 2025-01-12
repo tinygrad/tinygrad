@@ -57,7 +57,7 @@ def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any]
 
 class TestOnnxOps(unittest.TestCase):
   def test_reshape(self):
-    inputs = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3], dtype=np.int64)}
+    inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
     outputs = {"out": ([2,3], np.float32)}
     helper_test_single_op("Reshape", inputs, attributes, outputs)
