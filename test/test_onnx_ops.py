@@ -57,7 +57,7 @@ def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any]
 
 class TestOnnxOps(unittest.TestCase):
   def test_reshape(self):
-    inputs = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3]).astype(np.int64)}
+    inputs = {"in": np.random.uniform(size=[6]).astype(np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
     outputs = {"out": ([2,3], np.float32)}
     helper_test_single_op("Reshape", inputs, attributes, outputs)
@@ -68,15 +68,15 @@ class TestOnnxQuantizedOps(unittest.TestCase):
     # https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
     # first qlinear_conv from mobilnet but with x, w, and b randomized
     inputs = {
-      "x": np.random.randint(0, 256, [1, 3, 224, 224]).astype(np.uint8),
-      "x_scale": np.array(0.01865844801068306).astype(np.float32),
-      "x_zero_point": np.array(114).astype(np.uint8),
-      "w": np.random.randint(0, 256, [32, 3, 3, 3]).astype(np.uint8),
-      "w_scale": np.array(0.00205775024369359).astype(np.float32),
-      "w_zero_point": np.array(133).astype(np.uint8),
-      "y_scale": np.array(0.015050271525979042).astype(np.float32),
-      "y_zero_point": np.array(0).astype(np.uint8),
-      "b": np.random.randint(-12667, 25215, [32]).astype(np.int32)
+      "x": np.random.randint(0, 256, [1, 3, 224, 224], dtype=np.uint8),
+      "x_scale": np.array(0.01865844801068306, dtype=np.float32),
+      "x_zero_point": np.array(114, dtype=np.uint8),
+      "w": np.random.randint(0, 256, [32, 3, 3, 3], dtype=np.uint8),
+      "w_scale": np.array(0.00205775024369359, dtype=np.float32),
+      "w_zero_point": np.array(133, dtype=np.uint8),
+      "y_scale": np.array(0.015050271525979042, dtype=np.float32),
+      "y_zero_point": np.array(0, dtype=np.uint8),
+      "b": np.random.randint(-12667, 25215, [32], dtype=np.int32)
     }
     attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
     outputs = {"out": ([1,32,112,112], np.uint8)}
@@ -85,14 +85,14 @@ class TestOnnxQuantizedOps(unittest.TestCase):
   @unittest.skip("TODO: Max absolute difference: 127")
   def test_qlinear_matmul(self):
     inputs = {
-      "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
-      "A_scale": np.array(0.05).astype(np.float32),
-      "A_zero_point": np.array(128).astype(np.uint8),
-      "B": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
-      "B_scale": np.array(0.05).astype(np.float32),
-      "B_zero_point": np.array(128).astype(np.uint8),
-      "Y_scale": np.array(0.05).astype(np.float32),
-      "Y_zero_point": np.array(128).astype(np.uint8)
+      "A": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "A_scale": np.array(0.05, dtype=np.float32),
+      "A_zero_point": np.array(128, dtype=np.uint8),
+      "B": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "B_scale": np.array(0.05, dtype=np.float32),
+      "B_zero_point": np.array(128, dtype=np.uint8),
+      "Y_scale": np.array(0.05, dtype=np.float32),
+      "Y_zero_point": np.array(128, dtype=np.uint8)
     }
     attributes = {}
     outputs = {"Y": ([10,10], np.uint8)}
@@ -101,14 +101,14 @@ class TestOnnxQuantizedOps(unittest.TestCase):
   @unittest.skip("TODO: Max absolute difference: 110")
   def test_qlinear_add(self):
     inputs = {
-      "A": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
-      "A_scale": np.array(0.05).astype(np.float32),
-      "A_zero_point": np.array(128).astype(np.uint8),
-      "B": np.random.randint(0, 256, [10, 10]).astype(np.uint8),
-      "B_scale": np.array(0.05).astype(np.float32),
-      "B_zero_point": np.array(128).astype(np.uint8),
-      "C_scale": np.array(0.05).astype(np.float32),
-      "C_zero_point": np.array(128).astype(np.uint8)
+      "A": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "A_scale": np.array(0.05, dtype=np.float32),
+      "A_zero_point": np.array(128, dtype=np.uint8),
+      "B": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "B_scale": np.array(0.05, dtype=np.float32),
+      "B_zero_point": np.array(128, dtype=np.uint8),
+      "C_scale": np.array(0.05, dtype=np.float32),
+      "C_zero_point": np.array(128, dtype=np.uint8)
     }
     attributes = {}
     outputs = {"C": ([10,10], np.uint8)}
@@ -116,11 +116,11 @@ class TestOnnxQuantizedOps(unittest.TestCase):
 
   def test_qlinear_global_average_pool(self):
     inputs = {
-      "X": np.random.randint(0, 256, [1, 3, 10, 10]).astype(np.uint8),
-      "x_scale": np.array(0.05).astype(np.float32),
-      "x_zero_point": np.array(128).astype(np.uint8),
-      "y_scale": np.array(0.05).astype(np.float32),
-      "y_zero_point": np.array(128).astype(np.uint8)
+      "X": np.random.randint(0, 256, [1, 3, 10, 10], dtype=np.uint8),
+      "x_scale": np.array(0.05, dtype=np.float32),
+      "x_zero_point": np.array(128, dtype=np.uint8),
+      "y_scale": np.array(0.05, dtype=np.float32),
+      "y_zero_point": np.array(128, dtype=np.uint8)
     }
     attributes = {"channels_last": 0}
     outputs = {"Y": ([1,3,1,1], np.uint8)}
