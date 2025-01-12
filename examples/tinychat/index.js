@@ -246,7 +246,6 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   let inChunk = new Uint8Array(inChunkSize);
   const byteFactor = 1 / 210 * 256 * 4;
   let chunkContents = {};
-  let freeSpace = inChunkSize;
 
   // decompression time goes from 15sec to 10sec by scheduling GPU jobs like below
   // TODO: can we get tinygrad to give us bigger kernels? currently throws exceptions when trying to compile them
@@ -310,32 +309,35 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   }
 
   const gpuJobs = [];
+  let freeSpace = inChunkSize;
 
   for (const [k, v] of Object.entries(state_dict)) {
     const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
 
     if (v.dtype === "Q6_K") {
       v.size = parseInt(v.size * byteFactor);
+      v.dtype = "float32";
       v.bytes = new Uint8Array(v.size);
 
-      for (i=0; i<tensor.byteLength; i += inChunkSize) {
-        if (!(k in chunkContents)) {chunkContents[k] = [inChunkSize - freeSpace, inChunkSize - freeSpace, i]}
+      let tensor_cursor = 0;
+      while (tensor_cursor < tensor.byteLength) {
+        const inChunk_cursor = inChunkSize - freeSpace;
+        if (!(k in chunkContents)) {chunkContents[k] = [inChunk_cursor, inChunk_cursor, tensor_cursor]}
 
-        const end = Math.min(i + freeSpace, i + inChunkSize, tensor.byteLength);
-        freeSpace -= (end - i);
-        inChunk.set(tensor.subarray(i, end));
-        chunkContents[k][1] += (end - i);
+        const end = Math.min(tensor_cursor + freeSpace, tensor.byteLength);
+        inChunk.set(tensor.subarray(tensor_cursor, end), inChunk_cursor);
+        freeSpace -= (end - tensor_cursor);
+        chunkContents[k][1] += (end - tensor_cursor);
+        tensor_cursor = end;
 
         if (freeSpace === 0) {gpuJobs.push(scheduleDequantizeJob());}
       }
-      v.dtype = "float32";
-
     } else {v.bytes = tensor;}
+  }
 
   if (freeSpace < inChunkSize) {
     inChunk.set(new Uint8Array(freeSpace), inChunkSize - freeSpace); // pad last partial chunk with zeroes
     gpuJobs.push(scheduleDequantizeJob());
-  }
   }
 
   await Promise.all(gpuJobs);
