@@ -56,10 +56,11 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
              list(onnx_tensor.uint64_data):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
-  assert onnx_tensor.HasField("raw_data")
-  np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
-  if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
-  return Tensor(np_buffer, dtype=dtype)
+  if onnx_tensor.HasField("raw_data"):
+    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+    if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
+    return Tensor(np_buffer, dtype=dtype)
+  return Tensor(None)
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
@@ -98,7 +99,7 @@ def get_run_onnx(onnx_model: ModelProto):
   def prepare_input(user_input:Any, model_input:ValueInfoProto):
     type_proto = model_input.type
     if type_proto.HasField("optional_type"):
-      if user_input is None: return Tensor(None)
+      if user_input is None: return None
       type_proto = type_proto.optional_type.elem_type
     if type_proto.HasField("sequence_type"):
       if not isinstance(user_input, Sequence): raise RuntimeError(f"{model_input.name} received {user_input}, expected sequence type")
@@ -116,7 +117,7 @@ def get_run_onnx(onnx_model: ModelProto):
       # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} has mismatch for dtype. Expected {dtype}, received {tensor.dtype}.")
       for dim, onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
         dim_param, dim_value = onnx_dim.dim_param, onnx_dim.dim_value
-        user_dim_input = user_input.shape[dim]
+        user_dim_input = tensor.shape[dim]
         if dim_param: dim_value = variable_dims[dim_param] if dim_param in variable_dims else variable_dims.setdefault(dim_param, user_dim_input)
         if user_dim_input != dim_value:
           raise RuntimeError(f"{model_input.name} has mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_dim_input}.")
