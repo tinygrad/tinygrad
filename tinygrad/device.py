@@ -123,7 +123,7 @@ class Buffer:
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
   def deallocate(self):
-    if not self.is_allocated(): return
+    assert self.is_allocated(), "buffer must be allocated to deallocate"
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
@@ -139,7 +139,7 @@ class Buffer:
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self): self.deallocate()
+  def __del__(self): (not self.is_allocated()) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
