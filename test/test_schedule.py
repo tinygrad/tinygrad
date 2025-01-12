@@ -110,7 +110,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_constants_are_embedded(self):
     a = Tensor.empty(3,3) * 2
-    check_schedule(a, 2, filter_sink=False)
+    check_schedule(a, 1, filter_sink=False)
 
   def tests_constants_are_folded(self):
     a = Tensor(2)
@@ -242,9 +242,9 @@ class TestSchedule(unittest.TestCase):
   def test_no_dedup_empty(self):
     a = Tensor.empty((4,))
     b = Tensor.empty((4,))
-    sched = check_schedule([a, b], 2, filter_sink=False)
-    run_schedule(sched)
-    self.assertIsNot(a.lazydata.realized, b.lazydata.realized)
+    # NOTE: empty does not have any schedule
+    check_schedule([a, b], 0, filter_sink=False)
+    self.assertIsNot(a.lazydata.buffer, b.lazydata.buffer)
 
   def test_dedup_outputs(self):
     a = Tensor.full((4, 4), 1.).contiguous().realize()
@@ -506,12 +506,12 @@ class TestSchedule(unittest.TestCase):
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.contiguous()
-    check_schedule(out, 1, filter_sink=False)
+    check_schedule(out, 0, filter_sink=False)
 
   def test_contiguous_while_not_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.permute(0,2,3,1).contiguous()
-    check_schedule(out, 2, filter_sink=False)
+    check_schedule(out, 1, filter_sink=False)
 
   def test_fold_with_contiguous(self):
     a = Tensor.randn(16, 16, 16).realize()
@@ -519,6 +519,7 @@ class TestSchedule(unittest.TestCase):
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
 
+  @unittest.skip("no longer supported")
   def test_double_from(self):
     x = Tensor([1,2,3,4])
     out = x.to('python')
@@ -2227,6 +2228,67 @@ class TestTensorUOpSpec(unittest.TestCase):
     a = Tensor.ones((4, 4))
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule_with_vars(list(t.src))
+
+class TestBufferUOp(unittest.TestCase):
+  # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
+  def test_buffer_has_buffer(self):
+    buf = Tensor.empty(10)
+    self.assertIsNotNone(buf.lazydata.buffer)
+    self.assertEqual(buf.lazydata.st, ShapeTracker.from_shape((10,)))
+    # the device Buffer remains unallocated until it's we run the schedule
+    self.assertFalse(buf.lazydata.buffer.is_allocated())
+    add = buf+1
+    sched = add.schedule()
+    self.assertFalse(buf.lazydata.buffer.is_allocated())
+    run_schedule(sched)
+    self.assertTrue(buf.lazydata.buffer.is_allocated())
+
+  def test_buffer_has_unique_buffer(self):
+    buf = Tensor.empty(10)
+    buf1 = buf.lazydata.buffer
+    buf2 = buf.lazydata.buffer
+    self.assertIs(buf1, buf2)
+
+  # we also allow VIEW(BUFFER) to access the underlying device Buffer, as long as it's contiguous
+  def test_buffer_view_allowed(self):
+    add = Tensor.empty(1, 1)+Tensor.empty(1, 1)
+    add.realize()
+    self.assertIsNotNone(add.lazydata.buffer)
+    self.assertEqual(add.lazydata.shape, (1, 1))
+
+  def test_buffer_view_not_allowed(self):
+    permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
+    merged = graph_rewrite(permuted_view.lazydata, remove_movement_ops)
+    with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
+      merged.buffer # cannot access Buffer of a non contiguous VIEW
+
+  def test_buffer_only_after_realize(self):
+    a = Tensor([1])+Tensor([2])
+    # accessing realized will return None
+    self.assertIsNone(a.lazydata.realized)
+    # accessing Buffer will assert
+    with self.assertRaisesRegex(AssertionError, "must be BUFFER"):
+      a.lazydata.buffer # there is no BUFFER on an unrealized ADD
+    # Buffer only exists once we realize it
+    a.realize()
+    self.assertIsNotNone(a.lazydata.buffer)
+
+  def test_const_does_not_realize(self):
+    a = Tensor(1)+Tensor(2)
+    run_schedule(check_schedule(a, 0))
+    self.assertIsNone(a.lazydata.base.realized)
+
+  def test_var_does_not_realize(self):
+    a = Tensor(UOp.variable("a", 0, 10).bind(1))
+    run_schedule(check_schedule(a, 0))
+    self.assertIsNone(a.lazydata.base.realized)
+
+  def test_view_does_not_realize(self):
+    a = Tensor.randn(1, 4).expand(4, 4)
+    a.realize()
+    self.assertEqual(a.lazydata.base.realized.size, 4)
+    a2 = a.contiguous().realize()
+    self.assertEqual(a2.lazydata.base.realized.size, 16)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

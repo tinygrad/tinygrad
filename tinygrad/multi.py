@@ -25,13 +25,13 @@ def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   for step in range(n_lbs-1):
     for i in range(len(chunks)):
       src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device, force=True))
+      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device))
 
   # allgather
   for step in range(n_lbs-1):
     for i in range(len(chunks)):
       src, dest = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device, force=True)
+      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device)
 
   # assemble chunks back
   pads = [((s,numel-e),) for s,e in chunks]
