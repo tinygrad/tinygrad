@@ -18,20 +18,18 @@ PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 CONTRIB_OPERATORS = "com.microsoft"
 
 def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
-  # prepare input
   input_names = [inp.name for inp in model.graph.input]
   if not isinstance(inputs, list): inputs = [inputs]
   inp = dict(zip(input_names, inputs))
 
-  # prepare runners
   rep = onnxruntime.backend.prepare(model.SerializeToString(), "CPU")
-  tinygrad_runner = get_run_onnx(model)
-
   ort_out = rep.run(inputs)
+
+  tinygrad_runner = get_run_onnx(model)
   st = time.monotonic()
   tinygrad_out = tinygrad_runner(inp)
   tinygrad_out = [out.numpy() if isinstance(out, Tensor) else out for out in tinygrad_out.values()]
-  non_jit_time = time.monotonic() - st
+  tinygrad_time = time.monotonic() - st
 
   for tinygrad_val, ort_val in zip(tinygrad_out, ort_out):
     if PRINT_TENSORS: print(tinygrad_val, ort_val)
@@ -43,16 +41,16 @@ def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
 
   if not CI:
     print("\ntesting %40r   tinygrad run: %.2f ms" % \
-          (model.graph.name, non_jit_time*1000), end="")
+          (model.graph.name, tinygrad_time*1000), end="")
 
 def helper_test_single_op(op:str, inps:dict[str, np.ndarray], opt:dict[str, Any],
-                          outs:dict[str, tuple[list[int], np.dtype]], domain=None, atol=1e-6, rtol=1e-3, tag=""):
+                          outs:dict[str, tuple[list[int], np.dtype]], domain=None, atol=1e-6, rtol=1e-3):
   onnx_inputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
   onnx_outputs = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(np.dtype(dtype)), shape)
                   for name, (shape, dtype) in outs.items()]
   nodes = [helper.make_node(op, list(inps.keys()), list(outs), domain=domain, **opt)]
-  graph = helper.make_graph(nodes, f"test_{op.lower()}{tag}", onnx_inputs, onnx_outputs)
-  model = helper.make_model(graph, producer_name=f"test_{op.lower()}{tag}")
+  graph = helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
+  model = helper.make_model(graph, producer_name=f"test_{op.lower()}")
   helper_test_op(list(inps.values()), model, atol, rtol)
 
 class TestOnnxOps(unittest.TestCase):
