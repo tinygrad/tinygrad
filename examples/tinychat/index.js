@@ -164,7 +164,6 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   let totalLoaded = 0;
   let totalSize = 0;
   let partSize = {};
-  const bytesPerIteration = 430080;
 
   const progressCallback = (part, loaded, total, message) => {
     totalLoaded += loaded;
@@ -236,12 +235,12 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
     saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
   }
 
-  //totalLoaded = 0;
-  //totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0) / bytesPerIteration;
-  //const numCheckpoints = 100;
-  //let nextCheckpoint = totalSize / numCheckpoints;
-  //const decompProgressFraction = 0.90;
-  //totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
+  totalLoaded = 0;
+  totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0);
+  const numCheckpoints = 90;
+  let nextCheckpoint = totalSize / numCheckpoints;
+  const decompProgressFraction = 0.90;
+  totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
 
   const inChunkSize = 3144960; // max size that tinygrad compiled without exceptions; divisible by 210
   let inChunk = new Uint8Array(inChunkSize);
@@ -290,6 +289,11 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
       const offset = parseInt(start_end_tOffset[2] * byteFactor);
       state_dict[t].bytes.set(outChunk.subarray(start, end), offset)
     }
+    totalLoaded += inChunkSize;
+    if (totalLoaded >= nextCheckpoint) {
+      nextCheckpoint += totalSize * decompProgressFraction / numCheckpoints;
+      progress(totalLoaded, totalSize, "Decompressing model:");
+    }
   }
 
   function scheduleDequantizeJob() {
@@ -311,7 +315,8 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
     const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
 
     if (v.dtype === "Q6_K") {
-      v.bytes = new Uint8Array(v.size * byteFactor);
+      v.size = parseInt(v.size * byteFactor);
+      v.bytes = new Uint8Array(v.size);
 
       for (i=0; i<tensor.byteLength; i += inChunkSize) {
         if (!(k in chunkContents)) {chunkContents[k] = [inChunkSize - freeSpace, inChunkSize - freeSpace, i]}
@@ -324,16 +329,13 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
         if (freeSpace === 0) {gpuJobs.push(scheduleDequantizeJob());}
       }
       v.dtype = "float32";
-      v.size = v.bytes.byteLength;
 
-    } else {
-      v.bytes = tensor;
-    }
+    } else {v.bytes = tensor;}
 
-    if (freeSpace < inChunkSize) {
-      inChunk.set(new Uint8Array(freeSpace), inChunkSize - freeSpace); // pad last partial chunk with zeroes
-      gpuJobs.push(scheduleDequantizeJob());
-    }
+  if (freeSpace < inChunkSize) {
+    inChunk.set(new Uint8Array(freeSpace), inChunkSize - freeSpace); // pad last partial chunk with zeroes
+    gpuJobs.push(scheduleDequantizeJob());
+  }
   }
 
   await Promise.all(gpuJobs);
