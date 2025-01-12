@@ -7,7 +7,7 @@ from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI, Context, JIT
+from tinygrad.helpers import CI, Context, JIT, GlobalCounters
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -537,6 +537,21 @@ class TestJitPrune(unittest.TestCase):
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
+class TestJitFree(unittest.TestCase):
+  def test_free_intermediates(self):
+    @TinyJit
+    def fxn(x:Tensor):
+      out = (x*2).reshape(5,1).expand(5, 100).contiguous()
+      return out.sum()
+    for i in range(5):
+      out = fxn(Tensor([i,1,2,3,4]))
+      assert out.item() == 2000+i*200
+    pre_free = GlobalCounters.mem_used
+    fxn.captured.free_intermediates()
+    savings_after_free = pre_free - GlobalCounters.mem_used
+    assert savings_after_free == 2024
+    out = fxn(Tensor([11,1,2,3,4]))
+    assert out.item() == 4200
 
 if __name__ == '__main__':
   unittest.main()

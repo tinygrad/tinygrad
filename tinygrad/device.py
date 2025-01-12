@@ -111,7 +111,7 @@ class Buffer:
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
-    self.allocator = Device[self.device].allocator
+    self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
@@ -122,6 +122,12 @@ class Buffer:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
+  def deallocate(self):
+    if not self.is_allocated(): return
+    if self._base is None and (self.options is None or self.options.external_ptr is None):
+      if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+      self.allocator.free(self._buf, self.nbytes, self.options)
+      del self._buf
   def __reduce__(self):
     buf = None
     if self._base is not None:
@@ -133,11 +139,7 @@ class Buffer:
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self):
-    if not self.is_allocated(): return
-    if self._base is None and (self.options is None or self.options.external_ptr is None):
-      if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-      self.allocator.free(self._buf, self.nbytes, self.options)
+  def __del__(self): self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"

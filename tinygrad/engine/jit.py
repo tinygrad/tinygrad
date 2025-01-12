@@ -127,6 +127,14 @@ class GraphRunner(Runner):
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner): pass
 
+def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
+  for ei in jit_cache:
+    if any(b in depends for b in ei.bufs):
+      if isinstance(ei.prg, CompiledRunner):
+        depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
+      if isinstance(ei.prg, (BufferCopy, BufferXfer)):
+        depends.add(cast(Buffer, ei.bufs[0]))
+
 ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
@@ -149,6 +157,12 @@ class CapturedJit(Generic[ReturnType]):
 
   def _clear_inputs(self):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+
+  def free_intermediates(self):
+    depends: set[Buffer|None] = set([None])
+    update_depends(depends, self.jit_cache)
+    for b in depends:
+      if b is not None: b.deallocate()
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
@@ -256,12 +270,7 @@ class TinyJit(Generic[ReturnType]):
       # prune independent kernels (optional)
       if self.prune:
         depends = set(input_buffers)
-        for ei in jit_cache:
-          if any(b in depends for b in ei.bufs):
-            if isinstance(ei.prg, CompiledRunner):
-              depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
-            if isinstance(ei.prg, (BufferCopy, BufferXfer)):
-              depends.add(cast(Buffer, ei.bufs[0]))
+        update_depends(depends, jit_cache)
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
