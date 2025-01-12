@@ -1,27 +1,27 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
+import os, ctypes, contextlib, re, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
-from typing import Any, cast, Union, Type, Optional
+from typing import Any, cast, Union, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
+from tinygrad.runtime.support.hcq import HWInterface, MOCKGPU
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
-from tinygrad.runtime.autogen import nv_gpu, libc
+from tinygrad.runtime.autogen import nv_gpu
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
-if MOCKGPU:=getenv("MOCKGPU"): import test.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
 NV_PFAULT_FAULT_TYPE = {dt:name for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_FAULT_TYPE_")}
 NV_PFAULT_ACCESS_TYPE = {dt:name.split("_")[-1] for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_ACCESS_TYPE_")}
 
-def nv_iowr(fd, nr, args):
-  ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
+def nv_iowr(fd:HWInterface, nr, args):
+  ret = fd.ioctl((3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
 def rm_alloc(fd, clss, root, parant, params):
@@ -46,8 +46,8 @@ def make_rmctrl_type():
       getattr(nv_gpu, name+"_PARAMS", getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_DEBUG_")+"_PARAMETERS", None))))})
 rmctrl = make_rmctrl_type()
 
-def uvm_ioctl(cmd, sttyp, fd, **kwargs):
-  ret = fcntl.ioctl(fd, cmd, made:=sttyp(**kwargs))
+def uvm_ioctl(cmd, sttyp, fd:HWInterface, **kwargs):
+  ret = fd.ioctl(cmd, made:=sttyp(**kwargs))
   if ret != 0: raise RuntimeError(f"ioctl(uvm) returned {ret}")
   if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {get_error_str(made.rmStatus)}")
   return made
@@ -72,7 +72,7 @@ qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 class NVSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+  def __init__(self, base_addr:int|None=None, **kwargs):
     super().__init__(NVDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=1000, value_off=0, timestamp_off=8)
 
   def __del__(self):
@@ -256,7 +256,7 @@ class NVProgram(HCQProgram):
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size) or self.lcmem_usage > cast(NVDevice, self.dev).slm_per_thread:
-      raise RuntimeError("Too many resources requested for launch")
+      raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {self.max_threads=}")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
@@ -283,8 +283,8 @@ class GPFifo:
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
   root = None
-  fd_ctl: int = -1
-  fd_uvm: int = -1
+  fd_ctl: HWInterface
+  fd_uvm: HWInterface
   gpus_info: Union[list, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: list[int] = []
@@ -297,19 +297,17 @@ class NVDevice(HCQCompiled[NVSignal]):
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
-    fd_dev = os.open(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
-    nv_iowr(fd_dev, nv_gpu.NV_ESC_REGISTER_FD, nv_gpu.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl))
+    fd_dev = HWInterface(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
+    nv_iowr(fd_dev, nv_gpu.NV_ESC_REGISTER_FD, nv_gpu.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl.fd))
     return fd_dev
 
   def _gpu_map_to_cpu(self, memory_handle, size, target=None, flags=0, system=False):
-    fd_dev = self._new_gpu_fd() if not system else os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
-    made = nv_gpu.nv_ioctl_nvos33_parameters_with_fd(fd=fd_dev,
+    fd_dev = self._new_gpu_fd() if not system else HWInterface("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
+    made = nv_gpu.nv_ioctl_nvos33_parameters_with_fd(fd=fd_dev.fd,
       params=nv_gpu.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.nvdevice, hMemory=memory_handle, length=size, flags=flags))
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_MAP_MEMORY, made)
     if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_cpu returned {get_error_str(made.params.status)}")
-    res = libc.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), fd_dev, 0)
-    os.close(fd_dev)
-    return res
+    return fd_dev.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), 0)
 
   def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, tag="") -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
@@ -318,7 +316,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
 
     if host:
-      va_addr = libc.mmap(va_addr, size, mmap.PROT_READ | mmap.PROT_WRITE, MAP_FIXED | mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, -1, 0)
+      va_addr = HWInterface.anon_mmap(va_addr, size, mmap.PROT_READ | mmap.PROT_WRITE, MAP_FIXED | mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
 
       flags = (nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) \
             | (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30)
@@ -357,7 +355,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     self._debug_mappings.pop((cast(int, mem.va_addr), mem.size))
     uvm.free(self.fd_uvm, base=cast(int, mem.va_addr), length=mem.size)
-    if mem.meta.has_cpu_mapping: libc.munmap(cast(int, mem.va_addr), mem.size)
+    if mem.meta.has_cpu_mapping: HWInterface.munmap(cast(int, mem.va_addr), mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False, tag="") -> HCQBuffer:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
@@ -365,8 +363,9 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     # NOTE: va_addr is set to make rawbufs compatible with HCQBuffer protocol.
     self._debug_mappings[(va_base, size)] = tag
-    return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root,
-      hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping))
+    return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd,
+      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs,
+      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping))
 
   def _gpu_map(self, mem:HCQBuffer):
     if self.gpu_uuid in mem.meta.mapped_gpu_ids: return
@@ -384,12 +383,12 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
-      NVDevice.fd_ctl = os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
-      NVDevice.fd_uvm = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-      fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      NVDevice.fd_ctl = HWInterface("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
+      NVDevice.fd_uvm = HWInterface("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      self.fd_uvm_2 = HWInterface("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
-      with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm) # this error is okay, CUDA hits it too
+      with contextlib.suppress(RuntimeError): uvm.mm_initialize(self.fd_uvm_2, uvmFd=self.fd_uvm.fd) # this error is okay, CUDA hits it too
 
       nv_iowr(NVDevice.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, gpus_info:=(nv_gpu.nv_ioctl_card_info_t*64)())
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
@@ -425,7 +424,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.gpu_uuid = nv_gpu.struct_nv_uuid(uuid=(ctypes.c_ubyte*16)(*[raw_uuid.data[i] for i in range(16)]))
 
     uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=self.gpu_uuid)
-    uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl, hClient=self.root, hVaSpace=vaspace)
+    uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace)
 
     for dev in cast(list[NVDevice], self.devices):
       try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.gpu_uuid)
@@ -481,7 +480,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     assert ws_token_params.workSubmitToken != -1
 
     channel_base = self._alloc_gpu_vaddr(0x4000000, force_low=True)
-    uvm.register_channel(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl, hClient=self.root,
+    uvm.register_channel(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root,
                          hChannel=gpfifo, base=channel_base, length=0x4000000)
 
     return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,

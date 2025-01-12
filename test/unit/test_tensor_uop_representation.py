@@ -8,8 +8,6 @@ def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pa
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.lazydata, pat)
 
 class TestTensorMutates(unittest.TestCase):
-  # this fails because uops are mutating
-  @unittest.expectedFailure
   def test_mutate_add(self):
     a = Tensor([1,2,3])
     b = Tensor([4,5,6])
@@ -104,13 +102,12 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #   UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
   #     UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),))
-  @unittest.expectedFailure
+  # update: now the arg is just a single bool, the first source is a device.
   def test_copyin(self):
     a = Tensor([1.,2,3]).realize()
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.lazydata)
-    # NOTE: this is wrong, COPY has an extra buffer for some reason
-    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern,)))
+    is_pattern(c, UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)))
 
 if __name__ == '__main__':
   unittest.main()

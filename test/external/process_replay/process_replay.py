@@ -8,7 +8,6 @@ from tinygrad.engine.schedule import ScheduleContext, schedule_uop
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
-from test.helpers import print_diff
 
 # *** process replay settings
 
@@ -18,6 +17,7 @@ REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["RUN_PROCESS_REPLAY"] = "0"
+os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -33,7 +33,7 @@ class ProcessReplayWarning(Warning): pass
 def recreate_sched(ast:UOp, assigns:Set[UOp]) -> UOp:
   # NOTE: process replay isn't meant to actually schedule anything
   return schedule_uop(ast, ScheduleContext(assigns=assigns, tensor_uops=defaultdict(list))).ast
-def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
+def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master
@@ -60,7 +60,7 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       continue
     # try recreate
     try:
-      with Context(**{k:v for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
+      with Context(**{k:v.value for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
       if good is None: continue
     except Exception as e:
       changed += 1
@@ -73,10 +73,10 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       changed += 1
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       for x in args[:-1]: logging.info(x)
-      print_diff(good, args[-1])
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       additions += len([x for x in changes if x.startswith("+")])
       deletions += len([x for x in changes if x.startswith("-")])
+      logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
       if ASSERT_DIFF: return additions, deletions
   conn.commit()
   cur.close()

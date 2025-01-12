@@ -25,13 +25,13 @@ def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   for step in range(n_lbs-1):
     for i in range(len(chunks)):
       src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device, force=True))
+      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device))
 
   # allgather
   for step in range(n_lbs-1):
     for i in range(len(chunks)):
       src, dest = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device, force=True)
+      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device)
 
   # assemble chunks back
   pads = [((s,numel-e),) for s,e in chunks]
@@ -84,8 +84,8 @@ class MultiLazyBuffer(MathTrait):
   # passthroughs
   @property
   def is_realized(self) -> bool: return all(lb.base.realized is not None for lb in self.real_lbs)
-  def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
-    return MultiLazyBuffer([x.cast(dtype, bitcast, allow_buffer_view) for x in self.lbs], self.axis, self.real)
+  def cast(self, dtype:DType, bitcast:bool=False):
+    return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis, self.real)
   def const_like(self, b) -> MultiLazyBuffer: return MultiLazyBuffer([x.const_like(b) for x in self.lbs], self.axis, self.real)
   def assign(self, x:MultiLazyBuffer): return MultiLazyBuffer([s.assign(d) for s,d in zip(self.lbs, x.lbs)], self.axis, self.real)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
