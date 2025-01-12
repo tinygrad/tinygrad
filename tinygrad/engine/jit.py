@@ -131,7 +131,7 @@ def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
   for ei in jit_cache:
     if any(b in depends for b in ei.bufs):
       if isinstance(ei.prg, CompiledRunner):
-        depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
+        depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins)
       if isinstance(ei.prg, (BufferCopy, BufferXfer)):
         depends.add(cast(Buffer, ei.bufs[0]))
 
@@ -144,6 +144,7 @@ class CapturedJit(Generic[ReturnType]):
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[Union[int, str]]
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
+  intermediates_freed: bool = False
 
   def __reduce__(self):
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
@@ -163,6 +164,8 @@ class CapturedJit(Generic[ReturnType]):
     update_depends(depends, self.jit_cache)
     for b in depends:
       if b is not None: b.deallocate()
+    self.__post_init__()   # reset the graph state
+    self.intermediates_freed = True
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
@@ -170,6 +173,13 @@ class CapturedJit(Generic[ReturnType]):
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
+
+    # allocate intermediates if freed
+    if self.intermediates_freed:
+      for ji in self.jit_cache:
+        for b in ji.bufs:
+          if b is not None: b.ensure_allocated()
+      self.intermediates_freed = False
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:

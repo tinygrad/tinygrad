@@ -539,19 +539,36 @@ class TestJitPrune(unittest.TestCase):
 
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
+    ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit
     def fxn(x:Tensor):
-      out = (x*2).reshape(5,1).expand(5, 100).contiguous()
+      out = (x*2+ext_tensor).reshape(5,1).expand(5, 100).contiguous()
       return out.sum()
     for i in range(5):
       out = fxn(Tensor([i,1,2,3,4]))
-      assert out.item() == 2000+i*200
+      self.assertEqual(out.item(), 11400+200*i)
     pre_free = GlobalCounters.mem_used
     fxn.captured.free_intermediates()
     savings_after_free = pre_free - GlobalCounters.mem_used
-    assert savings_after_free == 2024
+    self.assertEqual(savings_after_free, 2024)
     out = fxn(Tensor([11,1,2,3,4]))
-    assert out.item() == 4200
+    self.assertEqual(out.item(), 13600)
+
+  def test_updated_not_freed(self):
+    x = Tensor([1]).realize()
+    @TinyJit
+    def fxn(y):
+      nonlocal x
+      x += y
+      return x
+    for _ in range(5): fxn(Tensor([1]))
+    self.assertEqual(x.item(), 6)
+    pre_free = GlobalCounters.mem_used
+    fxn.captured.free_intermediates()
+    savings_after_free = pre_free - GlobalCounters.mem_used
+    self.assertEqual(savings_after_free, 0)
+    fxn(Tensor([2]))
+    self.assertEqual(x.item(), 8)
 
 if __name__ == '__main__':
   unittest.main()
