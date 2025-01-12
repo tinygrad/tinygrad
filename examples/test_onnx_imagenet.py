@@ -52,7 +52,9 @@ if __name__ == "__main__":
           except StopIteration:
             return None
           return {"input": img.numpy()}
-      quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False, weight_type=QuantType.QInt8)
+      quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False,
+                      activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
+                      extra_options={"ActivationSymmetric": True})
 
   run_onnx_jit, input_shapes, input_types = load_onnx_model(fn)
   t_name, shape = list(input_shapes.items())[0]
