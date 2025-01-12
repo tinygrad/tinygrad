@@ -69,10 +69,10 @@ class TestMemoryCount(unittest.TestCase):
   def test_copyout(self):
     a = Tensor.empty(32, dtype=dtypes.uint8).to("CLANG")
     _, mem = get_stats(a)
-    self.assertEqual(mem, 32*dtypes.uint8.itemsize)
-    a = Tensor.empty(32, dtype=dtypes.float32).to("CLANG")
+    self.assertEqual(mem, 32*1)
+    a = Tensor.empty(32, dtype=dtypes.uint32).to("CLANG")
     _, mem = get_stats(a)
-    self.assertEqual(mem, 32*dtypes.float32.itemsize)
+    self.assertEqual(mem, 32*4)
 
 # NOTE: this still isn't testing unroll using the acc
 @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
