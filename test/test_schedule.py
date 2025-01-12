@@ -2273,5 +2273,22 @@ class TestBufferUOp(unittest.TestCase):
     a.realize()
     self.assertIsNotNone(a.lazydata.buffer)
 
+  def test_const_does_not_realize(self):
+    a = Tensor(1)+Tensor(2)
+    run_schedule(check_schedule(a, 0))
+    self.assertIsNone(a.lazydata.base.realized)
+
+  def test_var_does_not_realize(self):
+    a = Tensor(UOp.variable("a", 0, 10).bind(1))
+    run_schedule(check_schedule(a, 0))
+    self.assertIsNone(a.lazydata.base.realized)
+
+  def test_view_does_not_realize(self):
+    a = Tensor.randn(1, 4).expand(4, 4)
+    a.realize()
+    self.assertEqual(a.lazydata.base.realized.size, 4)
+    a2 = a.contiguous().realize()
+    self.assertEqual(a2.lazydata.base.realized.size, 16)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
