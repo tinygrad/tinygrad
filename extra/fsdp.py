@@ -40,7 +40,7 @@ class FSDPLinear(nn.Linear):
 def fsdp(obj, devices: tuple[str]):
   for param in nn.state.get_parameters(obj):
     if(param.shape[0] == 1 or prod(param.shape) <= 1):
-       param.to_(devices)
+      param.to_(devices)
     else:
-        param.shard_(devices, axis=0)
+      param.shard_(devices, axis=0)
   return obj
