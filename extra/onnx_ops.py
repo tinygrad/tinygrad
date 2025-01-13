@@ -562,9 +562,7 @@ def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_sc
   assert channels_last == 0, "unsure what this does"
   X = (X.int() - x_zero_point) * x_scale
   y = GlobalAveragePool(X)
-  y = (y / y_scale + y_zero_point).round()
-  # NOTE: no need to clamp cast here since average value does not exceed min/max
-  return y.cast(y_zero_point.dtype)
+  return _quantize_linear(y, y_scale, y_zero_point)
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
