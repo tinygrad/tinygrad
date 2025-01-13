@@ -104,7 +104,7 @@ class TestPickle(unittest.TestCase):
     assert ref_value == vt2.tolist()
 
   def test_pickle_numpy(self):
-    t = Tensor(np.array([1,2,3,4.]))
+    t = Tensor(np.array([1,2,3,4.]), dtype=dtypes.float32)
     st = pickle.dumps(t)
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())

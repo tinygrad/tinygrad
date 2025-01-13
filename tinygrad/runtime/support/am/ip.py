@@ -1,7 +1,7 @@
 import ctypes, time
 from typing import Literal
 from tinygrad.runtime.autogen.am import am, smu_v13_0_0
-from tinygrad.helpers import to_mv, data64, lo32, hi32
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -107,6 +107,7 @@ class AM_SMU(AM_IP):
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
 
   def mode1_reset(self):
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
     time.sleep(0.5) # 500ms
 
@@ -394,6 +395,7 @@ class AM_PSP(AM_IP):
     return cmd
 
   def _load_ip_fw_cmd(self, psp_desc):
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[psp_desc[0]]}")
     fw_type, fw_bytes = psp_desc
 
     self._prep_msg1(fw_bytes)
