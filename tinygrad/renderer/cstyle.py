@@ -304,7 +304,7 @@ class CUDARenderer(CStyleLanguage):
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
 
-  tc_sm80 = tc_8168_f16 + tc_81616
+  tc_sm80 = tc_81616 + tc_8168_f16
   tc_sm75 = tc_8168_f16
   def __init__(self, arch:str):
     self.tensor_cores, self.arch = CUDARenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else [], arch
