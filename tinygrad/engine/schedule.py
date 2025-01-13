@@ -13,8 +13,6 @@ from tinygrad.device import Buffer
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
-BUF_LIMIT = {"METAL":32}
-
 # **** big graph spec
 
 tensor_uop_spec = PatternMatcher([
@@ -236,10 +234,6 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
   sink = graph_rewrite(graph_rewrite(sink, to_si+check_preload if len(si_ctx.assigns) != 0 else to_si, si_ctx), append_bufs, si_ctx)
-  # assert buffer count limit
-  if (limit:=BUF_LIMIT.get(device:=si_ctx.bufs[0].device)) is not None and len(si_ctx.bufs) >= limit:
-    if DEBUG >= 3: print(sink)
-    raise RuntimeError(f"Kernel for {si_ctx.metadata} exceeded the {limit} buffer count limit for {device} with {len(si_ctx.bufs)} buffers.")
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
   for ubuf,ops in si_ctx.assign_adj.items():
     if si_ctx.sinked.get(ubuf) is not None and not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \

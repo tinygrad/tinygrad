@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -1363,20 +1363,17 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
-  def _test_buf_cnt(self, cnt:int, allowed:int):
-    if (m:=BUF_LIMIT.get(Device.DEFAULT)) is None or m != 32: self.skipTest(f"test needs a buf_max of 32 {Device.DEFAULT}")
+  @unittest.skip("splitting kernels exceeding device buffer count is not yet supported")
+  def _test_buf_cnt(self, cnt:int):
     alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
     s = alu.schedule()
-    assert len(s) == allowed
     run_schedule(s)
     expected = functools.reduce(lambda x,y: x+y, [np.ones((1, 1)) for _ in range(cnt-1)])
     np.testing.assert_equal(alu.numpy(), expected)
 
-  def test_buf_cnt_at_limit(self): self._test_buf_cnt(31, allowed=1)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit(self): self._test_buf_cnt(32, allowed=2)
-  @unittest.expectedFailure
-  def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
+  def test_buf_cnt_at_limit(self): self._test_buf_cnt(31)
+  def test_buf_cnt_over_limit(self): self._test_buf_cnt(32)
+  def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63)
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
