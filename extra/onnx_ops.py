@@ -141,8 +141,8 @@ def Gemm(A:Tensor, B:Tensor, C:Tensor|None=None, alpha:float=1.0, beta:float=1.0
 
 def Einsum(*Inputs:list[Tensor], equation:str): return Tensor.einsum(equation, *Inputs)
 
-def CumSum(X:Tensor, axis:int, exclusive:int=0, reverse:int=0):
-  axis = X._resolve_dim(axis)
+def CumSum(X:Tensor, axis:int|list, exclusive:int=0, reverse:int=0):
+  axis = X._resolve_dim(axis[0] if isinstance(axis, list) else axis)
   if reverse: X = X.flip(axis)
   if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
                       .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
@@ -342,23 +342,22 @@ def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, si
     else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
     return index.clip(0, input_dim-1)
 
-  scales, sizes = (None if scales is None else scales[-2:]), (None if sizes is None else sizes[-2:])
+  scales, sizes = (None if scales is None else scales[2-(X.ndim-len(scales)):]), (None if sizes is None else sizes[2-(X.ndim-len(sizes)):])
   # we pre permute the axes and permute back after resize
   axes, input_shape, = (axes or list(range(X.ndim))), cast(tuple[int, ...], X.shape[2:]),
   perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
   X = X.permute(*perm)
 
   if sizes is not None:
-    assert scales is None
     if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
       scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
-      scales = [scale_fxn([sizes[i] / input_shape[i] for i in range(X.ndim-2) if i+2 in axes])] * 2
+      scales = [scale_fxn([sizes[i] / input_shape[i] for i in range(len(input_shape)) if i+2 in axes])] * 2
       sizes = [int((scales[0] * input_shape[i]) + 0.5) if i+2 in axes else input_shape[i] for i in range(X.ndim-2)]
-    else: scales = [sizes[-2] / cast(int, X.size(-2)), sizes[-1] / cast(int, X.size(-1))]
+    else:
+      scales = [size / input_shape for size, input_shape in zip(sizes, input_shape)]
   else:
-    assert scales is not None
     sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
-  regions = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) else [[0.0, 0.0]] * (X.ndim-2)
+  regions = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) and roi else [[0.0, 0.0]] * (X.ndim-2)
 
   # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
   # in Tensor.interpolate, we use indexes without any transformation
@@ -388,9 +387,9 @@ def CenterCropPad(t:Tensor, shape:list[int], axes:list[int]|None=None):
     elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
-def OneHot(indices:Tensor, depth:float|int, values:Tensor, axis:int=-1):
+def OneHot(indices:Tensor, depth:float|int|list, values:Tensor, axis:int=-1):
   # Scalar or Rank 1 tensor containing exactly one element
-  depth = int(depth)
+  depth = int(depth[0] if isinstance(depth, list) else depth)
   indices = (indices < 0).where(indices+depth, indices)
   return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
@@ -419,7 +418,7 @@ def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
 def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
   out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
   y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
-  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype)
+  return ((x / y_scale).round() + y_zero_point).clamp(dtypes.min(out_dtype), dtypes.max(out_dtype)).cast(out_dtype).contiguous()
 
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
   x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)

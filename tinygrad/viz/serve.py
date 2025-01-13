@@ -71,7 +71,8 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
     if u in excluded: continue
     argst = str(u.arg)
     if u.op is Ops.VIEW:
-      argst = ("\n".join([f"{v.shape} / {v.strides}"+(f" / {v.offset}" if v.offset is not None else "") for v in unwrap(u.st).views]))
+      argst = ("\n".join([f"{v.shape} / {v.strides}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
+                          ("" if v.offset == 0 else f" / {v.offset}") for v in unwrap(u.st).views]))
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x in excluded:
