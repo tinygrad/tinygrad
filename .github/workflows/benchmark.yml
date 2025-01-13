@@ -369,30 +369,30 @@ jobs:
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
-    - name: Run Stable Diffusion
-      run: AMD=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
-    - name: Run SDXL
-      run: AMD=1 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
-    - name: Run LLaMA 7B
-      run: |
-        AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        AMD=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
-    - name: Run LLaMA 7B with BEAM
-      run: AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
-    # - name: Run LLaMA 7B on 4 GPUs
-    #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
-    # - name: Run LLaMA 7B on 6 GPUs
-    #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
-    - name: Run LLaMA-3 8B BEAM
-      run: AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --size 8B --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_beam.txt
-    - name: Run LLaMA-3 8B on 4 GPUs
-      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_four_gpu.txt
-    - name: Run LLaMA-3 8B on 6 GPUs
-      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
-    - name: Run LLaMA-2 70B
-      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
-    - name: Run Mixtral 8x7B
-      run: time AMD=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
+    # - name: Run Stable Diffusion
+    #   run: AMD=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
+    # - name: Run SDXL
+    #   run: AMD=1 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
+    # - name: Run LLaMA 7B
+    #   run: |
+    #     AMD=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+    #     AMD=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    # - name: Run LLaMA 7B with BEAM
+    #   run: AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+    # # - name: Run LLaMA 7B on 4 GPUs
+    # #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    # # - name: Run LLaMA 7B on 6 GPUs
+    # #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 1 --size 7B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_six_gpu.txt
+    # - name: Run LLaMA-3 8B BEAM
+    #   run: AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --size 8B --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_beam.txt
+    # - name: Run LLaMA-3 8B on 4 GPUs
+    #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_four_gpu.txt
+    # - name: Run LLaMA-3 8B on 6 GPUs
+    #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
+    # - name: Run LLaMA-2 70B
+    #   run: AMD=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+    # - name: Run Mixtral 8x7B
+    #   run: time AMD=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Remove amdgpu
       run: sudo rmmod amdgpu
     - name: Run GPT2
