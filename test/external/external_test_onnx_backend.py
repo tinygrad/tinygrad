@@ -44,6 +44,12 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
+# BUG: onnxruntime 1.20.1 fails these tests too
+backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
+
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
   backend_test.exclude('float64')
@@ -85,9 +91,6 @@ backend_test.exclude('test_quantizelinear_e5m2_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
 backend_test.exclude('test_dequantizelinear_e5m2_cpu')
-
-# TODO: unsure. The number is off by 1. and it's not because of float16
-backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
