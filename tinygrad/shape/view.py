@@ -73,11 +73,11 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
 def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # find the position of offset on each dimension based on shape
   # similar to unravel_index in numpy/torch
-  ret = []
-  for stride in strides_for_shape(shape):
-    ret.append(offset // stride if stride != 0 else 0)
-    offset -= ret[-1] * stride
-  return ret
+  acc, idxs = 1, []
+  for d in reversed(shape):
+    idxs.append((offset//acc)%d)
+    acc *= d
+  return idxs[::-1]
 
 @dataclass(frozen=True)
 class View:

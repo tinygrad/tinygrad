@@ -11,10 +11,10 @@ from tinygrad.helpers import fetch, getenv
 #  ~43% - https://github.com/onnx/models/raw/refs/heads/main/Computer_Vision/alexnet_Opset16_torch_hub/alexnet_Opset16.onnx
 #  ~72% - https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx
 #  ~71% - https://github.com/axinc-ai/onnx-quantization/raw/refs/heads/main/models/mobilenetv2_1.0.opt.onnx
+#  ~67% - https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
 # broken:
 #  https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
 #  https://huggingface.co/qualcomm/MobileNet-v2-Quantized/resolve/main/MobileNet-v2-Quantized.onnx
-#  https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
 #  ~35% - https://github.com/axinc-ai/onnx-quantization/raw/refs/heads/main/models/mobilenev2_quantized.onnx
 
 def imagenet_dataloader(cnt=0):
@@ -52,7 +52,9 @@ if __name__ == "__main__":
           except StopIteration:
             return None
           return {"input": img.numpy()}
-      quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False, weight_type=QuantType.QInt8)
+      quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False,
+                      activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
+                      extra_options={"ActivationSymmetric": True})
 
   run_onnx_jit, input_shapes, input_types = load_onnx_model(fn)
   t_name, shape = list(input_shapes.items())[0]
