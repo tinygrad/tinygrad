@@ -223,7 +223,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, sink))
-  # verify we scheduled the SINK correctly
+  # deal with ASSIGN
   assign_preloads: list[UOp] = []
   if len(ctx.assigns) != 0:
     for x in list(sink.toposort)[::-1]:
