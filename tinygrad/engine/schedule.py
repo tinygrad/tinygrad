@@ -199,12 +199,6 @@ def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
   return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=x.size), (), len(ctx.bufs)-1)
 append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
 
-def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
-  (adj_loads:=ctx.assign_adj.setdefault(b, [])).append(x)
-  if not all_same([x.op for x in adj_loads]): raise RuntimeError(f"Detected cycle when fusing {adj_loads}. Can only fuse PRELOAD or LOAD of {b}")
-  return x.replace(op=Ops.LOAD)
-check_preload = PatternMatcher([(UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),])
-
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
@@ -240,9 +234,8 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
         assign_preloads.append(x.buf_uop)
         # if this kernel also assigns to the buffer, we only allow either contiguous or masked views for the LOAD.
         # if it has a single view and it's equal when you shrink a contig, it's fine
-        if x.buf_uop in store_bufs and not ((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
-            and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m))):
-          raise RuntimeError("contiguous")
+        if x.buf_uop in store_bufs and not ((st:=x.st_arg).contiguous or (len(st.views) == 1 and (m:=st.views[0].mask) is not None \
+            and ShapeTracker.from_shape(st.shape).shrink(m) == st.shrink(m))): raise RuntimeError(f"must be contiguous for assign {x.st_arg}")
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
                       tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
 
