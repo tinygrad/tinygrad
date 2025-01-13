@@ -10,7 +10,6 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
-  <script src="assets/cdnjs.cloudflare.com/ajax/libs/dompurify/1.0.3/purify.min.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -276,7 +275,9 @@
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const highlightedCodeBlock = (code, lang, wrap) => {
     const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
-    const codeEl= Object.assign(document.createElement("code"), {className: `language-${lang} code-block`, textContent: DOMPurify.sanitize(code)});
+    const codeEl = Object.assign(document.createElement("code"), {
+      // NOTE: since code is in textContent, we don't need DOMPurify
+      className: `language-${lang} code-block`, textContent: code});
     pre.appendChild(codeEl);
     hljs.highlightElement(codeEl);
     return pre;
@@ -363,7 +364,7 @@
     let code = ret.uops[currentRewrite];
     let lang = "python"
     if (ret.kernel_code != null) {
-      code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      code = ret.kernel_code;
       lang = "cpp";
     }
     const codeBlock = highlightedCodeBlock(code, lang, false);

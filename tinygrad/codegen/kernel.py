@@ -10,8 +10,8 @@ from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, typ
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put
-from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
+from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
@@ -57,7 +57,7 @@ class Kernel:
     if ast.op is Ops.SINK: self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: uop_sts_map = verify_ast(self.ast)
+    try: verify_ast(self.ast)
     except AssertionError as e:
       print("INVALID AST")
       print(self.ast)
@@ -80,8 +80,8 @@ class Kernel:
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
     for x in self.reduceops:
-      self.sts.append(uop_sts_map[x])
-      self.sts.append(uop_sts_map[x.src[0]])
+      self.sts.append(unwrap(x.st))
+      self.sts.append(unwrap(x.src[0].st))
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
@@ -670,9 +670,8 @@ class Kernel:
     self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
-    if getenv("RUN_PROCESS_REPLAY"):
-      from test.external.process_replay.helpers import get_process_replay_ctx
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, *get_process_replay_ctx(), src))
+    if CAPTURE_PROCESS_REPLAY:
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
@@ -708,7 +707,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> 
       raise AssertionError(f"found implicit expand {sizes} {shapes}")
   sts[uop] = st
 
-def verify_ast(ast:UOp) -> dict[UOp, ShapeTracker]:
+def verify_ast(ast:UOp) -> None:
   assert ast.op is Ops.SINK and all(x.op is Ops.STORE for x in ast.src), "must be SINK"
   assert all_same([x.st_arg.size for x in ast.src]), "outputs must be exactly the same size"
   sts: dict[UOp, ShapeTracker] = {}
@@ -716,4 +715,3 @@ def verify_ast(ast:UOp) -> dict[UOp, ShapeTracker]:
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
   type_verify(list(sts))
-  return sts
