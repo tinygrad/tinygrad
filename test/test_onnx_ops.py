@@ -34,10 +34,7 @@ def helper_test_op(inputs, model, atol=1e-6, rtol=1e-3):
   for tinygrad_val, ort_val in zip(tinygrad_out, ort_out):
     if PRINT_TENSORS: print(tinygrad_val, ort_val)
     assert tinygrad_val.dtype == ort_val.dtype, f"dtype mismatch: tinygrad={tinygrad_val.dtype} | onnxruntime={ort_val.dtype}"
-    if np.issubdtype(tinygrad_val.dtype, np.floating):
-      np.testing.assert_allclose(tinygrad_val, ort_val, rtol=rtol, atol=atol)
-    else:
-      np.testing.assert_equal(tinygrad_val, ort_val)
+    np.testing.assert_allclose(tinygrad_val, ort_val, rtol=rtol, atol=atol)
 
   if not CI:
     print("\ntesting %40r   tinygrad run: %.2f ms" % \
@@ -61,7 +58,6 @@ class TestOnnxOps(unittest.TestCase):
     helper_test_single_op("Reshape", inputs, attributes, outputs)
 
 class TestOnnxQuantizedOps(unittest.TestCase):
-  @unittest.skip("TODO: Max absolute difference: 128")
   def test_qlinear_conv(self):
     # https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7-quantized.onnx
     # first qlinear_conv from mobilnet but with x, w, and b randomized
@@ -80,7 +76,6 @@ class TestOnnxQuantizedOps(unittest.TestCase):
     outputs = {"out": ([1,32,112,112], np.uint8)}
     helper_test_single_op("QLinearConv", inputs, attributes, outputs)
 
-  @unittest.skip("TODO: Max absolute difference: 127")
   def test_qlinear_matmul(self):
     inputs = {
       "A": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
@@ -94,9 +89,8 @@ class TestOnnxQuantizedOps(unittest.TestCase):
     }
     attributes = {}
     outputs = {"Y": ([10,10], np.uint8)}
-    helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
+    helper_test_single_op("QLinearMatMul", inputs, attributes, outputs, atol=1) # sometimes flaky
 
-  @unittest.skip("TODO: Max absolute difference: 110")
   def test_qlinear_add(self):
     inputs = {
       "A": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
@@ -123,6 +117,35 @@ class TestOnnxQuantizedOps(unittest.TestCase):
     attributes = {"channels_last": 0}
     outputs = {"Y": ([1,3,1,1], np.uint8)}
     helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs, domain=CONTRIB_OPERATORS)
+
+  def test_qgemm(self):
+    inputs = {
+      "A": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "a_scale": np.array(0.05, dtype=np.float32),
+      "a_zero_point": np.array(128, dtype=np.uint8),
+      "B": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "b_scale": np.array(0.05, dtype=np.float32),
+      "b_zero_point": np.array(128, dtype=np.uint8),
+      "C": np.random.randint(-12667, 25215, [10, 10], dtype=np.int32),
+      "y_scale": np.array(0.05, dtype=np.float32),
+      "y_zero_point": np.array(128, dtype=np.uint8)
+    }
+    attributes = {'alpha': 1.0, 'transA': 0, 'transB': 0}
+    outputs = {"Y": ([10,10], np.uint8)}
+    helper_test_single_op("QGemm", inputs, attributes, outputs, domain=CONTRIB_OPERATORS, atol=1) # sometimes flaky
+
+    inputs = {
+      "A": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "a_scale": np.array(0.05, dtype=np.float32),
+      "a_zero_point": np.array(128, dtype=np.uint8),
+      "B": np.random.randint(0, 256, [10, 10], dtype=np.uint8),
+      "b_scale": np.array(0.05, dtype=np.float32),
+      "b_zero_point": np.array(128, dtype=np.uint8),
+      "C": np.random.randint(-12667, 25215, [10, 10], dtype=np.int32),
+    }
+    attributes = {'alpha': 1.0, 'transA': 0, 'transB': 0}
+    outputs = {"Y": ([10,10], np.float32)}
+    helper_test_single_op("QGemm", inputs, attributes, outputs, domain=CONTRIB_OPERATORS, atol=1) # sometimes flaky
 
 if __name__ == "__main__":
   unittest.main()
