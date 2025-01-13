@@ -257,7 +257,7 @@ class AMDev:
 
     self.lock_fd = os.open(temp(f"am_{self.devfmt}"), os.O_RDWR | os.O_CREAT, 0o666)
     try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. Is it already in use.")
+    except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
 
     self._run_discovery()
     self._build_regs()
