@@ -255,7 +255,12 @@ class AMDev:
     self.pcidev, self.devfmt = pcidev, devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
-    self.lock_fd = os.open(temp(f"am_{self.devfmt}"), os.O_RDWR | os.O_CREAT, 0o666)
+    os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
+
+    # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
+    if os.path.exists(lock_name:=temp(f"am_{self.devfmt}.lock")): self.lock_fd = os.open(lock_name, os.O_RDWR)
+    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT, 0o666)
+
     try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
 
