@@ -486,6 +486,7 @@ class TestHCQ(unittest.TestCase):
 
       assert buf2.as_buffer()[0] == i
 
+  @unittest.skipUnless(MOCKGPU, "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):
     if not hasattr(self.d0, 'on_device_hang'): self.skipTest("device does not have on_device_hang")
 
