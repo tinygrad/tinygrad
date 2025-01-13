@@ -821,14 +821,14 @@ class TestIdxUpcast(unittest.TestCase):
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.expectedFailure
   def test_int64_unsupported_overflow_sym(self):
-    with self.assertRaises(RuntimeError):
-      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.expectedFailure
   def test_int64_unsupported_overflow(self):
-    with self.assertRaises(RuntimeError):
-      self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+    self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
 
 if __name__ == '__main__':
   unittest.main()

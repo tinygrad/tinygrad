@@ -13,23 +13,19 @@ def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-def upcast(u: UOp, int64_support: bool):
-  srcs = [upcast(_src, int64_support) for _src in u.src]
+def upcast(u: UOp):
+  srcs = [upcast(_src) for _src in u.src]
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
     upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
-    if overflow(u):
-      if not int64_support: raise RuntimeError("Index upcast required but int64 not supported on current device")
-      return upcasted
+    if overflow(u): return upcasted
     # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
     # Cast back is required because if the node is in range, siblings would never be upcasted
-    if any((overflow(src) for src in u.src)):
-      if not int64_support: raise RuntimeError("Index upcast required but int64 not supported on current device")
-      return upcasted.cast(u.dtype)
+    if any((overflow(src) for src in u.src)): return upcasted.cast(u.dtype)
   return u.replace(src=tuple(srcs))
 
 # pooling op may overflow before folding causing unnecessary upcast
-def folded_upcast(u: UOp, int64_support: bool): return upcast(graph_rewrite(u, sym, {}), int64_support)
+def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))
 
 @functools.lru_cache(None)
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
@@ -92,9 +88,9 @@ class ShapeTracker:
   def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
-  def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None, int64_support: bool=True) -> tuple[UOp, UOp]:
+  def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
     idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
-    return folded_upcast(idx, int64_support), folded_upcast(valid, int64_support)
+    return folded_upcast(idx), folded_upcast(valid)
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
