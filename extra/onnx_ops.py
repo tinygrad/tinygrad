@@ -570,9 +570,10 @@ def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_sc
 def QGemm(A: Tensor, a_scale: Tensor, a_zero_point: Tensor, B: Tensor, b_scale: Tensor, b_zero_point: Tensor, C: Tensor|None=None,
           y_scale: Tensor|None=None, y_zero_point: Tensor|None=None, alpha: float=1.0, transA: int=0, transB: int=0):
   assert (y_scale is None) == (y_zero_point is None)
+  if int(alpha) == alpha: alpha = int(alpha)
   A = (A.int() - a_zero_point)
   B = (B.int() - b_zero_point)
-  Y = Gemm(A, B, C, alpha=alpha, transA=transA, transB=transB)
+  Y = Gemm(A, B, C, alpha=alpha, beta=1, transA=transA, transB=transB)
   if y_scale is None and y_zero_point is None:
     Y = Y * a_scale * b_scale
   else:
