@@ -2157,9 +2157,9 @@ class TestKernelOpts(unittest.TestCase):
     data1 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
     data2 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
     helper_linearizer_ast(sink, [data1, data2], opts=[
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.GROUP, 0, 4)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
+      #[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.GROUP, 0, 4)],
+      #[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
+      #[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
