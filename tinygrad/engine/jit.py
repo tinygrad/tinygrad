@@ -127,6 +127,14 @@ class GraphRunner(Runner):
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner): pass
 
+def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
+  for ei in jit_cache:
+    if any(b in depends for b in ei.bufs):
+      if isinstance(ei.prg, CompiledRunner):
+        depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins)
+      if isinstance(ei.prg, (BufferCopy, BufferXfer)):
+        depends.add(cast(Buffer, ei.bufs[0]))
+
 ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
@@ -138,17 +146,25 @@ class CapturedJit(Generic[ReturnType]):
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
+    # TODO: free_intermediates here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
                             self.expected_names, self.expected_st_vars_dtype_device)
 
   def __post_init__(self):
     self._jit_cache: list[ExecItem] = self.jit_cache
     self._input_replace: dict[tuple[int, int], int] = self.input_replace
-    self._graphed = False
+    self._first_run = True
     self._clear_inputs()
 
   def _clear_inputs(self):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+
+  def free_intermediates(self):
+    depends: set[Buffer|None] = set([None])
+    update_depends(depends, self.jit_cache)
+    for b in depends:
+      if b is not None: b.deallocate()
+    self.__post_init__()   # reset the graph state
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[Variable, int]) -> ReturnType:
@@ -158,10 +174,16 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
     # Condense the items into a graph executor.
-    if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
-      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
-      self._graphed = True
+    if self._first_run:
+      # allocate intermediates if freed
+      for ji in self.jit_cache:
+        for b in ji.bufs:
+          if b is not None: b.ensure_allocated()
+      # create graph if needed
+      if JIT < 2:
+        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+        self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self._first_run = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
@@ -256,12 +278,7 @@ class TinyJit(Generic[ReturnType]):
       # prune independent kernels (optional)
       if self.prune:
         depends = set(input_buffers)
-        for ei in jit_cache:
-          if any(b in depends for b in ei.bufs):
-            if isinstance(ei.prg, CompiledRunner):
-              depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
-            if isinstance(ei.prg, (BufferCopy, BufferXfer)):
-              depends.add(cast(Buffer, ei.bufs[0]))
+        update_depends(depends, jit_cache)
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
