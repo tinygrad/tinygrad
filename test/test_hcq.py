@@ -1,4 +1,4 @@
-import unittest, ctypes, struct
+import unittest, ctypes, struct, os
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import getenv
 from tinygrad.device import Buffer, BufferSpec
@@ -485,6 +485,18 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_value += 1
 
       assert buf2.as_buffer()[0] == i
+
+  def test_on_device_hang(self):
+    if not hasattr(self.d0, 'on_device_hang'): self.skipTest("device does not have on_device_hang")
+
+    os.environ["MOCKGPU_EMU_FAULTADDR"] = "0xDEADBEE1"
+
+    # Check api calls
+    with self.assertRaises(RuntimeError) as ctx:
+      self.d0.on_device_hang()
+
+    assert "0xDEADBEE1" in str(ctx.exception)
+    os.environ.pop("MOCKGPU_EMU_FAULTADDR")
 
 if __name__ == "__main__":
   unittest.main()
