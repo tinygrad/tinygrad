@@ -235,7 +235,9 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
         # if this kernel also assigns to the buffer, we only allow either contiguous or masked views for the LOAD.
         # if it has a single view and it's equal when you shrink a contig, it's fine
         if x.buf_uop in store_bufs and not ((st:=x.st_arg).contiguous or (len(st.views) == 1 and (m:=st.views[0].mask) is not None \
-            and ShapeTracker.from_shape(st.shape).shrink(m) == st.shrink(m))): raise RuntimeError(f"must be contiguous for assign {x.st_arg}")
+            and ShapeTracker.from_shape(st.shape).shrink(m) == st.shrink(m))):
+                raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
                       tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
 
