@@ -298,6 +298,7 @@ class AMDev:
 
     if not self.partial_boot:
       try: # do not interrupt the boot process
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         if self.psp.is_sos_alive(): self.smu.mode1_reset()
         for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
           ip.init()
