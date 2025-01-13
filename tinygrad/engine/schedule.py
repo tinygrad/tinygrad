@@ -225,28 +225,26 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # remove movement ops + substitute LOAD of fused STORE with just the value
   sink = graph_rewrite(graph_rewrite(pre, multioutput+view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  sink = graph_rewrite(sink, to_si+append_bufs, si_ctx:=ScheduleItemContext(ctx.var_vals))
+  ast = graph_rewrite(sink, to_si+append_bufs, si_ctx:=ScheduleItemContext(ctx.var_vals))
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, sink))
   # verify we scheduled the SINK correctly
-  ast_uops = list(pre.toposort)
   assign_preloads: list[UOp] = []
   if len(ctx.assigns) != 0:
-    for x in ast_uops[::-1]:
+    for x in list(sink.toposort)[::-1]:
       # we only allow a kernel to depend on either the before ASSIGN or after ASSIGN version of a BUFFER
       if x.op is Ops.LOAD and x.buf_uop in assign_preloads: raise RuntimeError("cycle detected in graph")
       # PRELOAD tells the toposort this kernel should run before ASSIGN
       if x.op is Ops.PRELOAD:
         assign_preloads.append(x.buf_uop)
-        # if this kernel also assigns to the buffer, we only allow either contiguous or some masked views for the LOAD.
+        # if this kernel also assigns to the buffer, we only allow either contiguous or masked views for the LOAD.
         # if it has a single view and it's equal when you shrink a contig, it's fine
         if x.buf_uop in store_bufs and not ((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
             and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m))):
           raise RuntimeError("contiguous")
-      if x.op is Ops.LOAD and x.buf_op in store_bufs: raise Exception()
-  return ScheduleItem(sink, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
-                      tuple(dedup(m for x in ast_uops if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
+  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
+                      tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
 
 PROCESS_REPLAY_CAPTURE: dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
