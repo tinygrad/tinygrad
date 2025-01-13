@@ -708,7 +708,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> 
       raise AssertionError(f"found implicit expand {sizes} {shapes}")
   sts[uop] = st
 
-def verify_ast(ast:UOp) -> dict[UOp, ShapeTracker]:
+def verify_ast(ast:UOp) -> None:
   assert ast.op is Ops.SINK and all(x.op is Ops.STORE for x in ast.src), "must be SINK"
   assert all_same([x.st_arg.size for x in ast.src]), "outputs must be exactly the same size"
   sts: dict[UOp, ShapeTracker] = {}
@@ -716,4 +716,3 @@ def verify_ast(ast:UOp) -> dict[UOp, ShapeTracker]:
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
   type_verify(list(sts))
-  return sts
