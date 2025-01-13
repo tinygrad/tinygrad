@@ -559,27 +559,12 @@ def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:
   return _quantize_linear(c, c_scale, c_zero_point)
 
 def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
-  assert channels_last in {0, 1}
-  if channels_last == 1: X = X.permute(0, 2, 3, 1)
+  assert channels_last == 0, "unsure what this does"
   X = (X.int() - x_zero_point) * x_scale
   y = GlobalAveragePool(X)
   y = (y / y_scale + y_zero_point).round()
   # NOTE: no need to clamp cast here since average value does not exceed min/max
   return y.cast(y_zero_point.dtype)
-
-def QGemm(A: Tensor, a_scale: Tensor, a_zero_point: Tensor, B: Tensor, b_scale: Tensor, b_zero_point: Tensor, C: Tensor|None=None,
-          y_scale: Tensor|None=None, y_zero_point: Tensor|None=None, alpha: float=1.0, transA: int=0, transB: int=0):
-  assert (y_scale is None) == (y_zero_point is None)
-  if int(alpha) == alpha: alpha = int(alpha)
-  A = (A.int() - a_zero_point)
-  B = (B.int() - b_zero_point)
-  Y = Gemm(A, B, C, alpha=alpha, beta=1, transA=transA, transB=transB)
-  if y_scale is None and y_zero_point is None:
-    Y = Y * a_scale * b_scale
-  else:
-    y_scale = y_scale / (a_scale * b_scale)
-    Y = _quantize_linear(Y, y_scale, y_zero_point)
-  return Y
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
