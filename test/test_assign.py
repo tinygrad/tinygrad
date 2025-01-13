@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
+from tinygrad.device import is_dtype_supported
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -364,6 +365,14 @@ class TestAssign(unittest.TestCase):
       a.realize()
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_setitem_half(self):
+    a = Tensor.full((8,), 1.0, dtype=dtypes.half).contiguous().realize()
+    b = Tensor.full((4,), 2.0, dtype=dtypes.half).contiguous().realize()
+    assign = a[:4].assign(b)
+    assign.realize()
+    np.testing.assert_allclose(a.numpy(), [2., 2., 2., 2., 1., 1., 1., 1.])
 
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
   def test_cast_assignment(self):

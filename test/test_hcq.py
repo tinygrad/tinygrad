@@ -1,6 +1,6 @@
 import unittest, ctypes, struct
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import getenv
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner, CompiledRunner
@@ -311,7 +311,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (7000 if CI else 100)
+    assert 0.1 <= et <= (7000 if MOCKGPU else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -335,7 +335,7 @@ class TestHCQ(unittest.TestCase):
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
     print(f"same device copy:  {et_ms:.2f} ms, {gb_s:.2f} GB/s")
-    assert (0.3 if CI else 10) <= gb_s <= 1000
+    assert (0.2 if MOCKGPU else 10) <= gb_s <= 1000
 
   def test_speed_cross_device_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -362,7 +362,7 @@ class TestHCQ(unittest.TestCase):
 
     gb_s = ((SZ / 1e9) / et_ms) * 1e3
     print(f"cross device copy: {et_ms:.2f} ms, {gb_s:.2f} GB/s")
-    assert (0.3 if CI else 2) <= gb_s <= 50
+    assert (0.2 if MOCKGPU else 2) <= gb_s <= 50
 
   def test_timeline_signal_rollover(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:

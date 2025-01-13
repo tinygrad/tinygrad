@@ -2,9 +2,8 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '8'
-  RUN_PROCESS_REPLAY: 1
+  CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PYTHONPATH: .
 
 on:
   push:
@@ -569,6 +568,54 @@ jobs:
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  osxtests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [amd]
+
+    name: Tests on MacOS (${{ matrix.backend }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: /Users/runner/Library/Python/3.12/lib/python/site-packages
+          key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Install comgr
+        if: matrix.backend == 'amd'
+        run: |
+          sudo mkdir -p /usr/local/lib
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
+            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+      - name: Install remu
+        if: matrix.backend == 'amd'
+        run: |
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
+            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+      - name: Install dependencies
+        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (amd)
+        if: matrix.backend=='amd'
+        run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
