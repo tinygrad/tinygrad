@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG
+import ctypes, collections, time, dataclasses, pathlib, fcntl, os, signal
+from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
@@ -255,6 +255,10 @@ class AMDev:
     self.pcidev, self.devfmt = pcidev, devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
+    self.lock_fd = os.open(temp(f"am_{self.devfmt}"), os.O_RDWR | os.O_CREAT, 0o666)
+    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. Is it already in use.")
+
     self._run_discovery()
     self._build_regs()
 
@@ -284,14 +288,16 @@ class AMDev:
     self.sdma:AM_SDMA = AM_SDMA(self)
 
     if self.partial_boot and (self.reg("regCP_MEC_RS64_CNTL").read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
-      print(f"am {self.devfmt}: MEC is active. Someone might be using the GPU? Issue a full reset.")
+      if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
       self.partial_boot = False
 
     if not self.partial_boot:
-      if self.psp.is_sos_alive(): self.smu.mode1_reset()
-      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
-        ip.init()
-        if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+      try: # do not interrupt the boot process
+        if self.psp.is_sos_alive(): self.smu.mode1_reset()
+        for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+          ip.init()
+          if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+      finally: signal.signal(signal.SIGINT, signal.default_int_handler)
 
     # Booting done
     self.is_booting = False
