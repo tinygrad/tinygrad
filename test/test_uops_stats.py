@@ -7,6 +7,7 @@ from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.device import Device
 
 def flops_mem(uops, ignore_indexing=False):
   est = Estimates.from_uops(uops, ignore_indexing)
@@ -63,6 +64,15 @@ class TestMemoryCount(unittest.TestCase):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8).realize()
     _, mem = get_stats(a.assign(a+a))
     self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
+
+  @unittest.skipIf(Device.DEFAULT == "CLANG", "test copy to CLANG from other device")
+  def test_copyout(self):
+    a = Tensor.empty(32, dtype=dtypes.uint8).to("CLANG")
+    _, mem = get_stats(a)
+    self.assertEqual(mem, 32*1)
+    a = Tensor.empty(32, dtype=dtypes.uint32).to("CLANG")
+    _, mem = get_stats(a)
+    self.assertEqual(mem, 32*4)
 
 # NOTE: this still isn't testing unroll using the acc
 @unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
