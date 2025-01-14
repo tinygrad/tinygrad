@@ -460,18 +460,15 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_uneven_shard_with_empty(self):
     N = 4
-    X = Tensor.rand(16, 1, 17).contiguous().realize()
+    X = Tensor.rand(16, 1, 3).contiguous().realize()
     np_x = X.numpy()
     devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
 
     # test empty shard
-    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).numpy(), np_x)
+    np.testing.assert_equal(X.shard(devices, 0).numpy(), np_x)
 
     # test reshape with empty shard
-    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).reshape(8, 1, 34).numpy(), np_x.reshape(8, 1, 34))
-
-    # test elementwise with empty shard
-    np.testing.assert_equal((X.shard(devices, 0, (2, 2, 12, 0)) + X.shard(devices, 0, (0, 0, 1, 15))).numpy(), np_x + np_x)
+    np.testing.assert_equal(X.shard(devices, 0).reshape(8, 1, 6).numpy(), np_x.reshape(8, 1, 6))
 
   def test_multiple_uneven_shard(self):
     N = 4
@@ -479,8 +476,8 @@ class TestMultiTensor(unittest.TestCase):
     Y = Tensor.rand(4, 1, 257).contiguous().realize()
     np_x, np_y = X.numpy(), Y.numpy()
     devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
-    X.shard_(devices, 2, (2, 38, 47, 170))
-    Y.shard_(devices, 2, (34, 53, 51, 119))
+    X.shard_(devices, 2)
+    Y.shard_(devices, 2)
     np.testing.assert_equal(X.numpy(), np_x)
     np.testing.assert_equal(Y.numpy(), np_y)
     np.testing.assert_equal((X + Y).numpy(), np_x + np_y)
@@ -534,6 +531,7 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises((AssertionError, ValueError)):
       t0.reshape((26*15,7))
 
+  @unittest.skip("no longer supports splits")
   def test_reshape_on_axis_uneven(self):
     def reshape_helper(t0, t, t_axis):
       np.testing.assert_allclose(t0.reshape(t.shape).numpy(), t.numpy())
@@ -606,7 +604,7 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
 
   def test_rand_like_uneven_shard(self):
-    t = Tensor.empty((4, 42, 15)).shard(devices_3, axis=1, splits=(14, 7, 21))
+    t = Tensor.empty((4, 42, 15)).shard(devices_3, axis=1)
     t2 = Tensor.rand_like(t)
     self.assertEqual(t.shape, t2.shape)
     self.assertEqual(t.device, t2.device)
@@ -657,7 +655,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_dropout_on_uneven_shard_axis(self):
     with Tensor.train():
-      X = Tensor.ones(256).shard(devices_3, axis=0, splits=(100, 50, 106))
+      X = Tensor.ones(256).shard(devices_3, axis=0)
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
