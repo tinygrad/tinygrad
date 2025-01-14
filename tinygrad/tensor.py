@@ -394,33 +394,30 @@ class Tensor(SimpleMathTrait):
     if self.grad is not None and real.grad is not None: self.grad.replace(real.grad)
     return self.replace(real)
 
-  def shard(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None) -> Tensor:
+  def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> Tensor:
     """
-    Shards the tensor across the given devices. Optionally specify which axis to shard on, and how to split it across devices.
+    Shards the tensor across the given devices. Optionally specify which axis to shard on.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.empty(2, 3)
-    print(t.shard((t.device, t.device), axis=1, splits=(2, 1)).lazydata)
+    print(t.shard((t.device, t.device), axis=1).lazydata)
     ```
-
     """
     assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
     if axis is not None:
       axis = self._resolve_dim(axis)
-      if splits is None:
-        if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
-        sz = ceildiv(total, len(devices))
-        splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
-      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
+      if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
+      sz = ceildiv(total, len(devices))
+      splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
       bounds = tuple(itertools.pairwise(itertools.accumulate(splits, initial=0)))
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
-  def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None, splits:Optional[tuple[int, ...]]=None):
+  def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
     """
     Shards the tensor across the given devices in place.
     """
-    return self.replace(self.shard(devices, axis, splits))
+    return self.replace(self.shard(devices, axis))
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
