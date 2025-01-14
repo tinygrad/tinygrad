@@ -1,6 +1,5 @@
 """This is where the forwards and backwards passes live."""
 import math
-from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import Ops, resolve, sint, UOp
@@ -77,11 +76,11 @@ class Sign(Function):
 
 class Less(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x<y
-  def backward(self, grad_output:UOp) -> Tuple[Optional[UOp], Optional[UOp]]: return None, None
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]: return None, None
 
 class Neq(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x.ne(y)
-  def backward(self, grad_output:UOp) -> Tuple[Optional[UOp], Optional[UOp]]: return None, None
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]: return None, None
 
 class Xor(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x^y
@@ -98,7 +97,7 @@ class Threefry(Function):
 class Add(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x+y
 
-  def backward(self, grad_output:UOp) -> Tuple[Optional[UOp], Optional[UOp]]:
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]:
     return grad_output if self.needs_input_grad[0] else None, \
            grad_output if self.needs_input_grad[1] else None
 
@@ -107,12 +106,15 @@ class Mul(Function):
     self.x, self.y = x, y
     return x * y
 
-  def backward(self, grad_output:UOp) -> Tuple[Optional[UOp], Optional[UOp]]:
+  def backward(self, grad_output:UOp) -> tuple[UOp|None, UOp|None]:
     return (self.y * grad_output) if self.needs_input_grad[0] else None, \
            (self.x * grad_output) if self.needs_input_grad[1] else None
 
 class IDiv(Function):
   def forward(self, x:UOp, y:UOp) -> UOp: return x // y
+
+class Mod(Function):
+  def forward(self, x:UOp, y:UOp) -> UOp: return x % y
 
 # ************* ternary ops *************
 
@@ -121,7 +123,7 @@ class Where(Function):
     self.x = x
     return self.x.where(y, z)
 
-  def backward(self, grad_output:UOp) -> Tuple[None, Optional[UOp], Optional[UOp]]:
+  def backward(self, grad_output:UOp) -> tuple[None, UOp|None, UOp|None]:
     return None, \
       self.x.where(grad_output, grad_output.const_like(0)) if self.needs_input_grad[1] else None, \
       self.x.where(grad_output.const_like(0), grad_output) if self.needs_input_grad[2] else None
@@ -129,14 +131,14 @@ class Where(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x:UOp, axis:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, axis:tuple[int, ...]) -> UOp:
     self.input_shape = x.shape
     return x.r(Ops.ADD, axis)
 
   def backward(self, grad_output:UOp) -> UOp: return grad_output.expand(self.input_shape)
 
 class Prod(Function):
-  def forward(self, x:UOp, axis:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, axis:tuple[int, ...]) -> UOp:
     self.x, self.ret = x, x.r(Ops.MUL, axis)
     return self.ret
 
@@ -144,7 +146,7 @@ class Prod(Function):
     return (grad_output * self.ret).expand(self.x.shape) / self.x
 
 class Max(Function):
-  def forward(self, x:UOp, axis:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, axis:tuple[int, ...]) -> UOp:
     self.x, self.ret, self.axis = x, x.r(Ops.MAX, axis), axis
     return self.ret
 
@@ -158,7 +160,7 @@ class Max(Function):
 
 # NOTE: this is sum in reverse
 class Expand(Function):
-  def forward(self, x:UOp, shape:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, shape:tuple[int, ...]) -> UOp:
     self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if resolve(si != so))
     return x.expand(shape)
 
@@ -166,35 +168,35 @@ class Expand(Function):
     return grad_output.cast(sum_acc_dtype(grad_output.dtype)).r(Ops.ADD, self.expanded_axis).cast(grad_output.dtype)
 
 class Reshape(Function):
-  def forward(self, x:UOp, shape:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, shape:tuple[int, ...]) -> UOp:
     self.input_shape = x.shape
     return x.reshape(shape)
 
   def backward(self, grad_output:UOp) -> UOp: return grad_output.reshape(self.input_shape)
 
 class Permute(Function):
-  def forward(self, x:UOp, order:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, order:tuple[int, ...]) -> UOp:
     self.input_order = order
     return x.permute(order)
 
   def backward(self, grad_output:UOp) -> UOp: return grad_output.permute(argsort(self.input_order))
 
 class Pad(Function):
-  def forward(self, x:UOp, arg:Tuple[Tuple[int, int], ...]) -> UOp:
+  def forward(self, x:UOp, arg:tuple[tuple[int, int], ...]) -> UOp:
     self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
     return x.pad(arg)
 
   def backward(self, grad_output:UOp) -> UOp: return grad_output.shrink(self.narg)
 
 class Shrink(Function):
-  def forward(self, x:UOp, arg:Tuple[Tuple[sint, sint], ...]) -> UOp:
+  def forward(self, x:UOp, arg:tuple[tuple[sint, sint], ...]) -> UOp:
     self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
     return x.shrink(arg)
 
   def backward(self, grad_output:UOp) -> UOp: return grad_output.pad(self.narg)
 
 class Flip(Function):
-  def forward(self, x:UOp, axis:Tuple[int, ...]) -> UOp:
+  def forward(self, x:UOp, axis:tuple[int, ...]) -> UOp:
     self.arg = tuple([-1 if i in axis else 1 for i in range(len(x.shape))])
     return x.stride(self.arg)
 

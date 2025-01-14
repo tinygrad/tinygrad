@@ -93,6 +93,12 @@ class TestTensorGradient(unittest.TestCase):
     dx = z.gradient(x, gradient=dz)[0]
     self.assertListEqual(dx.tolist(), [2.0, 4.0, 6.0])
 
+  def test_cast_before_view(self):
+    x = Tensor([1.0, 1, 1, 1])
+    x_reshaped = x.reshape(2,2)
+    x_casted = x_reshaped.cast(dtypes.float16)
+    x_casted.mean().gradient(x_reshaped)
+
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
@@ -103,6 +109,12 @@ class TestRealizeMeansRealize(unittest.TestCase):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
     print(x.lazydata)
     self.assertEqual(x.lazydata.op, Ops.VIEW)
+
+  # NOTE: even though it doesn't realize, this seems fine
+  def test_uniform_gradient(self):
+    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    y = x * 2
+    y.sum().gradient(x)[0].realize()
 
 if __name__ == '__main__':
   unittest.main()

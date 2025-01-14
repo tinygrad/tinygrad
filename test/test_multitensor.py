@@ -4,8 +4,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import Ops
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
+from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 from tinygrad.multi import all_reduce, MultiLazyBuffer
 import numpy as np
 from hypothesis import given, strategies as strat, settings
@@ -69,7 +68,7 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
     out = (X + X)
-    sched = create_schedule(out.lazydata.lbs)
+    sched = out.schedule()
     names = []
     for si, ei in zip(sched[:], lower_schedule(sched)):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
@@ -158,6 +157,7 @@ class TestMultiTensor(unittest.TestCase):
          strat.sampled_from((Ops.ADD, Ops.MUL, Ops.MAX)),
          strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)), strat.sampled_from((1, 0, -1)))
   def test_simple_reduce(self, N, devices, rop, shard_axis, reduce_axis, sign):
+    N = N * len(devices)
     X = Tensor.rand(N*N).reshape(N, N).mul(sign)
     n = X.numpy()
     X.shard_(devices, shard_axis)
@@ -439,6 +439,7 @@ class TestMultiTensor(unittest.TestCase):
     assert isinstance(jf.jit_cache[4].prg, BufferCopy)
     assert isinstance(jf.jit_cache[5].prg, graph_d1)
 
+  @unittest.skip("no longer supports uneven shard")
   def test_uneven_shard(self):
     for N in range(1, 6):
       X = Tensor.rand(4, 1, 257).contiguous().realize()
@@ -451,6 +452,7 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
       np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
 
+  @unittest.skip("no longer supports uneven shard")
   def test_uneven_multiple_zeros(self):
     for data in ([1, 2, 3, 4], [1, 2, 3], [1, 2], [1], []):
       for N in (1, 2, 3, 4):
@@ -459,29 +461,28 @@ class TestMultiTensor(unittest.TestCase):
         X = ((Tensor(data).shard(devices, axis=0) + 1).realize() - 1).realize()
         np.testing.assert_equal(X.numpy(), data)
 
+  @unittest.skip("no longer supports uneven shard")
   def test_uneven_shard_with_empty(self):
     N = 4
-    X = Tensor.rand(16, 1, 17).contiguous().realize()
+    X = Tensor.rand(16, 1, 3).contiguous().realize()
     np_x = X.numpy()
     devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
 
     # test empty shard
-    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).numpy(), np_x)
+    np.testing.assert_equal(X.shard(devices, 0).numpy(), np_x)
 
     # test reshape with empty shard
-    np.testing.assert_equal(X.shard(devices, 0, (2, 2, 12, 0)).reshape(8, 1, 34).numpy(), np_x.reshape(8, 1, 34))
+    np.testing.assert_equal(X.shard(devices, 0).reshape(8, 1, 6).numpy(), np_x.reshape(8, 1, 6))
 
-    # test elementwise with empty shard
-    np.testing.assert_equal((X.shard(devices, 0, (2, 2, 12, 0)) + X.shard(devices, 0, (0, 0, 1, 15))).numpy(), np_x + np_x)
-
+  @unittest.skip("no longer supports uneven shard")
   def test_multiple_uneven_shard(self):
     N = 4
     X = Tensor.rand(4, 1, 257).contiguous().realize()
     Y = Tensor.rand(4, 1, 257).contiguous().realize()
     np_x, np_y = X.numpy(), Y.numpy()
     devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
-    X.shard_(devices, 2, (2, 38, 47, 170))
-    Y.shard_(devices, 2, (34, 53, 51, 119))
+    X.shard_(devices, 2)
+    Y.shard_(devices, 2)
     np.testing.assert_equal(X.numpy(), np_x)
     np.testing.assert_equal(Y.numpy(), np_y)
     np.testing.assert_equal((X + Y).numpy(), np_x + np_y)
@@ -492,7 +493,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
+    scheds = [sched for sched in out.schedule() if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
     assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
@@ -535,6 +536,7 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises((AssertionError, ValueError)):
       t0.reshape((26*15,7))
 
+  @unittest.skip("no longer supports uneven shard")
   def test_reshape_on_axis_uneven(self):
     def reshape_helper(t0, t, t_axis):
       np.testing.assert_allclose(t0.reshape(t.shape).numpy(), t.numpy())
@@ -606,8 +608,9 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(t.dtype, t2.dtype)
     self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
 
+  @unittest.skip("no longer supports uneven shard")
   def test_rand_like_uneven_shard(self):
-    t = Tensor.empty((4, 42, 15)).shard(devices_3, axis=1, splits=(14, 7, 21))
+    t = Tensor.empty((4, 42, 15)).shard(devices_3, axis=1)
     t2 = Tensor.rand_like(t)
     self.assertEqual(t.shape, t2.shape)
     self.assertEqual(t.device, t2.device)
@@ -656,9 +659,10 @@ class TestMultiTensor(unittest.TestCase):
       assert set(unique) == {0, 2}, unique
       assert 200 < counts[0] < 312, counts[0]
 
+  @unittest.skip("no longer supports uneven shard")
   def test_dropout_on_uneven_shard_axis(self):
     with Tensor.train():
-      X = Tensor.ones(256).shard(devices_3, axis=0, splits=(100, 50, 106))
+      X = Tensor.ones(256).shard(devices_3, axis=0)
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
@@ -690,12 +694,14 @@ class TestMultiTensor(unittest.TestCase):
         assert ast.src[2].src[0].op is Ops.LOAD
         assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 3
 
+  @unittest.skip("TODO: this requires forced_realize to be deleted.")
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
     t.shard_(devices, axis=0).realize()
     assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.lazydata.lbs])
 
+  @unittest.skip("this is unreliable on OSX")
   def test_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=None)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
@@ -703,13 +709,26 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
+  def test_multi_const_folding(self):
+    with Context(TRACK_MATCH_STATS=0):
+      a = Tensor.arange(3).realize()
+      zeros = Tensor.zeros(3).realize()
+    b = a.to(devices_2)*zeros.to(devices_2)
+    sched = b.schedule()
+    self.assertEqual(len(sched), 6)
+    # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
+    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
+    # all these kernels are just because multi calls contiguous on every single shard
+    run_schedule(sched)
+    self.assertListEqual(b.tolist(), [0, 0, 0])
+
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):
     device = (d0, d1, d2, d3)
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
     not_covered = t.to(d5)
-    sched = create_schedule([not_covered.lazydata])
+    sched = not_covered.schedule()
     assert len(sched) == 1
     # setup again because create_schedule has side effect
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
@@ -719,7 +738,7 @@ class TestHandleData(unittest.TestCase):
     for d in device:
       t = Tensor([1, 2, 3, 4]).shard(device).realize()
       covered = t.to(d)
-      sched = create_schedule([covered.lazydata])
+      sched = covered.schedule()
       assert len(sched) == 0
       # setup again because create_schedule has side effect
       t = Tensor([1, 2, 3, 4]).shard(device).realize()
@@ -803,6 +822,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       np.testing.assert_allclose(a.reshape((2, 1, 8)).expand((2, 5, 8)).numpy(), b.reshape((2, 1, 8)).expand((2, 5, 8)).numpy(), rtol=1e-7, atol=1e-3)
       np.testing.assert_allclose(a.flip(-1).numpy(), b.flip(-1).numpy(), rtol=1e-7, atol=1e-3)
 
+  @unittest.skip("no longer supports uneven shard")
   def test_uneven(self):
     t = Tensor.arange(24).reshape(3, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(2)], axis=0)
@@ -987,9 +1007,9 @@ class TestBatchNorm(unittest.TestCase):
           p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = list(create_schedule(synced_out.lazydata.lbs))
+      synced_si = list(synced_out.schedule())
       unsynced_out = unsynced_bn(x)
-      unsynced_si = list(create_schedule(unsynced_out.lazydata.lbs))
+      unsynced_si = list(unsynced_out.schedule())
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si

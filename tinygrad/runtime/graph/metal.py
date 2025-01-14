@@ -1,4 +1,4 @@
-from typing import List, Any, Dict, cast, Optional
+from typing import Any, cast
 import ctypes
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
@@ -17,7 +17,7 @@ class MTLResourceUsage:
   MTLResourceUsageWrite = 0b10
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
@@ -58,7 +58,7 @@ class MetalGraph(GraphRunner):
     if len(self.vars): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
     self.range = to_struct(0, len(jit_cache))
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> float|None:
 
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])

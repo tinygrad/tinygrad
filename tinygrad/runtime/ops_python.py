@@ -2,9 +2,8 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-import sys
-from typing import Tuple, List, Optional, Any, Dict, TYPE_CHECKING
-import pickle, base64, itertools, time, struct
+from typing import Optional, Any, TYPE_CHECKING
+import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -27,18 +26,18 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[Ops, Optional[DType], List[int], Any]] = pickle.loads(lib)
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    self.uops: list[tuple[Ops, Optional[DType], list[int], Any]] = pickle.loads(lib)
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      ul: Dict[int, Any] = {}
-      dl: Dict[int, DType] = {}
-      pbufs: List[memoryview] = list(bufs)
-      pvals: List[int] = list(vals)
+      ul: dict[int, Any] = {}
+      dl: dict[int, DType] = {}
+      pbufs: list[memoryview] = list(bufs)
+      pvals: list[int] = list(vals)
       i = 0
-      loop_ends: Dict[int, int] = {}
+      loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF}
@@ -139,31 +138,38 @@ class PythonProgram:
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
-            def a_elem(x, i, j, goff):
-              assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
-              return x[i][goff+j]
+            def a_elem(x, k, row, goff):
+              assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
+              return x[k][goff+row]
             # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
-            def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)  # pylint: disable=arguments-out-of-order
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
-            # A (8 elements on 32 threads)
-            def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
-            # B (4 elements on 32 threads)
-            def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4]
-            # (i, j), C, D (4 elements on 32 threads)
-            def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
-            ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+            # (col, row) given (lane, elem) for C & D (4 elements on 32 threads); shared by all tc shapes with M=16 N=8
+            def c_map(lane, elem): return (elem%2 + (lane%4)*2, lane//4 + (elem//2)*8)
+
+            if arg[1] == (8,16,16):
+              def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2 + (k//8)*4][goff + (k//2)%4 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k%2 + (k//8)*2][goff + (k//2)%4 + col*4]
+              ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+
+            elif arg[1] == (8,16,8):
+              def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2][goff + k//2 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
+              ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
+
+            else: raise NotImplementedError(f"unimplemented tensor core {arg}")
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
-            def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
+            def a_elem(x, k, row, goff): return x[k%2+row*2][goff+k//2]
             # B (16 elements on 8 threads)
-            def b_elem(x, i, j, goff): return x[j][goff+i]
+            def b_elem(x, col, k, goff): return x[k][goff+col]
             # C, D (8 elements on 8 threads)
             def c_map(lane, elem): return (lane, elem)
             ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CLANG":
-            def elem(x, i, j, _): return x[i+j][0]
+            def elem(x, col, row, _): return x[col+row][0] # k is always 0
             def c_map(_, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
@@ -180,11 +186,12 @@ class PythonRenderer(Renderer):
   def __init__(self):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
-    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tensor_cores
+    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
+    if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
-  def render(self, name:str, uops:List[UOp]) -> str:
+  def render(self, name:str, uops:list[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 

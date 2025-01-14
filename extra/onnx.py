@@ -1,18 +1,12 @@
-from __future__ import annotations
-from typing import List, Dict, Union, Callable, Any, Sequence
+from typing import Callable, Any, Sequence
 import importlib, functools
 import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
-from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
+from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto, helper
+from google.protobuf.json_format import MessageToDict
 
 cache_misses = 0
 @functools.lru_cache(None)
@@ -22,7 +16,7 @@ def _cached_to_python_const(t:Tensor):
   return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
+def to_python_const(t) -> list[ConstType]|ConstType|bytes:
   if not isinstance(t, Tensor): return t
   global cache_misses
   ret = _cached_to_python_const(t)
@@ -33,19 +27,18 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
 
 # TODO: use real float16
 # src: onnx/mapping.py
-DTYPE_MAP: Dict[TensorProto.DataType | int, DType] = {
+DTYPE_MAP: dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
   TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
   TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
-  TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float,
-  TensorProto.FLOAT8E4M3FNUZ:dtypes.float, TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
+  TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16,
 }
-def dtype_parse(onnx_dtype: TensorProto.DataType | int) -> DType:
+def dtype_parse(onnx_dtype: int) -> DType:
   if onnx_dtype not in DTYPE_MAP: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype]) else dtypes.float
 
 # src: onnx/onnx_ml_pb2.pyi
-ATTRIBUTE_MAP: Dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
+ATTRIBUTE_MAP: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
   AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
   AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
   AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
@@ -56,17 +49,21 @@ def attribute_parse(onnx_attribute: AttributeProto):
     raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
   return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
 
-def buffer_parse(inp: TensorProto) -> Tensor:
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-    return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
-  if len(inp.raw_data) > 0:
-    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
-                  dtype=dtype_parse(inp.data_type), requires_grad=False)
-  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
+def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
+  if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
+  dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
+             list(onnx_tensor.uint64_data):
+    if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
+    return Tensor(data, dtype=dtype).reshape(shape).realize()
+  if onnx_tensor.HasField("raw_data"):
+    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+    if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
+    return Tensor(np_buffer, dtype=dtype)
+  return Tensor(None)
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
-
 def get_run_onnx(onnx_model: ModelProto):
   # model initialization data
   model_tensors = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
@@ -78,15 +75,18 @@ def get_run_onnx(onnx_model: ModelProto):
   is_onnx_preview_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in onnx_model.graph.node)
   onnx_model_version = onnx_model.opset_import[0].version
 
+  # used to check validity of user_input according to their dimension variables
+  variable_dims = {}
+
   # mapping from onnx ops to tensor.py ops
   tensor_methods = {
     op:op.lower() for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan",
     "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh",
-    "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")
+    "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf", "Mod")
   }
 
   # these values are expected to be python consts
-  required_input_python_consts: Dict[str, tuple[int, ...]] = {
+  required_input_python_consts: dict[str, tuple[int, ...]] = {
     "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
     "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
     "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
@@ -99,7 +99,7 @@ def get_run_onnx(onnx_model: ModelProto):
   def prepare_input(user_input:Any, model_input:ValueInfoProto):
     type_proto = model_input.type
     if type_proto.HasField("optional_type"):
-      if user_input is None: return Tensor(None)
+      if user_input is None: return None
       type_proto = type_proto.optional_type.elem_type
     if type_proto.HasField("sequence_type"):
       if not isinstance(user_input, Sequence): raise RuntimeError(f"{model_input.name} received {user_input}, expected sequence type")
@@ -107,27 +107,34 @@ def get_run_onnx(onnx_model: ModelProto):
       sequence = [Tensor(i, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(i, Tensor) else i for i in user_input]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"shapes for {model_input.name} must be homogeneous")
       # TODO: need true float16 for dtype checking
-      # if not all(t.dtype is dtype for t in sequence): raise RuntimeError(f"{model_input.name} received wrong dtype, expected {dtype}")
+      # if not all(t.dtype is dtype for t in sequence):
+      #   raise RuntimeError(f"{model_input.name} has dtype mismatch for sequence type. Expected {dtype}, received {tensor.dtype}.")
       return sequence
     if type_proto.HasField("tensor_type"):
       dtype = dtype_parse(type_proto.tensor_type.elem_type)
       tensor = Tensor(user_input, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(user_input, Tensor) else user_input
       # TODO: need true float16 for dtype checking
-      # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
-      for d,onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
-        # NOTE: dim is a variable dimension when `dim_param` is specified, e.g. dim {dim_param: "N"} is a variable dim
-        if onnx_dim.dim_param is None and onnx_dim.dim_value != user_input.shape[d]:
-          raise RuntimeError(f"{model_input.name} received value {user_input.shape[d]} on dim {d}, expected {onnx_dim.dim_value}")
+      # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} has mismatch for dtype. Expected {dtype}, received {tensor.dtype}.")
+      for dim, onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
+        dim_param, dim_value = onnx_dim.dim_param, onnx_dim.dim_value
+        user_dim_input = tensor.shape[dim]
+        if dim_param: dim_value = variable_dims[dim_param] if dim_param in variable_dims else variable_dims.setdefault(dim_param, user_dim_input)
+        if user_dim_input != dim_value:
+          raise RuntimeError(f"{model_input.name} has mismatch for dim={dim_param or dim}. Expected {dim_value}, received {user_dim_input}.")
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
     raise NotImplementedError(f"{model_input.name} with {type_field_names=} is not supported")
 
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
+    if debug >= 3: print("Model initialization data:\n" + "\n".join(f"\t{i.name} - {model_tensors[i.name]}" for i in onnx_model.graph.initializer))
 
+    if debug >= 1: print("Model input:")
     for name, value_info in model_expected_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       model_tensors[name] = prepare_input(inputs[name], value_info)
+      if debug >= 1: print(f"\t{name} - {model_tensors[name]}")
+      if debug >= 2: print(f"\t\t{MessageToDict(value_info.type)}")
 
     for num,n in enumerate(onnx_model.graph.node):
       inp_tensors = [model_tensors.get(x) for x in n.input]
@@ -138,24 +145,14 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp_tensors]} opt {opt}")
       if debug >= 3:
         print("\tinputs:")
-        print("\n".join(f"\t\t{x} - {t}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
+        print("\n".join(f"\t\t{x} - {t!r}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
 
-      if n.op_type in tensor_methods:
-        ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
+      # provide additional arguments
+      if n.op_type == "Split" and 'num_outputs' not in opt: opt['num_outputs'] = len(n.output)
+      if n.op_type == "Gradient": opt['intermediate_tensors'] = model_tensors
 
-      # NOTE some ops live here because they require access to some local variables
-      elif n.op_type == "Split":
-        axis, n_outputs  = opt.get('axis', 0), opt.get('num_outputs') or len(n.output)
-        sz = inp[0].shape[axis]
-        sizes = inp[1] if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
-        ret = inp[0].split(sizes, axis)
-      elif n.op_type == "Gradient":
-        assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
-        y = opt["y"]
-        model_tensors[y].backward()
-        ret = tuple([t.grad for t in inp])
-
-      # onnx_ops.py
+      # run op
+      if n.op_type in tensor_methods: ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):

@@ -1,10 +1,42 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, cast, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array
+from typing import cast, Type, TypeVar, Generic, Any
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
 from tinygrad.ops import sym_infer, sint, Variable
+from tinygrad.runtime.autogen import libc
+
+class HWInterface:
+  """
+  Hardware Abstraction Layer for HCQ devices. The class provides a unified interface for interacting with hardware devices.
+  """
+
+  def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
+    self.path:str = path
+    self.fd:int = fd or os.open(path, flags)
+  def __del__(self):
+    if hasattr(self, 'fd'): os.close(self.fd)
+  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
+  def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
+  def read(self, size=None, binary=False):
+    with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
+  def write(self, content, binary=False):
+    with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
+  def listdir(self): return os.listdir(self.path)
+  def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
+  @staticmethod
+  def munmap(buf, sz): return libc.munmap(buf, sz)
+  @staticmethod
+  def exists(path): return os.path.exists(path)
+  @staticmethod
+  def readlink(path): return os.readlink(path)
+  @staticmethod
+  def eventfd(initval, flags=None): return HWInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
+
+if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockHWInterface as HWInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
@@ -15,13 +47,13 @@ ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class BumpAllocator:
-  def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.start_off, self.wrap = size, 0, start, wrap
+  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
   def alloc(self, size:int, alignment:int=1) -> int:
     if round_up(self.ptr, alignment) + size > self.size:
       if not self.wrap: raise RuntimeError("Out of memory")
       self.ptr = 0
     self.ptr = (res:=round_up(self.ptr, alignment)) + size
-    return res + self.start_off
+    return res + self.base
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
@@ -30,11 +62,11 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 
   def __init__(self):
     self._q:Any = []
-    self.binded_device:Optional[DeviceType] = None
-    self.q_sints:List[Tuple[int, int]] = []
-    self.mv_sints:List[Tuple[memoryview, int, int, Optional[int]]] = []
-    self.syms:List[sint] = []
-    self._prev_resolved_syms:List[Optional[int]] = []
+    self.binded_device:DeviceType|None = None
+    self.q_sints:list[tuple[int, int]] = []
+    self.mv_sints:list[tuple[memoryview, int, int, int|None]] = []
+    self.syms:list[sint] = []
+    self._prev_resolved_syms:list[int|None] = []
 
   def _new_sym(self, sym:sint) -> int:
     if sym not in self.syms:
@@ -91,7 +123,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
     """
 
-  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     """
     Enqueues an execution command for a kernel program. Only on compute queues.
 
@@ -133,16 +165,16 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def bind_args_state(self, args_state:ArgsStateType):
     for vals, ptr, fmt in args_state.bind_data: self.bind_sints_to_ptr(*vals, ptr=ptr, fmt=fmt)
 
-  def bind_sints(self, *vals:sint, struct:ctypes.Structure, start_field:str, fmt, mask:Optional[int]=None):
+  def bind_sints(self, *vals:sint, struct:ctypes.Structure, start_field:str, fmt, mask:int|None=None):
     self.bind_sints_to_ptr(*vals, ptr=ctypes.addressof(struct) + getattr(type(struct), start_field).offset, fmt=fmt, mask=mask)
 
-  def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt, mask:Optional[int]=None):
+  def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt, mask:int|None=None):
     mv = to_mv(ptr, 8*len(vals)).cast(fmt)
     for i, val in enumerate(vals):
       if isinstance(val, int): mv[i] = val if mask is None else ((mv[i] & ~mask) | val)
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
-  def _apply_var_vals(self, var_vals:Dict[Variable, int]):
+  def _apply_var_vals(self, var_vals:dict[Variable, int]):
     resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
 
     for off, sym_idx in self.q_sints:
@@ -153,9 +185,9 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
       mv[off] = resolved_syms[sym_idx] if mask is None else ((mv[off] & ~mask) | resolved_syms[sym_idx])
 
-    self._prev_resolved_syms = cast(List[Optional[int]], resolved_syms)
+    self._prev_resolved_syms = cast(list[int|None], resolved_syms)
 
-  def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
+  def submit(self, dev:DeviceType, var_vals:dict[Variable, int]|None=None):
     """
     Submits the command queue to a specific device for execution.
 
@@ -169,10 +201,10 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def _submit(self, dev:DeviceType): raise NotImplementedError("need _submit")
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:DeviceType|None=None, timestamp_divider=1, value_off=0, timestamp_off=8):
     self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
-    self.timeline_for_device:Optional[DeviceType] = timeline_for_device
+    self.timeline_for_device:DeviceType|None = timeline_for_device
 
     if isinstance(base_addr, int):
       self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
@@ -215,7 +247,7 @@ class HCQSignal(Generic[DeviceType]):
     if self.value < value: raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
-def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
+def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Type[HWQueue]|None=None, queue:HWQueue|None=None):
   st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)
 
   if enabled and queue is not None: queue.timestamp(st)
@@ -235,14 +267,14 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue
     if enabled and PROFILE: dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQArgsState(Generic[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[sint, ...]=()):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):
     self.ptr, self.prg = ptr, prg
-    self.bind_data:List[Tuple[Tuple[sint, ...], int, str]] = []
+    self.bind_data:list[tuple[tuple[sint, ...], int, str]] = []
 
   def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt): self.bind_data.append((vals, ptr, fmt))
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[sint, ...]=(), prefix:Optional[List[int]]=None):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=(), prefix:list[int]|None=None):
     super().__init__(ptr, prg, bufs, vals=vals)
 
     if prefix is not None: to_mv(self.ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
@@ -254,7 +286,7 @@ class HCQProgram(Generic[DeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
 
-  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
+  def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=(), kernargs_ptr:int|None=None) -> HCQArgsState:
     """
     Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
     Args:
@@ -264,10 +296,10 @@ class HCQProgram(Generic[DeviceType]):
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(kernargs_ptr or self.dev.kernargs_alloctor.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
+    return self.args_state_t(kernargs_ptr or self.dev.kernargs_allocator.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
 
-  def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
-               vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
+  def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
+               vals:tuple[int, ...]=(), wait:bool=False) -> float|None:
     """
     Enqueues the program for execution with the given arguments and dimensions.
 
@@ -298,24 +330,22 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
-  devices: List[HCQCompiled] = []
+  devices: list[HCQCompiled] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
+               comp_queue_t:Type[HWQueue], copy_queue_t:Type[HWQueue]|None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
-    self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
-    self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
-    self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
+    self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
-    self.kernargs_alloctor:BumpAllocator = BumpAllocator(self.kernargs_page.size, start=cast(int, self.kernargs_page.va_addr), wrap=True)
+    self.kernargs_allocator:BumpAllocator = BumpAllocator(self.kernargs_page.size, base=cast(int, self.kernargs_page.va_addr), wrap=True)
     self.devices.append(self)
 
   def synchronize(self):
@@ -349,7 +379,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
 class HCQBuffer:
-  def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:Optional[HCQBuffer]=None):
+  def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:HCQBuffer|None=None):
     self.va_addr, self.size, self.texture_info, self.meta, self._base = va_addr, size, texture_info, meta, _base
 
 class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):

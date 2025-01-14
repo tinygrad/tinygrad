@@ -1,7 +1,7 @@
-from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
+from typing import Optional, Union, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, cast_float_to_bf16
+from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -60,7 +60,7 @@ extra_pm = PatternMatcher([
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
 
-def uops_to_dtypes(uops:List[UOp]) -> List[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
+def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
 class CStyleLanguage(Renderer):
   kernel_prefix: str = ""
@@ -71,13 +71,13 @@ class CStyleLanguage(Renderer):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
-  extra_args: List[str] = []
+  code_for_workitem: dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
+  extra_args: list[str] = []
   float4: Optional[str] = None
-  type_map: Dict[DType, str] = {}
+  type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_op: Dict = {
+  code_for_op: dict = {
     Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIP: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}|{b})",
@@ -89,8 +89,8 @@ class CStyleLanguage(Renderer):
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
 
-  def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def get_kernel_modifier(self, uops:list[UOp]) -> str: return ""
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
@@ -101,23 +101,21 @@ class CStyleLanguage(Renderer):
 
   def render_cast(self, dt:DType, val: str) -> str: return f"({self.render_dtype(dt)})({val})"
   def render_dtype(self, dt:DType, mutable=True) -> str:
-    if isinstance(dt, ImageDType):
-      return f"{'write_only' if mutable else 'read_only'} image2d_t"
+    if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + \
-        self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
+      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def render(self, name:str, uops:List[UOp]) -> str:
-    r: Dict[UOp, str] = {}
+  def render(self, name:str, uops:list[UOp]) -> str:
+    r: dict[UOp, str] = {}
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
+    bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
-    c: DefaultDict[str, int] = defaultdict(int)
+    c: defaultdict[str, int] = defaultdict(int)
     for u in uops:
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
@@ -143,8 +141,8 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
-      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX} or (u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST}
-                                                        and child_count[u] == 1 and not getenv("EXPAND_SSA")):
+      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX} or \
+        (u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:
         if u.op in {Ops.RANGE, Ops.ASSIGN, Ops.DEFINE_LOCAL} or u.dtype == dtypes.void:
@@ -177,8 +175,9 @@ class ClangRenderer(CStyleLanguage):
     CStyleLanguage.extra_matcher
 
   if AMX:
-    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
-      for dt, sz in [(dt, 64//dt.itemsize) for dt in [dtypes.float]]]
+    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
+                               swizzle=(None, ((),(4,5,6,7,0,1,2,3))), opts=("u0","u0","u0","u0","u1","u1","u1","u1"))
+                               for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
 
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
@@ -191,7 +190,10 @@ class ClangRenderer(CStyleLanguage):
         '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
         '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
       ]
-      prefix += [f"""{(out := self.render_dtype(dtype_in.vec(N*N)))} __{name}({self.render_dtype(dtype_in.vec(N))} data1, {self.render_dtype(dtype_in.vec(M))} data2, {out} data0){{
+      # 'static' in C roughly means that function symbol isn't exported. LLVM puts those symbols at the end of object file which allows Clang JIT
+      # to just jump at the start of a shellcode whithout having to deal with symbols or trampolines at all. This is better than having to inline
+      # wmma function every time it is called or wasting complexity on a symbol parsing and a memory page on trampoline.
+      prefix += [f"""static {(out := self.render_dtype(dtype_in.vec(N*N)))} __{name}({self.render_dtype(dtype_in.vec(N))} data1, {self.render_dtype(dtype_in.vec(M))} data2, {out} data0){{
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
   AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
@@ -208,7 +210,7 @@ class OpenCLRenderer(CStyleLanguage):
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
-  type_map = { dtypes.int8:"char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
+  type_map = { dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
               dtypes.bfloat16: "ushort" }
 
   string_rewrite = PatternMatcher([
@@ -223,17 +225,17 @@ class OpenCLRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
+    if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,8)],dtype_in=di,dtype_out=do,reduce_axes=[(0,16)],upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
-    st1_pattern=(((1,0),),((1,2),(1,1),(0,0))),expanded_shape=(8,2,8)) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
+  tensor_cores = [TensorCore(dims=(8,8,16), threads=8, elements_per_thread=(16,16,8), dtype_in=dtypes.half, dtype_out=dtypes.float,
+    opts=("l0","l0","l0","u1","u1","u1"), swizzle=(((4,5,6),(0,1,2,3,7,8,9)), ((0,1,2),(7,8,9,3,4,5,6))))]
 
   string_rewrite = PatternMatcher([
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x[0]]})"),
-    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x[0]]})"),
+    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x]})"),
+    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16))), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x]})"),
   ]) + OpenCLRenderer.string_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
@@ -247,10 +249,9 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],expanded_shape=(2,2,2,2),upcast_axes=([(1,2)],[(1,2)],[(1,2)]),
-    st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
-    dtype_in=di,dtype_out=do,reduce_axes=[(0,8)]) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),
-                                                                (dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
+  tensor_cores = [TensorCore(dims=(8,8,8), threads=32, elements_per_thread=(2,2,2), dtype_in=di, dtype_out=do, opts=("u0","l0","l1","l1","l0","l1"),
+    swizzle=(((6,1,2,7,4),(8,0,3,5)), ((0,5,6,3,7),(1,2,4,8)))) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),
+    (dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
@@ -290,18 +291,23 @@ class MetalRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 _nms = "xyzwabcdefghijkl"
+cuda_tc_opts = ("u0","l0","l0","l1","l1","l1","u1")  # shared by all shapes with M=16 N=8
 
 class CUDARenderer(CStyleLanguage):
   device = "CUDA"
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2,2),
-    st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
-    st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
-    upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
-  def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
+  # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
+  tc_81616 = [TensorCore(dims=(8,16,16), threads=32, elements_per_thread=(8,4,4), dtype_in=di,dtype_out=do, opts=cuda_tc_opts,
+    swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
+  tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
+    swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
+
+  tc_sm80 = tc_81616 + tc_8168_f16
+  tc_sm75 = tc_8168_f16
+  def __init__(self, arch:str):
+    self.tensor_cores, self.arch = CUDARenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
@@ -352,18 +358,24 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-  def get_kernel_modifier(self, uops:List[UOp]) -> str:
+  def get_kernel_modifier(self, uops:list[UOp]) -> str:
     maxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
+
+def cast_float_to_bf16(x: UOp) -> UOp:
+  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
+  x = x.bitcast(dtypes.uint)
+  x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # https://gpuopen.com/learn/wmma_on_rdna3/
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(0,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], opts_seq=("LC","UP"),
-    upcast_axes = ([(0,16)],[(0,16)],[(1,8)]), st1_pattern=(((1,2),(0,2),(1,1),(0,1)),((1,0),(0,0))), expanded_shape=(16,2,4))
-    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
+  tensor_cores = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
+    opts=("l0","l0","l0","l0","l1","u1","u1","u1"), swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))))
+    for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
@@ -421,7 +433,7 @@ class AMDRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def get_kernel_modifier(self, uops:List[UOp]) -> str:
+  def get_kernel_modifier(self, uops:list[UOp]) -> str:
     requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
     # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
     # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

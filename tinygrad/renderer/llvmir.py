@@ -1,4 +1,4 @@
-from typing import List, Dict, cast
+from typing import cast
 import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
@@ -73,6 +73,10 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
 
+def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
+  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
+  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
+
 class LLVMRenderer(Renderer):
   device = "LLVM"
   supports_float4 = False
@@ -87,17 +91,19 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+    # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
+    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
-  def render(self, name: str, uops: List[UOp]) -> str:
-    r: Dict[UOp, str] = {}
-    args: List[str] = []
-    kernel: List[str] = []
-    end_lines: Dict[str, None] = {}
+  def render(self, name: str, uops: list[UOp]) -> str:
+    r: dict[UOp, str] = {}
+    args: list[str] = []
+    kernel: list[str] = []
+    end_lines: dict[str, None] = {}
     vc = -1
 
     # prealloc all assigns
-    acc_to_assign: Dict[UOp, UOp] = {}
+    acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
       if u.op is Ops.ASSIGN:
         vc += 1
@@ -129,7 +135,7 @@ class LLVMRenderer(Renderer):
         # generate the phi nodes for the assigns
         if u.op is Ops.RANGE:
           for x in acc_to_assign:
-            if u in x.src:  # if this range is relevent for this acc
+            if u in x.src:  # if this range is relevant for this acc
               vc += 1
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
               r[x] = f"%acc{vc}"

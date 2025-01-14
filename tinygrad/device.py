@@ -1,19 +1,18 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Dict, Tuple, Any, Iterator, List, Set, Generator
+from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
-from tinygrad.ops import UOp, buffers
 
 # **************** Device ****************
 
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-    self._opened_devices:Set[str] = set()
+    self._opened_devices:set[str] = set()
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
@@ -59,7 +58,7 @@ class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal;
 class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[decimal.Decimal] # noqa: E702
+class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
 
 @dataclass
 class ProfileResult: st:Optional[int]=None; en:Optional[int]=None # noqa: E702
@@ -86,7 +85,7 @@ class BufferSpec:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
-               lb_refcount=0, uop_ref:Optional[UOp]=None, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+               lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -103,7 +102,6 @@ class Buffer:
       assert device == base.device, "base must have the same device"
       self._base = base
     if preallocate: self.allocate()
-    if uop_ref is not None: buffers[uop_ref] = self
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
@@ -113,7 +111,7 @@ class Buffer:
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
-    self.allocator = Device[self.device].allocator
+    self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
@@ -124,24 +122,24 @@ class Buffer:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
-  def __reduce__(self):
-    buf = None
-    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) > 1: raise RuntimeError(f"double ref to buffer? {len(uop_refs)}")
-    uop_ref = None if len(uop_refs) == 0 else uop_refs[0]
-    if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, uop_ref, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount, uop_ref)
-    if self.is_allocated():
-      buf = bytearray(self.nbytes)
-      self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref)
-  @property
-  def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self):
-    if not self.is_allocated(): return
+  def deallocate(self):
+    assert self.is_allocated(), "buffer must be allocated to deallocate"
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
+      del self._buf
+  def __reduce__(self):
+    buf = None
+    if self._base is not None:
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+    if self.is_allocated():
+      buf = bytearray(self.nbytes)
+      self.copyout(memoryview(buf))
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
+  @property
+  def nbytes(self): return self.size*self.dtype.itemsize
+  def __del__(self): (not self.is_allocated()) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
@@ -170,9 +168,9 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  # overriden in LRUAllocator
+  # overridden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
-    assert size > 0, f"alloc size must be positve, getting {size}"
+    assert size > 0, f"alloc size must be positive, getting {size}"
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 
@@ -190,7 +188,7 @@ class LRUAllocator(Allocator):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+  def __init__(self): self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -231,7 +229,7 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 class Compiled:
-  profile_events:List[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
+  profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
@@ -271,7 +269,7 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
 
 if PROFILE:
   @atexit.register
-  def finlize_profile():
+  def finalize_profile():
     devs = [Device[d] for d in Device._opened_devices]
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()

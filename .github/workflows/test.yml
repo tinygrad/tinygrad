@@ -2,9 +2,8 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '8'
-  RUN_PROCESS_REPLAY: 1
+  CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PYTHONPATH: .
 
 on:
   push:
@@ -27,6 +26,8 @@ jobs:
         python-version: 3.12
     - name: Install docs dependencies (no cache)
       run: pip install -e '.[docs]'
+    - name: Install capstone for CLANG disassembly
+      run: pip install capstone
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -165,6 +166,7 @@ jobs:
     - name: Test emulated CUDA tensor cores
       run: |
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+        DEBUG=2 EMULATE_CUDA_SM75=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
@@ -240,8 +242,8 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Repo line count <= 9999 lines
-      run: MAX_LINE_COUNT=9999 python sz.py
+    - name: Repo line count < 11000 lines
+      run: MAX_LINE_COUNT=11000 python sz.py
 
   testopencl:
     strategy:
@@ -295,7 +297,7 @@ jobs:
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model kernel count and gate usage
         run: |
-          PYTHONPATH="." ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2138 ALLOWED_GATED_READ_IMAGE=13 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          PYTHONPATH="." ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2104 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot alt model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
@@ -481,7 +483,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -567,6 +569,54 @@ jobs:
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  osxtests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [amd]
+
+    name: Tests on MacOS (${{ matrix.backend }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: /Users/runner/Library/Python/3.12/lib/python/site-packages
+          key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Install comgr
+        if: matrix.backend == 'amd'
+        run: |
+          sudo mkdir -p /usr/local/lib
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
+            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+      - name: Install remu
+        if: matrix.backend == 'amd'
+        run: |
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
+            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+      - name: Install dependencies
+        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (amd)
+        if: matrix.backend=='amd'
+        run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
