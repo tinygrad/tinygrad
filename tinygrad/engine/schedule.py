@@ -220,9 +220,6 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   sink = graph_rewrite(graph_rewrite(pre, multioutput+view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
   ast = graph_rewrite(sink, to_si+append_bufs, si_ctx:=ScheduleItemContext(ctx.var_vals))
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, sink))
   # deal with ASSIGN
   assign_preloads: list[UOp] = []
   if len(ctx.assigns) != 0:
@@ -238,6 +235,9 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
           if len(st.views) != 1 or (mask:=st.views[0].mask) is None or ShapeTracker.from_shape(st.shape).shrink(mask) != st.shrink(mask):
             raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                                +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+  # capture process replay
+  if CAPTURE_PROCESS_REPLAY:
+    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, ast))
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
                       tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
 
