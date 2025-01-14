@@ -1,7 +1,6 @@
 import unittest
-from tinygrad import dtypes, Tensor
+from tinygrad import dtypes
 from tinygrad.ops import UOp, symbolic, graph_rewrite_map, _substitute
-from test.unit.test_tensor_uop_representation import is_pattern, realized_pattern, is_pattern_uop
 
 class TestRewriteMap(unittest.TestCase):
   def test_substitute(self):
