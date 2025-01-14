@@ -399,7 +399,7 @@ class Tensor(SimpleMathTrait):
     Shards the tensor across the given devices. Optionally specify which axis to shard on.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.empty(2, 3)
+    t = Tensor.empty(2, 4)
     print(t.shard((t.device, t.device), axis=1).lazydata)
     ```
     """
