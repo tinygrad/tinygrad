@@ -806,7 +806,7 @@ def train_bert():
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
-      if getenv("RESET_STEP", 1): train_step_bert.reset()
+      train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
