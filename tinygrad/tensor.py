@@ -179,7 +179,7 @@ class Tensor(SimpleMathTrait):
     # data might be on a different device
     if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None)
+    elif isinstance(data, UOp): self.lazydata = Tensor(data).shard(device).lazydata
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
@@ -405,8 +405,16 @@ class Tensor(SimpleMathTrait):
     """
     assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
-    if axis is not None: axis = self._resolve_dim(axis)
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis), device=devices, requires_grad=self.requires_grad)
+    if axis is None: lbs = [self.lazydata] * len(devices)
+    else:
+      axis = self._resolve_dim(axis)
+      sz = ceildiv(self.shape[axis], len(devices))
+      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
+      lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
+    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
+    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
+    mlb = MultiLazyBuffer([lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
+    return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
     """
