@@ -138,31 +138,31 @@ class PythonProgram:
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
-            def a_elem(x, i, j, goff):
-              assert x[i][goff+j] == x[i][goff+j+16], "warp elements not duplicated properly across lanes"
-              return x[i][goff+j]
+            def a_elem(x, k, row, goff):
+              assert x[k][goff+row] == x[k][goff+row+16], "warp elements not duplicated properly across lanes"
+              return x[k][goff+row]
             # B (16 elements on 32 threads): row major, lane 16-32 == lane 0-15
-            def b_elem(x, i, j, goff): return a_elem(x, j, i, goff)  # pylint: disable=arguments-out-of-order
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
             # A (8 elements on 32 threads)
-            def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
+            def a_elem(x, k, row, goff): return x[(k%2)+(row//8)*2+(k//8)*4][goff+((k//2)%4)+(row%8)*4]
             # B (4 elements on 32 threads)
-            def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4]
+            def b_elem(x, col, k, goff): return x[(k%2)+(k//8)*2][goff+(k//2)%4+(col)*4]
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
             ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
-            def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
+            def a_elem(x, k, row, goff): return x[k%2+row*2][goff+k//2]
             # B (16 elements on 8 threads)
-            def b_elem(x, i, j, goff): return x[j][goff+i]
+            def b_elem(x, col, k, goff): return x[k][goff+col]
             # C, D (8 elements on 8 threads)
             def c_map(lane, elem): return (lane, elem)
             ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CLANG":
-            def elem(x, i, j, _): return x[i+j][0]
+            def elem(x, col, row, _): return x[col+row][0] # k is always 0
             def c_map(_, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
