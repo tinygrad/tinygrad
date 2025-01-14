@@ -179,7 +179,7 @@ class Tensor(SimpleMathTrait):
     # data might be on a different device
     if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
+    elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None)
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
@@ -404,14 +404,9 @@ class Tensor(SimpleMathTrait):
     ```
     """
     assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
-    devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
-    if axis is not None:
-      axis = self._resolve_dim(axis)
-      if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
-      sz = ceildiv(total, len(devices))
-      splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
-      bounds = tuple(itertools.pairwise(itertools.accumulate(splits, initial=0)))
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
+    devices = tuple(Device.canonicalize(x) for x in devices)
+    if axis is not None: axis = self._resolve_dim(axis)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
     """
