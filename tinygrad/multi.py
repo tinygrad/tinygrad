@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, ceildiv
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType
 from tinygrad.ops import Ops, MathTrait, UOp, sint
 
@@ -62,18 +62,6 @@ class MultiLazyBuffer(MathTrait):
     return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.lbs], initial=0)))
 
   def __repr__(self): return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
-
-  @staticmethod
-  def from_sharded(lb:UOp, devices:tuple[str, ...], axis:int|None):
-    if axis is not None:
-      if not isinstance(total:=lb.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {lb.shape=}, {axis=}")
-      sz = ceildiv(total, len(devices))
-      splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
-      bounds = tuple(itertools.pairwise(itertools.accumulate(splits, initial=0)))
-    lbs = [lb] * len(devices)
-    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis, bounds) if axis is not None and bounds is not None else lbs, devices)]
-    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    return MultiLazyBuffer([lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
 
   def copy_to_device(self, device:str) -> UOp:
     if self.axis is None:
