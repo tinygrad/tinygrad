@@ -467,12 +467,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
     return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
-  def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
-    ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-    # instant folding rules
-    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
-    return ret
+  def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
@@ -1293,7 +1288,10 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
-merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+merge_views = PatternMatcher([
+  (UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st)),
+  (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), lambda mv,x: x if mv.st.contiguous and x.st is not None and x.shape == mv.shape else None),
+])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
