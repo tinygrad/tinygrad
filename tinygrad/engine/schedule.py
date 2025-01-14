@@ -2,7 +2,7 @@ import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, symbolic_simple, type_verify
+from tinygrad.ops import identity_element, buffers, symbolic_simple, type_verify, graph_rewrite_map
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, ContextVar
 from tinygrad.dtype import DType, ImageDType, dtypes
@@ -99,25 +99,25 @@ class ScheduleContext:
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
-def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
+def add_buffers(buf:UOp, ctx:ScheduleContext, tensor_map:dict[UOp, UOp], cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
-  if buf.op is Ops.SINK: return UOp.sink(*[add_buffers(x, ctx, cache) for x in buf.src])
+  if buf.op is Ops.SINK: return UOp.sink(*[add_buffers(x, ctx, tensor_map, cache) for x in buf.src])
   # shapeless op is passthrough
   # realized is passthrough
   # constants are passthrough
   if buf.st is None or buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND}: return buf
   # view is passthrough
   if buf is not buf.base:
-    cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
+    cache[buf] = ret = add_buffers(buf.base, ctx, tensor_map, cache).view(buf.st)
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
-  if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
-    dtype = buf.dtype.base
+  #if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+  #  if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
+  #  dtype = buf.dtype.base
   # ASSIGN already has a target buffer, otherwise we create a new one
   buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-  op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
+  op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, tensor_map, cache) for x in buf.src))
   # track the underlying tensor uop for this op
   ctx.tensor_uops[buf_uop] = [buf]
   # (early) bufferize
@@ -524,11 +524,25 @@ remove_movement_ops = PatternMatcher([
    lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
 ])
 
+def image_uop_fixup(b:UOp):
+  if isinstance(b.dtype, ImageDType) and (prod(b.shape) != prod(b.dtype.shape) or
+                                          not any(b.shape[x]%4 == 0 for x in unwrap(b.st).unit_stride_axes())):
+    if DEBUG >= 2: print(f"forcing image {b.dtype} with shape {b.shape} to {b.dtype.base}")
+    return b.replace(dtype=b.dtype.base, src=tuple(x.cast(b.dtype.base) for x in b.src)).cast(b.dtype)
+  return None
+
+image_fixup = PatternMatcher([
+  (UPat(GroupOp.All - set([Ops.BUFFER, Ops.CAST]), name="b"), image_uop_fixup),
+])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  if not skip_check: type_verify(list(UOp.sink(*outs).toposort), tensor_uop_spec)
+  sink = UOp.sink(*outs)
+  if not skip_check: type_verify(list(sink.toposort), tensor_uop_spec)
+  # start by simplifying the graph on tensors
+  tensor_map = graph_rewrite_map(sink, image_fixup)
   # to_uop is removing (many) of the movement ops
-  sink = add_buffers(UOp.sink(*outs), ctx:=ScheduleContext(), cache={})
+  sink = add_buffers(sink, ctx:=ScheduleContext(), tensor_map, cache={})
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
   sink = graph_rewrite(sink, merge_bufs, ctx)
