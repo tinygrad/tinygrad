@@ -1290,7 +1290,7 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
 merge_views = PatternMatcher([
   (UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st)),
-  (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), lambda mv,x: x if mv.st.contiguous and x.shape == mv.shape else None),
+  (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), lambda mv,x: x if mv.st.contiguous and x.st is not None and x.shape == mv.shape else None),
 ])
 
 # push VIEW to loads
