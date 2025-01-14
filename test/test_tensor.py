@@ -12,6 +12,7 @@ from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -783,7 +784,7 @@ class TestIdxUpcast(unittest.TestCase):
         renderer.render("test", uops)
         return uops
 
-  def _assert(self, dtype: dtypes, a: Tensor):
+  def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
     # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
     store = next(uop for uop in uops if uop.op is Ops.STORE)
@@ -795,7 +796,7 @@ class TestIdxUpcast(unittest.TestCase):
       assert idx_val.dtype is dtype
 
   # use expand to generate kernel that uses large idx
-  def do_op_then_assert(self, dtype: dtypes, dim1, dim2, dim3):
+  def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
     self._assert(dtype, Tensor.empty(dim1, dim2, 1).expand(-1, -1, dim3).contiguous())
 
   @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
