@@ -564,6 +564,19 @@ def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_sc
   y = GlobalAveragePool(X)
   return _quantize_linear(y, y_scale, y_zero_point)
 
+def QGemm(A: Tensor, a_scale: Tensor, a_zero_point: Tensor, B: Tensor, b_scale: Tensor, b_zero_point: Tensor, C: Tensor|None=None,
+          y_scale: Tensor|None=None, y_zero_point: Tensor|None=None, alpha: float=1.0, transA: int=0, transB: int=0):
+  assert (y_scale is None) == (y_zero_point is None)
+  A = (A.int() - a_zero_point)
+  B = (B.int() - b_zero_point)
+  Y = Gemm(A, B, C, alpha=1, beta=1, transA=transA, transB=transB)
+  if y_scale is None and y_zero_point is None:
+    Y = Y * a_scale * b_scale * alpha
+  else:
+    y_scale = y_scale / (a_scale * b_scale * alpha)
+    Y = _quantize_linear(Y, y_scale, y_zero_point)
+  return Y
+
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
 # NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
