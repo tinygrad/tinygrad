@@ -150,12 +150,12 @@ class PythonProgram:
             def c_map(lane, elem): return ((lane%4)*2 + elem%2, lane//4 + (elem//2)*8)
 
             if arg[1] == (8,16,16):
-              def a_elem(x, k, row, goff): return x[k%2 + 2*(row//8) + (k//8)*4][goff + (k//2)%4 + (row%8)*4]
+              def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2 + (k//8)*4][goff + (k//2)%4 + (row%8)*4]
               def b_elem(x, col, k, goff): return x[k%2 + (k//8)*2][goff + (k//2)%4 + col*4]
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
             elif arg[1] == (8,16,8):
-              def a_elem(x, k, row, goff): return x[k%2 + 2*(row//8)][goff + k//2 + (row%8)*4]
+              def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2][goff + k//2 + (row%8)*4]
               def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
