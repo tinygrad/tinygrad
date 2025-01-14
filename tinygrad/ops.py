@@ -423,7 +423,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def contiguous(self, allow_buffer_view=True):
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
       return self.alu(Ops.BUFFER_VIEW if allow_buffer_view and self.can_view() else Ops.CONTIGUOUS)
-    forced_realize.add(self.base)
     return self
 
   # *** from LazyBuffer ***
