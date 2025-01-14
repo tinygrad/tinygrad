@@ -19,7 +19,7 @@ class ExternalTestDatasets(unittest.TestCase):
   def _create_samples(self, val, num_samples=2):
     self._set_seed()
 
-    img, lbl = np.random.rand(8, 8, 8).astype(np.float32), np.random.randint(0, 100, size=(8, 8, 8)).astype(np.uint8)
+    img, lbl = np.random.rand(190, 392, 392).astype(np.float32), np.random.randint(0, 100, size=(190, 392, 392)).astype(np.uint8)
     img, lbl = nib.Nifti1Image(img, np.eye(4)), nib.Nifti1Image(lbl, np.eye(4))
     dataset = "val" if val else "train"
     preproc_pth = Path(tempfile.gettempdir() + f"/{dataset}")
