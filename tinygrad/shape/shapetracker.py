@@ -14,7 +14,7 @@ def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
 def upcast(u: UOp):
-  srcs = [upcast(_src) for _src in u.src]
+  srcs = tuple(upcast(_src) for _src in u.src)
   if u.dtype.scalar() is dtypes.int:
     dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
     upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
