@@ -424,10 +424,10 @@ def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:i
   x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
   return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
-def _quantize_linear(y:Tensor, y_scale:Tensor, y_zero_point:Tensor):
-  assert y_scale.dtype is dtypes.float32 and y_zero_point.dtype in {dtypes.uint8, dtypes.int8}, "used only for qlinear ops"
-  y = (y / y_scale + y_zero_point).round()
-  return y.clamp(dtypes.min(y_zero_point.dtype), dtypes.max(y_zero_point.dtype)).cast(y_zero_point.dtype)
+def _quantize_linear(t:Tensor, scale:Tensor, zero_point:Tensor):
+  assert scale.dtype is dtypes.float32 and zero_point.dtype in {dtypes.uint8, dtypes.int8}, "used only for qlinear ops"
+  t = (t / scale + zero_point).round()
+  return t.clamp(dtypes.min(zero_point.dtype), dtypes.max(zero_point.dtype)).cast(zero_point.dtype)
 
 def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
                 y_zero_point: Tensor|int, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:int|list[int]=1, group:int=1,
@@ -435,16 +435,14 @@ def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_s
   x = x.int() - x_zero_point
   w = w.int() - w_zero_point
   y = Conv(x, w, B, auto_pad, dilations, group, kernel_shape, pads, strides)
-  y_scale = y_scale / (x_scale * w_scale)
-  return _quantize_linear(y, y_scale, y_zero_point)
+  return _quantize_linear(y, y_scale / (x_scale * w_scale), y_zero_point)
 
 def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point:Tensor|int) -> Tensor:
   a = a.int() - a_zero_point
   b = b.int() - b_zero_point
   y = Tensor.matmul(a, b, acc_dtype=dtypes.int32)
-  y_scale =  y_scale / (a_scale * b_scale)
-  return _quantize_linear(y, y_scale, y_zero_point)
+  return _quantize_linear(y, y_scale / (a_scale * b_scale), y_zero_point)
 
 def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None,
                 auto_pad: AUTO_PAD_OPTIONS = "NOTSET", dilations: int | list[int] = 1, group: int = 1, kernel_shape: list[int] | None = None,
@@ -570,12 +568,8 @@ def QGemm(A: Tensor, a_scale: Tensor, a_zero_point: Tensor, B: Tensor, b_scale: 
   A = (A.int() - a_zero_point)
   B = (B.int() - b_zero_point)
   Y = Gemm(A, B, C, alpha=1, beta=1, transA=transA, transB=transB)
-  if y_scale is None and y_zero_point is None:
-    Y = Y * a_scale * b_scale * alpha
-  else:
-    y_scale = y_scale / (a_scale * b_scale * alpha)
-    Y = _quantize_linear(Y, y_scale, y_zero_point)
-  return Y
+  if y_scale is None and y_zero_point is None: return Y * a_scale * b_scale * alpha
+  return _quantize_linear(Y, y_scale / (a_scale * b_scale * alpha), y_zero_point)
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
