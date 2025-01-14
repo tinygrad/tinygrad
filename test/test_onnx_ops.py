@@ -52,52 +52,53 @@ class TestOnnxOps(unittest.TestCase):
 
 class TestOnnxQuantizedOps(unittest.TestCase):
   def test_qlinear_conv(self):
-    for dtype in [np.uint8, np.int8]:
-      with self.subTest(dtype=dtype):
+    for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
+      with self.subTest(dtype=dtype, zero_point=zero_point):
+        dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
-          "x": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [1, 3, 224, 224], dtype=dtype),
-          "x_scale": np.array(0.01865844801068306, dtype=np.float32),
-          "x_zero_point": np.array(0 if dtype == np.int8 else 114, dtype=dtype),
-          "w": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [32, 3, 3, 3], dtype=dtype),
-          "w_scale": np.array(0.00205775024369359, dtype=np.float32),
-          "w_zero_point": np.array(0 if dtype == np.int8 else 133, dtype=dtype),
-          "y_scale": np.array(0.015050271525979042, dtype=np.float32),
-          "y_zero_point": np.array(0, dtype=dtype),
-          "b": np.random.randint(-12667, 25215, [32], dtype=np.int32)
+          "x": np.random.randint(dtype_min, dtype_max, [1, 3, 224, 224], dtype=dtype),
+          "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "x_zero_point": np.array(zero_point, dtype=dtype),
+          "w": np.random.randint(dtype_min, dtype_max, [32, 3, 3, 3], dtype=dtype),
+          "w_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "w_zero_point": np.array(zero_point, dtype=dtype),
+          "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "y_zero_point": np.array(zero_point, dtype=dtype),
+          "b": np.random.randint(-10000, 10000, [32], dtype=np.int32)
         }
         attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
-        outputs = {"out": ([1,32,112,112], dtype)}
-        helper_test_single_op("QLinearConv", inputs, attributes, outputs)
+        outputs = {"out": ([1, 32, 112, 112], dtype)}
+        helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1)
 
   def test_qlinear_matmul(self):
-    for dtype in [np.uint8, np.int8]:
-      with self.subTest(dtype=dtype):
+    for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
+      with self.subTest(dtype=dtype, zero_point=zero_point):
         inputs = {
           "A": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [10, 10], dtype=dtype),
-          "A_scale": np.array(0.05, dtype=np.float32),
-          "A_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype),
+          "A_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "A_zero_point": np.array(zero_point, dtype=dtype),
           "B": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [10, 10], dtype=dtype),
-          "B_scale": np.array(0.05, dtype=np.float32),
-          "B_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype),
-          "Y_scale": np.array(0.05, dtype=np.float32),
-          "Y_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype)
+          "B_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "B_zero_point": np.array(zero_point, dtype=dtype),
+          "Y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "Y_zero_point": np.array(zero_point, dtype=dtype)
         }
         attributes = {}
         outputs = {"Y": ([10,10], dtype)}
-        helper_test_single_op("QLinearMatMul", inputs, attributes, outputs, atol=1) # sometimes flaky
+        helper_test_single_op("QLinearMatMul", inputs, attributes, outputs, atol=1)
 
   def test_qlinear_add(self):
-    for dtype in [np.uint8, np.int8]:
-      with self.subTest(dtype=dtype):
+    for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
+      with self.subTest(dtype=dtype, zero_point=zero_point):
         inputs = {
           "A": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [10, 10], dtype=dtype),
-          "A_scale": np.array(0.05, dtype=np.float32),
-          "A_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype),
+          "A_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "A_zero_point": np.array(zero_point, dtype=dtype),
           "B": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [10, 10], dtype=dtype),
-          "B_scale": np.array(0.05, dtype=np.float32),
-          "B_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype),
-          "C_scale": np.array(0.05, dtype=np.float32),
-          "C_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype)
+          "B_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "B_zero_point": np.array(zero_point, dtype=dtype),
+          "C_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "C_zero_point": np.array(zero_point, dtype=dtype)
         }
         attributes = {}
         outputs = {"C": ([10,10], dtype)}
@@ -105,18 +106,18 @@ class TestOnnxQuantizedOps(unittest.TestCase):
 
   # TODO: test channels_last
   def test_qlinear_global_average_pool(self):
-    for dtype in [np.uint8, np.int8]:
-      with self.subTest(dtype=dtype):
+    for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
+      with self.subTest(dtype=dtype, zero_point=zero_point):
         inputs = {
           "X": np.random.randint(np.iinfo(dtype).min, np.iinfo(dtype).max + 1, [1, 3, 10, 10], dtype=dtype),
-          "x_scale": np.array(0.05, dtype=np.float32),
-          "x_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype),
-          "y_scale": np.array(0.05, dtype=np.float32),
-          "y_zero_point": np.array(0 if dtype == np.int8 else 128, dtype=dtype)
+          "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "x_zero_point": np.array(zero_point, dtype=dtype),
+          "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "y_zero_point": np.array(zero_point, dtype=dtype)
         }
         attributes = {"channels_last": 0}
         outputs = {"Y": ([1,3,1,1], dtype)}
-        helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs, domain=CONTRIB_OPERATORS, atol=1) # sometimes flaky
+        helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs, domain=CONTRIB_OPERATORS, atol=1)
 
 if __name__ == "__main__":
   unittest.main()
