@@ -440,7 +440,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** from LazyBuffer ***
 
   @staticmethod
-  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None, src:tuple[UOp, ...]=()) -> UOp:
+  def metaop(op:Ops, shape:tuple[sint, ...], dtype:DType, device:str, arg=None) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
