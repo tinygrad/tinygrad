@@ -147,7 +147,7 @@ class PythonProgram:
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
             # (col, row) given (lane, elem) for C & D (4 elements on 32 threads); shared by all tc shapes with M=16 N=8
-            def c_map(lane, elem): return ((lane%4)*2 + elem%2, lane//4 + (elem//2)*8)
+            def c_map(lane, elem): return (elem%2 + (lane%4)*2, lane//4 + (elem//2)*8)
 
             if arg[1] == (8,16,16):
               def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2 + (k//8)*4][goff + (k//2)%4 + (row%8)*4]
