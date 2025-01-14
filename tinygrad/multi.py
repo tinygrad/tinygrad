@@ -97,6 +97,8 @@ class MultiLazyBuffer(MathTrait):
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
   def clone(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
   def detach(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.detach() for lb in self.lbs], self.axis, self.real)
+  @property
+  def toposort(self) -> dict[UOp, None]: return {l:None for x in self.lbs for l in x.toposort}
 
   # elementwise is simple
   def alu(self, op:Ops, *in_srcs:MultiLazyBuffer) -> MultiLazyBuffer:
