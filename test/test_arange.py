@@ -66,7 +66,8 @@ class TestArange(unittest.TestCase):
     return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
 
 class TestIndexing(unittest.TestCase):
-  @unittest.expectedFailure
+  # update: passing after CAST_BEFORE_VIEW=1 deletion
+  # @unittest.expectedFailure
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
