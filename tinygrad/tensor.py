@@ -41,9 +41,9 @@ class Function:
 
 import tinygrad.function as F
 
-def _metaop(op, shape:tuple[sint,...], dtype:DType, device:Union[str, tuple[str, ...]], arg=None, src:tuple[UOp, ...]=()):
-  if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg, src)
-  return MultiLazyBuffer([UOp.metaop(op, shape, dtype, d, arg, src) for d in device], None)
+def _metaop(op, shape:tuple[sint,...], dtype:DType, device:Union[str, tuple[str, ...]], arg=None):
+  if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
+  return MultiLazyBuffer([UOp.metaop(op, shape, dtype, d, arg) for d in device], None)
 
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
