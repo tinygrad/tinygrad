@@ -2,7 +2,7 @@ import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, symbolic_simple, type_verify
+from tinygrad.ops import identity_element, symbolic_simple, type_verify
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, ContextVar
 from tinygrad.dtype import DType, ImageDType, dtypes
@@ -17,8 +17,7 @@ sys.setrecursionlimit(10000)
 
 tensor_uop_spec = PatternMatcher([
   (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
-   lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
+  (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf: isinstance(buf.arg, Buffer) and buf.dtype == buf.arg.dtype),
 
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
@@ -447,8 +446,9 @@ def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
 def create_subbuffer(ctx:ScheduleContext, base:UOp, b:UOp, root:UOp, x:UOp):
   if not root.device.startswith("DISK"): return None
   if x.op is not Ops.VIEW: x = x.src[-1] # TODO: remove this once forced_realize is gone
-  buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
-  return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
+  vbuf = b.replace(arg=x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize))
+  ctx.tensor_uops[vbuf] = ctx.tensor_uops[b]
+  return base.replace(src=(vbuf, root.replace(op=Ops.BUFFER_VIEW)))
 
 do_realize = PatternMatcher([
   # always realize sinked ops

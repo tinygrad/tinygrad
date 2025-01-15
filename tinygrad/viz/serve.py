@@ -69,7 +69,7 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
     if u.op in {Ops.CONST, Ops.DEVICE}: excluded.update((u,) + u.src)
   for u in toposort:
     if u in excluded: continue
-    argst = str(u.arg)
+    argst = u.argstr()
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{v.shape} / {v.strides}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
                           ("" if v.offset == 0 else f" / {v.offset}") for v in unwrap(u.st).views]))

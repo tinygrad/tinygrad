@@ -220,20 +220,15 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer:Buffer|None=None):
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
     if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
-    # NOTE: this value is set by pickle when pickling a realized tensor
-    if _buffer is not None:
-      assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
-      buffers[created] = _buffer
     return created
 
 # some uops map to other stuff
-buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
@@ -246,13 +241,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
-    if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
+    if self.op is Ops.BUFFER: self.arg.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
       for s in self.src: s.children.discard(ref)
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
-    if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
+    # disable pickling the _buf
+    if self.op is Ops.BUFFER and not PICKLE_BUFFERS:
+      from tinygrad.device import Buffer
+      args[3] = Buffer(self.device, self.size, self.dtype)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
@@ -263,7 +261,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
-  def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
+  def argstr(self):
+    if self.op is Ops.BUFFER: return f"Buffer({repr(self.device)}, {self.size}, {repr(self.dtype)})"
+    return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
 
   @property
   def toposort(self) -> dict[UOp, None]:
@@ -308,7 +308,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg.size if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -477,14 +477,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
-  buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
+  def new_buffer(device:str, size:int, dtype:DType):
+    from tinygrad.device import Buffer
+    return UOp(Ops.BUFFER, dtype, (), Buffer(device, size, dtype))
   @property
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
   def _device(self) -> Optional[str]:
     if self.op is Ops.DEVICE: return self.arg
+    if self.op is Ops.BUFFER: return self.arg.device
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
@@ -498,10 +500,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
-    if (cret:=buffers.get(self)) is not None: return cret
-    from tinygrad.device import Buffer
-    buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
-    return ret
+    return self.arg
   @property
   def realized(self) -> Optional[Buffer]:
     if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return self.src[0].realized
