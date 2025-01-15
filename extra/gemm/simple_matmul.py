@@ -1,9 +1,22 @@
 import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad import dtypes, Tensor
-dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
-acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None
-dtype_in = dtypes.fp8e4m3 if getenv("FP8E4M3") else dtypes.fp8e5m2 if getenv("FP8E5M2") else dtype_in
+dtype_in = (
+    dtypes.half if getenv("HALF") else
+    dtypes.bfloat16 if getenv("BFLOAT16") else
+    dtypes.fp8e4m3 if getenv("FP8E4M3") else
+    dtypes.fp8e5m2 if getenv("FP8E5M2") else
+    dtypes.float
+)
+
+acc_dtype = (
+    dtypes.half if getenv("ACC_HALF") else
+    dtypes.bfloat16 if getenv("ACC_BFLOAT16") else
+    dtypes.fp8e4m3 if getenv("ACC_FP8E4M3") else
+    dtypes.fp8e5m2 if getenv("ACC_FP8E5M2") else
+    None
+)
+
 if getenv("INT"):
   dtype_in = dtypes.int8
   acc_dtype = dtypes.int32

@@ -307,17 +307,6 @@ class CUDARenderer(CStyleLanguage):
   tc_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
     swizzle=(((7,8,2,3,4),(0,1,10,5,6,9,11)), ((10,0,1,7,8),(2,3,4,11,5,6,9)))) for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
 
-  # A:
-  #  0  1   2   3    4  5  6  7  8  9  10   11
-  # (0, 0, 32, 64, 128, 1, 2, 4, 8, 16, 0, 256)
-  # local: 4, 8, 32, 64, 128,
-  # upcast: 1, 2, 16, 256
-
-  # B:
-  # (2, 4, 0, 0, 0, 8, 16, 32, 64, 128, 1, 0)
-  # local: 1, 2, 4, 32, 64
-  # upcast: 8, 16, 128
-
   tc_sm75 = tc_8168_f16
   tc_sm80 = tc_sm75 + tc_81616
   tc_sm89 = tc_sm80 + tc_81632_f8
@@ -333,13 +322,6 @@ class CUDARenderer(CStyleLanguage):
         self.tensor_cores = []
     self.arch = arch
   def __reduce__(self): return self.__class__, (self.arch,)
-
-  # chyba dla mul A zrobilem rpzypadkiem
-  # TensorCore(dims=(a), threads=b, elements_per_thread=(c), dtype_in=di, dtype_out=do,
-  #   opts=("u0","u0","l0","l0","l1","l1","l1","u1","l0"), swizzle=(d)
-
-  # TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,4,4), dtype_in=di, dtype_out=do,
-  #   opts=("u0","l0","l0","l1","l1","l1","u1"))
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
