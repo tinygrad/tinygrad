@@ -27,6 +27,7 @@ nav:
     - Runtime:
       - developer/runtime.md
       - HCQ: developer/hcq.md
+      - AM Driver: developer/am.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
 
