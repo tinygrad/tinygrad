@@ -424,7 +424,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # TODO: BUFFER_VIEW should be deleted and subbuffer should be moved to realize.py
     if self.device.startswith("DISK"): return self.alu(Ops.BUFFER_VIEW)
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      return self.alu(Ops.BUFFER_VIEW if allow_buffer_view and self.can_view() else Ops.CONTIGUOUS)
+      return self.alu(Ops.CONTIGUOUS)
     forced_realize.add(self.base)
     return self
 
