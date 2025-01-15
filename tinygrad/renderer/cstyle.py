@@ -312,16 +312,12 @@ class CUDARenderer(CStyleLanguage):
   tc_sm80 = tc_sm75 + tc_81616
   tc_sm89 = tc_sm80 + tc_81632_f8
   def __init__(self, arch:str):
-    arch_version = int(arch[3:])
-    if arch_version >= 80:
-        self.tensor_cores = CUDARenderer.tc_sm89
-    elif arch_version >= 80:
-        self.tensor_cores = CUDARenderer.tc_sm80
-    elif arch_version >= 75:
-        self.tensor_cores = CUDARenderer.tc_sm75
-    else:
-        self.tensor_cores = []
     self.arch = arch
+    arch_version = int(arch[3:])
+    if arch_version >= 80: self.tensor_cores = CUDARenderer.tc_sm89
+    elif arch_version >= 80: self.tensor_cores = CUDARenderer.tc_sm80
+    elif arch_version >= 75: self.tensor_cores = CUDARenderer.tc_sm75
+    else: self.tensor_cores = []
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
