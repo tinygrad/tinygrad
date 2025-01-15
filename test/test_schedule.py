@@ -585,6 +585,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
 
+  def test_example_matmul_same(self):
+    x = Tensor.eye(64, requires_grad=True)
+    z = x.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
+    run_schedule(check_schedule(out, 2))
+    # NOTE: the gradient flows twice
+    np.testing.assert_allclose(out.numpy(), 2*np.ones((64,64)))
+
   def test_contiguous_add(self):
     x = Tensor.empty(32)
     y = Tensor.empty(32)
