@@ -308,9 +308,9 @@ class CUDARenderer(CStyleLanguage):
     swizzle=(((7,8,2,3,4),(0,1,10,5,6,9,11)), ((10,0,1,7,8),(2,3,4,11,5,6,9))))
     for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
 
+  tc_sm89 = tc_81616 + tc_8168_f16 + tc_81632_f8
+  tc_sm80 = tc_81616 + tc_8168_f16
   tc_sm75 = tc_8168_f16
-  tc_sm80 = tc_sm75 + tc_81616
-  tc_sm89 = tc_sm80 + tc_81632_f8
   def __init__(self, arch:str):
     self.arch = arch
     arch_version = int(arch[3:])
