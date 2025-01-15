@@ -314,7 +314,7 @@ class CUDARenderer(CStyleLanguage):
   def __init__(self, arch:str):
     self.arch = arch
     arch_version = int(arch[3:])
-    if arch_version >= 80: self.tensor_cores = CUDARenderer.tc_sm89
+    if arch_version >= 89: self.tensor_cores = CUDARenderer.tc_sm89
     elif arch_version >= 80: self.tensor_cores = CUDARenderer.tc_sm80
     elif arch_version >= 75: self.tensor_cores = CUDARenderer.tc_sm75
     else: self.tensor_cores = []
@@ -363,8 +363,7 @@ class CUDARenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
-    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))",]
-              # "#define __nv_fp8_storage_t16 __nv_fp8x4_storage_t", "#define __nv_fp8_storage_t4 __nv_fp8x2_storage_t"]
+    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() in [dtypes.fp8e4m3, dtypes.fp8e5m2] for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
