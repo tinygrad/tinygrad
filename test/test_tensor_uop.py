@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import Ops, UOp, UPat
+from tinygrad.ops import Ops, UOp, UPat, view_supported_devices
 
 class TestTensorUOp(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -83,6 +83,15 @@ class TestTensorUOp(unittest.TestCase):
     empty = Tensor.empty(1).contiguous()
     sched = empty.schedule()
     self.assertEqual(len(sched), 0)
+
+  @unittest.skipIf(Device.DEFAULT in view_supported_devices, "BUFFER_VIEW cannot exist on a CONST")
+  def test_contiguous_folded_alu(self):
+    a = Tensor.empty(8, 8)
+    # NOTE: the buffer for mul_0 late folds to just a CONST
+    mul_0 = a*0
+    out = mul_0.shrink(((4, 8), (0, 8))).contiguous()
+    out.realize()
+    self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
 
 reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, src=(UPat(), UPat(), UPat(Ops.REDUCE_AXIS)))))
 class TestReduceOp(unittest.TestCase):
