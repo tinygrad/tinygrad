@@ -439,6 +439,7 @@ def _qlinearop_float(op, inputs:list[Tensor], zero_points:list[Tensor], scales:l
   # op execution is done in float32
   dequantized_inputs = [(inp.int() - zp) * scale for inp, zp, scale in zip(inputs, zero_points, scales)]
   out = op(*dequantized_inputs, **opts)
+  assert dtypes.is_float(out.dtype), "op should've done math in float"
   out_quantized = (out / out_scale).round() + out_zero_point
   return out_quantized.clamp(dtypes.min(out_zero_point.dtype), dtypes.max(out_zero_point.dtype)).cast(out_zero_point.dtype)
 
