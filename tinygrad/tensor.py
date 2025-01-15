@@ -920,7 +920,7 @@ class Tensor(SimpleMathTrait):
     rets = []
     for i,(uop,grad) in enumerate(zip(self.lazydata.lbs, gradient.lazydata.lbs)):
       target_uops = [x.lazydata.lbs[i] for x in targets]
-      grads = compute_gradient(uop, grad, target_uops)
+      grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
       for x in target_uops:
         if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
