@@ -1,6 +1,6 @@
 from typing import Callable, Any, Sequence, cast, Literal
-import importlib, functools, collections, io, math, dataclasses, types
-from tinygrad.tensor import Tensor, _broadcast_shape, ConstType, ReductionStr
+import functools, io, math, dataclasses
+from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
@@ -153,7 +153,7 @@ def make_onnx_ops():
 
   def _onnx_pads_to_tiny_pads(pads):
     # (padding_top, padding_left, ..., padding_bottom, padding_right, ...) -> (padding_left, padding_right, padding_top, padding_bottom, ...)
-    return flatten(reversed([(pB,pA) for pB, pA in zip(pads, pads[len(pads)//2:])]))
+    return flatten(reversed(list(zip(pads, pads[len(pads)//2:]))))
   def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[int]|None=None,
           mode:Literal["constant", "reflect", "edge", "wrap"]="constant", value=0):
     value = constant_value or value
@@ -624,7 +624,6 @@ def make_onnx_ops():
       int_y = _op_integer(Gemm, [A,B], [a_zero_point,b_zero_point], **{"C":C, **opts})
       return int_y * a_scale * b_scale * alpha
     return _qlinearop_quantized(Gemm, [A,B], [a_zero_point,b_zero_point], [a_scale,b_scale], y_scale/alpha, y_zero_point, **{"C":C, **opts})
-
 
   # **************** Training Ops ****************
   # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
