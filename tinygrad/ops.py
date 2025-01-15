@@ -420,7 +420,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def contiguous(self, allow_buffer_view=True):
+  def contiguous(self):
     # TODO: BUFFER_VIEW should be deleted and subbuffer should be moved to realize.py
     if self.device.startswith("DISK"): return self.alu(Ops.BUFFER_VIEW)
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
