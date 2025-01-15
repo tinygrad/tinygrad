@@ -915,15 +915,21 @@ class Tensor(SimpleMathTrait):
     print(dy.tolist())  # dz/dy
     ```
     """
-    assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
-    target_uops: list[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-    grads = compute_gradient(self.lazydata, self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata), target_uops)
-    ret = []
-    for x in target_uops:
-      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
-      ret.append(Tensor(y, device=x.device))
-    return ret
+    if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
+    rets = []
+    for i,(uop,grad) in enumerate(zip(self.lazydata.lbs, gradient.lazydata.lbs)):
+      target_uops = [x.lazydata.lbs[i] for x in targets]
+      grads = compute_gradient(uop, grad, target_uops)
+      ret = []
+      for x in target_uops:
+        if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
+        ret.append(y)
+      rets.append(ret)
+    # create returned Tensors
+    if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
+    return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
+                   device=t.device) for t,u in zip(targets, zip(*rets))]
 
   def _deepwalk(self):
     def _walk(node, visited):
