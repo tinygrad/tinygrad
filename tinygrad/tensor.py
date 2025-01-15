@@ -926,6 +926,8 @@ class Tensor(SimpleMathTrait):
         if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
         ret.append(y)
       rets.append(ret)
+    # clear contexts
+    for t in targets: t._ctx = None
     # create returned Tensors
     if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
     return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
@@ -944,7 +946,7 @@ class Tensor(SimpleMathTrait):
     """
     all_uops = self.lazydata.toposort
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and
-                                       any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad]
+                                       any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad and not Tensor.no_grad]
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       t.grad = g if t.grad is None else (t.grad + g)
