@@ -124,11 +124,12 @@ class PTXRenderer(Renderer):
   device = "CUDA"
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
-  tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
+  tc_sm80 = [tc for tc in CUDARenderer.tc_sm80 if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
-    self.device, self.tensor_cores, self.arch = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
+    self.device, self.arch = device, arch
+    self.tensor_cores = PTXRenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
