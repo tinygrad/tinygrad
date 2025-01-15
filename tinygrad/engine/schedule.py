@@ -51,17 +51,6 @@ tensor_uop_spec = PatternMatcher([
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
    lambda assign,target,new_val: (target.op is Ops.BUFFER or target.is_realized) and (assign.dtype == target.dtype == new_val.dtype)),
-
-  # TODO: BUFFER_VIEW is overloaded, it should be removed.
-  # BUFFER_VIEW shares the device buffer with its source, it uses a subbuffer of the underlying source buffer
-
-  (UPat(Ops.BUFFER_VIEW, name="root", src=(UPat.var("x"),)), lambda root,x:
-   # BUFFER_VIEW can replace contiguous, keeping dtype the same
-   (root.dtype == x.dtype) or
-   # it can also replace bitcast, this changes the dtype, but the itemsize stays the same
-   (root.dtype != x.dtype and root.dtype.itemsize == x.dtype.itemsize) or
-   # it can also represent shape changing bitcast (only on DISK)
-   (root.dtype != x.dtype and root.dtype.itemsize != x.dtype.itemsize and x.device.startswith("DISK"))),
 ])
 
 # **** ScheduleItem return type
