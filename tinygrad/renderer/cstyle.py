@@ -304,16 +304,27 @@ class CUDARenderer(CStyleLanguage):
     swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
-  tc_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do,
-    opts=cuda_tc_opts) for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
+  tc_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
+    swizzle=(((7,8,2,3,4),(0,1,10,5,6,9,11)), ((10,0,1,7,8),(2,3,4,11,5,6,9)))) for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
+
+  # A:
+  #  0  1   2   3    4  5  6  7  8  9  10   11
+  # (0, 0, 32, 64, 128, 1, 2, 4, 8, 16, 0, 256)
+  # local: 4, 8, 32, 64, 128,
+  # upcast: 1, 2, 16, 256
+
+  # B:
+  # (2, 4, 0, 0, 0, 8, 16, 32, 64, 128, 1, 0)
+  # local: 1, 2, 4, 32, 64
+  # upcast: 8, 16, 128
 
   tc_sm75 = tc_8168_f16
   tc_sm80 = tc_sm75 + tc_81616
-  tc_sm90 = tc_sm80 + tc_81632_f8
+  tc_sm89 = tc_sm80 + tc_81632_f8
   def __init__(self, arch:str):
     arch_version = int(arch[3:])
-    if arch_version >= 90:
-        self.tensor_cores = CUDARenderer.tc_sm90
+    if arch_version >= 80:
+        self.tensor_cores = CUDARenderer.tc_sm89
     elif arch_version >= 80:
         self.tensor_cores = CUDARenderer.tc_sm80
     elif arch_version >= 75:
