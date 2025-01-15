@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
@@ -67,15 +66,15 @@ class TestTinygrad(unittest.TestCase):
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
     out.backward(retain_graph=True)
-    xgrad,wgrad = x.grad.numpy(), W.grad.numpy()
+    xgrad,wgrad = x.grad, W.grad
     out.backward(retain_graph=True)
-    xgrad2,wgrad2 = x.grad.numpy(), W.grad.numpy()
+    xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
-    xgrad3,wgrad3 = x.grad.numpy(), W.grad.numpy()
-    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
-    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
+    xgrad3,wgrad3 = x.grad, W.grad
+    np.testing.assert_allclose(xgrad3.numpy(), xgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3.numpy(), wgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2.numpy(), xgrad.numpy() * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
 
   def test_second_order_backward_pass(self):
     def test_pytorch():
@@ -725,7 +724,7 @@ class TestTensorMetadata(unittest.TestCase):
     W = Tensor.rand(3, 3, requires_grad=True)
     out = x.matmul(W)
     self.assertEqual(out.lazydata.metadata.name, "matmul")
-    si = create_schedule([out.lazydata])[-1]
+    si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "matmul")
 
@@ -733,7 +732,7 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True)
     out = x.relu()
     self.assertEqual(out.lazydata.metadata.name, "relu")
-    si = create_schedule([out.lazydata])[-1]
+    si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
@@ -744,7 +743,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(out.lazydata.metadata.name, "__mul__")
     self.assertEqual(out.lazydata.src[0].metadata.name, "relu")
     self.assertEqual(out.lazydata.src[1].metadata.name, "sigmoid")
-    si = create_schedule([out.lazydata])[-1]
+    si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
@@ -758,7 +757,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertTrue(x.grad.lazydata.metadata.backward)
     self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
     self.assertTrue(y.grad.lazydata.metadata.backward)
-    si = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])[-1]
+    si = Tensor.schedule(out, x.grad, y.grad)[-1]
     self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
     self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]

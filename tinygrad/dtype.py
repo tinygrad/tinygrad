@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, prod
 
 ConstType = Union[float, int, bool]
 
@@ -10,7 +10,7 @@ FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
-  dcache: Dict[Tuple, DType] = {}
+  dcache: dict[tuple, DType] = {}
   def __call__(cls, *args, **kwargs):
     if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
@@ -38,7 +38,8 @@ class DType(metaclass=DTypeMetaClass):
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
-  def ptr(self, local=False) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1)
+  def ptr(self, size=-1, local=False) -> PtrDType:
+    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
 
 @dataclass(frozen=True, eq=False)
@@ -46,6 +47,7 @@ class PtrDType(DType):
   _base: DType
   local: bool
   v: int
+  size: int = -1  # -1 is unlimited size
   @property
   def base(self): return self._base
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
@@ -53,15 +55,16 @@ class PtrDType(DType):
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
-  def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
+  def ptr(self, size=-1, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
-  def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=True' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
+  def __repr__(self):
+    return f"{self.base.__repr__()}.ptr({self.size}{', local=True' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
-  shape: Tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, local=False) -> PtrDType:
+  shape: tuple[int, ...] = ()   # shape of the Image
+  def ptr(self, size=-1, local=False) -> PtrDType:
     assert not local, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
@@ -70,7 +73,7 @@ class dtypes:
   @staticmethod
   @functools.lru_cache(None)
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
-  @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
+  @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
   @staticmethod
@@ -85,7 +88,7 @@ class dtypes:
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
-  def as_const(val: Tuple[ConstType, ...]|ConstType, dtype:DType):
+  def as_const(val: tuple[ConstType, ...]|ConstType, dtype:DType):
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
@@ -102,12 +105,12 @@ class dtypes:
     if dtypes.is_int(dtype): return 2**(dtype.itemsize*8)-1+dtypes.min(dtype)
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
-  def finfo(dtype:DType) -> Tuple[int, int]:
+  def finfo(dtype:DType) -> tuple[int, int]:
     """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
-  def fields() -> Dict[str, DType]: return DTYPES_DICT
+  def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
@@ -131,9 +134,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, False, 1, shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, False, 1, prod(shp), shp)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, False, 1, shp)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, False, 1, prod(shp), shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
@@ -158,7 +161,7 @@ promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.lru_cache(None)
-def _get_recursive_parents(dtype:DType) -> Set[DType]:
+def _get_recursive_parents(dtype:DType) -> set[DType]:
   return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
 @functools.lru_cache(None)
 def least_upper_dtype(*ds:DType) -> DType:
@@ -178,7 +181,7 @@ def truncate_fp16(x):
   try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
+truncate: dict[DType, Callable] = {dtypes.bool: bool,
   # TODO: bfloat16
   dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,

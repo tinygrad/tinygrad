@@ -4,7 +4,6 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import Ops, UOp
-from tinygrad.engine.schedule import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -74,30 +73,29 @@ class TestLazyBuffer(unittest.TestCase):
     b = Tensor.randn(2, 2).realize()
     add = (a+b).contiguous()
     out = add+2
-    sched = create_schedule([out.lazydata])
+    sched = out.schedule()
     self.assertEqual(len(sched), 2)
     run_schedule(sched)
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
-  def test_forced_realized_metaop(self):
+  # NOTE: contiguous on a buffer collapses
+  def test_contiguous_empty(self):
     empty = Tensor.empty(1).contiguous()
-    sched = create_schedule([empty.lazydata])
-    self.assertEqual(len(sched), 1)
-    self.assertIs(sched[0].ast.op, Ops.EMPTY)
-    run_schedule(sched)
+    sched = empty.schedule()
+    self.assertEqual(len(sched), 0)
 
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
     a = Tensor.rand(4, 4).realize()
     a = a.sum()
-    sched = create_schedule([a.lazydata])
+    sched = a.schedule()
     assert len(sched) == 1
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
   def test_split_reduce_kernel_dim0(self):
     a = Tensor.rand(256, 255).realize()
     a = a.sum()
-    sched = create_schedule([a.lazydata])
+    sched = a.schedule()
     assert len(sched) == 2
     for s in sched:
       self.assertIs(s.ast.src[0].src[2].op, Ops.REDUCE_AXIS)
@@ -105,7 +103,7 @@ class TestReduceOp(unittest.TestCase):
   def test_split_reduce_kernel_dim1(self):
     a = Tensor.rand(255, 256).realize()
     a = a.sum()
-    sched = create_schedule([a.lazydata])
+    sched = a.schedule()
     assert len(sched) == 2
     for s in sched:
       self.assertIs(s.ast.src[0].src[2].op, Ops.REDUCE_AXIS)
