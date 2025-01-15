@@ -14,6 +14,7 @@ class TLSFAllocator:
   def __init__(self, size:int, base:int=0, block_size:int=16, lv2_cnt:int=16):
     self.size, self.base, self.block_size, self.l2_cnt = size, base, block_size, lv2_cnt.bit_length()
     self.storage:list = [collections.defaultdict(list) for _ in range(size.bit_length() + 1)]
+    self.lv1_entries:list[int] = [0] * len(self.storage)
 
     # self.blocks is more like a linked list, where each entry is a contigous block.
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
@@ -25,12 +26,14 @@ class TLSFAllocator:
   def _insert_block(self, start:int, size:int, prev:int|None=None):
     if prev is None: prev = self.blocks[start][2]
     self.storage[self.lv1(size)][self.lv2(size)].append(start)
+    self.lv1_entries[self.lv1(size)] += 1
     self.blocks[start] = (size, start + size, prev, True)
     return self
 
   def _remove_block(self, start:int, size:int, prev:int|None=None):
     if prev is None: prev = self.blocks[start][2]
     self.storage[self.lv1(size)][self.lv2(size)].remove(start)
+    self.lv1_entries[self.lv1(size)] -= 1
     self.blocks[start] = (size, start + size, prev, False)
     return self
 
@@ -67,6 +70,7 @@ class TLSFAllocator:
 
     # Search for the smallest block that can fit the requested size. Start with the it's bucket and go up until any block is found.
     for l1 in range(self.lv1(size), len(self.storage)):
+      if self.lv1_entries[l1] == 0: continue
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
           nsize = self.blocks[self.storage[l1][l2][0]][0]

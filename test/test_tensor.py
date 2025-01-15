@@ -464,7 +464,7 @@ class TestTinygrad(unittest.TestCase):
   def test_repr_with_grad(self):
     a = Tensor([1], requires_grad=True)
     b = Tensor([1])
-    c = (a + b).mean().backward()
+    c = (a + b).sum().backward()
     print(a)
     print(c)
 
@@ -646,10 +646,19 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_clone(self):
     a = Tensor.rand(16, 16).realize()
+    self.assertIsNot(a.lazydata, a.clone().lazydata)
     np.testing.assert_allclose(a.numpy(), a.clone().numpy())
 
     a = Tensor.rand(16, 16).mul(5.0).add(5.0)
+    self.assertIsNot(a.lazydata, a.clone().lazydata)
     np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+
+  def test_clone_with_shrink(self):
+    a = Tensor.empty(16, 16)
+    self.assertIsNot(a.lazydata, a.clone().lazydata)
+
+    b = a.shrink(((2, 10), None))
+    self.assertIsNot(b.lazydata, b.clone().lazydata)
 
   def test_clone_with_grad(self):
     a = Tensor.rand(16, 16, requires_grad=True)
