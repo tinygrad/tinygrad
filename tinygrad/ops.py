@@ -248,9 +248,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
     # disable pickling the _buf
-    if self.op is Ops.BUFFER and not PICKLE_BUFFERS:
-      from tinygrad.device import Buffer
-      args[3] = Buffer(self.device, self.size, self.dtype)
+    if self.op is Ops.BUFFER and not PICKLE_BUFFERS: args[3] = None # TODO: this breaks viz! how do we wanna do this?
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
