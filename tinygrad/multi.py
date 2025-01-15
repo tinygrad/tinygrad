@@ -25,20 +25,20 @@ def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   for step in range(n_lbs-1):
     for i in range(len(chunks)):
       src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device, force=True))
+      chunked[dest][i] = chunked[dest][i].alu(bop, chunked[src][i].copy_to_device(chunked[dest][i].device))
 
   # allgather
   for step in range(n_lbs-1):
     for i in range(len(chunks)):
       src, dest = (i+step-1)%n_lbs, (i+step)%n_lbs
-      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device, force=True)
+      chunked[dest][i] = chunked[src][i].copy_to_device(chunked[dest][i].device)
 
   # assemble chunks back
   pads = [((s,numel-e),) for s,e in chunks]
   return [functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads,lb_c)]).reshape(shape) for lb_c in chunked]
 
 def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> list[UOp]:
-  if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
+  if lbs[0].shape[axis] % len(lbs) != 0: raise RuntimeError(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
 class MultiLazyBuffer(MathTrait):
@@ -46,9 +46,6 @@ class MultiLazyBuffer(MathTrait):
     assert all(isinstance(x, UOp) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
     assert all_same([x.dtype for x in lbs]), f"all multilazybuffer needs same dtype, getting {[x.dtype for x in lbs]}"
     self.lbs, self.axis, self.dtype, self.device, self.real = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), real or [True]*len(lbs)
-    if axis is not None:
-      splits = list(itertools.accumulate([lb.shape[axis] for lb in lbs], initial=0))
-      self.bounds = tuple(zip(splits, splits[1:]))
 
   @property
   def shape(self): return tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape))
@@ -59,15 +56,12 @@ class MultiLazyBuffer(MathTrait):
   @property
   def real_lbs(self): return [lb for lb,r in zip(self.lbs, self.real) if r]
 
-  def __repr__(self): return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
+  @property
+  def bounds(self):
+    if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
+    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.lbs], initial=0)))
 
-  @staticmethod
-  def from_sharded(lb:UOp, devices:tuple[str, ...], axis:int|None, bounds:tuple[tuple[int, int], ...]|None):
-    assert (axis is None) == (bounds is None), "must specify bounds iff axis is specified"
-    lbs = [lb] * len(devices)
-    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis, bounds) if axis is not None and bounds is not None else lbs, devices)]
-    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    return MultiLazyBuffer([lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
+  def __repr__(self): return f"<MLB {self.axis=} {self.real=} {chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
 
   def copy_to_device(self, device:str) -> UOp:
     if self.axis is None:
@@ -91,6 +85,8 @@ class MultiLazyBuffer(MathTrait):
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
   def clone(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
   def detach(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.detach() for lb in self.lbs], self.axis, self.real)
+  @property
+  def toposort(self) -> dict[UOp, None]: return {l:None for x in self.lbs for l in x.toposort}
 
   # elementwise is simple
   def alu(self, op:Ops, *in_srcs:MultiLazyBuffer) -> MultiLazyBuffer:
@@ -106,12 +102,10 @@ class MultiLazyBuffer(MathTrait):
     assert any(new_real), "output contains no real lb"
     for mlb in msrcs:
       if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.lbs)
-      elif mlb.axis is None and axis is not None:
-        assert bounds is not None
-        srcs.append(to_sharded(mlb.lbs, axis, bounds))
       else:
         assert axis is not None and bounds is not None
-        srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
+        if mlb.axis is None: srcs.append(to_sharded(mlb.lbs, axis, bounds))
+        else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
     new_real_lbs:dict[int,UOp] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
     new_dtype = next(iter(new_real_lbs.values())).dtype

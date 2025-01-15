@@ -65,7 +65,7 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
     else:
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
-      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return None
+      if mask != (0, old_dim) and l != r and next_mask[1] - next_mask[0] != 1: return None
       mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
   return tuple(reversed(new_mask))
@@ -73,11 +73,11 @@ def _reshape_mask(_mask:Optional[tuple[tuple[sint, sint], ...]], old_shape:tuple
 def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # find the position of offset on each dimension based on shape
   # similar to unravel_index in numpy/torch
-  ret = []
-  for stride in strides_for_shape(shape):
-    ret.append(offset // stride if stride != 0 else 0)
-    offset -= ret[-1] * stride
-  return ret
+  acc, idxs = 1, []
+  for d in reversed(shape):
+    idxs.append((offset//acc)%d)
+    acc *= d
+  return idxs[::-1]
 
 @dataclass(frozen=True)
 class View:

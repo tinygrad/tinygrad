@@ -44,6 +44,12 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 
+# BUG: onnxruntime 1.20.1 fails these tests too
+backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
+
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
   backend_test.exclude('float64')
@@ -71,9 +77,6 @@ backend_test.exclude('cast_no_saturate')
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_max_float16_cpu')
 backend_test.exclude('test_min_float16_cpu')
-
-backend_test.exclude('test_convinteger_*')
-backend_test.exclude('test_matmulinteger_*')
 
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
@@ -108,8 +111,6 @@ backend_test.exclude('test_regex_*')
 
 # no quantize
 backend_test.exclude('test_dynamicquantizelinear_*')
-backend_test.exclude('test_qlinearmatmul_*')
-backend_test.exclude('test_qlinearconv_*')
 
 # no rnn
 backend_test.exclude('test_gru_*')
