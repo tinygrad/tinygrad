@@ -43,6 +43,12 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (256,)
     (X + X).realize()
 
+  def test_gradient(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.to_(devices_2)
+    grad = X.sum().gradient(X)[0]
+    grad.realize()
+
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
