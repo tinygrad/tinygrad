@@ -211,8 +211,8 @@ to_si = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
   # PRELOAD becomes LOAD
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
-  # LOAD the DEFINE_GLOBAL pointer and merge views
-  (UPat(Ops.LOAD, src=(UPat(Ops.LOAD, name="inner"), UPat.var("vm"))), lambda inner,vm: inner.view(vm.st)),
+  # LOAD the DEFINE_GLOBAL pointer
+  (UPat(Ops.LOAD, name="root", src=(UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat())), UPat.var("vm"))), lambda root,glbl,vm: root.replace(src=(glbl, vm))),
   # STORE to pointer + swizzle
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("vm1"))), UPat.var("vm2"), UPat.var("val"))),
    lambda glbl,vm1,vm2,val: UOp(Ops.STORE, dtypes.void, (glbl, vm1.view(vm2.st), val))),
