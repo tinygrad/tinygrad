@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from extra.onnx import get_run_onnx
+from extra.onnx import OnnxSession
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -30,8 +30,8 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = get_run_onnx(model)
-    return TinygradModel(run_onnx, net_feed_input)
+    onnx_sess = OnnxSession(model)
+    return TinygradModel(onnx_sess.run, net_feed_input)
 
   @classmethod
   def supports_device(cls, device: str) -> bool:
