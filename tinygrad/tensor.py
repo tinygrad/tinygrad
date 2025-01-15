@@ -923,12 +923,9 @@ class Tensor(SimpleMathTrait):
       grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
       # NOTE: we have to track this because two different Tensors can point to the same UOp
-      uop_count: collections.defaultdict[UOp, int] = collections.defaultdict(int)
-      for x in target_uops: uop_count[x] += 1
       for x in target_uops:
         if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
-        if uop_count[x] > 1: ret.append(y/uop_count[x])
-        else: ret.append(y)
+        ret.append(y)
       rets.append(ret)
     # create returned Tensors
     if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
