@@ -319,6 +319,7 @@ class AMDev:
 
   def fini(self):
     for ip in [self.sdma, self.gfx]: ip.fini()
+    fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
