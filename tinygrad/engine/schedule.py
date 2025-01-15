@@ -196,7 +196,8 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> UOp|None:
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
   ctx.bufs.append(x)
-  return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=x.size), (), len(ctx.bufs)-1)
+  glbl = UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=x.size), (), len(ctx.bufs)-1)
+  return UOp(Ops.LOAD, x.dtype.base, (glbl, ShapeTracker.from_shape((x.size,)).to_uop()))
 
 to_si = PatternMatcher([
   # BUFFER -> DEFINE_GLOBAL
@@ -210,6 +211,11 @@ to_si = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
   # PRELOAD becomes LOAD
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
+  # LOAD the DEFINE_GLOBAL pointer and merge views
+  (UPat(Ops.LOAD, src=(UPat(Ops.LOAD, name="inner"), UPat.var("vm"))), lambda inner,vm: inner.view(vm.st)),
+  # STORE to pointer + swizzle
+  (UPat(Ops.STORE, src=(UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("vm1"))), UPat.var("vm2"), UPat.var("val"))),
+   lambda glbl,vm1,vm2,val: UOp(Ops.STORE, dtypes.void, (glbl, vm1.view(vm2.st), val))),
 ])
 
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
@@ -218,8 +224,8 @@ multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: c
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # remove movement ops + substitute LOAD of fused STORE with just the value
   sink = graph_rewrite(graph_rewrite(pre, multioutput+view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
-  # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
+  # remove extra uops from SINK + LOAD buffers
+  ast = graph_rewrite(sink, view_left+to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
   # deal with ASSIGN
   assign_preloads: list[UOp] = []
   if len(ctx.assigns) != 0:
