@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, collections
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -922,12 +922,14 @@ class Tensor(SimpleMathTrait):
       target_uops = [x.lazydata.lbs[i] for x in targets]
       grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
+      # NOTE: we have to track this because two different Tensors can point to the same UOp
+      uop_count: collections.defaultdict[UOp, int] = collections.defaultdict(int)
+      for x in target_uops: uop_count[x] += 1
       for x in target_uops:
         if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
-        ret.append(y)
+        if uop_count[x] > 1: ret.append(y/uop_count[x])
+        else: ret.append(y)
       rets.append(ret)
-    # clear contexts
-    for t in targets: t._ctx = None
     # create returned Tensors
     if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
     return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
@@ -947,6 +949,8 @@ class Tensor(SimpleMathTrait):
     all_uops = self.lazydata.toposort
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and
                                        any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad and not Tensor.no_grad]
+    # clear contexts
+    for t in tensors_need_grad: t._ctx = None
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       t.grad = g if t.grad is None else (t.grad + g)
