@@ -367,7 +367,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       raise RuntimeError(f"unsupported size in bitcast {dtype}")
     # shape changing bitcast can use a subbuffer on DISK
     # TODO: this should be moved to realize.py
-    if self.can_view() and self.device.startswith("DISK"): return UOp(Ops.BUFFER_VIEW, dtype, (self,))
+    if self._device is not None and self.device.startswith("DISK"): return UOp(Ops.BUFFER_VIEW, dtype, (self,))
     return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
@@ -420,9 +420,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def contiguous(self, allow_buffer_view=True):
+  def contiguous(self):
+    # TODO: BUFFER_VIEW op should be deleted and subbuffer should be moved to realize.py
+    # NOTE: DISK uses subbuffer because DISK does not render kernels
+    if self.device.startswith("DISK"): return self.alu(Ops.BUFFER_VIEW)
+    # otherwise it's normal CONTIGUOUS
     if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      return self.alu(Ops.BUFFER_VIEW if allow_buffer_view and self.can_view() else Ops.CONTIGUOUS)
+      return self.alu(Ops.CONTIGUOUS)
     forced_realize.add(self.base)
     return self
 
@@ -451,9 +455,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
-  def can_view(self):
-    return (self.st is not None and self._device is not None and self.st.consecutive and self.base.op is not Ops.CONST and
-            not isinstance(self.dtype, ImageDType) and self.device.split(":")[0] in view_supported_devices)
   @property
   def lbs(self): return [self]
   @property

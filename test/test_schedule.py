@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple, merge_views
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import verify_ast
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
@@ -1630,7 +1630,8 @@ class TestIndexing(unittest.TestCase):
     a[0] = 6
     np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
 
-  @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  #@unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  @unittest.skip("BUFFER_VIEW no longer supported on non-disk devices")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     sched = self.check_schedule(a, 1)
