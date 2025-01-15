@@ -1,4 +1,4 @@
-import tinygrad.runtime.autogen.libc as libc
+import struct, tinygrad.runtime.autogen.libc as libc
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, i2u
 
@@ -51,3 +51,10 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
   raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
+
+def jit_loader(obj: bytes) -> bytes:
+  image, _, relocs = elf_loader(obj)
+  # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
+  for ploc,tgt,r_type,r_addend in relocs:
+    image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
+  return bytes(image)
