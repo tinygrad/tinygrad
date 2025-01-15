@@ -367,7 +367,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       raise RuntimeError(f"unsupported size in bitcast {dtype}")
     # shape changing bitcast can use a subbuffer on DISK
     # TODO: this should be moved to realize.py
-    if self.device.startswith("DISK"): return UOp(Ops.BUFFER_VIEW, dtype, (self,))
+    if self._device is not None and self.device.startswith("DISK"): return UOp(Ops.BUFFER_VIEW, dtype, (self,))
     return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
