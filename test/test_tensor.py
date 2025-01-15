@@ -470,7 +470,7 @@ class TestTinygrad(unittest.TestCase):
   def test_repr_with_grad(self):
     a = Tensor([1], requires_grad=True)
     b = Tensor([1])
-    c = (a + b).mean().backward()
+    c = (a + b).sum().backward()
     print(a)
     print(c)
 

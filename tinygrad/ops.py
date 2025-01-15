@@ -361,17 +361,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def cast(self, dtype:DType, bitcast=False):
     if bitcast: return self.bitcast(dtype)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
-    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
-      # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
-      # TODO: move this to the scheduler
-      ret = self.base.cast(dtype, bitcast)
-      op_arg = []
-      mop = self
-      while mop is not self.base:
-        op_arg.append((mop.op, mop.arg))
-        mop = mop.src[0]
-      for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
-      return ret
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType):
     if self.st is not None and self.shape and ((self.shape[-1]*self.dtype.itemsize)%dtype.itemsize != 0):
@@ -477,13 +466,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
-  def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
-    ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-    # instant folding rules
-    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
-    return ret
+    return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+  def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
@@ -1304,7 +1288,10 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
-merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+merge_views = PatternMatcher([
+  (UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st)),
+  (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), lambda mv,x: x if mv.st.contiguous and x.st is not None and x.shape == mv.shape else None),
+])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
