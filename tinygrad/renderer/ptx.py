@@ -63,9 +63,9 @@ def render_wmma(ctx: "PTXRenderer", x: UOp):
   dt_map = { dtypes.half: "f16" }
   _i = 0
   for vv in x.src[:2]:
-    for i in range(0, len(ctx.r[vv]), 4//dtype_in.itemsize):
-      if (4//dtype_in.itemsize) == 1: yield f"mov.b32 {ctx.wmma_r[_i]}, {ctx.r[vv][i]};"
-      else: yield f"mov.b32 {ctx.wmma_r[_i]}, {{{', '.join(ctx.r[vv][i:i+(4//dtype_in.itemsize)])}}};"
+    for i in range(0, len(ctx.r[vv]), (elems_per_reg := 4//dtype_in.itemsize)):
+      if elems_per_reg == 1: yield f"mov.b32 {ctx.wmma_r[_i]}, {ctx.r[vv][i]};"
+      else: yield f"mov.b32 {ctx.wmma_r[_i]}, {{{', '.join(ctx.r[vv][i:i+elems_per_reg])}}};"
       _i += 1
   yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32{" "*12}' +\
   f'{{{", ".join(ctx.r[x])}}}, {{{", ".join(ctx.wmma_r[:n_operands[0]])}}}, {{{", ".join(ctx.wmma_r[-n_operands[1]:])}}}, ' + \
