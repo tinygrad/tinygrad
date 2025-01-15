@@ -925,17 +925,6 @@ class Tensor(SimpleMathTrait):
       ret.append(Tensor(y, device=x.device))
     return ret
 
-  def _deepwalk(self):
-    def _walk(node, visited):
-      visited.add(node)
-      # if tensor is not leaf, reset grad
-      if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: node.grad = None
-      if ctx:
-        for i in node._ctx.parents:
-          if i not in visited: yield from _walk(i, visited)
-        yield node
-    return list(_walk(self, set()))
-
   def backward(self, gradient:Optional[Tensor]=None, retain_graph:bool=False) -> Tensor:
     """
     Propagates the gradient of a tensor backwards through the computation graph.
@@ -947,15 +936,9 @@ class Tensor(SimpleMathTrait):
     print(t.grad.numpy())
     ```
     """
-    tensors_need_grad = [self]
-    for t0 in reversed(self._deepwalk()):
-      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
-      _METADATA.reset(token)
-      for t in t0._ctx.parents:
-        if t.requires_grad: tensors_need_grad.append(t)
-      if not retain_graph: del t0._ctx
-    tensors_need_grad = dedup(tensors_need_grad)
-
+    all_uops = self.lazydata.toposort
+    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and
+                                       any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad]
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       t.grad = g if t.grad is None else (t.grad + g)
