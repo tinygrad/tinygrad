@@ -305,7 +305,8 @@ class CUDARenderer(CStyleLanguage):
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
   tc_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-    swizzle=(((7,8,2,3,4),(0,1,10,5,6,9,11)), ((10,0,1,7,8),(2,3,4,11,5,6,9)))) for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
+    swizzle=(((7,8,2,3,4),(0,1,10,5,6,9,11)), ((10,0,1,7,8),(2,3,4,11,5,6,9))))
+    for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
 
   tc_sm75 = tc_8168_f16
   tc_sm80 = tc_sm75 + tc_81616
