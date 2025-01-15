@@ -446,7 +446,8 @@ def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
 
 def create_subbuffer(ctx:ScheduleContext, base:UOp, b:UOp, root:UOp, x:UOp):
   if not root.device.startswith("DISK"): return None
-  buffers[b] = vbuf = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  if x.op is not Ops.VIEW: x = x.src[-1] # TODO: remove this once forced_realize is gone
+  buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
 
 do_realize = PatternMatcher([
@@ -458,10 +459,11 @@ do_realize = PatternMatcher([
   (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
-  # realize before COPY
+  # realize before COPY or BUFFER_VIEW
   (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   # substitute BITCAST/CONTIGUOUS for BUFFER_VIEW on DISK
-  (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat(Ops.VIEW, name="x", src=(UPat(Ops.BUFFER),)))), create_subbuffer),
+  (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
 ])
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
