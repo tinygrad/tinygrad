@@ -1007,7 +1007,8 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
-      (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
+      (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float),
+      (dtypes.fp8e4m3, dtypes.float), (dtypes.fp8e5m2, dtypes.float)):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         k = Kernel(a.schedule()[-1].ast)
@@ -1029,6 +1030,10 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float16, dtypes.float16, dtypes.float16),
       (dtypes.bfloat16, dtypes.bfloat16, dtypes.bfloat16),
       (dtypes.float, dtypes.float16, dtypes.float16),
+      (dtypes.fp8e5m2, dtypes.fp8e5m2, dtypes.fp8e5m2),
+      (dtypes.fp8e4m3, dtypes.fp8e4m3, dtypes.fp8e4m3),
+      (dtypes.fp8e4m3, None, dtypes.float),
+      (dtypes.fp8e5m2, None, dtypes.float),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype) and is_dtype_supported(expected_dtype):

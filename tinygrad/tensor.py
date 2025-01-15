@@ -162,7 +162,7 @@ class Tensor(SimpleMathTrait):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      if dtype in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
       else: data = _frompy(data, dtype)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
@@ -360,7 +360,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     import numpy as np
-    if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
+    if self.dtype.base in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]: return self.float().numpy()
     assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)
@@ -1639,7 +1639,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     ret = self.cast(sum_acc_dtype(self.dtype) if acc_dtype is None else acc_dtype)._reduce(F.Sum, axis, keepdim)
-    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
+    return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2) else ret
 
   def prod(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
     """

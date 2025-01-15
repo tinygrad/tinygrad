@@ -34,7 +34,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{x.arg}u"),
   (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "1" if x.arg else "0"),
   # consts are rendered to larger type and casted
-  (UPat(Ops.CONST, (dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}f')})"),
+  (UPat(Ops.CONST, (dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.bfloat16, dtypes.half), name="x"),
+    lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}f')})"),
   (UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}u')})"),
   (UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
   # default const render
@@ -303,12 +304,31 @@ class CUDARenderer(CStyleLanguage):
     swizzle=(((6,7,2,3,4),(0,1,9,5,10,8)), ((6,7,9,0,1),(2,3,4,10,5,8)))) for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)]]
   tc_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.half, dtype_out=dtypes.float, opts=cuda_tc_opts,
     swizzle=(((6,7,2,3,4),(0,1,8,5,9)), ((6,7,8,0,1),(2,3,4,9,5))))]
+  tc_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do,
+    opts=cuda_tc_opts) for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
 
-  tc_sm80 = tc_81616 + tc_8168_f16
   tc_sm75 = tc_8168_f16
+  tc_sm80 = tc_sm75 + tc_81616
+  tc_sm90 = tc_sm80 + tc_81632_f8
   def __init__(self, arch:str):
-    self.tensor_cores, self.arch = CUDARenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else [], arch
+    arch_version = int(arch[3:])
+    if arch_version >= 90:
+        self.tensor_cores = CUDARenderer.tc_sm90
+    elif arch_version >= 80:
+        self.tensor_cores = CUDARenderer.tc_sm80
+    elif arch_version >= 75:
+        self.tensor_cores = CUDARenderer.tc_sm75
+    else:
+        self.tensor_cores = []
+    self.arch = arch
   def __reduce__(self): return self.__class__, (self.arch,)
+
+  # chyba dla mul A zrobilem rpzypadkiem
+  # TensorCore(dims=(a), threads=b, elements_per_thread=(c), dtype_in=di, dtype_out=do,
+  #   opts=("u0","u0","l0","l0","l1","l1","l1","u1","l0"), swizzle=(d)
+
+  # TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,4,4), dtype_in=di, dtype_out=do,
+  #   opts=("u0","l0","l0","l1","l1","l1","u1"))
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -324,7 +344,27 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
+
+  extra_matcher = PatternMatcher([
+    # cast float8 alus to float
+    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e4m3), UPat.var("y", dtype=dtypes.fp8e4m3))),
+      lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.float, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.fp8e4m3)),
+    (UPat(GroupOp.ALU, dtype=dtypes.fp8e4m3, name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e4m3)),
+    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.fp8e4m3), UPat.var("y", dtype=dtypes.fp8e4m3))),
+      lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e4m3, name="x"),
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e4m3))),
+    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
+      lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.fp8e5m2)),
+    (UPat(GroupOp.ALU, dtype=dtypes.fp8e5m2, name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e5m2)),
+    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
+      lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e5m2, name="x"),
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e5m2))),
+    ]) + extra_pm
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -333,14 +373,16 @@ class CUDARenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
-    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
+    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))",]
+              # "#define __nv_fp8_storage_t16 __nv_fp8x4_storage_t", "#define __nv_fp8_storage_t4 __nv_fp8x2_storage_t"]
 
     used_dtypes = uops_to_dtypes(uops)
+    if any(dt.scalar() in [dtypes.fp8e4m3, dtypes.fp8e5m2] for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
-
-    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if (dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16})
+                or (dt.count in (8,16) and dt.scalar() in {dtypes.fp8e4m3, dtypes.fp8e5m2})]
+    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]

@@ -179,6 +179,26 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "need fp8e4m3 support")
+  def test_rand_fp8e4m3(self):
+    N = 128
+    x = Tensor.rand((2, N, N), dtype=dtypes.fp8e4m3)
+    assert x.dtype == dtypes.fp8e4m3
+    nx = x.numpy()
+    assert nx[nx == 1].size == 0
+    assert nx[nx == 0].size > 0
+    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.fp8e4m3).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "need fp8e5m2 support")
+  def test_rand_fp8e5m2(self):
+    N = 128
+    x = Tensor.rand((2, N, N), dtype=dtypes.fp8e5m2)
+    assert x.dtype == dtypes.fp8e5m2
+    nx = x.numpy()
+    assert nx[nx == 1].size == 0
+    assert nx[nx == 0].size > 0
+    equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.fp8e5m2).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
   def test_rand_like(self):
     empty = Tensor.empty((80, 44))
     rand = Tensor.rand_like(empty)
