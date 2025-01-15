@@ -75,7 +75,7 @@ class ShapeTracker:
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    return ( v.shrink(v.mask) if (v:=self.views[0]).mask else v ).to_indexed_uops()[0].vmax + 1
+    return int( (v.shrink(v.mask) if (v:=self.views[0]).mask else v).to_indexed_uops()[0].vmax + 1 )
 
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
