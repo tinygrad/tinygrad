@@ -267,6 +267,15 @@ def cpu_objdump(lib, objdump_tool='objdump'):
     pathlib.Path(f.name).write_bytes(lib)
     print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
 
+def capstone_flatdump(lib):
+  import capstone
+  match platform.machine():
+    case 'x86_64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    case 'aarch64' | 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+    case machine: raise NotImplementedError(f"Capstone disassembly isn't supported for {machine}")
+  for instr in cs.disasm(lib, 0):
+    print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
+
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)
