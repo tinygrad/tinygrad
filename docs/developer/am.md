@@ -6,6 +6,7 @@ AM driver is a userspace driver targeting AMD's 7900XTX. You only need tinygrad 
 Make sure that amdgpu module is unloaded and just run tinygrad with `AMD=1`!
 
 Optional requirements:
+
 * System without IOMMU for P2P / SDMA support
 * vfio-pci module for IRQ handling
 
