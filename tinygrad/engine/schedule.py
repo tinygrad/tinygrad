@@ -444,6 +444,11 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
 def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
   for x in sink.src: realize(ctx, x.buf_uop, x)
 
+def create_subbuffer(ctx:ScheduleContext, base:UOp, b:UOp, root:UOp, x:UOp):
+  if not root.device.startswith("DISK"): return None
+  buffers[b] = vbuf = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
+
 do_realize = PatternMatcher([
   # always realize sinked ops
   (UPat(Ops.SINK, name="sink"), sink_outputs),
@@ -453,9 +458,10 @@ do_realize = PatternMatcher([
   (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
-  # realize before COPY or BUFFER_VIEW
+  # realize before COPY
   (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  # substitute BITCAST/CONTIGUOUS for BUFFER_VIEW on DISK
+  (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat(Ops.VIEW, name="x", src=(UPat(Ops.BUFFER),)))), create_subbuffer),
 ])
 
 # **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
@@ -491,10 +497,6 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.base.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
-  # BUFFER_VIEW overrides the underlying buffer
-  # TODO: this should be a shrink on the buffer
-  if op.op is Ops.BUFFER_VIEW:
-    buffers[buf_uop] = (x:=op.src[0]).buf_uop.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
