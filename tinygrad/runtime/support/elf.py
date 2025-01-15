@@ -52,7 +52,7 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
   raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
 
-def jit_loader(obj: bytes):
+def jit_loader(obj: bytes) -> bytes:
   image, _, relocs = elf_loader(obj)
   # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
   for ploc,tgt,r_type,r_addend in relocs:

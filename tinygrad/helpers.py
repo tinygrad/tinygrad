@@ -267,7 +267,7 @@ def cpu_objdump(lib, objdump_tool='objdump'):
     pathlib.Path(f.name).write_bytes(lib)
     print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
 
-def capstone_flatdump(lib):
+def capstone_flatdump(lib: bytes):
   import capstone
   match platform.machine():
     case 'x86_64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
