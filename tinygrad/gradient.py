@@ -39,6 +39,8 @@ pm_gradient = PatternMatcher([
 
   # there's no gradient for...is this ASSIGN?
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BUFFER_VIEW))), lambda: (None, None)),
+  # also no gradient for bitcast
+  (UPat(Ops.BITCAST), lambda ctx: (None,)),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
