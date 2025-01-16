@@ -413,7 +413,7 @@ class Tensor(SimpleMathTrait):
       lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
     # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    mlb = MultiLazyBuffer([lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
+    mlb = MultiLazyBuffer([lb.contiguous() for lb in sharded_lbs], axis)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
@@ -3130,9 +3130,10 @@ class Tensor(SimpleMathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
+  # TODO: tensor should stop checking if things are const
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
-    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.is_unrealized_unmasked_const() \
-      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
+    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.base.op is Ops.CONST \
+      and unwrap(x.lazydata.st).views[0].mask is None and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
