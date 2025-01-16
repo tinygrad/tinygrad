@@ -179,7 +179,7 @@ class Tensor(SimpleMathTrait):
     # data might be on a different device
     if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data, UOp): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None)
+    elif isinstance(data, UOp): self.lazydata = Tensor(data).shard(device).lazydata
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
@@ -399,14 +399,22 @@ class Tensor(SimpleMathTrait):
     Shards the tensor across the given devices. Optionally specify which axis to shard on.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.empty(2, 3)
+    t = Tensor.empty(2, 4)
     print(t.shard((t.device, t.device), axis=1).lazydata)
     ```
     """
     assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
-    if axis is not None: axis = self._resolve_dim(axis)
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis), device=devices, requires_grad=self.requires_grad)
+    if axis is None: lbs = [self.lazydata] * len(devices)
+    else:
+      axis = self._resolve_dim(axis)
+      sz = ceildiv(self.shape[axis], len(devices))
+      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
+      lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
+    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
+    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
+    mlb = MultiLazyBuffer([lb.contiguous() for lb in sharded_lbs], axis)
+    return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
     """
@@ -907,23 +915,29 @@ class Tensor(SimpleMathTrait):
     print(dy.tolist())  # dz/dy
     ```
     """
-    assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
-    target_uops: list[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-    grads = compute_gradient(self.lazydata, self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata), target_uops)
-    ret = []
-    for x in target_uops:
-      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
-      ret.append(Tensor(y, device=x.device))
-    return ret
+    if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
+    rets = []
+    for i,(uop,grad) in enumerate(zip(self.lazydata.lbs, gradient.lazydata.lbs)):
+      target_uops = [x.lazydata.lbs[i] for x in targets]
+      grads = compute_gradient(uop, grad, set(target_uops))
+      ret = []
+      for x in target_uops:
+        if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
+        ret.append(y)
+      rets.append(ret)
+    # create returned Tensors
+    if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
+    return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
+                   device=t.device) for t,u in zip(targets, zip(*rets))]
 
-  def _deepwalk(self):
-    def _walk(node, visited):
+  def _deepwalk(self) -> list[Tensor]:
+    def _walk(node:Tensor, visited:set[Tensor]):
       visited.add(node)
       # if tensor is not leaf, reset grad
       if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: node.grad = None
       if ctx:
-        for i in node._ctx.parents:
+        for i in cast(Function, node._ctx).parents:
           if i not in visited: yield from _walk(i, visited)
         yield node
     return list(_walk(self, set()))
@@ -946,18 +960,22 @@ class Tensor(SimpleMathTrait):
       # this is "implicit gradient creation"
       gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
 
+    toposort_uop = self.lazydata.toposort
     assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
     self.grad = gradient
     for t0 in reversed(toposorted):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
-      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
-      grads = t0._ctx.backward(t0.grad.lazydata)
+      ctx = cast(Function, t0._ctx)
+      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := ctx.metadata) is not None else None)
+      grads = ctx.backward(t0.grad.lazydata)
       _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-        for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
-      for t, g in zip(t0._ctx.parents, grads):
+        for g in ([grads] if len(ctx.parents) == 1 else grads)]
+      for t, g in zip(ctx.parents, grads):
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
+          assert t.lazydata in toposort_uop or (isinstance(t.lazydata, MultiLazyBuffer) and any(x in toposort_uop for x in t.lazydata.lbs)), \
+            f"grad uop must have a path from self\ngrad uop: {t.lazydata}"
           t.grad = g if t.grad is None else (t.grad + g)
       if not retain_graph: del t0._ctx
     return self

@@ -500,7 +500,7 @@ break_sched = PatternMatcher([
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
   if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
-  for x in op.src:
+  for x in op.base.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   # BUFFER_VIEW overrides the underlying buffer
   # TODO: this should be a shrink on the buffer

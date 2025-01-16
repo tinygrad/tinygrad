@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple, merge_views
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import verify_ast
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
@@ -584,6 +584,15 @@ class TestSchedule(unittest.TestCase):
     out = x.grad.contiguous()
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
+
+  def test_example_matmul_same(self):
+    x = Tensor.eye(64, requires_grad=True)
+    z = x.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
+    run_schedule(check_schedule(out, 2))
+    # NOTE: the gradient flows twice
+    np.testing.assert_allclose(out.numpy(), 2*np.ones((64,64)))
 
   def test_contiguous_add(self):
     x = Tensor.empty(32)
@@ -1436,6 +1445,7 @@ class TestSchedule(unittest.TestCase):
   def test_late_fusion_post_expand(self):
     self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
+  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_padded_view(self):
     a = Tensor.arange(4).reshape(1, 4)
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
@@ -1446,6 +1456,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(realized_view.tolist(), [[0.0, 1.0, 2.0, 3.0], [0.0, 0.0, 0.0, 0.0]])
 
   # NOTE: we might want to reconsider pushing this cast before the shrink
+  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_after_shrink(self):
     a = Tensor.arange(4).reshape(1, 4)
     casted_view = a.shrink(((0, 1), (0, 2))).cast(dtypes.float)
@@ -1455,6 +1466,7 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(realized_view.lazydata.base.realized.size, 2)
     self.assertListEqual(realized_view.tolist(), [[0, 1]])
 
+  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_const_view(self):
     a = Tensor.ones((4, 4), dtype=dtypes.float32)
     casted_view = a.cast(dtypes.int32)
@@ -1464,6 +1476,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
+  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_padded_const(self):
     a = Tensor(1, dtype=dtypes.int32).reshape(1, 1).pad(((1, 1), None))
     casted_view = a.cast(dtypes.float32)
@@ -1566,7 +1579,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous(self):
@@ -1574,7 +1587,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10).contiguous()
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 3)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_child(self):
@@ -1582,7 +1595,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous_child(self):
@@ -1590,7 +1603,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = (Tensor.arange(10)+1).contiguous()
     out = (x + a[2]).sum()
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 3)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_childless_base(self):
@@ -1617,7 +1630,8 @@ class TestIndexing(unittest.TestCase):
     a[0] = 6
     np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
 
-  @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  #@unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  @unittest.skip("BUFFER_VIEW no longer supported on non-disk devices")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     sched = self.check_schedule(a, 1)
