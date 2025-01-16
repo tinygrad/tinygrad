@@ -106,8 +106,7 @@ class OnnxSession:
   def __init__(self, model: ModelProto):
     # parse model protobuf
     self.is_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in model.graph.node)
-    self.old_training = Tensor.training
-    self.old_no_grad = Tensor.no_grad
+    self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
     self.values = {x.name:buffer_parse(x) for x in model.graph.initializer}
@@ -194,5 +193,5 @@ class OnnxSession:
 
       # limit is used for debug purposes only
       if node.num == limit: return {name:self.values[name] for name in node.outputs}
-    if self.is_training: Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
+    Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
     return {name:self.values[name] for name in self.output_spec}
