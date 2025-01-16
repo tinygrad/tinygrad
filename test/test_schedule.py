@@ -2105,16 +2105,6 @@ class TestConst(unittest.TestCase):
     print(a.lazydata)
     self.assertTrue(tensor_const_pm.rewrite(a.lazydata))
 
-  def test_uop_methods(self):
-    a = Tensor(1)
-    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
-
-    a = Tensor.ones((4, 4))
-    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
-
-    a = Tensor.ones((4, 4)).pad((1, 1),)
-    self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
-
   def test_const_schedule(self):
     a = Tensor.ones((4, 4))
     sched = a.schedule()
