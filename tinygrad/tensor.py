@@ -922,7 +922,6 @@ class Tensor(SimpleMathTrait):
       target_uops = [x.lazydata.lbs[i] for x in targets]
       grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
-      # NOTE: we have to track this because two different Tensors can point to the same UOp
       for x in target_uops:
         if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
         ret.append(y)
