@@ -62,18 +62,18 @@ def type_parse(onnx_type: TypeProto):
 # ***** onnx spec *****
 class ValueType(enum.Enum):
   # supported
-  TENSOR = enum.auto(); SEQUENCE = enum.auto()
+  TENSOR = enum.auto(); SEQUENCE = enum.auto() # noqa: E702
   # unsupported
-  MAP = enum.auto(); OPTIONAL = enum.auto(); SPARSE_TENSOR = enum.auto(); OPAQUE = enum.auto()
+  MAP = enum.auto(); OPTIONAL = enum.auto(); SPARSE_TENSOR = enum.auto(); OPAQUE = enum.auto() # noqa: E702
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class OnnxValue:
   type: ValueType
   is_optional: bool
   shape: tuple[str|int]
   dtype: DType
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class OnnxNode:
   num: int
   op: str
@@ -82,6 +82,14 @@ class OnnxNode:
   opts: dict[str, Any]
 
 # ***** python const *****
+required_input_python_consts: dict[str, tuple[int, ...]] = {
+  "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
+  "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+  "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
+  **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
+  **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
+}
+
 cache_misses = 0
 @functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor):
@@ -90,8 +98,8 @@ def _cached_to_python_const(t:Tensor):
   return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t) -> list[ConstType]|ConstType|bytes:
-  if not isinstance(t, Tensor): return t
+def to_python_const(t, op, idx) -> list[ConstType]|ConstType|bytes:
+  if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
   global cache_misses
   ret = _cached_to_python_const(t)
   if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
@@ -115,16 +123,8 @@ class OnnxSession:
     self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
-    self.variable_dims = {}
+    self.variable_dims: dict[str, int] = {}
 
-    # these values are expected to be python consts
-    self.required_input_python_consts: dict[str, tuple[int, ...]] = {
-      "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
-      "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
-      "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
-      **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
-      **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
-    }
     # TODO: move extra.onnx_ops here so we don't have to deal with annoying circular import
     # TODO: clean up opset stuff after moving extra.onnx_ops here
     self.onnx_ops_module = importlib.import_module('extra.onnx_ops')
@@ -142,14 +142,13 @@ class OnnxSession:
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
       return sequence
-    if spec.type is ValueType.TENSOR:
-      tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-      for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
-        if isinstance(onnx_dim, str):
-          onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, user_dim_input)
-        if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
-      return tensor
-    raise RuntimeError(f"{name} was not parsed properly")
+    assert spec.type is ValueType.TENSOR
+    tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
+    for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
+      if isinstance(onnx_dim, str):
+        onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
+      if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
+    return tensor
 
   def _dispatch_op(self, op, inps, opts):
     if op in self.onnx_ops: return self.onnx_ops[op](*inps, **opts)
@@ -169,20 +168,16 @@ class OnnxSession:
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for node in self.graph_nodes:
-      inps = [self.graph_values.get(name) for name in node.inputs]
-      opts, op = node.opts, node.op
+      inps = [to_python_const(self.graph_values.get(name), node.op, i) for i,name in enumerate(node.inputs)]
+      opts = node.opts
 
       # provide additional opts
-      if op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if op == "Gradient": opts['intermediate_tensors'] = self.graph_values
+      if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
+      if node.op == "Gradient": opts['intermediate_tensors'] = self.graph_values
 
-      required_consts = self.required_input_python_consts.get(op, ())
-      inps = [to_python_const(t) if i in required_consts else t for i,t in enumerate(inps)]
-
-      if debug >= 1: print(f"{node.num}: op '{node.op}'")
-      if debug >= 2: print(f"\tattributes: {opts}")
-      if debug >= 2: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
-      ret = self._dispatch_op(op, inps, opts)
+      if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
+      if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
+      ret = self._dispatch_op(node.op, inps, opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
