@@ -447,7 +447,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
     return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   @property
   def lbs(self): return [self]
   @property
