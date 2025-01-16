@@ -84,6 +84,14 @@ class TestTensorUOp(unittest.TestCase):
     sched = empty.schedule()
     self.assertEqual(len(sched), 0)
 
+  def test_contiguous_folded_alu(self):
+    a = Tensor.empty(8, 8)
+    # NOTE: the buffer for mul_0 late folds to just a CONST
+    mul_0 = a*0
+    out = mul_0.shrink(((4, 8), (0, 8))).contiguous()
+    out.realize()
+    self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
+
 reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, src=(UPat(), UPat(), UPat(Ops.REDUCE_AXIS)))))
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
