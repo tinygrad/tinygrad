@@ -444,7 +444,7 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
 def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
   for x in sink.src: realize(ctx, x.buf_uop, x)
 
-def create_subbuffer(ctx:ScheduleContext, base:UOp, b:UOp, root:UOp, x:UOp):
+def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
   if not root.device.startswith("DISK"): return None
   if x.op is not Ops.VIEW: x = x.src[-1] # TODO: remove this once forced_realize is gone
   buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
@@ -462,7 +462,7 @@ do_realize = PatternMatcher([
   # realize before COPY or BUFFER_VIEW
   (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  # substitute BITCAST/CONTIGUOUS for BUFFER_VIEW on DISK
+  # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
 ])
 
