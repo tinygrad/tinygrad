@@ -11,9 +11,10 @@ def create_uniform(wgpu_device, val):
 
 class WebGPUProgram:
   def __init__(self, dev, name:str, lib:bytes):
-    self.dev = dev
+    (self.dev, self.timestamp_supported) = dev
     self.name, self.lib, self.prg = name, lib, utils.create_shader_module(self.dev, lib.decode())   # NOTE: this is the compiler
   def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
+    wait = wait and self.timestamp_supported
     tmp_bufs = [*bufs]
     buf_patch = False
 
@@ -82,6 +83,9 @@ class WebGpuAllocator(Allocator):
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     adapter = utils.request_adapter_sync(power_preference=webgpu.WGPUPowerPreference_HighPerformance)
-    wgpu_device = utils.request_device_sync(adapter, required_features=[webgpu.WGPUFeatureName_TimestampQuery, webgpu.WGPUFeatureName_ShaderF16])
+    timestamp_supported = "WGPUFeatureName_TimestampQuery" in utils.supported_features(adapter)
+    required_features = [webgpu.WGPUFeatureName_ShaderF16]
+    if timestamp_supported: required_features.append(webgpu.WGPUFeatureName_TimestampQuery)
+    wgpu_device = utils.request_device_sync(adapter, required_features=required_features)
     super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), Compiler(),
-                     functools.partial(WebGPUProgram, (wgpu_device)))
+                     functools.partial(WebGPUProgram, (wgpu_device, timestamp_supported)))
