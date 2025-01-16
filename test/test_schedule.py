@@ -576,9 +576,19 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
+  @unittest.skip("these two Tensors are the same")
   def test_example_matmul(self):
     x = Tensor.eye(64, requires_grad=True)
     y = Tensor.eye(64, requires_grad=True)
+    z = y.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
+    run_schedule(check_schedule(out, 2))
+    np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
+
+  def test_example_matmul_contig(self):
+    x = Tensor.eye(64, requires_grad=True).contiguous().realize()
+    y = Tensor.eye(64, requires_grad=True).contiguous().realize()
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
