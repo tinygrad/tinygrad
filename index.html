@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+
+<head>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
+</head>
+
+<body>
+  <div>
+    <h1>Tinygrad in browser</h1>
+    <p>Require JavaScript Promise Integration (JSPI) to work. You can find out more about it <a href="https://v8.dev/blog/jspi">here</a>
+       and track its adoption <a href="https://webassembly.org/features/">here</a>.</p>
+    <p>To view or modify the setting, enter this in the browser URL: <code>chrome://flags/#enable-experimental-webassembly-jspi</code></p>
+    <p>JSPI status: <span id="jspi_status"></span></p>
+    
+    <div>
+      <button id="run">Run (cmd/ctrl + Enter)</button>
+      <button id="clear">Clear output</button>
+    </div>
+    <textarea id="userscript" spellcheck="false" rows="10" cols="100">
+from tinygrad import Tensor
+from tinygrad.helpers import DEBUG
+DEBUG.value = 2
+a = Tensor.rand(20)
+print(a.tolist())
+    </textarea>
+    <textarea id="output" rows="30" cols="200"></textarea>
+
+  <script type="module">
+    const jspi = "Suspending" in WebAssembly
+    if (!jspi) {
+      document.getElementById("jspi_status").innerHTML = "\u274C Not enabled. You will need to enable JSPI then restart your browser"
+      document.getElementById("run").disabled = true;
+      throw new Error("JSPI not supported")
+    } else {
+      document.getElementById("jspi_status").textContent = "\u2705 Enabled"
+    }
+    const NUM_ELEMENTS = 1000;
+    const BUFFER_SIZE = NUM_ELEMENTS * 4; // Buffer size, in bytes
+    const pyodideWorker = new Worker("./worker.mjs", { type: "module" });
+    const output = document.getElementById("output")
+    const script = document.getElementById("userscript")
+    function logOutput(data) {
+      output.innerHTML = `${output.innerHTML}\n${data}`
+    }
+    pyodideWorker.addEventListener("message", ({data}) => {
+      logOutput(data)
+    })
+    const runButton = document.getElementById("run")
+    function getScriptAndRun() {
+      const content = script.value      
+      console.log(`Executing script:\n${content}`)
+      logOutput("Running...")
+      pyodideWorker.postMessage({ python: content });
+    }
+    runButton.addEventListener("click", getScriptAndRun)
+    document.addEventListener("keydown", e => {
+      if (e.metaKey && e.code === "Enter") { // cmd/ctrl + enter 
+        getScriptAndRun()        
+      }
+    })
+    const clearOutputButton = document.getElementById("clear")
+    clearOutputButton.addEventListener("click", () => {
+      output.innerHTML = ""
+    })
+
+
+  </script>
+</body>
+
+</html>
