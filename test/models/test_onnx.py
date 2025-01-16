@@ -128,7 +128,7 @@ class TestOnnxModel(unittest.TestCase):
 
     def run(img):
       inputs = {input_name: preprocess(img, new=input_new)}
-      tinygrad_out = list(onnx_sess(inputs, debug=debug).values())[0].numpy()
+      tinygrad_out = list(onnx_sess.run(inputs, debug=debug).values())[0].numpy()
       return tinygrad_out.argmax()
 
     cls = run(chicken_img)

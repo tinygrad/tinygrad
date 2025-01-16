@@ -621,12 +621,5 @@ def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str,
   return [X, V]
 
 def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **__):
-  print(intermediate_tensors)
-  print(y)
   intermediate_tensors[y].backward()
-  print(inputs[0].requires_grad)
-  print(tuple([t.grad for t in inputs]))
-  print(Tensor.no_grad)
-  print(Tensor.training)
-
   return tuple([t.grad for t in inputs])
