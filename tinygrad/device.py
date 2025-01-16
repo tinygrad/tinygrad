@@ -220,7 +220,7 @@ MAP_JIT = 0x0800
 
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
-  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'gcc_s'))
+  helper_handle = ctypes.CDLL(ctypes.util.find_library('System') if OSX else 'libgcc_s.so.1')
 
   def __init__(self, name:str, lib:bytes):
     # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
