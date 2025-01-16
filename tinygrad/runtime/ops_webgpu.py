@@ -46,8 +46,7 @@ class WebGPUProgram:
     utils.dispatch_workgroups(compute_pass, *global_size)
     utils.end_compute_pass(compute_pass)
 
-    if wait:
-      utils.resolve_query_set(command_encoder, query_set, 0, 2, query_buf, 0)
+    if wait: utils.resolve_query_set(command_encoder, query_set, 0, 2, query_buf, 0)
 
     cmd_buf = utils.command_encoder_finish(command_encoder)
     utils.submit(self.dev, [cmd_buf])
