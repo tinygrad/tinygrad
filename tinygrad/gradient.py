@@ -1,4 +1,4 @@
-from typing import cast
+from typing import cast, Iterator
 import math, functools
 from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
@@ -37,17 +37,15 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
     (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
 
-  # there's no gradient for...is this ASSIGN?
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BUFFER_VIEW))), lambda: (None, None)),
-  # also no gradient for bitcast
+  # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda ctx: (None,)),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
-def _deepwalk(root:UOp, targets:list[UOp]):
+def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   @functools.lru_cache(None)
   def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src)
-  def _walk(node:UOp, visited:set[UOp]):
+  def _walk(node:UOp, visited:set[UOp]) -> Iterator[UOp]:
     visited.add(node)
     if node.op is Ops.DETACH: return
     if is_in_target_path(node):
@@ -56,7 +54,7 @@ def _deepwalk(root:UOp, targets:list[UOp]):
       yield node
   return list(_walk(root, set()))
 
-def compute_gradient(root:UOp, root_grad:UOp, targets:list[UOp]) -> dict[UOp, UOp]:
+def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue

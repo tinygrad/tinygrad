@@ -413,7 +413,7 @@ class Tensor(SimpleMathTrait):
       lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
     # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    mlb = MultiLazyBuffer([lb.contiguous(allow_buffer_view=False) for lb in sharded_lbs], axis)
+    mlb = MultiLazyBuffer([lb.contiguous() for lb in sharded_lbs], axis)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
@@ -920,7 +920,7 @@ class Tensor(SimpleMathTrait):
     rets = []
     for i,(uop,grad) in enumerate(zip(self.lazydata.lbs, gradient.lazydata.lbs)):
       target_uops = [x.lazydata.lbs[i] for x in targets]
-      grads = compute_gradient(uop, grad, target_uops)
+      grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
       for x in target_uops:
         if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
@@ -931,13 +931,13 @@ class Tensor(SimpleMathTrait):
     return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
                    device=t.device) for t,u in zip(targets, zip(*rets))]
 
-  def _deepwalk(self):
-    def _walk(node, visited):
+  def _deepwalk(self) -> list[Tensor]:
+    def _walk(node:Tensor, visited:set[Tensor]):
       visited.add(node)
       # if tensor is not leaf, reset grad
       if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: node.grad = None
       if ctx:
-        for i in node._ctx.parents:
+        for i in cast(Function, node._ctx).parents:
           if i not in visited: yield from _walk(i, visited)
         yield node
     return list(_walk(self, set()))
@@ -965,12 +965,13 @@ class Tensor(SimpleMathTrait):
     self.grad = gradient
     for t0 in reversed(toposorted):
       if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
-      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
-      grads = t0._ctx.backward(t0.grad.lazydata)
+      ctx = cast(Function, t0._ctx)
+      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := ctx.metadata) is not None else None)
+      grads = ctx.backward(t0.grad.lazydata)
       _METADATA.reset(token)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-        for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
-      for t, g in zip(t0._ctx.parents, grads):
+        for g in ([grads] if len(ctx.parents) == 1 else grads)]
+      for t, g in zip(ctx.parents, grads):
         if g is not None and t.requires_grad:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           assert t.lazydata in toposort_uop or (isinstance(t.lazydata, MultiLazyBuffer) and any(x in toposort_uop for x in t.lazydata.lbs)), \
@@ -3129,9 +3130,10 @@ class Tensor(SimpleMathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
+  # TODO: tensor should stop checking if things are const
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
-    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.is_unrealized_unmasked_const() \
-      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
+    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.base.op is Ops.CONST \
+      and unwrap(x.lazydata.st).views[0].mask is None and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
