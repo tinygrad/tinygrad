@@ -17,7 +17,6 @@
       <button id="clear">Clear output</button>
     </div>
     <textarea id="userscript" spellcheck="false" rows="10" cols="100">
-
 from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored, trange, DEBUG
@@ -46,13 +45,15 @@ model = Model()
 opt = nn.optim.Adam(nn.state.get_parameters(model))
 @Tensor.train()
 def train():
-  x = Tensor.rand(4, 1, 28, 28)
-  y = Tensor([0,1,1,2])
+  batch = 1024
+  x = Tensor.rand(batch, 1, 28, 28)
+  y = Tensor.rand(batch)
   loss = model(x).sparse_categorical_crossentropy(y).backward()
   opt.step()
   print(f"{loss.tolist()=}")
 train()
 
+    
     </textarea>
     <textarea id="output" rows="30" cols="200" spellcheck="false"></textarea>
 
@@ -73,8 +74,9 @@ train()
     function logOutput(data) {
       output.innerHTML = `${output.innerHTML}\n${data}`
     }
+    const remove_ansi_escape = (text) => text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
     pyodideWorker.addEventListener("message", ({data}) => {
-      logOutput(data)
+      logOutput(remove_ansi_escape(data))
     })
     const runButton = document.getElementById("run")
     function getScriptAndRun() {
