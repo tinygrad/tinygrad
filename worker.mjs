@@ -1,10 +1,20 @@
 import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v0.27.1/full/pyodide.mjs";
 
-let pyodideReadyPromise = loadPyodide({
-  env: {
-    "WEBGPU": "1"
-  }
-});
+let initPyodide = async () => {
+  console.log("initializing")
+  const pyodide = await loadPyodide({
+    env: {
+      "WEBGPU": "1"
+    }
+  });
+  await pyodide.loadPackage("numpy");
+  await pyodide.loadPackage("sqlite3");
+  await pyodide.loadPackage(`${self.location.origin}/tinygrad/tinygrad-0.10.0-py3-none-any.whl`);
+  console.log("Pyodide initialized")
+  return pyodide
+}
+
+let pyodideReadyPromise = initPyodide()
 
 self.onmessage = async (event) => {
   // make sure loading is done
@@ -19,10 +29,6 @@ self.onmessage = async (event) => {
       self.postMessage(output)
     }
   })
-  await pyodide.loadPackage("numpy");
-  await pyodide.loadPackage("sqlite3");
-  console.log("origin", self.location)
-  await pyodide.loadPackage(`${self.location.origin}/tinygrad/tinygrad-0.10.0-py3-none-any.whl`);
   const { python } = event.data;
   try {
     await pyodide.runPythonAsync(python);

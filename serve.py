@@ -1,7 +1,7 @@
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import time
 
-hostName = "localhost"
+hostName = "0.0.0.0"
 serverPort = 8000
 
 class NoCacheHTTPRequestHandler(SimpleHTTPRequestHandler):

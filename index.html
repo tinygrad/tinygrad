@@ -2,7 +2,6 @@
 <html>
 
 <head>
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
 </head>
 
 <body>
@@ -23,7 +22,11 @@ from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored, trange, DEBUG
 from tinygrad.nn.datasets import mnist
+
 DEBUG.value = 2
+
+a = Tensor.arange(16).reshape((4, 4))
+print(a.tolist())
 
 class Model:
   def __init__(self):
@@ -48,6 +51,7 @@ def train():
   y = Tensor([0,1,1,2])
   loss = model(x).sparse_categorical_crossentropy(y).backward()
   opt.step()
+  print(f"{loss.tolist()=}")
 train()
 
     </textarea>
