@@ -7,7 +7,7 @@ try:
   import onnx
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
-from extra.onnx import get_run_onnx
+from extra.onnx import OnnxSession
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
 
@@ -26,7 +26,7 @@ np.random.seed(1337)
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
-    run_onnx = get_run_onnx(onnx_model)
+    onnx_sess = OnnxSession(onnx_model)
     def get_inputs():
       np_inputs = {
         "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -42,7 +42,7 @@ class TestOnnxModel(unittest.TestCase):
     for _ in range(7):
       inputs = get_inputs()
       st = time.monotonic()
-      tinygrad_out = run_onnx(inputs)['outputs']
+      tinygrad_out = onnx_sess.run(inputs)['outputs']
       mt = time.monotonic()
       tinygrad_out.realize()
       mt2 = time.monotonic()
@@ -57,7 +57,7 @@ class TestOnnxModel(unittest.TestCase):
       inputs = get_inputs()
       pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
       pr.enable()
-    tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out = onnx_sess.run(inputs)['outputs']
     tinygrad_out.realize()
     tinygrad_out = tinygrad_out.numpy()
     if not CI:
@@ -70,7 +70,7 @@ class TestOnnxModel(unittest.TestCase):
 
   def test_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
-    run_onnx = get_run_onnx(onnx_model)
+    onnx_sess = OnnxSession(onnx_model)
     print("got run_onnx")
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -84,7 +84,7 @@ class TestOnnxModel(unittest.TestCase):
 
     st = time.monotonic()
     print("****** run onnx ******")
-    tinygrad_out = run_onnx(inputs)['outputs']
+    tinygrad_out = onnx_sess.run(inputs)['outputs']
     mt = time.monotonic()
     print("****** realize ******")
     tinygrad_out.realize()
@@ -124,11 +124,11 @@ class TestOnnxModel(unittest.TestCase):
     onnx_model = onnx.load(fn)
     print("onnx loaded")
     from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
-    run_onnx = get_run_onnx(onnx_model)
+    onnx_sess = OnnxSession(onnx_model)
 
     def run(img):
       inputs = {input_name: preprocess(img, new=input_new)}
-      tinygrad_out = list(run_onnx(inputs, debug=debug).values())[0].numpy()
+      tinygrad_out = list(onnx_sess(inputs, debug=debug).values())[0].numpy()
       return tinygrad_out.argmax()
 
     cls = run(chicken_img)

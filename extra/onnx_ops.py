@@ -575,12 +575,9 @@ from tinygrad.nn.optim import SGD
 def onnx_training(input_group_size):
   def _decorator(func):
     def __wrapper(R:Tensor, T:int, *inputs:Tensor, **kwargs):
-      old_training = Tensor.training
-      Tensor.training = True
       R = R.detach()
       groups = len(inputs) // input_group_size
       ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
-      Tensor.training = old_training
       return tuple(flatten(zip(*ret)))
     return __wrapper
   return _decorator
@@ -624,5 +621,12 @@ def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str,
   return [X, V]
 
 def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **__):
+  print(intermediate_tensors)
+  print(y)
   intermediate_tensors[y].backward()
+  print(inputs[0].requires_grad)
+  print(tuple([t.grad for t in inputs]))
+  print(Tensor.no_grad)
+  print(Tensor.training)
+
   return tuple([t.grad for t in inputs])
