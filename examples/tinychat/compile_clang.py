@@ -39,8 +39,6 @@ if __name__=="__main__":
     #Step(name = "q6k_to_f32", input = [Tensor.randn(3_144_960, dtype=dtypes.uint8)], forward = q6k_to_f32),
   ]
 
-  prg = ""
-
   # TODO: refactor to move some corrected CLANG rendering to export_model.py
   def compile_step(model, step: Step):
     run, special_names = jit_model(step, *step.input)
@@ -56,19 +54,16 @@ if __name__=="__main__":
     # TODO: add symbolic variable (start_pos) as arg to net function and enclosed functions that use it
 
     # declare buffers that we'll load weights into from javascript
-    wasm_to_js_pairs = []
-    buf_casts = []
+    buf_to_name = []
     # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
     dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
     for name,data in bufs_to_save.items():
       n_bytes, dtype, weightbuf_id = data
-      cprog.append(f"unsigned char {name}_data[{n_bytes}];")
-      c_dtype = dtype_map[dtype]
-      buf_casts.append(f"{c_dtype}* {name} = ({c_dtype}*){name}_data;")
-      wasm_to_js_pairs.append((f"{name}_data", f"{weightbuf_to_name[weightbuf_id]}"))
+      cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
+      buf_to_name.append((f"{name}", f"{weightbuf_to_name[weightbuf_id]}"))
 
-    # wasm_to_js_pairs must have unchanged order from hereafter. We will map downloaded weights in javascript to buffers in wasm using array index
-    cprog.append(f"unsigned char* buffers[] = {{\n{"\n".join([wasm_name for wasm_name, js_name in wasm_to_js_pairs])}\n}}")
+    # buf_to_name must have unchanged order from hereafter. We rely on integer index of void* buffers to load weights from javascript
+    cprog.append(f"void* buffers[] = {{\n{",\n".join([buf_name for buf_name, weight_name in buf_to_name])}\n}};")
 
     # declare zero-filled intermediate buffers
     for name in set(bufs.keys()) - set(bufs_to_save.keys()):
@@ -76,26 +71,51 @@ if __name__=="__main__":
       n_bytes, dtype, weightbuf_id = bufs[name]
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
 
-    # TODO: function to be exposed to JS for loading weights
+    # TODO: function to be exposed to JS for getting pointer from void* buffers based on index
 
-    # TODO: are inputs/outputs always arrays?
+    # TODO: start_pos should be an input here
     inputs = ", ".join([f'{dtype_map[bufs[input][1]]}* {input}' for input in input_names])
     outputs = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in output_names])
     cprog += list(functions.values())
     # TODO: move buf_casts into a separate function called once before inference, or instead setup weight buffers with final types?
-    cprog += [f"void net({inputs}, {outputs}) {{"] + buf_casts
+    cprog += [f"void net({inputs}, {outputs}) {{"]
     cprog += [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     cprog = "\n".join(cprog)
 
-    return cprog
+    with open(os.path.join(os.path.dirname(__file__), f"{step.name}.c"), "w") as text_file:
+      text_file.write(cprog)
+
+    return f"""\nvar {step.name} = function() {{
+
+  // load wasm module, get handle
+
+    return {{
+      "setup": async (safetensor, metadata) => {{
+
+      // fetch pointers to empty weight buffers on wasm heap
+      // allocate weights from JS memory to above pointers
+
+      // allocate wasm memory for input/output arrays
+
+        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
+
+          // set input buffer
+          // call net function
+          // set and return result
+        }}
+      }}
+    }}
+  }}"""
+
+  prg = ""
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
     prg += compile_step(model, step)
 
-  with open(os.path.join(os.path.dirname(__file__), "transformer.c"), "w") as text_file:
+  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
     text_file.write(prg)
 
-  # TODO: JS code for loading in weights based on wasm_to_js_pairs mapping
+  # TODO: JS code for loading in weights based on buf_to_name mapping
   # TODO: JS code for setting up inference function, analogous to net.js for WebGPU implementation
   done = 1
