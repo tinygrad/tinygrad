@@ -80,7 +80,6 @@ class OnnxNode:
   inputs: tuple[str]
   outputs: tuple[str]
   opts: dict[str, Any]
-  def __repr__(self): return f"{self.num}: op '{self.op}' inputs={self.inputs} opts={self.opts} outputs={self.outputs}"
 
 # ***** python const *****
 cache_misses = 0
@@ -104,28 +103,13 @@ def to_python_const(t) -> list[ConstType]|ConstType|bytes:
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxSession:
-  # these values are expected to be python consts
-  required_input_python_consts: dict[str, tuple[int, ...]] = {
-    "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
-    "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
-    "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
-    **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
-    **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
-  }
-  # TODO: move extra.onnx_ops here so we don't have to deal with annoying circular import
-  # TODO: clean up opset stuff after moving extra.onnx_ops here
-  onnx_ops_module = importlib.import_module('extra.onnx_ops')
-  onnx_ops = {
-    **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
-    "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf", "Mod")},
-  }
-
   def __init__(self, model: ModelProto):
     # parse model protobuf
     self.is_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in model.graph.node)
-    Tensor.no_grad = False if self.is_training else True
+    self.old_training = Tensor.training
+    self.old_no_grad = Tensor.no_grad
     Tensor.training = True if self.is_training else False
+    Tensor.no_grad = False if self.is_training else True
     self.values = {x.name:buffer_parse(x) for x in model.graph.initializer}
     self.input_spec = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.values}
     self.output_spec = {x.name:type_parse(x.type) for x in model.graph.output}
@@ -133,6 +117,23 @@ class OnnxSession:
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
     self.variable_dims = {}
+
+    # these values are expected to be python consts
+    self.required_input_python_consts: dict[str, tuple[int, ...]] = {
+      "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
+      "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+      "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
+      **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
+      **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
+    }
+    # TODO: move extra.onnx_ops here so we don't have to deal with annoying circular import
+    # TODO: clean up opset stuff after moving extra.onnx_ops here
+    self.onnx_ops_module = importlib.import_module('extra.onnx_ops')
+    self.onnx_ops = {
+      **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
+      "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
+      "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf", "Mod")},
+    }
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -152,7 +153,7 @@ class OnnxSession:
         if user_dim_input != onnx_dim:
           raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
       return tensor
-    raise NotImplementedError(f"{name} was not parsed properly")
+    raise RuntimeError(f"{name} was not parsed properly")
 
   def _dispatch_op(self, op, inps, opts):
     if op in self.onnx_ops: return self.onnx_ops[op](*inps, **opts)
@@ -182,11 +183,16 @@ class OnnxSession:
       required_consts = self.required_input_python_consts.get(op, ())
       inps = [to_python_const(t) if i in required_consts else t for i,t in enumerate(inps)]
 
-      if debug >= 1: print(node)
+      if debug >= 1: print(f"{node.num}: op '{node.op}'")
+      if debug >= 2: print(f"\tattributes: {opts}")
       if debug >= 2: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
       ret = self._dispatch_op(op, inps, opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
+      if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
+
       self.values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
+      # limit is used for debug purposes only
       if node.num == limit: return {name:self.values[name] for name in node.outputs}
+    if self.is_training: Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
     return {name:self.values[name] for name in self.output_spec}
