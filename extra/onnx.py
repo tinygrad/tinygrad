@@ -136,21 +136,18 @@ class OnnxSession:
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
+    # TODO: need true float16 for dtype checking
     if spec.type is ValueType.SEQUENCE:
       if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
-      # TODO: check for var dim
-      # TODO: need true float16 for dtype checking
       return sequence
     if spec.type is ValueType.TENSOR:
       tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-      # TODO: need true float16 for dtype checking
       for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
         if isinstance(onnx_dim, str):
           onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, user_dim_input)
-        if user_dim_input != onnx_dim:
-          raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
+        if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
       return tensor
     raise RuntimeError(f"{name} was not parsed properly")
 

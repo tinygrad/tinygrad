@@ -19,9 +19,6 @@ OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 def compile(onnx_file):
   onnx_model = onnx.load(onnx_file)
-  Tensor.no_grad = True
-  Tensor.training = False
-
   onnx_sess = OnnxSession(onnx_model)
   print("loaded model")
 

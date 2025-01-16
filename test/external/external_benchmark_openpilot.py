@@ -11,9 +11,6 @@ import numpy as np
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 if __name__ == "__main__":
-  Tensor.no_grad = True
-  Tensor.training = False
-
   onnx_model = onnx.load(onnx_path := fetch(OPENPILOT_MODEL))
   onnx_sess = OnnxSession(onnx_model)
 

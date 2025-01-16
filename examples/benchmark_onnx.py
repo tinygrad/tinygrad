@@ -6,8 +6,6 @@ from extra.onnx import OnnxSession
 def load_onnx_model(fn):
   onnx_file = fetch(fn)
   onnx_model = onnx.load(onnx_file)
-  Tensor.no_grad = True
-  Tensor.training = False
   onnx_sess = OnnxSession(onnx_model)
 
   # find preinitted tensors and ignore them
