@@ -339,6 +339,7 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
+    if any(luop.op is Ops.CONTIGUOUS for tr in group for luop in ctx.tensor_uops[tr]): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
