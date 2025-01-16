@@ -21,7 +21,8 @@ self.onmessage = async (event) => {
   })
   await pyodide.loadPackage("numpy");
   await pyodide.loadPackage("sqlite3");
-  await pyodide.loadPackage(`${self.location.origin}/tinygrad-0.10.0-py3-none-any.whl`);
+  console.log("origin", self.location)
+  await pyodide.loadPackage(`${self.location.origin}/tinygrad/tinygrad-0.10.0-py3-none-any.whl`);
   const { python } = event.data;
   try {
     await pyodide.runPythonAsync(python);
