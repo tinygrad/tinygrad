@@ -188,7 +188,8 @@ class OnnxSession:
 
       self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
-      # limit is used for debug purposes only
-      if node.num == limit: return {name:self.graph_values[name] for name in node.outputs}
+      if node.num == limit:
+        Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
+        return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
     return {name:self.graph_values[name] for name in self.graph_outputs}
