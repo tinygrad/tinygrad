@@ -109,10 +109,10 @@ class OnnxSession:
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
-    self.values = {x.name:buffer_parse(x) for x in model.graph.initializer}
-    self.input_spec = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.values}
-    self.output_spec = {x.name:type_parse(x.type) for x in model.graph.output}
-    self.nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
+    self.graph_values = {x.name:buffer_parse(x) for x in model.graph.initializer}
+    self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
+    self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
+    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
     self.variable_dims = {}
@@ -164,17 +164,17 @@ class OnnxSession:
     raise NotImplementedError(f"{op=} not supported")
 
   def run(self, inputs={}, debug=debug, limit=limit):
-    for name, input_spec in self.input_spec.items():
+    for name, input_spec in self.graph_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
-      self.values[name] = self._parse_input(name, inputs[name], input_spec)
+      self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
-    for node in self.nodes:
-      inps = [self.values.get(name) for name in node.inputs]
+    for node in self.graph_nodes:
+      inps = [self.graph_values.get(name) for name in node.inputs]
       opts, op = node.opts, node.op
 
       # provide additional opts
       if op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if op == "Gradient": opts['intermediate_tensors'] = self.values
+      if op == "Gradient": opts['intermediate_tensors'] = self.graph_values
 
       required_consts = self.required_input_python_consts.get(op, ())
       inps = [to_python_const(t) if i in required_consts else t for i,t in enumerate(inps)]
@@ -186,9 +186,9 @@ class OnnxSession:
       ret = ret if isinstance(ret, tuple) else (ret,)
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
-      self.values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
+      self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
       # limit is used for debug purposes only
-      if node.num == limit: return {name:self.values[name] for name in node.outputs}
+      if node.num == limit: return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
-    return {name:self.values[name] for name in self.output_spec}
+    return {name:self.graph_values[name] for name in self.graph_outputs}
