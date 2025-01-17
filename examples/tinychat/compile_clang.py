@@ -7,6 +7,7 @@ from tinygrad import Device, Variable, Tensor, dtypes
 from tinygrad.helpers import fetch
 from typing import List, Tuple, Any, NamedTuple
 from tinygrad.nn.state import get_state_dict
+from tinygrad.ops import Ops
 
 if __name__=="__main__":
   Device.DEFAULT = "CLANG"
@@ -45,13 +46,10 @@ if __name__=="__main__":
     functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
     state = get_state_dict(model)
     weightbuf_to_name = {id(x.lazydata.base.realized): name for name, x in state.items()}
-    input_names = [name for _,name in special_names.items() if "input" in name]
-    output_names = [name for _,name in special_names.items() if "output" in name]
     # this omits saving the random seeds, which therefore will be set in client by default to 0,0 (2x uint32)
     bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weightbuf_to_name}
 
     cprog = ["#include <tgmath.h>"]
-    # TODO: add symbolic variable (start_pos) as arg to net function and enclosed functions that use it
 
     # declare buffers that we'll load weights into from javascript
     buf_to_name = []
@@ -66,18 +64,23 @@ if __name__=="__main__":
     cprog.append(f"void* buffers[] = {{\n{",\n".join([buf_name for buf_name, weight_name in buf_to_name])}\n}};")
 
     # declare zero-filled intermediate buffers
-    for name in set(bufs.keys()) - set(bufs_to_save.keys()):
-      if 'output' in name or 'input' in name: continue
+    for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(special_names.values()):
       n_bytes, dtype, weightbuf_id = bufs[name]
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
 
     # TODO: function to be exposed to JS for getting pointer from void* buffers based on index
 
-    # TODO: start_pos should be an input here
-    inputs = ", ".join([f'{dtype_map[bufs[input][1]]}* {input}' for input in input_names])
-    outputs = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in output_names])
+    inputs = [f"{dtype_map[bufs[input][1]]}* {input}" for input in special_names.values() if "input" in input]
+    symbolic_vars = set()
+    for i, (_, args, _, _) in enumerate(statements):
+      for j, var in enumerate(args):
+        if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
+          symbolic_vars.add(var)
+          statements[i][1][j] = var.arg[0] # name assigned in Variable(name, ...), e.g. "start_pos"
+
+    inputs = ", ".join(inputs + [f"{dtype_map[var.dtype]} {var.arg[0]}" for var in symbolic_vars])
+    outputs = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in special_names.values() if "output" in output])
     cprog += list(functions.values())
-    # TODO: move buf_casts into a separate function called once before inference, or instead setup weight buffers with final types?
     cprog += [f"void net({inputs}, {outputs}) {{"]
     cprog += [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     cprog = "\n".join(cprog)
