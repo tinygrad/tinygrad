@@ -508,13 +508,12 @@ class PCIIface:
 
       # Read pagemap to get the physical address of each page. The pages are locked.
       paddrs = []
-      self.pagemap.seek((va // mmap.PAGESIZE) * 8)
       for off in range(0, size, mmap.PAGESIZE):
-        paddrs += [(struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1) * mmap.PAGESIZE, mmap.PAGESIZE)]
+        self.pagemap.seek(((va + off) // mmap.PAGESIZE) * 8)
+        paddrs += [((struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE)]
 
-      self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddrs=paddrs, system=True, snooped=True, uncached=True)
-      
-      
+      self.adev.mm.map_range(vaddr, size, paddrs=paddrs, system=True, snooped=True, uncached=True)
+
       # for off in range(0, size, mmap.PAGESIZE):
       #   self.pagemap.seek(((va + off) // mmap.PAGESIZE) * 8)
       #   pt_entry = struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)
@@ -604,7 +603,6 @@ class AMDDevice(HCQCompiled):
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
     atexit.register(self.device_fini)
-    exit(0)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
