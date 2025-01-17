@@ -61,7 +61,8 @@ setup(name='tinygrad',
             "ggml-python",
             "capstone",
             "pycocotools",
-            "boto3"
+            "boto3",
+            "pandas"
         ],
         'webgpu': ["wgpu"],
         'docs': [
