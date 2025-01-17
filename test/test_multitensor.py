@@ -288,6 +288,14 @@ class TestMultiTensor(unittest.TestCase):
       optim.step()
       out.numpy()
 
+  def test_backward_sum(self):
+    x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
+    w = Tensor([1.,2,3,4], requires_grad=True).shard(devices_2)
+    out = x * w
+    out.mean().backward()
+    tst = w.grad.numpy()
+    np.testing.assert_allclose(tst, [0.75, 1., 1.25, 1.5])
+
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
     conv = nn.Conv2d(3, 16, 3)
