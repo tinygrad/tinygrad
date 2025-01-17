@@ -900,7 +900,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** toposort and backward pass *****
 
-  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None, materialize_grads=False) -> list[Tensor]:
     """
     Compute the gradient of the targets with respect to self.
 
@@ -922,7 +922,9 @@ class Tensor(SimpleMathTrait):
       grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
       for x in target_uops:
-        if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
+        if (y:=grads.get(x)) is None:
+          if materialize_grads: y = x.const_like(0)
+          else: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
         ret.append(y)
       rets.append(ret)
     # create returned Tensors
@@ -946,7 +948,7 @@ class Tensor(SimpleMathTrait):
                                        any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad and not Tensor.no_grad]
     # clear contexts
     for t in tensors_need_grad: t._ctx = None
-    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
+    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       t.grad = g if t.grad is None else (t.grad + g)
     return self
