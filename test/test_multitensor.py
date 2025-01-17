@@ -43,6 +43,14 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (256,)
     (X + X).realize()
 
+  @unittest.expectedFailure("'MultiLazyBuffer' object has no attribute 'bitcast'")
+  def test_bitcast(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.to_(devices_2)
+    for lb in X.lazydata.lbs:
+      assert lb.shape == (256,)
+    (X.bitcast(dtypes.int)).realize()
+
   def test_gradient(self):
     X = Tensor.ones(256).contiguous().realize()
     X.to_(devices_2)
