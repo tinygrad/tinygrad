@@ -6,7 +6,7 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from extra.onnx import OnnxSession
+from extra.onnx import OnnxRunner
 from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
 from tinygrad.device import CompileError
@@ -65,11 +65,11 @@ def benchmark_model(m, devices, validate_outs=False):
     try:
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxSession(onnx_model)
-      benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model.run(inputs).items()})
+      tinygrad_model = OnnxRunner(onnx_model)
+      benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
       from tinygrad.engine.jit import TinyJit
-      tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model.run(kwargs).items()})
+      tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
       for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
       benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
       del inputs, tinygrad_model, tinygrad_jitted_model
@@ -115,8 +115,8 @@ def benchmark_model(m, devices, validate_outs=False):
       rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxSession(onnx_model)
-      tinygrad_out = tinygrad_model.run(inputs)
+      tinygrad_model = OnnxRunner(onnx_model)
+      tinygrad_out = tinygrad_model(inputs)
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
       onnx_out = ort_sess.run(output_names, np_inputs)

@@ -8,7 +8,7 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import tf2onnx
-from extra.onnx import OnnxSession
+from extra.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model_clang, compile_net, jit_model
 
@@ -25,10 +25,10 @@ class TinyOnnx:
   def __init__(self, keras_model):
     input_signature = [tf.TensorSpec([1,32], tf.float32, name='x')]
     onnx_model, _ = tf2onnx.convert.from_keras(keras_model, input_signature, opset=13)
-    self.onnx_sess = OnnxSession(onnx_model)
+    self.run_onnx = OnnxRunner(onnx_model)
 
   def forward(self, x):
-    return self.onnx_sess.run({"x": x}, debug=False)['predictions']
+    return self.run_onnx({"x": x}, debug=False)['predictions']
 
 def compile_onnx_model(onnx_model):
   tinyonnx = TinyOnnx(onnx_model)

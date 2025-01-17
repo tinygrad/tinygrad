@@ -98,7 +98,7 @@ def _cached_to_python_const(t:Tensor):
   return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t, op, idx) -> list[ConstType]|ConstType|bytes:
+def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
   if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
   global cache_misses
   ret = _cached_to_python_const(t)
@@ -110,7 +110,7 @@ def to_python_const(t, op, idx) -> list[ConstType]|ConstType|bytes:
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
-class OnnxSession:
+class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
     self.is_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in model.graph.node)
@@ -162,7 +162,7 @@ class OnnxSession:
       return real_fxn(*inps, **opts)
     raise NotImplementedError(f"{op=} not supported")
 
-  def run(self, inputs={}, debug=debug, limit=limit):
+  def __call__(self, inputs={}, debug=debug, limit=limit):
     for name, input_spec in self.graph_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)

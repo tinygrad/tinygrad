@@ -2,7 +2,7 @@ import time, sys, hashlib
 from pathlib import Path
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-from extra.onnx import OnnxSession
+from extra.onnx import OnnxRunner
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 from tinygrad.tensor import _from_np_dtype
@@ -12,7 +12,7 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 
 if __name__ == "__main__":
   onnx_model = onnx.load(onnx_path := fetch(OPENPILOT_MODEL))
-  onnx_sess = OnnxSession(onnx_model)
+  run_onnx = OnnxRunner(onnx_model)
 
   Tensor.manual_seed(100)
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
@@ -25,11 +25,11 @@ if __name__ == "__main__":
   for _ in range(5):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    ret = next(iter(onnx_sess.run(new_inputs_junk).values())).cast(dtypes.float32).numpy()
+    ret = next(iter(run_onnx(new_inputs_junk).values())).cast(dtypes.float32).numpy()
     print(f"unjitted: {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
 
   # NOTE: the inputs to a JIT must be first level arguments
-  run_onnx_jit = TinyJit(lambda **kwargs: onnx_sess.run(kwargs), prune=True)
+  run_onnx_jit = TinyJit(lambda **kwargs: run_onnx(kwargs), prune=True)
   for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
