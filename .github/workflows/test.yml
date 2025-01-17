@@ -88,16 +88,18 @@ jobs:
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: |
-          mkdir -p C:\usr\local\lib
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
-            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-            sudo xargs curl -L -o C:\usr\local\lib\libamd_comgr.dylib
+          mkdir -p C:/usr/local/lib
+          curl -s -H "Authorization: token %GH_TOKEN%" ^
+            "https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest" | ^
+            jq -r ".assets[] | select(.name == \"libamd_comgr.dylib\").browser_download_url" | ^
+            curl -L -o C:/usr/local/lib/libamd_comgr.dylib -K -
       - name: Install remu
         if: matrix.backend == 'amd'
         run: |
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            sudo xargs curl -L -o C:\usr\local\lib\libremu.dylib
+          curl -s -H "Authorization: token %GH_TOKEN%" ^
+            "https://api.github.com/repos/Qazalin/remu/releases/latest" | ^
+            jq -r ".assets[] | select(.name == \"libremu.dylib\").browser_download_url" | ^
+            curl -L -o C:/usr/local/lib/libremu.dylib -K -
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
