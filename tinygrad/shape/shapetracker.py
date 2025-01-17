@@ -92,7 +92,9 @@ class ShapeTracker:
     idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
     return folded_upcast(idx), folded_upcast(valid)
 
+  # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
+    if 0 in self.shape: return 0
     view = (v.shrink(v.mask) if (v:=self.views[0]).mask else v)
     idx, _ = views_to_indexed_uops((view,))
     assert idx.vmax < 1e12, f"real_size broken for {self}"
