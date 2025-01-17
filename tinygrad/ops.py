@@ -178,6 +178,9 @@ class GroupOp:
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
+  # all uops
+  All = set(Ops)
+
 # some BUFFER ops can be processed with only a view
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
 
