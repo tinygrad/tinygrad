@@ -65,5 +65,5 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       if v is None: continue
       if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
-      all_metadata[v] = dataclasses.replace(all_metadata[t0], backward=True)
+      if (forward_metadata:=all_metadata.get(t0)) is not None: all_metadata[v] = dataclasses.replace(forward_metadata, backward=True)
   return grads
