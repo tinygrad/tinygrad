@@ -40,6 +40,9 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
   if lbs[0].shape[axis] % len(lbs) != 0: raise RuntimeError(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
+def MultiLazyBuffer(lbs:list[UOp], axis:int|None, real:list[bool]|None=None): return UOp.multi(*lbs, axis=axis)
+
+"""
 class MultiLazyBuffer(MathTrait):
   def __init__(self, lbs:list[UOp], axis:int|None, real:list[bool]|None=None):
     assert all(isinstance(x, UOp) for x in lbs) and len(lbs), "all lbs must be LazyBuffers, and we need at least one of them"
@@ -170,3 +173,4 @@ class MultiLazyBuffer(MathTrait):
   def stride(self, arg:tuple[int, ...]):
     assert self.axis is None or arg[self.axis] == 1, "flipping not supported on sharded axis"
     return MultiLazyBuffer([x.stride(arg) for x in self.lbs], self.axis, self.real)
+"""
