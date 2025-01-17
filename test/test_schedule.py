@@ -1354,8 +1354,8 @@ class TestSchedule(unittest.TestCase):
 
   def test_bitcast_fuses(self):
     x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(Ops.EXP2).cast(dtypes.int32, True)
-    b = x.cast(dtypes.int32, True)
+    a = x.alu(Ops.EXP2).bitcast(dtypes.int32)
+    b = x.bitcast(dtypes.int32)
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 1) # this should fuse when it makes sense
 
