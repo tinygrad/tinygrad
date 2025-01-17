@@ -98,7 +98,7 @@ class LLVMRenderer(Renderer):
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
     # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
-    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
+    #(UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
