@@ -101,7 +101,9 @@ jobs:
           $url = $response.assets | Where-Object { $_.name -eq "libremu.dylib" } | Select-Object -ExpandProperty browser_download_url
           Invoke-WebRequest -Uri $url -OutFile "C:/usr/local/lib/libremu.dylib"
       - name: Install dependencies
-        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: |
+          pip install --user pywin32
+          pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
         shell: pwsh
         run: |
