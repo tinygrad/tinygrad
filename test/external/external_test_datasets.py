@@ -84,7 +84,8 @@ class TestKiTS19Dataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_sample[1], ref_sample[1])
 
 class TestOpenImagesDataset(ExternalTestDatasets):
-  def _create_samples(self, subset):
+  @classmethod
+  def _create_samples(cls, subset):
     os.makedirs((base_dir := Path(tempfile.gettempdir() + "/openimages")) / f"{subset}/data", exist_ok=True)
     os.makedirs(base_dir / Path(f"{subset}/labels"), exist_ok=True)
 
@@ -132,11 +133,15 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     dataloader = batch_load_retinanet(dataset, subset == "validation", anchors, base_dir, batch_size=batch_size, shuffle=False, seed=seed)
     return iter(dataloader)
 
+  @classmethod
+  def setUpClass(cls):
+    cls.base_dir, cls.train_ann_file = cls._create_samples("train")
+    _, cls.val_ann_file = cls._create_samples("validation")
+
   def test_training_set(self):
-    base_dir, ann_file = self._create_samples(subset := "train")
     img_size, img_mean, img_std, anchors = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], torch.ones((120087, 4))
-    tinygrad_dataloader = self._create_tinygrad_dataloader(base_dir, ann_file, subset, anchors.numpy())
-    ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, subset)
+    tinygrad_dataloader = self._create_tinygrad_dataloader(self.base_dir, self.train_ann_file, subset := "train", anchors.numpy())
+    ref_dataloader = self._create_ref_dataloader(self.base_dir, self.train_ann_file, subset)
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
     for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
@@ -151,10 +156,9 @@ class TestOpenImagesDataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
 
   def test_validation_set(self):
-    base_dir, ann_file = self._create_samples(subset := "validation")
     img_size, img_mean, img_std, anchors = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], torch.ones((120087, 4))
-    tinygrad_dataloader = self._create_tinygrad_dataloader(base_dir, ann_file, subset, anchors.numpy())
-    ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, "val")
+    tinygrad_dataloader = self._create_tinygrad_dataloader(self.base_dir, self.val_ann_file, "validation", anchors.numpy())
+    ref_dataloader = self._create_ref_dataloader(self.base_dir, self.val_ann_file, "val")
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
     for ((tinygrad_img, _), (ref_img, _)) in zip(tinygrad_dataloader, ref_dataloader):
