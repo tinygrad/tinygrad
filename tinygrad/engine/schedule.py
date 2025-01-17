@@ -13,7 +13,7 @@ from tinygrad.device import Buffer
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
-# **** big graph spec
+# **** Tensor UOp spec
 
 tensor_uop_spec = PatternMatcher([
   (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
