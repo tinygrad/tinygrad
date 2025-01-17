@@ -81,7 +81,8 @@ class WGSLRenderer(CStyleLanguage):
     bind_it = iter(range(len(bufs)))
     external_local_bufs = [line.lstrip() for line in kernel if "var<workgroup>" in line]
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
-    prg = "enable f16;\nfn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    # TODO: add "enable f16;" once backend has switched to Dawn
+    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
     # trick to obfuscate compiler so that nan is detected properly
     prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
