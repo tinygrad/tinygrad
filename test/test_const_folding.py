@@ -240,8 +240,6 @@ class TestMultiConstFolding(unittest.TestCase):
     _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
 
-  # failing because multi calls .contiguous() on every single sharded uop
-  @unittest.expectedFailure
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)

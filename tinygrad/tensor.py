@@ -413,8 +413,7 @@ class Tensor(SimpleMathTrait):
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
       lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    mlb = MultiLazyBuffer([lb.contiguous() for lb in sharded_lbs], axis)
+    mlb = MultiLazyBuffer(sharded_lbs, axis)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):

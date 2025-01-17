@@ -726,10 +726,7 @@ class TestMultiTensor(unittest.TestCase):
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule()
-    self.assertEqual(len(sched), 6)
-    # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
-    self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
-    # all these kernels are just because multi calls contiguous on every single shard
+    self.assertEqual(len(sched), 0)
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
