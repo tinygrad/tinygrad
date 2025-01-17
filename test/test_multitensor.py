@@ -1041,5 +1041,8 @@ class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
 
+  def test_bitcast(self):
+    helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
+
 if __name__ == '__main__':
   unittest.main()
