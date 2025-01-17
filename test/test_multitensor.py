@@ -56,6 +56,11 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_shard_not_multiple(self):
+    X = Tensor.ones(256).contiguous().realize()
+    with self.assertRaises(RuntimeError):
+      X.shard_(devices_3, 0)
+
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
     Y = Tensor(X.lazydata)

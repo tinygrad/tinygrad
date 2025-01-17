@@ -408,7 +408,8 @@ class Tensor(SimpleMathTrait):
     if axis is None: lbs = [self.lazydata] * len(devices)
     else:
       axis = self._resolve_dim(axis)
-      sz = ceildiv(self.shape[axis], len(devices))
+      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      sz = self.shape[axis] // len(devices)
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
       lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
