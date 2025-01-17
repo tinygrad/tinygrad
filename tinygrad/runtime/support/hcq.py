@@ -389,7 +389,7 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
-  def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
+  def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=4):
     self.dev:DeviceType = dev
     self.b = [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
