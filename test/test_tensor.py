@@ -839,7 +839,7 @@ class TestIdxUpcast(unittest.TestCase):
   def test_int64_unsupported_overflow(self):
     with self.assertRaises(KeyError):
       self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
-  
+
   @unittest.skip("This is kept for reference, it requires large memory to run")
   def test_overflow_kernel_run(self):
     # This creates a total of 2**31+1 elements, requiring at least 2147 MB memory to run
