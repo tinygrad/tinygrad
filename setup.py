@@ -60,7 +60,8 @@ setup(name='tinygrad',
             "bottle",
             "ggml-python",
             "capstone",
-            "pycocotools"
+            "pycocotools",
+            "boto3"
         ],
         'webgpu': ["wgpu"],
         'docs': [
