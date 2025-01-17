@@ -581,7 +581,7 @@ class AMDDevice(HCQCompiled):
     # <gfx103 requires alignment of 1024, >=gfx11 requires 256
     wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256 if self.target >= 110000 else 1024)
     self.scratch_len = (max_cu_id + 1) * self.dev_iface.props['max_slots_scratch_cu'] * wave_scratch_len
-    # self.scratch = self.dev_iface.alloc(self.scratch_len)
+    self.scratch = self.dev_iface.alloc(self.scratch_len)
     self.has_scratch_base_registers = self.target >= 110000
     engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
     waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
@@ -609,7 +609,7 @@ class AMDDevice(HCQCompiled):
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
-    eop_buffer = self.dev_iface.alloc(eop_buffer_size, cpu_access=True) if eop_buffer_size else None
+    eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
     return self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, debug_memory_size=debug_memory_size,
                                        ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
 

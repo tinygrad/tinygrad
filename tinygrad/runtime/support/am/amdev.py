@@ -122,12 +122,11 @@ class AMPageTableEntry:
 
   def get_entry(self, entry_id): return self.view[entry_id]
 
-
 class AMPageTableTraverseContext:
-  def __init__(self, adev, pt, vaddr, creat_pt=True, free_pt=False):
-    self.adev, self.vaddr = adev, vaddr
+  def __init__(self, adev, pt, vaddr, creat_pt=True):
+    self.adev, self.vaddr = adev, vaddr - adev.gmc.vm_base
     self.pt_stack = [(pt, self._pt_pte_idx(pt, vaddr))]
-    self.creat_pt, self.free_pt = creat_pt, free_pt
+    self.creat_pt = creat_pt
 
   def _pt_pte_size(self, pt, va): return (1 << ((9 * (3-pt.lv)) + 12))
   def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt, va)) % 512
@@ -168,7 +167,6 @@ class AMPageTableTraverseContext:
       off += entries * pte_covers
       self.vaddr += entries * pte_covers
 
-      # pt closed
       self.pt_stack[-1] = (pt, pte_idx + entries)
       self.cursor_advance()
 
@@ -182,12 +180,14 @@ class AMMemoryManager:
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def map_range(self, vaddr, size, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False):
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, creat_pt=True, free_pt=False)
+    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, creat_pt=True)
 
-    for paddr,size in paddrs:
+    for paddr, size in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.access_next(size):
-        for pte_id in range(pte_idx, pte_idx + pte_cnt):
-          pt.set_page(pte_id, paddr, uncached=uncached, system=system, snooped=snooped, valid=True)
+        # print(f"Mapping {off=} {pt=} {pte_idx=} {pte_cnt=} {pte_covers=}")
+        for pte_off in range(pte_cnt):
+          pt.set_page(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, valid=True)
+          assert off + pte_off * pte_covers < size, f"Mapping out of range {off=} {pte_off=} {pte_covers=} {size=}"
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
@@ -195,6 +195,10 @@ class AMMemoryManager:
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
     pass
+    # ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, creat_pt=True)
+    # for off, pt, pte_idx, pte_cnt, pte_covers in ctx.access_next(size):
+    #   for pte_id in range(pte_idx, pte_idx + pte_cnt): pt.set_page(pte_id, paddr=0x0, valid=False)
+
     # if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
 
     # vaddr = vaddr - AMMemoryManager.va_allocator.base
@@ -207,7 +211,16 @@ class AMMemoryManager:
     #     pt.set_page(pte_st_idx + pte_idx, paddr=0x0, valid=False)
 
   def map_from(self, vaddr:int, size:int, from_adev):
-    pass
+    assert False
+
+    # paddrs = []
+    # ctx = AMPageTableTraverseContext(from_adev, self.root_page_table, vaddr, creat_pt=True, free_pt=False)
+    # for off, pt, pte_idx, pte_cnt, pte_covers in ctx.access_next(size):
+    #   for pte_id in range(pte_idx, pte_idx + pte_cnt):
+    #     paddrs.append((pt.get_entry(pte_id) & 0x0000FFFFFFFFF000, pte_covers))
+
+    # self.map_range(vaddr, size, paddrs, uncached=False, system=False, snooped=False)
+
     # if AM_DEBUG >= 2: print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.pcidev}")
 
     # vaddr = vaddr - AMMemoryManager.va_allocator.base
@@ -220,10 +233,22 @@ class AMMemoryManager:
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
+  def _alloc_optimal_paddrs(self, va:int, size:int, contigous=False) -> list[tuple[int, int]]:
+    if contigous: return [(self.pa_allocator.alloc(size), size)]
+
+    # Traverse the PT to find the optimal paddrs
+    paddrs = []
+    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, creat_pt=True)
+    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.access_next(size):
+      # print(f"alloc optimal: {off=} {pte_idx=} {pte_cnt=} {pte_covers=}")
+      paddrs += [(self.pa_allocator.alloc(pte_covers), pte_covers) for pte_id in range(pte_cnt)]
+    # print(paddrs)
+    return paddrs
+
   def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMVirtualMapping:
-    pm = self.palloc(round_up(size, 0x1000), zero=True) if contigous else None
-    self.map_range(va:=self.alloc_vaddr(size, align), size, paddrs=[(pm.paddr, size)] if pm else None, uncached=uncached)
-    return AMVirtualMapping(va, size, pm.cpu_addr() if pm is not None else None, pm.paddr if pm is not None else None)
+    paddrs = self._alloc_optimal_paddrs(va:=self.alloc_vaddr(size, align), size, contigous=contigous)
+    self.map_range(va, size, paddrs=paddrs, uncached=uncached)
+    return AMVirtualMapping(va, size, AMPhysicalMemoryBlock(self.adev, *paddrs[0]).cpu_addr() if len(paddrs) == 1 else None, paddrs[0][0] if len(paddrs) == 1 else None)
 
   def vfree(self, vm:AMVirtualMapping):
     self.unmap_range(vm.va_addr, vm.size, free_paddrs=(vm.paddr is None))
