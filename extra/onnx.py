@@ -1,5 +1,5 @@
 from typing import Callable, Any, Sequence
-import importlib, functools, dataclasses, enum
+import importlib, functools, dataclasses
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType, dtypes
@@ -52,26 +52,24 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   return Tensor(None)
 
 def type_parse(onnx_type: TypeProto):
-  if is_optional := onnx_type.HasField("optional_type"): onnx_type = onnx_type.optional_type.elem_type
-  if onnx_type.HasField("sequence_type"): value_type, tensor_type = ValueType.SEQUENCE, onnx_type.sequence_type.elem_type.tensor_type
-  elif onnx_type.HasField("tensor_type"): value_type, tensor_type = ValueType.TENSOR, onnx_type.tensor_type
-  else: raise NotImplementedError(f"Unsupported {onnx_type=}")
-  shape, dtype = tuple(d.dim_param or d.dim_value for d in tensor_type.shape.dim), dtype_parse(tensor_type.elem_type)
-  return OnnxValue(value_type, is_optional, shape, dtype)
+  elem_type = onnx_type
+  if elem_type.HasField("map_type") or elem_type.HasField("sparse_tensor_type") or elem_type.HasField("opaque_type"):
+    raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
+  if is_optional := elem_type.HasField("optional_type"): elem_type = elem_type.optional_type.elem_type
+  if is_sequence := elem_type.HasField("sequence_type"): elem_type = elem_type.sequence_type.elem_type
+  if elem_type.HasField("tensor_type"):
+    shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
+    dtype = dtype_parse(elem_type.tensor_type.elem_type)
+    return OnnxValue(shape, dtype, is_optional, is_sequence)
+  raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
 # ***** onnx spec *****
-class ValueType(enum.Enum):
-  # supported
-  TENSOR = enum.auto(); SEQUENCE = enum.auto() # noqa: E702
-  # unsupported
-  MAP = enum.auto(); OPTIONAL = enum.auto(); SPARSE_TENSOR = enum.auto(); OPAQUE = enum.auto() # noqa: E702
-
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
-  type: ValueType
-  is_optional: bool
   shape: tuple[str|int]
   dtype: DType
+  is_optional: bool
+  is_sequence: bool
 
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
@@ -137,12 +135,11 @@ class OnnxRunner:
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
     # TODO: need true float16 for dtype checking
-    if spec.type is ValueType.SEQUENCE:
+    if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
       return sequence
-    assert spec.type is ValueType.TENSOR
     tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
