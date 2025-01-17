@@ -8,9 +8,11 @@ from tinygrad.ops import UOp
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
+  gc.collect()
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
 def bufs_allocated():
+  gc.collect()
   return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
 class TestGC(unittest.TestCase):
