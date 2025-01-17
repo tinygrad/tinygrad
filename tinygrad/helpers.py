@@ -101,7 +101,8 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
+DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
+JIT = ContextVar("JIT", 2 if platform.system() == 'Darwin' and ('Intel' in platform.processor() or 'i386' in platform.processor()) else 1)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
@@ -266,6 +267,15 @@ def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
     print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
+
+def capstone_flatdump(lib: bytes):
+  import capstone
+  match platform.machine():
+    case 'x86_64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    case 'aarch64' | 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+    case machine: raise NotImplementedError(f"Capstone disassembly isn't supported for {machine}")
+  for instr in cs.disasm(lib, 0):
+    print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
 
 # *** ctypes helpers
 

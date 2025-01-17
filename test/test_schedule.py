@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, view_supported_devices, symbolic_simple, merge_views
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import verify_ast
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
@@ -1344,8 +1344,8 @@ class TestSchedule(unittest.TestCase):
 
   def test_bitcast_fuses(self):
     x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(Ops.EXP2).cast(dtypes.int32, True)
-    b = x.cast(dtypes.int32, True)
+    a = x.alu(Ops.EXP2).bitcast(dtypes.int32)
+    b = x.bitcast(dtypes.int32)
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 1) # this should fuse when it makes sense
 
@@ -1630,7 +1630,8 @@ class TestIndexing(unittest.TestCase):
     a[0] = 6
     np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
 
-  @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  #@unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  @unittest.skip("BUFFER_VIEW no longer supported on non-disk devices")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     sched = self.check_schedule(a, 1)
@@ -2103,16 +2104,6 @@ class TestConst(unittest.TestCase):
     a = Tensor(vv)
     print(a.lazydata)
     self.assertTrue(tensor_const_pm.rewrite(a.lazydata))
-
-  def test_uop_methods(self):
-    a = Tensor(1)
-    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
-
-    a = Tensor.ones((4, 4))
-    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
-
-    a = Tensor.ones((4, 4)).pad((1, 1),)
-    self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
 
   def test_const_schedule(self):
     a = Tensor.ones((4, 4))
