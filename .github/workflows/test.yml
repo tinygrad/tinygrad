@@ -87,19 +87,19 @@ jobs:
         run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install comgr
         if: matrix.backend == 'amd'
+        shell: pwsh
         run: |
-          mkdir -p C:/usr/local/lib
-          curl -s -H "Authorization: token %GH_TOKEN%" ^
-            "https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest" | ^
-            jq -r ".assets[] | select(.name == \"libamd_comgr.dylib\").browser_download_url" | ^
-            curl -L -o C:/usr/local/lib/libamd_comgr.dylib -K -
+          New-Item -Path "C:/usr/local/lib" -ItemType Directory -Force
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest" -Headers @{Authorization="token $env:GH_TOKEN"}
+          $url = $response.assets | Where-Object { $_.name -eq "libamd_comgr.dylib" } | Select-Object -ExpandProperty browser_download_url
+          Invoke-WebRequest -Uri $url -OutFile "C:/usr/local/lib/libamd_comgr.dylib"
       - name: Install remu
         if: matrix.backend == 'amd'
+        shell: pwsh
         run: |
-          curl -s -H "Authorization: token %GH_TOKEN%" ^
-            "https://api.github.com/repos/Qazalin/remu/releases/latest" | ^
-            jq -r ".assets[] | select(.name == \"libremu.dylib\").browser_download_url" | ^
-            curl -L -o C:/usr/local/lib/libremu.dylib -K -
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/Qazalin/remu/releases/latest" -Headers @{Authorization="token $env:GH_TOKEN"}
+          $url = $response.assets | Where-Object { $_.name -eq "libremu.dylib" } | Select-Object -ExpandProperty browser_download_url
+          Invoke-WebRequest -Uri $url -OutFile "C:/usr/local/lib/libremu.dylib"
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
