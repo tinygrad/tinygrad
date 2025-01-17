@@ -57,6 +57,12 @@ llvm_rewrite = PatternMatcher([
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
+  (UPat(Ops.BF16, src=(UPat.var('idx'), UPat.var('buf')), name="x"), lambda ctx,x,idx,buf: 
+   f" {ctx[x]}_16 = load i16, i16* {ctx[buf]}\n"
+   f" {ctx[x]}_ext = zext i16 {ctx[x]}_16 to i32\n"
+   f" {ctx[x]}_shl = shl i32 {ctx[x]}_ext, 16\n"
+   f" {ctx[x]}_f32 = bitcast i32 {ctx[x]}_shl to float\n"
+   f" {ctx[x]} = { f'{ctx[x]}_f32' if x.dtype==dtypes.float32 else f'{lcast(dtypes.float32, x.dtype)} float {ctx[x]}_f32 to {ldt(x.dtype)}' }"),
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
@@ -72,11 +78,11 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
-
+'''
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
   u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
   return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
-
+'''
 class LLVMRenderer(Renderer):
   device = "LLVM"
   supports_float4 = False
