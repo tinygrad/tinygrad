@@ -361,8 +361,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
+    if isinstance(i, int): i = (i,)
     """
-    if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
       if self.op is Ops.VECTORIZE: return self.src[i]
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
