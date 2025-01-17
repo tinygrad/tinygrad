@@ -513,11 +513,6 @@ class PCIIface:
         paddrs += [((struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE)]
 
       self.adev.mm.map_range(vaddr, size, paddrs=paddrs, system=True, snooped=True, uncached=True)
-
-      # for off in range(0, size, mmap.PAGESIZE):
-      #   self.pagemap.seek(((va + off) // mmap.PAGESIZE) * 8)
-      #   pt_entry = struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)
-      #   self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=pt_entry * mmap.PAGESIZE, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
     vm = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
