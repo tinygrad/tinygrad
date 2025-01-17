@@ -150,6 +150,7 @@ class Ops(FastEnum):
 
   # device
   DEVICE = auto()
+  MULTI = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -360,6 +361,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
+  def multi(self, *more:UOp, axis:int|None):
+    parents = (self,)+more
+    assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
+    return UOp(Ops.MULTI, self.dtype, parents, axis)
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -476,8 +481,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
-  def _device(self) -> Optional[str]:
+  def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
+    if self.op is Ops.MULTI: return tuple(x.device for x in self.src)
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:

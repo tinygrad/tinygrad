@@ -179,7 +179,7 @@ class Tensor(SimpleMathTrait):
     # data might be on a different device
     if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data, UOp): self.lazydata = Tensor(data).shard(device).lazydata
+    elif isinstance(data, UOp) and isinstance(data.device, str): self.lazydata = Tensor(data).shard(device).lazydata
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
