@@ -68,13 +68,13 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
-    with self.assertRaises(RuntimeError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16)
+    with self.assertRaises(NotImplementedError):
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
-    with self.assertRaises(RuntimeError):
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+      Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16).schedule()
 
     with self.assertRaises(RuntimeError):
       # should fail because backprop through bitcast is undefined
