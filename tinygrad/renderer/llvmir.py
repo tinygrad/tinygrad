@@ -62,7 +62,7 @@ llvm_rewrite = PatternMatcher([
    f" {ctx[x]}_ext = zext i16 {ctx[x]}_16 to i32\n"
    f" {ctx[x]}_shl = shl i32 {ctx[x]}_ext, 16\n"
    f" {ctx[x]}_f32 = bitcast i32 {ctx[x]}_shl to float\n"
-   f" {ctx[x]} = { f'{ctx[x]}_f32' if x.dtype==dtypes.float32 else f'{lcast(dtypes.float32, x.dtype)} float {ctx[x]}_f32 to {ldt(x.dtype)}' }"),
+   f" {ctx[x]} = { f'{ctx[x]}_f32' if x.dtype==dtypes.float32 else f'{lcast(dtypes.float32, x.dtype)} float {ctx[x]}_f32 to {ldt(x.dtype)}' }"), 
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
