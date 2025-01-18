@@ -211,6 +211,39 @@ class TestSchedule(unittest.TestCase):
     reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
+  @unittest.expectedFailure
+  def test_div_collapse_buffer(self):
+    a = Tensor.empty(32)
+    b = Tensor.empty(32)
+    expr = (a*b)/b
+    check_schedule(expr, 0)
+    # (a*b)/b shares the BUFFER with a
+    self.assertIs(expr.lazydata.base.realized, a.lazydata.base.realized)
+
+  @unittest.expectedFailure
+  def test_div_collapse_const(self):
+    a = Tensor.empty(32)
+    b = Tensor.empty(32)
+    expr = a/a
+    check_schedule(expr, 0)
+    self.assertIsNone(expr.lazydata.base.realized)
+
+  def test_mul_collapse_buffer(self):
+    a = Tensor.empty(32)
+    b = Tensor.empty(32)
+    expr = a*1
+    check_schedule(expr, 0)
+    # NOTE: no BUFFER gets allocated if the tensor collapses to a CONST
+    self.assertIs(expr.lazydata.base.realized, a.lazydata.base.realized)
+
+  def test_mul_collapse_const(self):
+    a = Tensor.empty(32)
+    b = Tensor.empty(32)
+    expr = a*0
+    check_schedule(expr, 0)
+    # NOTE: no BUFFER gets allocated if the tensor collapses to a CONST
+    self.assertIsNone(expr.lazydata.base.realized)
+
   def test_dedup_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     b = Tensor.full((4,), 2.).contiguous()
