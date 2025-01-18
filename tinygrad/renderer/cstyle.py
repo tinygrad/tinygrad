@@ -200,6 +200,10 @@ class ClangRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
+  def __init__(self, *args, device_exts:str="", **kwargs):
+    super().__init__(*args, **kwargs)
+    self.device_exts = device_exts
+
   device = "GPU"
 
   # language options
