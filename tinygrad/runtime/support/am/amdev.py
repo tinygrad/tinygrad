@@ -123,10 +123,10 @@ class AMPageTableEntry:
   def get_entry(self, entry_id): return self.view[entry_id]
 
 class AMPageTableTraverseContext:
-  def __init__(self, adev, pt, vaddr, creat_pt=True):
+  def __init__(self, adev, pt, vaddr, create_mode=True):
     self.adev, self.vaddr = adev, vaddr - adev.gmc.vm_base
     self.pt_stack = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
-    self.creat_pt = creat_pt
+    self.create_mode = create_mode
 
   def _pt_pte_size(self, pt): return (1 << ((9 * (3-pt.lv)) + 12))
   def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % 512
@@ -139,7 +139,7 @@ class AMPageTableTraverseContext:
       assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.pm.paddr:#x}, {pte_idx=} {entry=:#x}"
       child_page_table = AMPageTableEntry(AMPhysicalMemoryBlock(pt.pm.adev, entry & 0x0000FFFFFFFFF000, 0x1000), lv=pt.lv+1)
     else:
-      assert self.creat_pt, "Not allowed to create new page table"
+      assert self.create_mode, "Not allowed to create new page table"
       child_page_table = AMPageTableEntry(self.adev.mm.palloc(0x1000, zero=True), lv=pt.lv+1)
       pt.set_table(pte_idx, child_page_table)
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -150,14 +150,14 @@ class AMPageTableTraverseContext:
       self.pt_stack.pop()
       self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
-  def next(self, size, off=0, iter_dir=False):
+  def next(self, size, off=0):
     while size > 0:
       # Go to the correct level
       pt, pte_idx, pte_covers = self.pt_stack[-1]
-      if iter_dir:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.get_entry(pte_idx) & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
-      else:
+      if self.create_mode:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
+      else:
+        while pt.lv!=am.AMDGPU_VM_PTB and (pt.get_entry(pte_idx) & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       yield off, pt, pte_idx, entries, pte_covers
@@ -181,7 +181,7 @@ class AMMemoryManager:
   def map_range(self, vaddr, size, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False):
     assert size == sum(p[1] for p in paddrs), "Size mismatch"
 
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, creat_pt=True)
+    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_mode=True)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
@@ -193,8 +193,8 @@ class AMMemoryManager:
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
     # pass
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size, iter_dir=True):
+    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_mode=False)
+    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         if not (entry:=pt.get_entry(pte_id) & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
         pt.set_page(pte_id, paddr=0x0, valid=False)
@@ -211,11 +211,11 @@ class AMMemoryManager:
     #     pt.set_page(pte_st_idx + pte_idx, paddr=0x0, valid=False)
 
   def map_from(self, vaddr:int, size:int, from_adev):
-    ctx = AMPageTableTraverseContext(from_adev, from_adev.mm.root_page_table, vaddr)
+    ctx = AMPageTableTraverseContext(from_adev, from_adev.mm.root_page_table, vaddr, create_mode=False)
     # print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.pcidev}")
 
     paddrs = []
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size, iter_dir=True):
+    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         entry = pt.get_entry(pte_id)
         paddr = (entry & 0x0000FFFFFFFFF000) if entry & am.AMDGPU_PTE_SYSTEM else (entry & 0x0000FFFFFFFFF000) + from_adev.pcidev.regions[0].base_addr
@@ -228,7 +228,7 @@ class AMMemoryManager:
     # assert False
 
     # paddrs = []
-    # ctx = AMPageTableTraverseContext(from_adev, self.root_page_table, vaddr, creat_pt=True, free_pt=False)
+    # ctx = AMPageTableTraverseContext(from_adev, self.root_page_table, vaddr, create_mode=True, free_pt=False)
     # for off, pt, pte_idx, pte_cnt, pte_covers in ctx.access_next(size):
     #   for pte_id in range(pte_idx, pte_idx + pte_cnt):
     #     paddrs.append((pt.get_entry(pte_id) & 0x0000FFFFFFFFF000, pte_covers))
@@ -238,7 +238,7 @@ class AMMemoryManager:
     # if AM_DEBUG >= 2: print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.pcidev}")
 
     # vaddr = vaddr - AMMemoryManager.va_allocator.base
-    # for va, _, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(from_adev.mm.root_page_table, vaddr, size, from_entry=True, creat_pt=False):
+    # for va, _, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(from_adev.mm.root_page_table, vaddr, size, from_entry=True, create_mode=False):
     #   entry = pt.get_entry(pte_st_idx)
     #   paddr = (entry & 0x0000FFFFFFFFF000) if entry & am.AMDGPU_PTE_SYSTEM else (entry & 0x0000FFFFFFFFF000) + from_adev.pcidev.regions[0].base_addr
     #   self.map_range(va + AMMemoryManager.va_allocator.base, n_ptes * pte_covers, paddr=paddr, system=True,
@@ -252,11 +252,14 @@ class AMMemoryManager:
 
     # Traverse the PT to find the optimal paddrs
     paddrs = []
-    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, creat_pt=True)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
-      # print(f"alloc optimal: {off=} {pte_idx=} {pte_cnt=} {pte_covers=}")
-      paddrs += [(self.palloc(pte_covers, zero=False).paddr, pte_covers) for pte_id in range(pte_cnt)]
-    # print(paddrs)
+    try:
+      ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_mode=True)
+      for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
+        paddrs += [(self.palloc(pte_covers, zero=False).paddr, pte_covers) for pte_id in range(pte_cnt)]
+    except MemoryError:
+      for paddr, _ in paddrs: self.pa_allocator.free(paddr)
+      raise
+
     return paddrs
 
   def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMVirtualMapping:
