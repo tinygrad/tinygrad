@@ -51,7 +51,7 @@ def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   error_check(msg(cbuf, "error", restype=objc_instance))
 
-def cmdbuf_label(cbuf: objc_id) -> str: return from_ns_str(msg(cbuf, "label", restype=objc_id))
+def cmdbuf_label(cbuf: objc_id) -> str|None: return from_ns_str(label) if (label:=msg(cbuf, "label", restype=objc_id)).value is not None else None
 def cmdbuf_st_time(cbuf: objc_id) -> float: return cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
 def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double))
 
@@ -78,7 +78,8 @@ class MetalDevice(Compiled):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
-      if PROFILE: Compiled.profile_events += [ProfileRangeEvent(self.device, cmdbuf_label(cbuf), st, en, is_copy=False)]
+      if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None:
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
@@ -194,6 +195,7 @@ class MetalAllocator(LRUAllocator):
       msg(dest_command_buffer, "commit")
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
+    msg(src_command_buffer, "setLabel:", to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def _cp_mv(self, dst, src, prof_desc):
