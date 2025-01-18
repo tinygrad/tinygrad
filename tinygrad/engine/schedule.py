@@ -522,7 +522,7 @@ remove_movement_ops = PatternMatcher([
 def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   big_sink = UOp.sink(*outs)
   # if using VIZ, do a graph rewrite to vizualize the Tensor graph
-  if getenv("VIZ"): graph_rewrite(big_sink, remove_movement_ops)
+  if getenv("VIZ"): graph_rewrite(big_sink, remove_movement_ops+ops_folding)
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
   sink = add_buffers(big_sink, ctx:=ScheduleContext(), cache={})
