@@ -93,19 +93,19 @@ def add_buffers(sink: UOp, ctx: ScheduleContext) -> UOp:
   cache: dict[UOp, UOp] = {}
   while stack:
     # iterate through every UOp twice. once to preprocess the arguments and another to save them to cache
-    buf, preprocessed = stack.pop()
-    if not preprocessed: stack.append((buf, True))
+    buf, processed = stack.pop()
+    if not processed: stack.append((buf, True))
     if cache.get(buf) is not None: pass
     elif buf.op is Ops.SINK:
-      if not preprocessed: stack.extend([(x, False) for x in buf.src])
+      if not processed: stack.extend([(x, False) for x in buf.src])
       else: cache[buf] = buf.replace(src=tuple(cache[x] for x in buf.src))
     # shapeless, realized, constants ops are passthrough
     elif buf.st is None or buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND}: cache[buf] = buf
     # view is passthrough
     elif buf is not buf.base:
-      if not preprocessed: stack.append((buf.base, False))
+      if not processed: stack.append((buf.base, False))
       else: cache[buf] = cache[buf.base].view(buf.st)
-    elif not preprocessed: stack.extend([(x, False) for x in buf.src])
+    elif not processed: stack.extend([(x, False) for x in buf.src])
     else:
       dtype = buf.dtype
       # make things that can't be images not images
