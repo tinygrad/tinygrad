@@ -361,10 +361,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
-  def multi(self, *more:UOp, axis:int|None):
-    parents = (self,)+more
-    assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
-    return UOp(Ops.MULTI, self.dtype, parents, axis)
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -421,6 +417,26 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return self.alu(Ops.CONTIGUOUS)
     forced_realize.add(self.base)
     return self
+
+  # *** from MultiLazyBuffer ***
+
+  def multi(self, *more:UOp, axis:int|None):
+    parents = (self,)+more
+    assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
+    return UOp(Ops.MULTI, self.dtype, parents, axis)
+
+  @property
+  def axis(self):
+    assert self.op is Ops.MULTI
+    return self.arg
+
+  @property
+  def bounds(self):
+    if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
+    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.lbs], initial=0)))
+
+  @property
+  def real(self): return [True]*len(self.src)
 
   # *** from LazyBuffer ***
 

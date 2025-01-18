@@ -6,7 +6,7 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
-from tinygrad.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer, apply_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
@@ -230,7 +230,8 @@ class Tensor(SimpleMathTrait):
     NOTE: A Tensor can only be scheduled once.
     """
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
-    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    multi_map = apply_multi_map(big_sink)
+    schedule, var_vals, becomes_map = create_schedule_with_vars(multi_map[big_sink])
 
     # get all children of keys in becomes_map
     all_uops: set[UOp] = set()

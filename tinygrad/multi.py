@@ -40,7 +40,77 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
   if lbs[0].shape[axis] % len(lbs) != 0: raise RuntimeError(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
-def MultiLazyBuffer(lbs:list[UOp], axis:int|None, real:list[bool]|None=None): return UOp.multi(*lbs, axis=axis)
+def MultiLazyBuffer(lbs:list[UOp], axis:int|None, real:list[bool]|None=None):
+  # TODO: handle real
+  return UOp.multi(*lbs, axis=axis)
+
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite, track_rewrites
+
+def alu_multi(root:UOp):
+  msrcs = root.src
+  assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
+  assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
+
+  # NOTE: they all have to share an axis, we always choose [-1]
+  axis, bounds = axes[-1] if len(axes := dedup([(x.axis, x.bounds) for x in msrcs if x.axis is not None])) else (None, None)
+  srcs:list[list[UOp]] = []
+  not_all_real = not all(all(mlb.real) for mlb in msrcs)
+  new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else msrcs[0].real
+  assert any(new_real), "output contains no real lb"
+  for mlb in msrcs:
+    if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.src)
+    else:
+      assert axis is not None and bounds is not None
+      if mlb.axis is None: srcs.append(to_sharded(mlb.src, axis, bounds))
+      else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.src], axis, bounds))
+  new_real_lbs:dict[int,UOp] = {i:lsrcs[0].alu(root.op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
+  # NOTE: const dtype should match real
+  new_dtype = next(iter(new_real_lbs.values())).dtype
+  new_lbs = [new_real_lbs.get(i, lsrcs[0].const_like(0).cast(new_dtype)) for i,lsrcs in enumerate(zip(*srcs))]
+  return MultiLazyBuffer(new_lbs, axis, new_real)
+
+def reduce_multi(root:UOp, multi:UOp):
+  op, axis = root.arg
+  if multi.axis is not None and multi.axis in axis:
+    # all-reduce on sharded axes
+    reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.lbs, multi.real)]
+    # if all partitions are real, do all_reduce
+    if all(multi.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
+    # only one partition is real, keep it
+    return MultiLazyBuffer(reduced_parts, None, multi.real)
+  # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
+  return MultiLazyBuffer([x.r(op, axis) for x in multi.src], multi.axis, multi.real)
+
+def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
+  return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
+
+def reshape_multi(root:UOp, multi:UOp):
+  arg = root.arg
+  if multi.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in multi.src], None, multi.real)
+  arg_acc:list[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
+  # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+  # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
+  new_axis = len(arg_acc) - arg_acc[::-1].index(prod(multi.shape[:multi.axis])) - 1
+  assert all(prod(lb.shape[multi.axis:])%prod(arg[new_axis+1:])==0 for lb in multi.src), f"reshape cannot move items between shards {root.arg=}"
+  lbs = [x.reshape(tuple(s if a!=new_axis else prod(x.shape[multi.axis:])//prod(arg[new_axis+1:]) for a,s in enumerate(arg))) for x in multi.src]
+  return MultiLazyBuffer(lbs, new_axis, multi.real)
+
+def expand_multi(root:UOp, multi:UOp):
+  # NOTE: this assert isn't needed, sharded axis can have dim 1
+  assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
+  return MultiLazyBuffer([x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], multi.axis, multi.real)
+
+multi_pm = PatternMatcher([
+  (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reshape_multi),
+  (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), expand_multi),
+])
+
+@track_rewrites(named=True)
+def apply_multi_map(big_sink:UOp) -> UOp:
+  #graph_rewrite(big_sink, multi_pm)
+  return graph_rewrite_map(big_sink, multi_pm)
 
 """
 class MultiLazyBuffer(MathTrait):
