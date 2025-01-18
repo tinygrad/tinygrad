@@ -223,14 +223,12 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_div_collapse_const(self):
     a = Tensor.empty(32)
-    b = Tensor.empty(32)
     expr = a/a
     check_schedule(expr, 0)
     self.assertIsNone(expr.lazydata.base.realized)
 
   def test_mul_collapse_buffer(self):
     a = Tensor.empty(32)
-    b = Tensor.empty(32)
     expr = a*1
     check_schedule(expr, 0)
     # NOTE: no BUFFER gets allocated if the tensor collapses to a CONST
@@ -238,7 +236,6 @@ class TestSchedule(unittest.TestCase):
 
   def test_mul_collapse_const(self):
     a = Tensor.empty(32)
-    b = Tensor.empty(32)
     expr = a*0
     check_schedule(expr, 0)
     # NOTE: no BUFFER gets allocated if the tensor collapses to a CONST
