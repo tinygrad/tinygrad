@@ -88,30 +88,36 @@ class ScheduleContext:
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
-def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
-  if (r:=cache.get(buf)) is not None: return r
-  if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
-  # shapeless op is passthrough
-  # realized is passthrough
-  # constants are passthrough
-  if buf.st is None or buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND}: return buf
-  # view is passthrough
-  if buf is not buf.base:
-    cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
-    return ret
-  # make things that can't be images not images
-  dtype = buf.dtype
-  if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
-    dtype = buf.dtype.base
-  # ASSIGN already has a target buffer, otherwise we create a new one
-  buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-  op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
-  # track the underlying tensor uop for this op
-  ctx.tensor_uops[buf_uop] = [buf]
-  # (early) bufferize
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
-  return ret
+def add_buffers(sink: UOp, ctx: ScheduleContext) -> UOp:
+  stack: list[tuple[UOp, bool]] = [(sink, False)]
+  cache: dict[UOp, UOp] = {}
+  while stack:
+    # iterate through every UOp twice. once to preprocess the arguments and another to save them to cache
+    buf, preprocessed = stack.pop()
+    if not preprocessed: stack.append((buf, True))
+    if cache.get(buf) is not None: pass
+    elif buf.op is Ops.SINK:
+      if not preprocessed: stack.extend([(x, False) for x in buf.src])
+      else: cache[buf] = buf.replace(src=tuple(cache[x] for x in buf.src))
+    # shapeless, realized, constants ops are passthrough
+    elif buf.st is None or buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND}: cache[buf] = buf
+    # view is passthrough
+    elif buf is not buf.base:
+      if not preprocessed: stack.append((buf.base, False))
+      else: cache[buf] = cache[buf.base].view(buf.st)
+    elif not preprocessed: stack.extend([(x, False) for x in buf.src])
+    else:
+      dtype = buf.dtype
+      # make things that can't be images not images
+      if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+        if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
+        dtype = buf.dtype.base
+      # ASSIGN already has a target buffer, otherwise we create a new one
+      buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
+      op = buf.replace(dtype=dtype.base, src=tuple(cache[x] for x in buf.src))    # track the underlying tensor uop for this op
+      ctx.tensor_uops[buf_uop] = [buf]
+      cache[buf] = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+  return cache[sink]
 
 # **** AST graph rewrite
 
@@ -525,7 +531,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   if getenv("VIZ"): graph_rewrite(big_sink, remove_movement_ops+ops_folding, ScheduleContext())
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
   # to_uop is removing (many) of the movement ops
-  sink = add_buffers(big_sink, ctx:=ScheduleContext(), cache={})
+  sink = add_buffers(big_sink, ctx:=ScheduleContext())
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
   sink = graph_rewrite(sink, merge_bufs, ctx)
