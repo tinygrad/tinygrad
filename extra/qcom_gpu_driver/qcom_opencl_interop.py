@@ -32,6 +32,11 @@ x = Tensor.from_blob(rawbuf_ptr, (8, 8), dtype=dtypes.int, device='QCOM')
 y = (x + 1).numpy()
 print(y)
 
+# testing float values with QCOM tensors
+x_f = Tensor.from_blob(rawbuf_ptr, (8, 8), dtype=dtypes.float, device='QCOM')
+y_f = (x + 1).numpy()
+print(y_f)
+
 # all calculations are done, save to free the object
 cl.clReleaseMemObject(cl_buf)
 
