@@ -1344,8 +1344,8 @@ class TestSchedule(unittest.TestCase):
 
   def test_bitcast_fuses(self):
     x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(Ops.EXP2).cast(dtypes.int32, True)
-    b = x.cast(dtypes.int32, True)
+    a = x.alu(Ops.EXP2).bitcast(dtypes.int32)
+    b = x.bitcast(dtypes.int32)
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 1) # this should fuse when it makes sense
 
@@ -2104,16 +2104,6 @@ class TestConst(unittest.TestCase):
     a = Tensor(vv)
     print(a.lazydata)
     self.assertTrue(tensor_const_pm.rewrite(a.lazydata))
-
-  def test_uop_methods(self):
-    a = Tensor(1)
-    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
-
-    a = Tensor.ones((4, 4))
-    self.assertTrue(a.lazydata.is_unrealized_unmasked_const())
-
-    a = Tensor.ones((4, 4)).pad((1, 1),)
-    self.assertFalse(a.lazydata.is_unrealized_unmasked_const())
 
   def test_const_schedule(self):
     a = Tensor.ones((4, 4))

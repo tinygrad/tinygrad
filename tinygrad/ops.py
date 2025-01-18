@@ -358,14 +358,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType, bitcast=False):
-    if bitcast: return self.bitcast(dtype)
-    if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
-    return UOp(Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType):
-    if self.st is not None and self.shape and ((self.shape[-1]*self.dtype.itemsize)%dtype.itemsize != 0):
-      raise RuntimeError(f"unsupported size in bitcast {dtype}")
-    return UOp(Ops.BITCAST, dtype, (self,))
+  def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
+  def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -447,7 +441,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
     return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  def is_unrealized_unmasked_const(self): return self.base.op is Ops.CONST and all(v.mask is None for v in unwrap(self.st).views)
   @property
   def lbs(self): return [self]
   @property

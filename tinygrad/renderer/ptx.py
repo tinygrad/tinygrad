@@ -60,7 +60,7 @@ def render_wmma(ctx: "PTXRenderer", x: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
   _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = x.arg
   n_operands = tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
-  dt_map = { dtypes.half: "f16" }
+  dt_map = { dtypes.half: "f16", dtypes.float: "tf32" }
   _i = 0
   for vv in x.src[:2]:
     for i in range(0, len(ctx.r[vv]), (elems_per_reg := 4//dtype_in.itemsize)):
@@ -124,7 +124,7 @@ class PTXRenderer(Renderer):
   device = "CUDA"
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
-  tc_sm80 = [tc for tc in CUDARenderer.tc_sm80 if tc.dtype_in == dtypes.half]
+  tc_sm80 = [tc for tc in CUDARenderer.tc_sm80 if tc.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
