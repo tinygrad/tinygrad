@@ -192,12 +192,12 @@ class AMMemoryManager:
     for ip in ["GC", "MM"]: self.adev.gmc.flush_tlb(ip, vmid=0)
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
-    pass
-    # ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr)
-    # for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size, iter_dir=True):
-    #   for pte_id in range(pte_idx, pte_idx + pte_cnt):
-    #     if not (entry:=pt.get_entry(pte_id) & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
-    #     pt.set_page(pte_id, paddr=0x0, valid=False)
+    # pass
+    ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr)
+    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size, iter_dir=True):
+      for pte_id in range(pte_idx, pte_idx + pte_cnt):
+        if not (entry:=pt.get_entry(pte_id) & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
+        pt.set_page(pte_id, paddr=0x0, valid=False)
 
     # if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
 
@@ -248,14 +248,14 @@ class AMMemoryManager:
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
   def _alloc_optimal_paddrs(self, va:int, size:int, contigous=False) -> list[tuple[int, int]]:
-    if contigous: return [(self.pa_allocator.alloc(size), size)]
+    if contigous: return [(self.palloc(size, zero=True).paddr, size)]
 
     # Traverse the PT to find the optimal paddrs
     paddrs = []
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, creat_pt=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       # print(f"alloc optimal: {off=} {pte_idx=} {pte_cnt=} {pte_covers=}")
-      paddrs += [(self.pa_allocator.alloc(pte_covers), pte_covers) for pte_id in range(pte_cnt)]
+      paddrs += [(self.palloc(pte_covers, zero=False).paddr, pte_covers) for pte_id in range(pte_cnt)]
     # print(paddrs)
     return paddrs
 
