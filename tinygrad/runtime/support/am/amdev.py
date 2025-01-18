@@ -196,7 +196,7 @@ class AMMemoryManager:
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_mode=False)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        if not (entry:=pt.get_entry(pte_id) & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
+        if not ((entry:=pt.get_entry(pte_id)) & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
         pt.set_page(pte_id, paddr=0x0, valid=False)
 
     # if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
@@ -268,9 +268,9 @@ class AMMemoryManager:
     return AMVirtualMapping(va, size, AMPhysicalMemoryBlock(self.adev, *paddrs[0]).cpu_addr() if len(paddrs) == 1 else None, paddrs[0][0] if len(paddrs) == 1 else None)
 
   def vfree(self, vm:AMVirtualMapping):
-    self.unmap_range(vm.va_addr, vm.size)
+    self.unmap_range(vm.va_addr, vm.size, free_paddrs=(vm.paddr is None))
     self.va_allocator.free(vm.va_addr)
-    # if vm.paddr is not None: self.pa_allocator.free(vm.paddr)
+    if vm.paddr is not None: self.pa_allocator.free(vm.paddr)
 
   def palloc(self, size, align=0x1000, zero=True, boot=False) -> AMPhysicalMemoryBlock:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
