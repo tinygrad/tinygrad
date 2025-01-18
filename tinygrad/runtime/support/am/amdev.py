@@ -123,17 +123,15 @@ class AMPageTableEntry:
   def get_entry(self, entry_id): return self.view[entry_id]
 
 class AMPageTableTraverseContext:
-  def __init__(self, adev, pt, vaddr, create_mode=True):
-    self.adev, self.vaddr = adev, vaddr - adev.gmc.vm_base
+  def __init__(self, adev, pt, vaddr, create_mode=False):
+    self.adev, self.vaddr, self.create_mode = adev, vaddr - adev.gmc.vm_base, create_mode
     self.pt_stack = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
-    self.create_mode = create_mode
 
   def _pt_pte_size(self, pt): return (1 << ((9 * (3-pt.lv)) + 12))
   def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % 512
 
   def level_down(self):
     pt, pte_idx, pte_covers = self.pt_stack[-1]
-    # pte_covers = self._pt_pte_size(pt)
     entry = pt.get_entry(pte_idx)
     if entry & am.AMDGPU_PTE_VALID:
       assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.pm.paddr:#x}, {pte_idx=} {entry=:#x}"
@@ -152,12 +150,11 @@ class AMPageTableTraverseContext:
 
   def next(self, size, off=0):
     while size > 0:
-      # Go to the correct level
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_mode:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.get_entry(pte_idx) & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and (pt.get_entry(pte_idx)&am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       yield off, pt, pte_idx, entries, pte_covers
@@ -184,37 +181,28 @@ class AMMemoryManager:
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_mode=True)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
+        frag = 0 if pte_covers == 0x1000 else 0x9
         for pte_off in range(pte_cnt):
-          pt.set_page(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, valid=True)
+          pt.set_page(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, frag=frag, valid=True)
           assert off + pte_off * pte_covers < psize, f"Mapping out of range {off=} {pte_off=} {pte_covers=} {psize=}"
 
     # Invalidate TLB after mappings.
     for ip in ["GC", "MM"]: self.adev.gmc.flush_tlb(ip, vmid=0)
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
-    # pass
+    if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
+
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_mode=False)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         if not ((entry:=pt.get_entry(pte_id)) & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
         pt.set_page(pte_id, paddr=0x0, valid=False)
 
-    # if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
-
-    # vaddr = vaddr - AMMemoryManager.va_allocator.base
-    # for _, _, pte_st_idx, n_ptes, _, pt, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
-    #   entry = pt.get_entry(pte_st_idx)
-    #   if not (entry & am.AMDGPU_PTE_SYSTEM) and free_paddrs: self.pa_allocator.free(entry & 0x0000FFFFFFFFF000)
-
-    #   for pte_idx in range(n_ptes):
-    #     assert pt.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, "Entry must be set"
-    #     pt.set_page(pte_st_idx + pte_idx, paddr=0x0, valid=False)
-
   def map_from(self, vaddr:int, size:int, from_adev):
-    ctx = AMPageTableTraverseContext(from_adev, from_adev.mm.root_page_table, vaddr, create_mode=False)
-    # print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.pcidev}")
+    if AM_DEBUG >= 2: print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.devfmt}")
 
     paddrs = []
+    ctx = AMPageTableTraverseContext(from_adev, from_adev.mm.root_page_table, vaddr, create_mode=False)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         entry = pt.get_entry(pte_id)
@@ -222,27 +210,7 @@ class AMMemoryManager:
         paddrs.append((paddr, pte_covers))
         uncached, snooped = bool(entry & am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC)), bool(entry & am.AMDGPU_PTE_SNOOPED)
 
-    # print(paddrs)
     self.map_range(vaddr, size, paddrs, uncached=uncached, system=True, snooped=snooped)
-
-    # assert False
-
-    # paddrs = []
-    # ctx = AMPageTableTraverseContext(from_adev, self.root_page_table, vaddr, create_mode=True, free_pt=False)
-    # for off, pt, pte_idx, pte_cnt, pte_covers in ctx.access_next(size):
-    #   for pte_id in range(pte_idx, pte_idx + pte_cnt):
-    #     paddrs.append((pt.get_entry(pte_id) & 0x0000FFFFFFFFF000, pte_covers))
-
-    # self.map_range(vaddr, size, paddrs, uncached=False, system=False, snooped=False)
-
-    # if AM_DEBUG >= 2: print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.pcidev}")
-
-    # vaddr = vaddr - AMMemoryManager.va_allocator.base
-    # for va, _, pte_st_idx, n_ptes, pte_covers, pt, _ in self.frags_walker(from_adev.mm.root_page_table, vaddr, size, from_entry=True, create_mode=False):
-    #   entry = pt.get_entry(pte_st_idx)
-    #   paddr = (entry & 0x0000FFFFFFFFF000) if entry & am.AMDGPU_PTE_SYSTEM else (entry & 0x0000FFFFFFFFF000) + from_adev.pcidev.regions[0].base_addr
-    #   self.map_range(va + AMMemoryManager.va_allocator.base, n_ptes * pte_covers, paddr=paddr, system=True,
-    #                  uncached=bool(entry & am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC)), snooped=bool(entry & am.AMDGPU_PTE_SNOOPED))
 
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
