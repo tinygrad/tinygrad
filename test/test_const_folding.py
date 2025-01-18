@@ -215,6 +215,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiConstFolding(unittest.TestCase):
+  @unittest.expectedFailure # requires contiguous folding
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)

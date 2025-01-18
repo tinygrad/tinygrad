@@ -493,7 +493,7 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+ops_folding, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
-  # add realizes
+  # add BUFFER uops and realize some of them
   sink = add_buffers(tensor_map[big_sink], rev_tensor_map, ctx, cache={})
   sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
   # group realizes into kernels
@@ -509,8 +509,9 @@ def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> 
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
 
-  # tensors can also collapse to a pre realized buffer
+  # tensors can become an existing buffer, no ScheduleItem needed
   for k,v in tensor_map.items():
+    # NOTE: we only add base tensors to becomes_map
     if k is not v and v.is_realized and k is k.base: ctx.becomes_map[k] = v.view(unwrap(k.st))
 
   # add kernel children

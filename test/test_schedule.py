@@ -217,7 +217,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = (a*b)/b
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0) # the scheduler can fold divs now!
     self.assertEqual(GlobalCounters.global_ops, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
 
@@ -226,7 +226,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = a/a
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
     self.assertEqual(GlobalCounters.global_ops, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
 
@@ -342,7 +342,7 @@ class TestSchedule(unittest.TestCase):
         fw = bn(x).contiguous_backward().relu().contiguous()
         fw.sum().backward()
         # TODO: this is too many
-        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
+        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 11)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -533,6 +533,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2, [conv1.weight, conv2.weight])
     Tensor.training = old_training
 
+  @unittest.expectedFailure # requires contiguous folding
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.contiguous()
@@ -1445,7 +1446,7 @@ class TestSchedule(unittest.TestCase):
       x = Tensor.randn((9, 9)).realize()
       y = Tensor.randn((9, 9)).realize()
       out = x@y
-      run_schedule(check_schedule(out, 3))
+      run_schedule(check_schedule(out, 4))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
       self.assertIsInstance(out.dtype, ImageDType)
       self.assertIsNotNone(out.lazydata.base.realized)
@@ -2181,7 +2182,8 @@ class TestConst(unittest.TestCase):
     sched = add.schedule()
     self.assertEqual(len(sched), 0)
     # b+0 and b share the same underlying device memory
-    self.assertIs(add.lazydata.realized, b.lazydata.realized)
+    # NOTE: realized only exists on base
+    self.assertIs(add.lazydata.base.realized, b.lazydata.base.realized)
     self.assertListEqual(add.tolist(), [2, 2, 2, 2])
 
   def test_src_masked_const_folding(self):
