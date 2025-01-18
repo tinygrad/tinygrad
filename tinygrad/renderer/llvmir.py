@@ -57,7 +57,7 @@ llvm_rewrite = PatternMatcher([
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
-  (UPat(Ops.BF16, src=(UPat.var('idx'), UPat.var('buf')), name="x"), lambda ctx,x,idx,buf: 
+  (UPat(Ops.BF16, src=(UPat.var('idx'), UPat.var('buf')), name="x"), lambda ctx,x,idx,buf:
    f" {ctx[x]}_16 = load i16, i16* {ctx[buf]}\n"
    f" {ctx[x]}_ext = zext i16 {ctx[x]}_16 to i32\n"
    f" {ctx[x]}_shl = shl i32 {ctx[x]}_ext, 16\n"
