@@ -238,7 +238,7 @@ class TestSchedule(unittest.TestCase):
     expr = (a/b)/c
     expr.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
-    self.assertLessEqual(GlobalCounters.global_ops, 12)
+    self.assertLessEqual(GlobalCounters.global_ops, 4*3)
     np.testing.assert_allclose(expr.numpy(), (a.numpy()/b.numpy())/c.numpy())
 
   def test_dedup_assign(self):
