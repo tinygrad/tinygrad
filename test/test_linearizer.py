@@ -1222,27 +1222,6 @@ class TestLinearizer(unittest.TestCase):
     assert idxs[1].arg == ('gidx1', 5), idxs[1].arg
     assert idxs[2].arg == ('gidx2', 4), idxs[2].arg
 
-  def test_div_collapse(self):
-    def helper(t, msg, max_ops=0):
-      sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
-      assert len(sched) == 1
-
-      lin = Kernel(sched[0].ast)
-      assert sum(u.op in {Ops.RECIP, Ops.FDIV} for u in lin.linearize().uops) == max_ops, msg
-
-    a = Tensor.empty((4,4))
-    b = Tensor.empty((4,4))
-    d = Tensor.empty((4,4))
-
-    c = (a*b)/b
-    helper(c, "found Ops.RECIP in (a*b)/b operation")
-
-    c = a/a
-    helper(c, "found Ops.RECIP in (a/a) operation")
-
-    c = (a/b)/d
-    helper(c, "found multiple Ops.RECIP in (a/b)/d operation", 1)
-
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]

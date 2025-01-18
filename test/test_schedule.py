@@ -211,6 +211,36 @@ class TestSchedule(unittest.TestCase):
     reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
+  def test_div_collapse_buffer(self):
+    a = Tensor.full((4,), 4.0).contiguous().realize()
+    b = Tensor.full((4,), 2.0).contiguous().realize()
+    GlobalCounters.reset()
+    expr = (a*b)/b
+    expr.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_ops, 0)
+    np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
+
+  def test_div_collapse_const(self):
+    a = Tensor.full((4,), 4.0).contiguous().realize()
+    GlobalCounters.reset()
+    expr = a/a
+    expr.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_ops, 0)
+    np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
+
+  def test_div_collapse(self):
+    a = Tensor.full((4,), 1.0).contiguous().realize()
+    b = Tensor.full((4,), 2.0).contiguous().realize()
+    c = Tensor.full((4,), 3.0).contiguous().realize()
+    GlobalCounters.reset()
+    expr = (a/b)/c
+    expr.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertLessEqual(GlobalCounters.global_ops, 4*3)
+    np.testing.assert_allclose(expr.numpy(), (a.numpy()/b.numpy())/c.numpy())
+
   def test_dedup_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     b = Tensor.full((4,), 2.).contiguous()
