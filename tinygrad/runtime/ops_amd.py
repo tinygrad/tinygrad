@@ -507,12 +507,9 @@ class PCIIface:
       va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      paddrs = []
-      for off in range(0, size, mmap.PAGESIZE):
-        self.pagemap.seek(((va + off) // mmap.PAGESIZE) * 8)
-        paddrs += [((struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE)]
-
-      self.adev.mm.map_range(vaddr, size, paddrs=paddrs, system=True, snooped=True, uncached=True)
+      self.pagemap.seek(va // mmap.PAGESIZE * 8)
+      paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
+      self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
     vm = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
