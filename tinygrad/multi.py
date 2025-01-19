@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, flatten
 from tinygrad.ops import Ops, UOp, sint
 
 def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
@@ -148,6 +148,7 @@ def copy_multi(multi:UOp, device:UOp):
 
 def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis)
 
+# NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),

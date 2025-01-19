@@ -256,7 +256,7 @@ class Tensor(SimpleMathTrait):
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
     _apply_map_to_tensors(get_multi_map(big_sink))
 
-    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+    big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
     schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map)
     return memory_planner(schedule), var_vals
