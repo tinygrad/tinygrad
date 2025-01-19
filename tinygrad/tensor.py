@@ -229,7 +229,8 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    schedule, var_vals, becomes_map = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
+    big_sink = UOp.sink(*flatten([x.lazydata.lbs for x in (self,)+lst]))
+    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
 
     # get all children of keys in becomes_map
     all_uops: set[UOp] = set()
