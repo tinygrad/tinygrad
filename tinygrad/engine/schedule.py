@@ -478,7 +478,7 @@ def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
-  return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
+  return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype, (b, unwrap(st.st).to_uop()))
 
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.tensor_uops[b][0].metadata) is not None: ctx.ops_metadata[x] = m
