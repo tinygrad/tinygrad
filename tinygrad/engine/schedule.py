@@ -490,8 +490,7 @@ remove_movement_ops = PatternMatcher([
 ])
 
 @track_rewrites(named=True)
-def create_schedule_with_vars(outs:list[UOp], skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  big_sink = UOp.sink(*outs)
+def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+ops_folding, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}

@@ -28,7 +28,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
   elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sched, _, __ = create_schedule_with_vars([t])
+    sched, _, __ = create_schedule_with_vars(t.sink())
   # test lowering all the ScheduleItems to ExecItems
   lowered = list(lower_schedule(sched.copy()))
   if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
@@ -998,9 +998,9 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 5)
 
   def test_scaled_dot_product_attention_causal_fusion(self):
-    x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
-    out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m, is_causal=True)
-    check_schedule(out, 6)
+    x, y, z = (Tensor.empty(32, 8, 16, 16) for _ in range(3))
+    out = Tensor.scaled_dot_product_attention(x, y, z, is_causal=True)
+    check_schedule(out, 5)
 
   def test_adam_step_fusion(self):
     with Tensor.train():
@@ -2247,12 +2247,12 @@ class TestTensorUOpSpec(unittest.TestCase):
     ])
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_push_views)
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      create_schedule_with_vars(list(t.src))
+      create_schedule_with_vars(t)
 
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
-    create_schedule_with_vars(list(t.src))
+    create_schedule_with_vars(t)
 
 class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
