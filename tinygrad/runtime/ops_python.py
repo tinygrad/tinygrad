@@ -159,6 +159,11 @@ class PythonProgram:
               def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
               ul[i] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
+            elif arg[1] == (8,16,32):
+                def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2 + (k//8)*8][goff + (k//2)%4 + (row%8)*4]
+                def b_elem(x, col, k, goff): return x[k%2 + (k//8)*4][goff + (k//2)%4 + col*4]
+                ul[i] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
+
             else: raise NotImplementedError(f"unimplemented tensor core {arg}")
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
@@ -188,6 +193,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
+    if getenv("EMULATE_CUDA_SM89"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm89
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
