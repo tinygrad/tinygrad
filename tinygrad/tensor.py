@@ -6,10 +6,10 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
-from tinygrad.multi import MultiLazyBuffer, apply_multi_map
+from tinygrad.multi import MultiLazyBuffer, get_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
-from tinygrad.device import Device, Buffer, BufferSpec
+from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -109,6 +109,30 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, .
 
 #  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
 def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: return tuple(zip(padding[-2::-2], padding[::-2]))
+
+def _apply_map_to_tensors(becomes_map:dict[UOp, UOp]) -> None:
+  # get all children of keys in becomes_map
+  all_uops: set[UOp] = set()
+  search_uops = list(becomes_map)
+  while len(search_uops):
+    x = search_uops.pop(0)
+    if x in all_uops: continue
+    all_uops.add(x)
+    search_uops.extend([u for c in x.children if (u:=c()) is not None])
+
+  # link the found UOps back to Tensors. exit early if there's no Tensors to realize
+  # NOTE: this uses all_tensors, but it's fast
+  fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and t.lazydata in all_uops]
+
+  # potentially rewrite all the discovered Tensors
+  if len(fixed_tensors):
+    sink = UOp.sink(*[t.lazydata for t in fixed_tensors])
+    new_sink = sink.substitute(becomes_map)
+
+    # set the relevant lazydata to the realized UOps
+    for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
+      if s is ns: continue
+      t.lazydata = ns
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -230,34 +254,11 @@ class Tensor(SimpleMathTrait):
     NOTE: A Tensor can only be scheduled once.
     """
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
-    multi_map = apply_multi_map(big_sink)
-    schedule, var_vals, becomes_map = create_schedule_with_vars(multi_map[big_sink])
-    #inverse_multi_map = {v:k for k,v in multi_map.items()}
-    #becomes_map = {inverse_multi_map[k]:v for k,v in becomes_map.items()}
+    _apply_map_to_tensors(get_multi_map(big_sink))
 
-    # get all children of keys in becomes_map
-    all_uops: set[UOp] = set()
-    search_uops = list(becomes_map)
-    while len(search_uops):
-      x = search_uops.pop(0)
-      if x in all_uops: continue
-      all_uops.add(x)
-      search_uops.extend([u for c in x.children if (u:=c()) is not None])
-
-    # link the found UOps back to Tensors. exit early if there's no Tensors to realize
-    # NOTE: this uses all_tensors, but it's fast
-    fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
-    if len(fixed_tensors) == 0: return [], {}
-
-    # potentially rewrite all the discovered Tensors
-    sink = UOp.sink(*[t.lazydata for t in fixed_tensors])
-    new_sink = sink.substitute(becomes_map)
-
-    # set the relevant lazydata to the realized UOps
-    for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
-      if s is ns: continue
-      t.lazydata = ns
-
+    big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
+    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    _apply_map_to_tensors(becomes_map)
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -310,7 +311,8 @@ class Tensor(SimpleMathTrait):
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
     cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
-    buf = cast(Buffer, cast(UOp, cpu.lazydata).base.realized)
+    buf = cast(UOp, cpu.lazydata).base.realized
+    assert buf is not None, f"{cast(UOp, cpu.lazydata).base} was not realized"
     if self.device != "CLANG": buf.options = BufferSpec(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
 
