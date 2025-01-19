@@ -299,6 +299,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
     else: shape = src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
+    if self.op is Ops.MULTI: return ShapeTracker.from_shape(tuple(x*(len(self.src) if self.arg == i else 1) for i,x in enumerate(shape)))
     return ShapeTracker.from_shape(shape)
 
   @functools.cached_property
@@ -433,7 +434,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def bounds(self):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
-    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.lbs], initial=0)))
+    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
 
   @property
   def real(self): return [True]*len(self.src)

@@ -1,8 +1,7 @@
 from __future__ import annotations
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
-from tinygrad.dtype import DType
-from tinygrad.ops import Ops, MathTrait, UOp, sint
+from tinygrad.ops import Ops, UOp, sint
 
 def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
@@ -44,7 +43,9 @@ def MultiLazyBuffer(lbs:list[UOp], axis:int|None, real:list[bool]|None=None):
   # TODO: handle real
   return UOp.multi(*lbs, axis=axis)
 
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite, track_rewrites
+# ***** multi functions *****
+
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
 
 def alu_multi(root:UOp):
   msrcs = root.src
@@ -73,7 +74,7 @@ def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
-    reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.lbs, multi.real)]
+    reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
     # if all partitions are real, do all_reduce
     if all(multi.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
     # only one partition is real, keep it
@@ -100,15 +101,31 @@ def expand_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
   return MultiLazyBuffer([x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], multi.axis, multi.real)
 
+def copy_multi(multi:UOp, device:UOp):
+  # if we already have a copy on the device, return that
+  real_lbs = multi.src  # TODO: this is wrong, handle fake
+  if multi.axis is None: return next((lb for lb in real_lbs if lb.device == device.arg), real_lbs[0].copy_to_device(device.arg))
+  # copy lbs to device, pad to final shape, and sum
+  llbs:list[UOp] = []
+  for lb,real,(start,end) in zip(multi.src, multi.real, multi.bounds):
+    if not real: continue
+    pad_arg = tuple((0,0) if a != multi.axis else (start, multi.bounds[-1][1]-end) for a in range(len(lb.shape)))
+    llbs.append(lb.copy_to_device(device.arg).pad(pad_arg))
+  return functools.reduce(operator.add, llbs)
+
+def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis)
+
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reshape_multi),
   (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), expand_multi),
+  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH), src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
 
 @track_rewrites(named=True)
-def apply_multi_map(big_sink:UOp) -> UOp:
+def apply_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
   #graph_rewrite(big_sink, multi_pm)
   return graph_rewrite_map(big_sink, multi_pm)
 

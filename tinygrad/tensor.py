@@ -232,6 +232,8 @@ class Tensor(SimpleMathTrait):
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
     multi_map = apply_multi_map(big_sink)
     schedule, var_vals, becomes_map = create_schedule_with_vars(multi_map[big_sink])
+    #inverse_multi_map = {v:k for k,v in multi_map.items()}
+    #becomes_map = {inverse_multi_map[k]:v for k,v in becomes_map.items()}
 
     # get all children of keys in becomes_map
     all_uops: set[UOp] = set()
@@ -248,14 +250,13 @@ class Tensor(SimpleMathTrait):
     if len(fixed_tensors) == 0: return [], {}
 
     # potentially rewrite all the discovered Tensors
-    sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
+    sink = UOp.sink(*[t.lazydata for t in fixed_tensors])
     new_sink = sink.substitute(becomes_map)
 
     # set the relevant lazydata to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
       if s is ns: continue
-      if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
-      else: t.lazydata = ns
+      t.lazydata = ns
 
     return memory_planner(schedule), var_vals
 
@@ -293,7 +294,7 @@ class Tensor(SimpleMathTrait):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
+    #assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized: return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
