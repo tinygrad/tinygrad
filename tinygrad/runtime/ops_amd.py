@@ -197,24 +197,44 @@ class AMDCopyQueue(HWQueue):
            *data64_le(signal.timestamp_addr))
     return self
 
+  def bind(self, dev:AMDDevice):
+    if not dev.driverless: return
+
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
+    hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
+    for i, value in enumerate(self._q): hw_view[i] = value
+
+    self.indirect_cmd = [amd_gpu.SDMA_OP_INDIRECT | amd_gpu.SDMA_PKT_INDIRECT_HEADER_VMID(0), *data64_le(self.hw_page.va_addr), qsz, *data64_le(0)]
+    self._q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
+
   def _submit(self, dev:AMDDevice):
     if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr[0] > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
+    if self.binded_device == dev:
+      # An IB packet must end on a 8 DW boundary.
+      add = (8 - (((dev.sdma_queue.put_value % 32) // 4) + len(self.indirect_cmd) % 8)) % 8
+      cmds, cmd_sizes = ([0] * add) + self.indirect_cmd, [len(self.indirect_cmd) + add]
+
+      if len(cmds) * 4 >= (dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes):
+        cmds, cmd_sizes = [0, 0] + self.indirect_cmd, [8]
+    else: cmds, cmd_sizes = self._q, self.internal_cmd_sizes
+
     tail_blit_dword = 0
-    for cmdsz in self.internal_cmd_sizes:
+    for cmdsz in cmd_sizes:
       if (tail_blit_dword + cmdsz) * 4 >= dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
 
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
-    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self._q[:tail_blit_dword])
+    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
-    if (rem_packet_cnt := len(self._q) - tail_blit_dword) > 0:
+    if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
       ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
       dev.sdma_queue.put_value += zero_fill
 
-      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self._q[tail_blit_dword:])
+      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
     dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
