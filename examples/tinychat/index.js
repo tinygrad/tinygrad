@@ -1,4 +1,5 @@
 window.TINYCHAT_ROOT = "/";
+window.MODEL_BASE_URL= ".";
 
 // copied from examples/webgpu/stable_diffusion/index.html
 const getDevice = async () => {

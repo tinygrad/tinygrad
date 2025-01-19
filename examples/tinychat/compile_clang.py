@@ -8,6 +8,7 @@ from tinygrad.helpers import fetch
 from typing import List, Tuple, Any, NamedTuple
 from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Ops
+from collections import OrderedDict
 
 if __name__=="__main__":
   Device.DEFAULT = "CLANG"
@@ -38,6 +39,7 @@ if __name__=="__main__":
   sub_steps = [
     Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward),
     #Step(name = "q6k_to_f32", input = [Tensor.randn(3_144_960, dtype=dtypes.uint8)], forward = q6k_to_f32),
+    # quantized weight input shapes: {(2048, 2048), (512, 2048), (2048, 8192), (8192, 2048)}
   ]
 
   # TODO: refactor to move some corrected CLANG rendering to export_model.py
@@ -49,7 +51,7 @@ if __name__=="__main__":
     # this omits saving the random seeds, which therefore will be set in client by default to 0,0 (2x uint32)
     bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weightbuf_to_name}
 
-    cprog = ["#include <tgmath.h>"]
+    cprog = ["#include <tgmath.h>", "#include <stddef.h>"]
 
     # declare buffers that we'll load weights into from javascript
     buf_to_name = []
@@ -60,17 +62,16 @@ if __name__=="__main__":
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
       buf_to_name.append((f"{name}", f"{weightbuf_to_name[weightbuf_id]}"))
 
-    # buf_to_name must have unchanged order from hereafter. We rely on integer index of void* buffers to load weights from javascript
+    buf_to_name = tuple(buf_to_name) # buf_to_name must have unchanged order from hereafter. We rely on known ordering to map weights from JS
     cprog.append(f"void* buffers[] = {{\n{",\n".join([buf_name for buf_name, weight_name in buf_to_name])}\n}};")
+    cprog.append(f"""void* get_buffer_by_index(size_t index) {{\n  return buffers[index];\n}}""")
 
     # declare zero-filled intermediate buffers
     for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(special_names.values()):
       n_bytes, dtype, weightbuf_id = bufs[name]
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
 
-    # TODO: function to be exposed to JS for getting pointer from void* buffers based on index
-
-    inputs = [f"{dtype_map[bufs[input][1]]}* {input}" for input in special_names.values() if "input" in input]
+    inputs = sorted([(name, bufs[name][1], True) for name in special_names.values() if "input" in name], key=lambda x: x[0].split("input")[1]) # (name, dtype, True)
     symbolic_vars = set()
     for i, (_, args, _, _) in enumerate(statements):
       for j, var in enumerate(args):
@@ -78,47 +79,65 @@ if __name__=="__main__":
           symbolic_vars.add(var)
           statements[i][1][j] = var.arg[0] # name assigned in Variable(name, ...), e.g. "start_pos"
 
-    inputs = ", ".join(inputs + [f"{dtype_map[var.dtype]} {var.arg[0]}" for var in symbolic_vars])
-    outputs = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in special_names.values() if "output" in output])
+    inputs += sorted([(var.arg[0], var.dtype, False) for var in symbolic_vars]) # (name, dtype, False)
+    input_c_args = ", ".join(f"{dtype_map[dtype]}* {name}" if isArray else f"{dtype_map[dtype]} {name}" for name,dtype,isArray in inputs)
+    outputs = sorted([name for name in special_names.values() if "output" in name], key=lambda x: x.split("output")[1])
+    output_c_args = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in outputs]) # TODO: always arrays only?
     cprog += list(functions.values())
-    cprog += [f"void net({inputs}, {outputs}) {{"]
+    cprog += [f"void net({output_c_args}, {input_c_args}) {{"]
+    # TODO: tell CLANG to assume specified ranges for symbolic vars, and for I/O buffer sizes?
     cprog += [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     cprog = "\n".join(cprog)
 
     with open(os.path.join(os.path.dirname(__file__), f"{step.name}.c"), "w") as text_file:
       text_file.write(cprog)
 
-    return f"""\nvar {step.name} = function() {{
+    input_ptrs = OrderedDict((f"inputPtr{name.split("input")[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
+    output_ptrs = OrderedDict((f"outputPtr{name.split("output")[1]}", (name, bufs[name][0])) for name in outputs)
 
-  // load wasm module, get handle
-
+    top = f"import {step.name}Module from './{step.name}.js'\n"
+    prg = f"""\nvar {step.name} = function() {{
     return {{
       "setup": async (safetensor, metadata) => {{
+        // safetensor: array of Uint8Array, model-ready (no decompression required)
+        // metadata: metadata.state_dict object from net_metadata.json
 
-      // fetch pointers to empty weight buffers on wasm heap
-      // allocate weights from JS memory to above pointers
+        const wasm = await {step.name}Module();
+        const weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
+        for (const [i, name] of weightNames.entries()) {{
+          const bufPtr = wasm._get_buffer_by_index(i);
+          const tensor = metadata[name];
+          wasm.HEAPU8.set(tensor.bytes, bufPtr);
+        }}
 
-      // allocate wasm memory for input/output arrays
+        {"\n".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+        {"\n".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+        // TODO: ensure proper generic view dtype and byte size
+        {"\n".join(f"const {name}View = new Int32Array(wasm.HEAP32.buffer, {outputPtr}, {n_bytes // 4});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
 
-        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
+        return async ({",".join(name for name,_,_ in inputs)}) => {{
 
-          // set input buffer
-          // call net function
-          // set and return result
+          {"\n".join(f"wasm.HEAP32.set({name}, {inputPtr})" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+
+          wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))})
+
+          return [{", ".join(f"{name}View" for name, n_bytes in output_ptrs.values())}]
+
         }}
       }}
     }}
   }}"""
+    return top, prg
 
-  prg = ""
+  top, prg = "", ""
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
-    prg += compile_step(model, step)
+    step_top, step_prg = compile_step(model, step)
+    top += step_top
+    prg += step_prg
 
-  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
-    text_file.write(prg)
+  with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as text_file:
+    text_file.write(top + prg)
 
-  # TODO: JS code for loading in weights based on buf_to_name mapping
-  # TODO: JS code for setting up inference function, analogous to net.js for WebGPU implementation
   done = 1
