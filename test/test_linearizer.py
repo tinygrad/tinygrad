@@ -1050,7 +1050,6 @@ class TestLinearizer(unittest.TestCase):
         d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
         helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
