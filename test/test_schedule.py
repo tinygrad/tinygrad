@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import verify_ast
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
+from tinygrad.engine.schedule import ScheduleItem, ScheduleContext, create_schedule_with_vars, view_right, view_left, remove_movement_ops, ops_folding
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -2303,6 +2303,32 @@ class TestBufferUOp(unittest.TestCase):
     self.assertEqual(a.lazydata.base.realized.size, 4)
     a2 = a.contiguous().realize()
     self.assertEqual(a2.lazydata.base.realized.size, 16)
+
+class TestContiguous(unittest.TestCase):
+  def test_contiguous_buffer(self):
+    a = Tensor.empty(4).lazydata
+    b = a.alu(Ops.CONTIGUOUS)
+    b = graph_rewrite(b, remove_movement_ops+ops_folding)
+    self.assertIs(b, a)
+
+  # some movement ops can be applied after the contiguous
+  def test_contiguous_buffer_view(self):
+    a = Tensor.empty(4).lazydata
+    b = a.reshape((2, 2)).alu(Ops.CONTIGUOUS)
+    b = graph_rewrite(b, remove_movement_ops+ops_folding, ScheduleContext())
+    self.assertIs(b, a.buf_uop.view(unwrap(b.st)))
+
+  def test_non_contiguous_buffer_view(self):
+    a = Tensor.empty(4, 1).lazydata
+    b = a.expand((4, 4)).alu(Ops.CONTIGUOUS)
+    b = graph_rewrite(b, remove_movement_ops+ops_folding, ScheduleContext())
+    assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
+
+  def test_remove_double_contiguous(self):
+    a = Tensor.empty(4, 1).lazydata
+    b = a.expand((4, 4)).alu(Ops.CONTIGUOUS).alu(Ops.CONTIGUOUS)
+    b = graph_rewrite(b, remove_movement_ops+ops_folding, ScheduleContext())
+    assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
