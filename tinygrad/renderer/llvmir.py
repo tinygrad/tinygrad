@@ -64,7 +64,8 @@ llvm_rewrite = PatternMatcher([
     {ctx[root]}_32 = zext i16 {ctx[root]}_16 to i32
     {ctx[root]}_shifted = shl nuw i32 {ctx[root]}_32, 16
     {ctx[root]} = bitcast i32 {ctx[root]}_shifted to float
-""")
+"""),
+
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
    f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
