@@ -30,6 +30,8 @@ integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (
                                                  (Tensor.bitwise_or, np.bitwise_or)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+# log and reciprocal not supported for fp8s
+fp8s_unary_operations = [(Tensor.exp, np.exp), (Tensor.sin, np.sin), (Tensor.sqrt, np.sqrt)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
@@ -128,18 +130,11 @@ class TestDTypeALU(unittest.TestCase):
   def test_fp8e5m2(self, a, b, op): universal_test(a, b, dtypes.fp8e5m2, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3, Device.DEFAULT), f"no fp8e4m3 on {Device.DEFAULT}")
-  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
-  def test_fp8e4m3_unary(self, a, op):
-    if (op[0] == Tensor.log or op[0] == Tensor.reciprocal) and a == 0.0:
-      out: Tensor = Tensor([0.0], dtype=dtypes.fp8e4m3).log()
-      sched = out.schedule()
-      run_schedule(sched)
-      tensor_value = out.numpy()
-      np.testing.assert_equal(tensor_value, [math.nan]) # inf is not supported for fp8e4m3
-    else: universal_test_unary(a, dtypes.fp8e4m3, op)
+  @given(ht.fp8e4m3, strat.sampled_from(fp8s_unary_operations))
+  def test_fp8e4m3_unary(self, a, op): universal_test_unary(a, dtypes.fp8e4m3, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2, Device.DEFAULT), f"no fp8e5m2 on {Device.DEFAULT}")
-  @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
+  @given(ht.fp8e5m2, strat.sampled_from(fp8s_unary_operations))
   def test_fp8e5m2_unary(self, a, op): universal_test_unary(a, dtypes.fp8e5m2, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
