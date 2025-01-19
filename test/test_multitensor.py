@@ -319,7 +319,6 @@ class TestMultiTensor(unittest.TestCase):
 
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  @unittest.skip("failing after tensor_map for some reason")
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
 
@@ -507,7 +506,6 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_equal(Y.numpy(), np_y)
     np.testing.assert_equal((X + Y).numpy(), np_x + np_y)
 
-  @unittest.skip("failing after tensor_map for some reason")
   def test_bn_ast_on_devices(self):
     t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
     bn = nn.BatchNorm2d(64)
@@ -664,7 +662,6 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor.rand_like(t, device=(d3, d4))
 
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_dropout_on_shard(self):
     with Tensor.train():
       X = Tensor.ones(256).to(devices_2)
@@ -673,7 +670,6 @@ class TestMultiTensor(unittest.TestCase):
       assert set(unique) == {0, 2}, unique
       assert 100 < counts[0] < 156, counts[0]
 
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_dropout_on_shard_axis(self):
     with Tensor.train():
       X = Tensor.ones(512).shard(devices_2, axis=0)
@@ -732,14 +728,13 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_multi_const_folding(self):
     with Context(TRACK_MATCH_STATS=0):
       a = Tensor.arange(3).realize()
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule()
-    self.assertEqual(len(sched), 7)
+    self.assertEqual(len(sched), 8)
     # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
     self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
     # all these kernels are just because multi calls contiguous on every single shard
@@ -885,7 +880,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
     np.testing.assert_equal(c.numpy(), expected)
 
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.arange(64).reshape(8, 8).contiguous().realize().shard(devices, axis=0)
@@ -904,7 +898,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestBatchNorm(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
       from extra.lr_scheduler import OneCycleLR
@@ -931,7 +924,6 @@ class TestBatchNorm(unittest.TestCase):
       optim.step()
       out.numpy()
 
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
     GPUS = (d1, d2)
@@ -968,7 +960,6 @@ class TestBatchNorm(unittest.TestCase):
       out.mean().backward()
       optim.step()
 
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_unsynced_backprop_sync_weights(self):
     from extra.lr_scheduler import OneCycleLR
     from examples.hlb_cifar10 import UnsyncedBatchNorm
@@ -995,7 +986,6 @@ class TestBatchNorm(unittest.TestCase):
       optim.step()
 
   @given(strat.sampled_from((False, True)))
-  @unittest.skipIf(Device.DEFAULT=="WEBGPU", "fails on WEBGPU without contiguous folding for some reason")
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.arange(4096).reshape(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
@@ -1017,7 +1007,6 @@ class TestBatchNorm(unittest.TestCase):
 
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
-  @unittest.skip("failing after tensor_map for some reason")
   def test_synced_vs_unsynced_bn(self):
     from examples.hlb_cifar10 import UnsyncedBatchNorm
     from tinygrad.nn import BatchNorm2d
