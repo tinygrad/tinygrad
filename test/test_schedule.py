@@ -998,8 +998,8 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 5)
 
   def test_scaled_dot_product_attention_causal_fusion(self):
-    x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
-    out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m, is_causal=True)
+    x, y, z = (Tensor.empty(32, 8, 16, 16) for _ in range(3))
+    out = Tensor.scaled_dot_product_attention(x, y, z, is_causal=True)
     check_schedule(out, 6)
 
   def test_adam_step_fusion(self):
