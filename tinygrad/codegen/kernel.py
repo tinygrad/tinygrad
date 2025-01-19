@@ -95,6 +95,7 @@ class Kernel:
     self.local_dims: int = 0
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
+    self.available_tensor_cores = self.opts.tensor_cores
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
 
@@ -116,6 +117,7 @@ class Kernel:
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
+    ret.available_tensor_cores = self.available_tensor_cores
 
     return ret
 
@@ -293,7 +295,7 @@ class Kernel:
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, opt_level:int) -> bool:
     if use_tensor_cores and self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
-      for tc in self.opts.tensor_cores:
+      for tc in self.available_tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)

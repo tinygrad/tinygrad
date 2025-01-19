@@ -102,19 +102,22 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
 # get dictionary of all possible actions
 def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
-  for i,a in enumerate(actions):
-    if a.axis is not None and a.op is not OptOps.TC:
-      if ((ax:=a.real_axis(lin)) >= lin.shape_len) or (lin.full_shape[ax] == a.amt and Opt(a.op, ax, 0) in actions): continue
-    lin2 = lin.copy()
-    try:
-      lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
-      for s,c in zip(lin2.full_shape, lin2.colors()):
-        if c in {"magenta", "yellow"}: up *= s
-        elif c in {"cyan", "green", "white"}: lcl *= s
-      if up//tc_up > max_up or lcl > max_lcl: continue
-      acted_lins[i+1] = lin2
-    except KernelOptError: pass
+  for tensor_core in lin.available_tensor_cores:
+    lintc = lin.copy()
+    lintc.available_tensor_cores = [tensor_core]
+    for i,a in enumerate(actions):
+      if a.axis is not None and a.op is not OptOps.TC:
+        if ((ax:=a.real_axis(lintc)) >= lintc.shape_len) or (lintc.full_shape[ax] == a.amt and Opt(a.op, ax, 0) in actions): continue
+      lin2 = lintc.copy()
+      try:
+        lin2.apply_opt(a)
+        up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
+        for s,c in zip(lin2.full_shape, lin2.colors()):
+          if c in {"magenta", "yellow"}: up *= s
+          elif c in {"cyan", "green", "white"}: lcl *= s
+        if up//tc_up > max_up or lcl > max_lcl: continue
+        acted_lins[i+1] = lin2
+      except KernelOptError: pass
   return acted_lins
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
