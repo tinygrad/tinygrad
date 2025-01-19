@@ -57,14 +57,14 @@ llvm_rewrite = PatternMatcher([
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
-  (UPat(Ops.BF16, src=(UPat.var('idx'), UPat.var('buf')), name="x"), lambda ctx,x,idx,buf:
-   f"  {ctx[x]}_gep = getelementptr inbounds i16, i16* {ctx[x]}_ptr, {ldt(idx.dtype)} {ctx[idx]}\n"
-   f"  {ctx[x]}_16 = load i16, i16* {ctx[x]}_gep\n"
-   f"  {ctx[x]}_32 = zext i16 {ctx[x]}_16 to i32\n"
-   f"  {ctx[x]}_mul = shl i32 {ctx[x]}_32, 16\n"
-   f"  {ctx[x]}_f32 = bitcast i32 {ctx[x]}_mul to float\n"
-   f"  {ctx[x]} = { f'{ctx[x]}_f32' if x.dtype==dtypes.float32 else f'{lcast(dtypes.float32, x.dtype)} float {ctx[x]}_f32 to {ldt(x.dtype)}' }"),
-
+  (UPat(Ops.BF16, name="root", src=(UPat.var("range"), UPat.var("buf")), dtype=dtypes.float), lambda ctx,root,range,buf: f"""
+    {ctx[root]}_ptr = bitcast {ldt(buf.dtype)} {ctx[buf]} to i16*
+    {ctx[root]}_gep = getelementptr inbounds i16, i16* {ctx[root]}_ptr, {ldt(range.dtype)} {ctx[range]}
+    {ctx[root]}_16 = load i16, i16* {ctx[root]}_gep, align 2
+    {ctx[root]}_32 = zext i16 {ctx[root]}_16 to i32
+    {ctx[root]}_shifted = shl nuw i32 {ctx[root]}_32, 16
+    {ctx[root]} = bitcast i32 {ctx[root]}_shifted to float
+""")
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
    f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
@@ -98,7 +98,7 @@ class LLVMRenderer(Renderer):
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
     # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
-    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
+    (UPat(Ops.BF16, name="root", src=(UPat.var("range"),UPat.var("buf")), dtype=dtypes.bfloat16), llvm_bf16_cast),
   ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
