@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 def ldt(dt:DType):
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
   return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
-          dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", dtypes.bfloat16: "i16",
+          dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
           dtypes.float16: "half", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1", dtypes.void: "void"}[dt]
 
 def lconst(x, dtype:DType):
@@ -57,14 +57,6 @@ llvm_rewrite = PatternMatcher([
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
-  (UPat(Ops.BF16, name="root", src=(UPat.var("idx"), UPat.var("buf")), dtype=dtypes.float), lambda ctx,root,idx,buf: f"""
-    {ctx[root]}_ptr = bitcast {ldt(buf.dtype)} {ctx[buf]} to i16*
-    {ctx[root]}_gep = getelementptr inbounds i16, i16* {ctx[root]}_ptr, {ldt(idx.dtype)} {ctx[idx]}
-    {ctx[root]}_16 = load i16, i16* {ctx[root]}_gep, align 2
-    {ctx[root]}_32 = zext i16 {ctx[root]}_16 to i32
-    {ctx[root]}_shifted = shl nuw i32 {ctx[root]}_32, 16
-    {ctx[root]} = bitcast i32 {ctx[root]}_shifted to float
-"""),
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
@@ -82,7 +74,8 @@ llvm_rewrite = PatternMatcher([
 ])
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
-  return UOp(Ops.BF16, dtypes.float32, (idx, buf)).cast(root.dtype)
+  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
+  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
@@ -99,7 +92,7 @@ class LLVMRenderer(Renderer):
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
     # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
-    (UPat(Ops.BF16, name="root", src=(UPat.var("idx"),UPat.var("buf")), dtype=dtypes.bfloat16), llvm_bf16_cast),
+    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
