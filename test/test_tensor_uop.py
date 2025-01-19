@@ -79,7 +79,6 @@ class TestTensorUOp(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
   # NOTE: contiguous on a buffer collapses
-  @unittest.expectedFailure # requires contiguous folding
   def test_contiguous_empty(self):
     empty = Tensor.empty(1).contiguous()
     sched = empty.schedule()

@@ -15,6 +15,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import all_same
 from tinygrad.codegen.kernel import verify_ast
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
@@ -342,7 +343,7 @@ class TestSchedule(unittest.TestCase):
         fw = bn(x).contiguous_backward().relu().contiguous()
         fw.sum().backward()
         # TODO: this is too many
-        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 11)
+        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -533,7 +534,6 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2, [conv1.weight, conv2.weight])
     Tensor.training = old_training
 
-  @unittest.expectedFailure # requires contiguous folding
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.contiguous()
@@ -2305,6 +2305,29 @@ class TestBufferUOp(unittest.TestCase):
     self.assertEqual(a.lazydata.base.realized.size, 4)
     a2 = a.contiguous().realize()
     self.assertEqual(a2.lazydata.base.realized.size, 16)
+
+def assert_same_buf(*t:Tensor):
+  assert t[0].lazydata.base.realized is not None
+  assert all_same([x.lazydata.base.realized for x in t])
+
+class TestContiguous(unittest.TestCase):
+  def test_contiguous_buffer(self):
+    a = Tensor.arange(4).realize()
+    b = a.contiguous()
+    check_schedule(b, 0)
+    assert_same_buf(a, b)
+
+  def test_contiguous_buffer_view(self):
+    a = Tensor.arange(4).realize()
+    b = a.reshape(2, 2).contiguous()
+    check_schedule(b, 0)
+    assert_same_buf(a, b)
+
+  def test_non_contiguous_buffer_view(self):
+    a = Tensor.arange(4).realize()
+    b = a[:2].contiguous()
+    run_schedule(check_schedule(b, 1))
+    np.testing.assert_equal(b.numpy(), [0, 1])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
