@@ -58,11 +58,12 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
   (UPat(Ops.BF16, src=(UPat.var('idx'), UPat.var('buf')), name="x"), lambda ctx,x,idx,buf:
-   f" {ctx[x]}_16 = load i16, i16* {ctx[buf]}\n"
-   f" {ctx[x]}_ext = zext i16 {ctx[x]}_16 to i32\n"
-   f" {ctx[x]}_shl = shl i32 {ctx[x]}_ext, 16\n"
-   f" {ctx[x]}_f32 = bitcast i32 {ctx[x]}_shl to float\n"
-   f" {ctx[x]} = { f'{ctx[x]}_f32' if x.dtype==dtypes.float32 else f'{lcast(dtypes.float32, x.dtype)} float {ctx[x]}_f32 to {ldt(x.dtype)}' }"), 
+   f"  {ctx[x]}_gep = getelementptr inbounds i16, i16* {ctx[x]}_ptr, {ldt(idx.dtype)} {ctx[idx]}\n"
+   f"  {ctx[x]}_16 = load i16, i16* {ctx[x]}_gep\n"
+   f"  {ctx[x]}_32 = zext i16 {ctx[x]}_16 to i32\n"
+   f"  {ctx[x]}_mul = shl i32 {ctx[x]}_32, 16\n"
+   f"  {ctx[x]}_f32 = bitcast i32 {ctx[x]}_mul to float\n"
+   f"  {ctx[x]} = { f'{ctx[x]}_f32' if x.dtype==dtypes.float32 else f'{lcast(dtypes.float32, x.dtype)} float {ctx[x]}_f32 to {ldt(x.dtype)}' }"),
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
@@ -79,6 +80,9 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
 
+def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
+  return UOp(Ops.BF16, dtypes.float32, (idx, buf)).cast(root.dtype)
+
 class LLVMRenderer(Renderer):
   device = "LLVM"
   supports_float4 = False
@@ -93,6 +97,8 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+    # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
+    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
