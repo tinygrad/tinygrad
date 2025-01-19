@@ -101,6 +101,39 @@ def expand_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
   return MultiLazyBuffer([x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], multi.axis, multi.real)
 
+def pad_multi(root:UOp, multi:UOp):
+  assert multi.axis is None or root.arg[multi.axis] == (0,0) or not all(multi.real), f"padding not supported for {root.arg=}"
+  # pad on shard axis -> fill others with zeros and set real to all True
+  if multi.axis is not None and root.arg[multi.axis] != (0,0):
+    # pad back to whole axis, remove real mask
+    assert all(root.arg[i] == (0, 0) for i in range(len(root.shape)) if i != multi.axis), "cannot pad sharded and non-sharded axis at the same time"
+    dim, bound = sum(lb.shape[multi.axis] for lb in multi.src), multi.bounds[multi.real.index(True)]
+    assert root.arg[multi.axis] == (bound[0], dim-bound[1]), "can only pad to whole axis"
+    return MultiLazyBuffer([x if r else x.const_like(0) for x,r in zip(multi.src, multi.real)], multi.axis)
+  return MultiLazyBuffer([x.pad(root.arg) for x in multi.src], multi.axis, multi.real)
+
+def permute_multi(root:UOp, multi:UOp):
+  # all permutes supported!
+  return MultiLazyBuffer([x.permute(root.arg) for x in multi.src], root.arg.index(multi.axis) if multi.axis is not None else None, multi.real)
+
+def shrink_multi(root:UOp, multi:UOp):
+  assert multi.axis is None or root.arg[multi.axis] == (0, root.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \
+    f"shrinking not supported for {root.arg=}"
+  if multi.axis is not None and root.arg[multi.axis] in multi.bounds and root.arg[multi.axis] != (0, root.shape[multi.axis]):
+    assert all(root.arg[i] == (0, s) or i == multi.axis for i,s in enumerate(root.shape)), \
+      "cannot shrink sharded and non-sharded axis at the same time"
+    # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
+    idx = multi.bounds.index(root.arg[multi.axis])
+    # zero out other lbs to not create lb reference
+    return MultiLazyBuffer([lb if i==idx else lb.const_like(0) for i,lb in enumerate(multi.src)],
+                            multi.axis, [i==idx for i in range(len(multi.src))])
+  return MultiLazyBuffer([x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
+                          multi.axis, multi.real)
+
+def stride_multi(root:UOp, multi:UOp):
+  assert multi.axis is None or root.arg[multi.axis] == 1, "flipping not supported on sharded axis"
+  return MultiLazyBuffer([x.stride(root.arg) for x in multi.src], multi.axis, multi.real)
+
 def copy_multi(multi:UOp, device:UOp):
   # if we already have a copy on the device, return that
   real_lbs = multi.src  # TODO: this is wrong, handle fake
@@ -120,6 +153,10 @@ multi_pm = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reshape_multi),
   (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), expand_multi),
+  (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), pad_multi),
+  (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
+  (UPat(Ops.STRIDE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), stride_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH), src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
