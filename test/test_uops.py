@@ -15,7 +15,7 @@ from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
 
-def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:List[UOp], opts=None) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts))
 
 def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))

@@ -146,7 +146,7 @@ def block_reorder(in_block:UOp):
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
+def linearize_uop(sink:UOp, enable_check:bool=__debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # get children and all block contexts
@@ -218,7 +218,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   _uops += sink.arg.lst
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(_uops)
+  if enable_check: type_verify(_uops)
 
   # strip the SINK
   return _uops[:-1]
