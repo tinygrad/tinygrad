@@ -204,11 +204,16 @@ to_si = PatternMatcher([
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
 
+fix_image = PatternMatcher([
+  # ImageDType UOps become the base dtype once we LOAD them
+  (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+])
+
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # remove movement ops + substitute LOAD of fused STORE with just the value
   sink = graph_rewrite(graph_rewrite(pre, multioutput+view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
-  # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
+  # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL + remove ImageDType
+  ast = graph_rewrite(sink, to_si+fix_image, si_ctx:=ScheduleItemContext(ctx.var_vals))
   # deal with ASSIGN
   assign_preloads: list[UOp] = []
   if len(ctx.assigns) != 0:

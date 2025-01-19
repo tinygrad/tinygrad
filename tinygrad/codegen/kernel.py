@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, PatternMatcher, UPat, can_pad, print_uops, type_verify, resolve, Variable, sint, \
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
   graph_rewrite, track_rewrites, view_left
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
@@ -647,7 +647,7 @@ class Kernel:
 
       return ret
 
-    return graph_rewrite(fixup_ast(self.ast), view_left+fix_image)
+    return graph_rewrite(fixup_ast(self.ast), view_left)
 
   # **** this is the lowerer ****
 
@@ -680,10 +680,6 @@ class Kernel:
                         key=lambda x: (x.op, x.src[0].arg)))
     return ProgramSpec(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
-
-fix_image = PatternMatcher([
-  (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x:x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-])
 
 # the living definition of intermediate UOps
 
