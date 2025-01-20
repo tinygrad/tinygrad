@@ -1,5 +1,6 @@
 import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
+from tinygrad.helpers import mv_address
 
 class FakeGMC:
   def __init__(self): self.vm_base = 0x0
@@ -19,6 +20,8 @@ class FakeAM:
     self.gmc = FakeGMC()
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
     self.is_booting = False
+  def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
+  def paddr2mc(self, paddr:int) -> int: return paddr
 
 #  * PTE format:
 #  * 63:59 reserved
