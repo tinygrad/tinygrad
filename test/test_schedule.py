@@ -972,6 +972,7 @@ class TestSchedule(unittest.TestCase):
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_softmax_upcast(self):
     # input half, softmax in float
     Tensor.manual_seed(0)
