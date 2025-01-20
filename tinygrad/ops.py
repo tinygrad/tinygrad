@@ -844,6 +844,8 @@ def launch_viz(env_str:str, data:str):
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
 
+class TreeAutomaton: pass
+
 # *** simple graph rewrite engine ***
 
 class RewriteContext:
