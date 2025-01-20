@@ -662,6 +662,8 @@ class TestOps(unittest.TestCase):
     ten0, ten1 = Tensor(data[0], dtype=dtypes.bool), Tensor(data[1], dtype=dtypes.bool)
     helper_test_op([], lambda: tor0&tor1, lambda: ten0&ten1, forward_only=True)
 
+    helper_test_op(None, lambda x: (1 < x) & (x < 2), forward_only=True, vals=[[1.2, 1.2, 1.2, 3.2]])
+
     self.helper_test_exception([(4), (4)], torch.bitwise_and, Tensor.bitwise_and, expected=RuntimeError)
 
   def test_or(self):
