@@ -2336,34 +2336,29 @@ class TestBufferUOp(unittest.TestCase):
 
 class TestContiguous(unittest.TestCase):
   def test_contiguous_buffer(self):
-    a = Tensor.empty(4).lazydata
-    b = a.alu(Ops.CONTIGUOUS)
-    b = schedule_graph_rewrite(b)
-    self.assertIs(b, a)
+    a = Tensor.empty(4)
+    b = a.contiguous()
+    check_schedule(b, 0)
 
   def test_contiguous_buffer_view(self):
-    a = Tensor.empty(4).lazydata
-    b = a.reshape((2, 2)).alu(Ops.CONTIGUOUS)
-    b = schedule_graph_rewrite(b)
-    self.assertIs(b, a.buf_uop.view(unwrap(b.st)))
+    a = Tensor.empty(4)
+    b = a.reshape((2, 2)).contiguous()
+    check_schedule(b, 0)
 
   def test_non_contiguous_buffer_view(self):
-    a = Tensor.empty(4, 1).lazydata
-    b = a.expand((4, 4)).alu(Ops.CONTIGUOUS)
-    b = schedule_graph_rewrite(b)
-    assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
+    a = Tensor.empty(4, 1)
+    b = a.expand((4, 4)).contiguous()
+    check_schedule(b, 1)
 
   def test_size_change_buffer_view(self):
-    a = Tensor.empty(4).lazydata
-    b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).alu(Ops.CONTIGUOUS)
-    b = schedule_graph_rewrite(b)
-    assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
+    a = Tensor.empty(4)
+    b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
+    check_schedule(b, 1)
 
   def test_double_contiguous_realizes_once(self):
-    a = Tensor.empty(4, 1).lazydata
-    b = a.expand((4, 4)).alu(Ops.CONTIGUOUS).alu(Ops.CONTIGUOUS)
-    b = schedule_graph_rewrite(b)
-    assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
+    a = Tensor.empty(4, 1)
+    b = a.expand((4, 4)).contiguous().contiguous()
+    check_schedule(b, 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
