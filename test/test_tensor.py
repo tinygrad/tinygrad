@@ -7,6 +7,12 @@ from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
+from tinygrad.ops import Ops, UOp
+from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -772,6 +778,74 @@ class TestTensorMetadata(unittest.TestCase):
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
     self.assertEqual(bw[0].name, "sigmoid")
+
+class TestIdxUpcast(unittest.TestCase):
+  def _find_op(self, ast: UOp, op: Ops):
+    if ast.op is op: return ast
+    for src in ast.src:
+      if (ret:=self._find_op(src, op)) is not None: return ret
+  def _schedule_render(self, a: Tensor):
+    schedule, _ = a.schedule_with_vars()
+    for s in schedule:
+      if s.ast.op is Ops.SINK:
+        renderer = Device[s.bufs[0].device].renderer
+        uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
+        renderer.render("test", uops)
+        return uops
+
+  def _assert(self, dtype: DType, a: Tensor):
+    uops = self._schedule_render(a)
+    # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
+    store = next(uop for uop in uops if uop.op is Ops.STORE)
+    assert store.op is Ops.STORE
+    idx = self._find_op(store, Ops.INDEX)
+    if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+      assert idx.op is Ops.INDEX
+      idx_val = idx.src[1]
+      assert idx_val.dtype is dtype
+
+  # use expand to generate kernel that uses large idx
+  def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
+    self._assert(dtype, Tensor.empty(dim1, dim2, 1).expand(-1, -1, dim3).contiguous())
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_overflow(self):
+    # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
+    self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_overflow_sym(self):
+    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  def test_regular(self):
+    self.do_op_then_assert(dtypes.int, 64, 64, 64)
+
+  def test_regular_sym(self):
+    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+
+  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  def test_symfold(self):
+    # This would cause an overflow, but after sym fold it's within int32
+    a = Tensor.arange(65535)
+    uops = self._schedule_render(a)
+    assert all(uop.dtype is not dtypes.long for uop in uops)
+
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_int64_unsupported_overflow_sym(self):
+    with self.assertRaises(KeyError):
+      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_int64_unsupported_overflow(self):
+    with self.assertRaises(KeyError):
+      self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+
+  @unittest.skip("This is kept for reference, it requires large memory to run")
+  def test_overflow_kernel_run(self):
+    # This creates a total of 2**31+10 elements, requiring at least 2147 MB memory to run
+    # Modified example from issue 3271
+    a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
+    a.realize()
 
 if __name__ == '__main__':
   unittest.main()

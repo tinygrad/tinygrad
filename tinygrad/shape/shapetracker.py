@@ -6,7 +6,28 @@ from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop
+from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop, Context
+from tinygrad.codegen.rewriter import sym
+
+def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
+
+# If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
+# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
+def upcast(u: UOp):
+  srcs = tuple(upcast(_src) for _src in u.src)
+  if u.dtype.scalar() is dtypes.int:
+    dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
+    upcasted = u.replace(dtype=dtype, src=tuple([_src.cast(dtype) for _src in srcs]))
+    if overflow(u): return upcasted
+    # Check the original src, new srcs has Ops.CAST whose vmin, vmax change the real bounds
+    # Cast back is required because if the node is in range, siblings would never be upcasted
+    if any((overflow(src) for src in u.src)): return upcasted.cast(u.dtype)
+  return u.replace(src=tuple(srcs))
+
+# pooling op may overflow before folding causing unnecessary upcast
+def folded_upcast(u: UOp):
+  with Context(TRACK_MATCH_STATS=0):
+    return upcast(graph_rewrite(u, sym, {}))
 
 @functools.lru_cache(None)
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
@@ -70,12 +91,16 @@ class ShapeTracker:
 
   def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
   def to_indexed_uops(self, _idxs:Optional[list[UOp]|tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:
-    return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
+    idx, valid = views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
+    return folded_upcast(idx), folded_upcast(valid)
 
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    return int((v.shrink(v.mask) if (v:=self.views[0]).mask else v).to_indexed_uops()[0].vmax + 1)
+    view = (v.shrink(v.mask) if (v:=self.views[0]).mask else v)
+    idx, _ = views_to_indexed_uops((view,))
+    assert idx.vmax < 1e12, f"real_size broken for {self}"
+    return int(idx.vmax + 1)
 
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 

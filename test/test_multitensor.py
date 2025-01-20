@@ -56,6 +56,11 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_shard_not_multiple(self):
+    X = Tensor.ones(256).contiguous().realize()
+    with self.assertRaises(RuntimeError):
+      X.shard_(devices_3, 0)
+
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
     Y = Tensor(X.lazydata)
@@ -282,6 +287,14 @@ class TestMultiTensor(unittest.TestCase):
       #for p in get_parameters(conv): p.grad.realize()
       optim.step()
       out.numpy()
+
+  def test_backward_sum(self):
+    x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
+    w = Tensor([1.,2,3,4], requires_grad=True).shard(devices_2)
+    out = x * w
+    out.mean().backward()
+    tst = w.grad.numpy()
+    np.testing.assert_allclose(tst, [0.75, 1., 1.25, 1.5])
 
   def test_lr_scheduler_OneCycleLR(self):
     from extra.lr_scheduler import OneCycleLR
