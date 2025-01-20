@@ -343,6 +343,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
@@ -362,6 +363,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow, and flaky on LLVM")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
@@ -897,6 +899,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_allclose(output.numpy(), expected)
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
 class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
@@ -924,6 +927,7 @@ class TestBatchNorm(unittest.TestCase):
       optim.step()
       out.numpy()
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
     GPUS = (d1, d2)
