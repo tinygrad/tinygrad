@@ -105,7 +105,7 @@ class AMPhysicalMemoryBlock:
   def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
 
 @dataclasses.dataclass(frozen=True)
-class AMMapping: va_addr:int; size:int; paddrs:list[int, int]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
+class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
   def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
@@ -165,7 +165,7 @@ class AMPageTableTraverseContext:
         while pt.lv!=am.AMDGPU_VM_PTB and (pt.get_entry(pte_idx)&am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
-      assert entries >= 0, "Invalid entries"
+      assert entries > 0, "Invalid entries"
       yield off, pt, pte_idx, entries, pte_covers
 
       size, off, self.vaddr = size - entries * pte_covers, off + entries * pte_covers, self.vaddr + entries * pte_covers
