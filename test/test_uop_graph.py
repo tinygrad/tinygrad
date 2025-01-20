@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, AMX
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, graph_rewrite, expander, sym
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
