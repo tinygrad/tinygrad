@@ -237,7 +237,7 @@ class AM_IH(AM_IP):
       (self.adev.mm.palloc(self.ring_size, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
 
   def interrupt_handler(self):
-    ring_vm, rwptr_vm, suf, _ = self.rings[0]
+    _, rwptr_vm, suf, _ = self.rings[0]
     wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
 
     if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):

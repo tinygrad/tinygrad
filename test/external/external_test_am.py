@@ -19,6 +19,8 @@ class FakeAM:
     self.gmc = FakeGMC()
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
     self.is_booting = False
+  def paddr2cpu(self, paddr:int) -> int: return paddr
+  def paddr2mc(self, paddr:int) -> int: return paddr
 
 #  * PTE format:
 #  * 63:59 reserved
