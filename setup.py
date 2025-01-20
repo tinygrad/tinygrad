@@ -59,7 +59,10 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone"
+            "capstone",
+            "pycocotools",
+            "boto3",
+            "pandas"
         ],
         'webgpu': ["wgpu"],
         'docs': [
