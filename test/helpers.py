@@ -10,7 +10,7 @@ from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.rewriter import full_graph_rewrite
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
 
 def derandomize_model(model):
