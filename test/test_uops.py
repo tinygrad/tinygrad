@@ -14,6 +14,7 @@ from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_ker
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
+from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
@@ -364,6 +365,17 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertIn(Ops.IDIV, ops)
+
+  def test_mulacc_unrolled(self):
+    # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
+    # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)
+    a = Tensor.empty(1024)
+    b = Tensor.empty(1024)
+    c = (a*b).sum()
+    k = Kernel(c.schedule()[-1].ast)
+    k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+    uops = k.linearize().uops
+    self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
