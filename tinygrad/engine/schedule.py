@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, symbolic_simple, type_verify
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
+from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap, flatten
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, ContextVar
 from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -81,9 +81,9 @@ class ScheduleContext:
   assigns: set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
-  ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+  metadata: defaultdict[UOp, list[Metadata]] = field(default_factory=lambda: defaultdict(list)) # this maps UOps to tensor(s) metadata
   becomes_map: dict[UOp, UOp] = field(default_factory=dict)
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
@@ -229,7 +229,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, ast))
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
-                      tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
+                      tuple(dedup(flatten(ctx.metadata[x] for x in pre.toposort))), tuple(dedup(assign_preloads)))
 
 PROCESS_REPLAY_CAPTURE: dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -481,7 +481,7 @@ def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
-  if (m:=ctx.tensor_uops[b][0].metadata) is not None: ctx.ops_metadata[x] = m
+  ctx.metadata[x] += [t.metadata for t in ctx.tensor_uops[b] if t.metadata is not None]
   if b not in ctx.realizes: return x # collapse BUFFER
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))

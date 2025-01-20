@@ -773,11 +773,12 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
     self.assertTrue(y.grad.lazydata.metadata.backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
+    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
+    self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "relu", "__mul__"})
     bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 1)
-    self.assertEqual(bw[0].name, "sigmoid")
+    self.assertEqual(len(bw), 2)
+    self.assertEqual(bw[0].name, "__mul__")
+    self.assertEqual(bw[1].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
