@@ -121,7 +121,7 @@ class TestImageDType(unittest.TestCase):
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
       sched = unwrap(w1.grad).schedule()
-      self.assertEqual(len(sched), 9)
+      self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
         if s.outputs[0].dtype == dtypes.float:
