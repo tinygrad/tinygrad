@@ -1,11 +1,11 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib, weakref
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
+from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
@@ -287,7 +287,6 @@ class Tensor(SimpleMathTrait):
       self.contiguous().realize().lazydata.base.realized.copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
@@ -904,7 +903,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** toposort and backward pass *****
 
-  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None, materialize_grads=False) -> list[Tensor]:
     """
     Compute the gradient of the targets with respect to self.
 
@@ -926,24 +925,15 @@ class Tensor(SimpleMathTrait):
       grads = compute_gradient(uop, grad, set(target_uops))
       ret = []
       for x in target_uops:
-        if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
+        if (y:=grads.get(x)) is None:
+          if materialize_grads: y = x.const_like(0)
+          else: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
         ret.append(y)
       rets.append(ret)
     # create returned Tensors
     if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
     return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
                    device=t.device) for t,u in zip(targets, zip(*rets))]
-
-  def _deepwalk(self) -> list[Tensor]:
-    def _walk(node:Tensor, visited:set[Tensor]):
-      visited.add(node)
-      # if tensor is not leaf, reset grad
-      if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: node.grad = None
-      if ctx:
-        for i in cast(Function, node._ctx).parents:
-          if i not in visited: yield from _walk(i, visited)
-        yield node
-    return list(_walk(self, set()))
 
   def backward(self, gradient:Optional[Tensor]=None, retain_graph:bool=False) -> Tensor:
     """
@@ -956,31 +946,14 @@ class Tensor(SimpleMathTrait):
     print(t.grad.numpy())
     ```
     """
-    toposorted = self._deepwalk()
-    if gradient is None:
-      assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-      # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
-      # this is "implicit gradient creation"
-      gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-
-    toposort_uop = self.lazydata.toposort
-    assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
-    self.grad = gradient
-    for t0 in reversed(toposorted):
-      if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
-      ctx = cast(Function, t0._ctx)
-      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := ctx.metadata) is not None else None)
-      grads = ctx.backward(t0.grad.lazydata)
-      _METADATA.reset(token)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-        for g in ([grads] if len(ctx.parents) == 1 else grads)]
-      for t, g in zip(ctx.parents, grads):
-        if g is not None and t.requires_grad:
-          assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-          assert t.lazydata in toposort_uop or (isinstance(t.lazydata, MultiLazyBuffer) and any(x in toposort_uop for x in t.lazydata.lbs)), \
-            f"grad uop must have a path from self\ngrad uop: {t.lazydata}"
-          t.grad = g if t.grad is None else (t.grad + g)
-      if not retain_graph: del t0._ctx
+    all_uops = self.lazydata.toposort
+    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and
+                                       any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad and not Tensor.no_grad]
+    # clear contexts
+    for t in tensors_need_grad: t._ctx = None
+    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
+      assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
+      t.grad = g if t.grad is None else (t.grad + g)
     return self
 
   # ***** movement low level ops *****
@@ -4000,5 +3973,5 @@ def _metadata_wrapper(fn):
 
 if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential"]: continue
+    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
