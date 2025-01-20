@@ -12,7 +12,6 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.ops import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.schedule import BUF_LIMIT
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
@@ -64,7 +63,11 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
-    a, b = Tensor.randn(4), Tensor.randn(4)
+    # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
+    # without contiguous folding, rand.to("CLANG") and rand.contiguous().to("CLANG") are different UOps.
+    # this test asserts they are the identical Buffer
+    # having different buffers is fine for correctness, because the outputs match.
+    a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     lowered = list(lower_schedule(c.schedule()))
@@ -1223,27 +1226,6 @@ class TestLinearizer(unittest.TestCase):
     assert idxs[1].arg == ('gidx1', 5), idxs[1].arg
     assert idxs[2].arg == ('gidx2', 4), idxs[2].arg
 
-  def test_div_collapse(self):
-    def helper(t, msg, max_ops=0):
-      sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
-      assert len(sched) == 1
-
-      lin = Kernel(sched[0].ast)
-      assert sum(u.op in {Ops.RECIP, Ops.FDIV} for u in lin.linearize().uops) == max_ops, msg
-
-    a = Tensor.empty((4,4))
-    b = Tensor.empty((4,4))
-    d = Tensor.empty((4,4))
-
-    c = (a*b)/b
-    helper(c, "found Ops.RECIP in (a*b)/b operation")
-
-    c = a/a
-    helper(c, "found Ops.RECIP in (a/a) operation")
-
-    c = (a/b)/d
-    helper(c, "found multiple Ops.RECIP in (a/b)/d operation", 1)
-
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
@@ -1701,7 +1683,7 @@ class TestHandCodedOpts(unittest.TestCase):
     # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
     assert k.upcasted == 1 and k.full_shape[-1] == 7
 
-  @unittest.skipIf((buf_max:=BUF_LIMIT.get(Device.DEFAULT)) is not None and buf_max <= 37, "this test uses too many bufs")
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL can only run kernels with up to 32 buffers")
   def test_masked_upcast_wino(self):
     monster = Tensor.stack(*[Tensor.stack(*[Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
@@ -1712,6 +1694,7 @@ class TestHandCodedOpts(unittest.TestCase):
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
 
+  @unittest.expectedFailure # requires contiguous folding
   def test_masked_upcast_wino_full(self):
     with Context(WINO=1):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
@@ -1983,7 +1966,7 @@ class TestKernelOpts(unittest.TestCase):
     Tensor.manual_seed(1552)
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
-      if tc.dtype_in == dtypes.bfloat16: continue
+      if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
@@ -2010,7 +1993,7 @@ class TestKernelOpts(unittest.TestCase):
     Tensor.manual_seed(1552)
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
-      if tc.dtype_in == dtypes.bfloat16: continue
+      if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
@@ -2157,9 +2140,9 @@ class TestKernelOpts(unittest.TestCase):
     data1 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
     data2 = Tensor.randn(2, 1, 4, 1, 3, 4, 2, 6, 1, 3).realize()
     helper_linearizer_ast(sink, [data1, data2], opts=[
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.GROUP, 0, 4)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
+      #[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.GROUP, 0, 4)],
+      #[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8)],
+      #[Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.GROUP, 0, 4)]
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")

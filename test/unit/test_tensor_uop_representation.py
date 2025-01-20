@@ -19,7 +19,10 @@ class TestTensorMutates(unittest.TestCase):
     self.assertIsNot(pa, a.lazydata)
     self.assertIsNot(pb, b.lazydata)
     self.assertIsNot(pr, ret.lazydata)
-    for t in [a,b,ret]: is_pattern(t, realized_pattern)
+    # NOTE: this becomes a VIEW(VIEW(BUFFER)) because UOp.view no longer instantly folds contiguous VIEW of the same shape
+    # this is fine because realized exists on the base.
+    # TODO: we can make this always be a VIEW(BUFFER) once BUFFER has a ShapeTracker of shape=(N,)
+    for t in [a,b,ret]: is_pattern_uop(t.lazydata.base, realized_pattern)
 
   def test_reshape_is_same_parent(self):
     a = Tensor([1,2,3])
@@ -43,14 +46,14 @@ class TestTensorUopRepresentation(unittest.TestCase):
   def test_realized(self):
     a = Tensor([1.,2,3]).realize()
     print(a.lazydata)
-    is_pattern(a, realized_pattern)
+    is_pattern_uop(a.lazydata.base, realized_pattern)
 
   def test_add_realized(self):
     a = Tensor([1.,2,3]).realize()
     b = Tensor([4.,5,6]).realize()
     c = a+b
     print(c.lazydata)
-    is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+    is_pattern(c, UPat(Ops.ADD, src=(UPat(Ops.VIEW, src=(realized_pattern,)), UPat(Ops.VIEW, src=(realized_pattern,)))))
 
   def test_const_pattern(self):
     a = Tensor(1)
@@ -102,13 +105,13 @@ class TestTensorUopRepresentation(unittest.TestCase):
   # UOp(Ops.COPY, dtypes.float, arg=('TEST', False), src=(
   #   UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
   #     UOp(Ops.BUFFER, dtypes.float, arg=(1, 'METAL', 3), src=()),))
-  @unittest.expectedFailure
+  # update: now the arg is just a single bool, the first source is a device.
   def test_copyin(self):
     a = Tensor([1.,2,3]).realize()
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.lazydata)
-    # NOTE: this is wrong, COPY has an extra buffer for some reason
-    is_pattern(c, UPat(Ops.COPY, src=(realized_pattern,)))
+    # TODO: COPY on a Tensor becomes a VIEW(COPY), this should be done in the scheduler not in ops
+    is_pattern(c, UPat(Ops.VIEW, src=(UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)),)))
 
 if __name__ == '__main__':
   unittest.main()

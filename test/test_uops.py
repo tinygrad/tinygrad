@@ -12,7 +12,7 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
@@ -494,7 +494,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "uopgraph.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "rewriter.py")
     self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
@@ -603,6 +603,13 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(alu.st, ShapeTracker.from_shape((2, 1, 4)))
     r = Tensor.empty(4, 4).sum(axis=1)
     self.assertEqual(r.lazydata.st, ShapeTracker.from_shape((4,)))
+
+  def test_st_wmma_none(self):
+    A = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('a', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 1)))
+    B = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('b', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 2)))
+    C = UOp(Ops.DEFINE_VAR, dtypes.float.vec(16), arg=('c', UOp.const(dtypes.float, 0), UOp.const(dtypes.float, 3)))
+    wmma = UOp(Ops.WMMA, dtypes.float.vec(16), (A, B, C))
+    assert wmma.st is None
 
 class TestUOpChildren(unittest.TestCase):
   def test_children_exist(self):

@@ -2,11 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle, decimal, time
-from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
+from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
+from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
+                             cpu_time_execution
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
-from tinygrad.ops import UOp, buffers
 
 # **************** Device ****************
 
@@ -86,7 +87,7 @@ class BufferSpec:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
-               lb_refcount=0, uop_ref:UOp|None=None, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+               lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -103,7 +104,6 @@ class Buffer:
       assert device == base.device, "base must have the same device"
       self._base = base
     if preallocate: self.allocate()
-    if uop_ref is not None: buffers[uop_ref] = self
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
@@ -113,7 +113,7 @@ class Buffer:
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
-    self.allocator = Device[self.device].allocator
+    self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
@@ -124,24 +124,24 @@ class Buffer:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
     return self
-  def __reduce__(self):
-    buf = None
-    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) > 1: raise RuntimeError(f"double ref to buffer? {len(uop_refs)}")
-    uop_ref = None if len(uop_refs) == 0 else uop_refs[0]
-    if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, uop_ref, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount, uop_ref)
-    if self.is_allocated():
-      buf = bytearray(self.nbytes)
-      self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref)
-  @property
-  def nbytes(self): return self.size*self.dtype.itemsize
-  def __del__(self):
-    if not self.is_allocated(): return
+  def deallocate(self):
+    assert self.is_allocated(), "buffer must be allocated to deallocate"
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
+      del self._buf
+  def __reduce__(self):
+    buf = None
+    if self._base is not None:
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+    if self.is_allocated():
+      buf = bytearray(self.nbytes)
+      self.copyout(memoryview(buf))
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
+  @property
+  def nbytes(self): return self.size*self.dtype.itemsize
+  def __del__(self): (not self.is_allocated()) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
@@ -214,6 +214,40 @@ class _MallocAllocator(LRUAllocator):
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
 MallocAllocator = _MallocAllocator()
+
+# NOTE: MAP_JIT is added to mmap module in python 3.13
+MAP_JIT = 0x0800
+
+# CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
+class CPUProgram:
+  helper_handle = ctypes.CDLL(ctypes.util.find_library('System') if OSX else 'libgcc_s.so.1')
+
+  def __init__(self, name:str, lib:bytes):
+    # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
+    # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
+    self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)
+
+    if OSX: CPUProgram.helper_handle.pthread_jit_write_protect_np(False)
+    self.mem.write(lib)
+    if OSX: CPUProgram.helper_handle.pthread_jit_write_protect_np(True)
+
+    # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
+    # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
+    # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
+    # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
+    CPUProgram.helper_handle["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+
+    self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
+
+  def __call__(self, *bufs, vals=(), wait=False):
+    args = list(bufs) + list(vals)
+    # NOTE: replace this by --target={host's triple}-elf in clang args once we only support macos sequoia and later.
+    # Apple relaxes abi requirement for stack arguments to always be at least 8 byte aligned on arm64
+    # https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms
+    # This hack is required because clang/llvm bug doesn't allow us to just use {host's triple}+'-elf' (relocation failures)
+    # The bug was fixed in https://github.com/llvm/llvm-project/commit/454cc36630296262cdb6360b60f90a64a97f7f1a but was only backported to xcode 16+
+    if platform.machine() == "arm64" and OSX: args = args[:8] + [ctypes.c_int64(a) if isinstance(a, int) else a for a in args[8:]]
+    return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
 
 # **************** for Compiled Devices ****************
 
