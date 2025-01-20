@@ -2339,5 +2339,11 @@ class TestContiguous(unittest.TestCase):
     b = schedule_graph_rewrite(b)
     assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
 
+  def test_double_contiguous_realizes_once(self):
+    a = Tensor.empty(4, 1).lazydata
+    b = a.expand((4, 4)).alu(Ops.CONTIGUOUS).alu(Ops.CONTIGUOUS)
+    b = schedule_graph_rewrite(b)
+    assert UPat(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)))).match(b, {})
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
