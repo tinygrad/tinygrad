@@ -58,7 +58,7 @@ class TestProfiler(unittest.TestCase):
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
-    assert kernel_runs[0].is_copy, "kernel should not be copy"
+    assert kernel_runs[0].is_copy, "kernel should be copy"
 
   def test_profile_multiops(self):
     runner_name = TestProfiler.runner._prg.name
@@ -97,6 +97,18 @@ class TestProfiler(unittest.TestCase):
       evs = [x for x in p if isinstance(x, ProfileRangeEvent)]
       assert len(evs) == 1, "one kernel runs are expected"
       assert evs[0].is_copy, "kernel should be copy"
+
+  def test_profile_multidev_transfer(self):
+    d1 = Device[f"{Device.DEFAULT}:1"]
+
+    buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
+    with helper_collect_profile(TestProfiler.d0, d1) as profile:
+      buf1.to(f"{Device.DEFAULT}:1").realize()
+
+    profile0, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    kernel_runs = [x for x in profile0 if isinstance(x, ProfileRangeEvent)]
+    assert len(kernel_runs) == 1, "one kernel run is expected"
+    assert kernel_runs[0].is_copy, "kernel should be copy"
 
   @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
