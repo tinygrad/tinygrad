@@ -1824,7 +1824,7 @@ def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.
 
 # these pattern matchers should move to engine/schedule.py
 
-sym = symbolic_simple+PatternMatcher([
+ops_folding = symbolic_simple+PatternMatcher([
   (UPat(Ops.DETACH, name="x"), lambda x:x.src[0]),
 ])
 
@@ -1842,8 +1842,8 @@ def run_tensor_ast(r:Tensor):
   output = UOp.new_buffer(r.device, r.lazydata.size, r.dtype)
   glbl = UOp(Ops.DEFINE_GLOBAL, output.dtype.ptr(size=output.size), (), 0)
   sink = UOp(Ops.STORE, src=(glbl, ShapeTracker.from_shape(r.lazydata.base.shape).to_uop(), r.lazydata.base)).sink()
-  sink = graph_rewrite(sink, remove_movement_ops+sym+load_buffers+view_left, bufs:=[output])
-  sink = graph_rewrite(sink, remove_movement_ops+sym+view_right)
+  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+load_buffers+view_left, bufs:=[output])
+  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+view_right)
   si = ScheduleItem(sink, tuple(x.buffer for x in bufs), (), ())
   run_schedule([si])
   return output.realized.as_buffer().cast(output.dtype.fmt, r.shape).tolist()
