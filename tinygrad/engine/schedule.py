@@ -242,7 +242,7 @@ if CAPTURE_PROCESS_REPLAY:
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2 and u.src[0].op is Ops.BUFFER
 def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
-  return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
+  return u.src[1]
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp], realizes:dict[UOp, UOp],
                      reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
@@ -340,10 +340,6 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
 
 # **** Schedule creation and BFS toposort
 
-class UPatScheduled(UPat):
-  def __init__(self, *args, **kwargs):
-    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
-
 # ** this is schedule level const folding
 
 def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
@@ -366,8 +362,8 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
-ops_folding = symbolic_simple+PatternMatcher([
-  # op with size 0 is zero
+sym = symbolic_simple+PatternMatcher([
+  # UOp with size 0 is zero
   (UPat(set(Ops)-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH is a NOOP here
@@ -400,6 +396,10 @@ ops_folding = symbolic_simple+PatternMatcher([
 ])
 
 # ** this decides which ops get realized
+
+class UPatScheduled(UPat):
+  def __init__(self, *args, **kwargs):
+    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
 
 def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
 
@@ -494,7 +494,7 @@ remove_movement_ops = PatternMatcher([
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
-  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+ops_folding, ctx:=ScheduleContext())
+  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
   # add BUFFER uops
