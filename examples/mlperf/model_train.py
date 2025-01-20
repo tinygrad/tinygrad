@@ -412,7 +412,7 @@ def train_retinanet():
     import wandb
 
     wandb_args = {"project": "MLPerf-RetinaNet"}
-    if (wandb_id := getenv("WANDB_RESUME")):
+    if (wandb_id := getenv("WANDB_RESUME", "")):
       wandb_args["id"] = wandb_id
       wandb_args["resume"] = "must"
 
