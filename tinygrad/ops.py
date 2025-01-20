@@ -150,6 +150,7 @@ class Ops(FastEnum):
 
   # device
   DEVICE = auto()
+  MULTI = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -298,6 +299,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
     else: shape = src_sts[0].shape
     from tinygrad.shape.shapetracker import ShapeTracker
+    if self.op is Ops.MULTI: return ShapeTracker.from_shape(tuple(x*(len(self.src) if self.arg == i else 1) for i,x in enumerate(shape)))
     return ShapeTracker.from_shape(shape)
 
   @functools.cached_property
@@ -417,6 +419,26 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     forced_realize.add(self.base)
     return self
 
+  # *** from MultiLazyBuffer ***
+
+  def multi(self, *more:UOp, axis:int|None):
+    parents = (self,)+more
+    assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
+    return UOp(Ops.MULTI, self.dtype, parents, axis)
+
+  @property
+  def axis(self):
+    assert self.op is Ops.MULTI
+    return self.arg
+
+  @property
+  def bounds(self):
+    if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
+    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
+
+  @property
+  def real(self): return [True]*len(self.src)
+
   # *** from LazyBuffer ***
 
   @staticmethod
@@ -474,10 +496,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
-  def device(self) -> str: return unwrap(self._device)
+  def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
   @functools.cached_property
-  def _device(self) -> Optional[str]:
+  def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
+    if self.op is Ops.MULTI: return tuple(x.device for x in self.src)
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
