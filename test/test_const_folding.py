@@ -220,6 +220,8 @@ class TestMultiConstFolding(unittest.TestCase):
     t = Tensor.arange(16).float().realize().to(ds)
 
     # non const folding case creates one ast on each shard
+    # NOTE: there's extra contiguous kernels here since it's realizing both the CONTIGUOUS and its parent COPY
+    # why does multi call contiguous on a COPY?
     _check_ast_count(7, t + 1)
     _check_ast_count(4, 1 + t)
     _check_ast_count(4, t * 2)

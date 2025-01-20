@@ -1694,7 +1694,7 @@ class TestHandCodedOpts(unittest.TestCase):
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
 
-  @unittest.expectedFailure # requires contiguous foldinw
+  @unittest.expectedFailure # requires contiguous folding
   def test_masked_upcast_wino_full(self):
     with Context(WINO=1):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
