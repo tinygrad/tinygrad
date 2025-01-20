@@ -1448,6 +1448,8 @@ class TestSchedule(unittest.TestCase):
       x = Tensor.randn((9, 9)).realize()
       y = Tensor.randn((9, 9)).realize()
       out = x@y
+      # NOTE: this is 4 kernels because the scheduler is applying symbolic_simple before making rewriting ImageDType output to the base float.
+      # we should write UPats that collapse ImageDType casts, right now imagef(3, 12, 4) != imagef(9, 3, 4), but the base is float32.
       run_schedule(check_schedule(out, 4))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
       self.assertIsInstance(out.dtype, ImageDType)
