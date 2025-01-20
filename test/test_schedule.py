@@ -220,7 +220,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = (a*b)/b
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0) # the scheduler can fold divs now!
     self.assertEqual(GlobalCounters.global_ops, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
 
@@ -229,7 +229,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = a/a
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
     self.assertEqual(GlobalCounters.global_ops, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
 
@@ -2204,7 +2204,7 @@ class TestConst(unittest.TestCase):
     sched = add.schedule()
     self.assertEqual(len(sched), 0)
     # b+0 and b share the same underlying device memory
-    self.assertIs(add.lazydata.realized, b.lazydata.realized)
+    self.assertIs(add.lazydata.buffer, b.lazydata.buffer)
     self.assertListEqual(add.tolist(), [2, 2, 2, 2])
 
   def test_src_masked_const_folding(self):
