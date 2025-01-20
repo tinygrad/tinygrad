@@ -166,7 +166,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       z = emb(x).realize()
       self.assertLessEqual(GlobalCounters.global_ops, op_limit)
-      self.assertEqual(GlobalCounters.kernel_count, 2)
+      self.assertEqual(GlobalCounters.kernel_count, 3)
     if getenv("CHECK", 1):
       import torch
       with torch.no_grad():

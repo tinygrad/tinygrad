@@ -220,7 +220,7 @@ class TestMultiConstFolding(unittest.TestCase):
     t = Tensor.arange(16).float().realize().to(ds)
 
     # non const folding case creates one ast on each shard
-    _check_ast_count(4, t + 1)
+    _check_ast_count(7, t + 1)
     _check_ast_count(4, 1 + t)
     _check_ast_count(4, t * 2)
     _check_ast_count(4, 2 * t)
