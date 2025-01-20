@@ -972,6 +972,25 @@ class TestSchedule(unittest.TestCase):
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
 
+  def test_softmax_upcast(self):
+    # input half, softmax in float
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
+    out = x.softmax(dtype=dtypes.float)
+    sched = out.schedule()
+    self.assertEqual(len(sched), 3)
+    self.assertEqual(len(sched[0].outputs), 1)
+    self.assertEqual(sched[0].outputs[0].dtype, dtypes.half)
+
+    # input float, softmax in float
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.float).realize()
+    out = x.softmax(dtype=dtypes.float)
+    sched = out.schedule()
+    self.assertEqual(len(sched), 3)
+    self.assertEqual(len(sched[0].outputs), 1)
+    self.assertEqual(sched[0].outputs[0].dtype, dtypes.float)
+
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
