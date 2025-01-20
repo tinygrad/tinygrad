@@ -497,8 +497,9 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+ops_folding, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
-  # add BUFFER uops and realizes
+  # add BUFFER uops
   sink = add_buffers(tensor_map[big_sink], rev_tensor_map, ctx, cache={})
+  # add realizes
   sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
@@ -506,9 +507,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   # preschedule realize groups
   prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
-    stores = [ctx.realizes[u] for u in store_uops]
-    assert all(x.op is Ops.STORE for x in stores), f"expected all realized BUFFERs to get a STORE {stores}"
-    prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
+    small_sink = UOp.sink(*[ctx.realizes[u] for u in store_uops])
+    # TODO: this still exists because symbolic folding is happening after bufferization
+    if not all(x.op is Ops.STORE for x in small_sink.src): raise RuntimeError(f"expected all realized BUFFERs to get a STORE {sink}")
+    prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
