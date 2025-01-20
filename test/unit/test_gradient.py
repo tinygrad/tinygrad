@@ -105,7 +105,7 @@ class TestRealizeMeansRealize(unittest.TestCase):
     self.assertEqual(x.lazydata.op, Ops.VIEW)
 
   #@unittest.expectedFailure
-  # update: passing after tensor_map
+  # update: passing after delete_forced_realize
   def test_uniform_realizes(self):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
     print(x.lazydata)

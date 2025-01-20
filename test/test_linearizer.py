@@ -63,8 +63,10 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
-    # NOTE: this realize exists because Tensor.numpy calls contiguous internally
+    # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
     # without contiguous folding, rand.to("CLANG") and rand.contiguous().to("CLANG") are different UOps.
+    # this test asserts they are the identical Buffer
+    # having different buffers is fine for correctness, because the outputs match.
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))

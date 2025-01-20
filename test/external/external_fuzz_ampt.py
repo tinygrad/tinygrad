@@ -1,6 +1,6 @@
 import random
 from tinygrad.helpers import round_up
-from tinygrad.runtime.support.am.amdev import AMMemoryManager
+from tinygrad.runtime.support.am.amdev import AMPageTableTraverseContext
 from test.external.external_test_am import helper_read_entry_components, FakeAM
 
 class AMPTFuzzer:
@@ -18,10 +18,12 @@ class AMPTFuzzer:
   def generate_pattern(self, ptr: int, size: int) -> int: return random.randint(0, 0xff)
 
   def fill_memory(self, va, size: int, pattern: int):
-    internal_va = va.va_addr - AMMemoryManager.va_allocator.base
-    pages = list(self.d.mm.page_table_walker(self.d.mm.root_page_table, vaddr=internal_va, size=size))
+    ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, va.va_addr)
+    pages = list(ctx.next(size))
 
-    for _vaddr, _offset, _pte_idx, _n_ptes, _pte_covers, _pt in pages:
+    for _offset, _pt, _pte_idx, _n_ptes, _pte_covers in pages:
+      _vaddr = va.va_addr + _offset
+
       for i in range(_n_ptes):
         pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
         self.d.vram[pte['paddr']] = pattern # Mark this page
@@ -34,8 +36,10 @@ class AMPTFuzzer:
         start_paddr = pte['paddr'] - (_vaddr - start_vaddr)
         contig_ptes = contig_range // _pte_covers
         assert contig_ptes > 0
-        frags_l = list(self.d.mm.page_table_walker(self.d.mm.root_page_table, vaddr=start_vaddr, size=contig_range))
-        for f_vaddr, f_offset, f_pte_idx, f_n_ptes, f_pte_covers, f_pt in frags_l:
+
+        ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, start_vaddr)
+        frags_l = list(ctx.next(contig_range))
+        for f_offset, f_pt, f_pte_idx, f_n_ptes, f_pte_covers in frags_l:
           for j in range(f_n_ptes):
             f_pte = helper_read_entry_components(f_pt.get_entry(f_pte_idx + j))
             assert f_pte['valid'] == 1
@@ -47,7 +51,7 @@ class AMPTFuzzer:
     return pages
 
   def verify_memory(self, pages, pattern: int) -> bool:
-    for _vaddr, _offset, _pte_idx, _n_ptes, _pte_covers, _pt in pages:
+    for _offset, _pt, _pte_idx, _n_ptes, _pte_covers in pages:
       for i in range(_n_ptes):
         pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
         if self.d.vram[pte['paddr']] != pattern: return False
