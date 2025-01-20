@@ -93,9 +93,9 @@ class Kernel:
     self.group_for_reduces: int = 0
     self.upcasted: int = 0
     self.local_dims: int = 0
+    self.available_tensor_cores = self.opts.tensor_cores
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
-    self.available_tensor_cores = self.opts.tensor_cores
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
 
@@ -116,8 +116,8 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
-    ret.available_tensor_cores = self.available_tensor_cores
+    ret.available_tensor_cores, ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = \
+      self.available_tensor_cores, self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
 
     return ret
 
