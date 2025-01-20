@@ -96,11 +96,11 @@ def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
   # VIEW is passthrough
   if buf is not buf.base:
-    cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
+    cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(unwrap(buf.st))
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
-  if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+  if isinstance(dtype, ImageDType) and (prod(buf.shape)!=prod(dtype.shape) or not any(buf.shape[x]%4==0 for x in unwrap(buf.st).unit_stride_axes())):
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
   # ASSIGN already has a target buffer, otherwise we create a new one
