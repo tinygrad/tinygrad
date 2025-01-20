@@ -187,7 +187,8 @@ class AMMemoryManager:
           assert off + pte_off * pte_covers < psize, f"Mapping out of range {off=} {pte_off=} {pte_covers=} {psize=}"
 
     # Invalidate TLB after mappings.
-    for ip in ["GC", "MM"]: self.adev.gmc.flush_tlb(ip, vmid=0)
+    self.adev.gmc.flush_tlb(ip='GC', vmid=0)
+    self.adev.gmc.flush_tlb(ip='MM', vmid=0)
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
     if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
