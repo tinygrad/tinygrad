@@ -110,7 +110,7 @@ def postprocess_targets(targets, anchors):
         match_quality_matrix = box_iou(targets_per_image['boxes'], anchors_per_image)
         matched_idxs.append(proposal_matcher(match_quality_matrix))
 
-    for targets_per_image,  matched_idxs_per_image in zip(targets, matched_idxs):
+    for targets_per_image, matched_idxs_per_image in zip(targets, matched_idxs):
         foreground_idxs_per_image = matched_idxs_per_image >= 0
         targets_per_image["boxes"] = targets_per_image["boxes"][matched_idxs_per_image[foreground_idxs_per_image]]
         targets_per_image["labels"] = targets_per_image["labels"][matched_idxs_per_image[foreground_idxs_per_image]]

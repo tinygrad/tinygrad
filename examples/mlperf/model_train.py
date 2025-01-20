@@ -345,7 +345,6 @@ def train_resnet():
 
 def train_retinanet():
   from examples.mlperf.dataloader import batch_load_retinanet
-  from examples.mlperf.helpers import generate_anchors
   from examples.mlperf.initializers import FrozenBatchNorm2d
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models.retinanet import RetinaNet
@@ -373,8 +372,8 @@ def train_retinanet():
           layer.requires_grad = False
 
   def _data_get(it):
-    x, y_bboxes, y_labels, matches, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), y_bboxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), cookie
+    x, y_bboxes, y_labels, matches, anchors, cookie = next(it)
+    return x.shard(GPUS, axis=0).realize(), y_bboxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
   
   def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
     # TODO: refactor this a bit more so we don't have to recreate it, unlike what MLPerf script is doing
@@ -435,9 +434,6 @@ def train_retinanet():
   optim = Adam(params, lr=lr)
 
   # ** dataset **
-  anchors = generate_anchors((800, 800), batch_size=bs)
-  batched_anchors = Tensor.stack(*[Tensor(a, requires_grad=False) for a in anchors]).shard(GPUS, axis=0)
-
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
   val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
 
@@ -445,7 +441,7 @@ def train_retinanet():
 
   # ** training loop **
   for e in range(1, num_epochs + 1):
-    train_dataloader = batch_load_retinanet(train_dataset, False, anchors[0], Path(BASE_DIR), batch_size=bs, seed=seed)
+    train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=bs, seed=seed)
     it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}"))
     i, proc = 0, _data_get(it)
 
@@ -461,8 +457,8 @@ def train_retinanet():
     while proc is not None:
       GlobalCounters.reset()
 
-      x, y_bboxes, y_labels, matches, proc = proc
-      loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=batched_anchors, bboxes=y_bboxes)
+      x, y_bboxes, y_labels, matches, anchors, proc = proc
+      loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
 
       pt = time.perf_counter()
 
