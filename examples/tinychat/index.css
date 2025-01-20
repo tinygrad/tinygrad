@@ -279,3 +279,41 @@ p {
 .monospace {
   font-family: monospace;
 }
+
+.loading-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 3rem;
+  margin-bottom: 2rem;
+}
+
+.loading-text {
+  color: var(--foreground-color);
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+#progress-percentage {
+  color: var(--foreground-color);
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.progress-bar {
+  flex-grow: 1;
+  height: 0.5rem;
+  background-color: var(--secondary-color);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress {
+  width: 0%;
+  height: 100%;
+  background-color: var(--primary-color);
+  transition: width 0.2s ease-in-out;
+}

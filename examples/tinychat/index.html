@@ -16,6 +16,16 @@
   <script src="assets/unpkg.com/marked-highlight@2.1.2/lib/index.umd.js"></script>
   <script src="assets/unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
 
+  <script src="net.js"></script>
+  <script type="module">
+    import { init, get_encoding, Tiktoken, load } from './tiktoken.js';
+
+    window.Tiktoken = Tiktoken;
+    window.tiktokenInit = init;
+    window.tiktokenGetEncoding = get_encoding;
+    window.tiktokenLoad = load;
+  </script>
+  <script src="q6k_to_f32.js"></script>
   <script src="index.js"></script>
 
   <link rel="stylesheet" href="assets/cdn.jsdelivr.net/npm/purecss@3.0.0/build/base-min.css">
@@ -57,7 +67,7 @@
             updateTotalTokens(cstate.messages);
             home = 1;
             // ensure that going back in history will go back to home
-            window.history.pushState({}, '', '/');
+            window.history.pushState({}, '', window.TINYCHAT_ROOT || '/');
           " @touchstart="
             otx = $event.changedTouches[0].clientX;
           " @touchmove="
@@ -141,7 +151,14 @@
           <p class="megrim-regular">TOKENS</p>
         </span>
       </div>
-      <div class="input">
+      <div class="loading-bar" x-show="loadingMessage !== ''">
+        <p class="loading-text" id="loading-message">Loading:</p>
+        <span id="progress-percentage">0%</span>
+        <div class="progress-bar">
+          <div class="progress"></div>
+        </div>
+      </div>
+      <div class="input" x-show="loadingMessage === ''">
         <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows=1 x-autosize
           :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
             home = (home === 0) ? 1 : home

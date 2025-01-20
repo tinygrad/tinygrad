@@ -1,5 +1,452 @@
+window.TINYCHAT_ROOT = "/";
+window.MODEL_BASE_URL= ".";
+
+// copied from examples/webgpu/stable_diffusion/index.html
+const getDevice = async () => {
+  const adapter = await navigator.gpu.requestAdapter();
+  const requiredLimits = {};
+  const maxBufferSizeInSDModel = 1073741824;
+  requiredLimits.maxStorageBufferBindingSize = maxBufferSizeInSDModel;
+  requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
+            
+  return await adapter.requestDevice({
+    requiredLimits
+  });
+};
+
+// copied from examples/webgpu/stable_diffusion/index.html 
+function initDb() {
+  return new Promise((resolve, reject) => {
+    let db;
+    const request = indexedDB.open('tinydb', 1);
+    request.onerror = (event) => {
+      console.error('Database error:', event.target.error);
+      resolve(null);
+    };
+
+    request.onsuccess = (event) => {
+      db = event.target.result;
+      console.log("Db initialized.");
+      resolve(db);
+    };
+
+    request.onupgradeneeded = (event) => {
+      db = event.target.result;
+      if (!db.objectStoreNames.contains('tensors')) {
+        db.createObjectStore('tensors', { keyPath: 'id' });
+      }
+    };
+  });
+}
+
+// copied from examples/webgpu/stable_diffusion/index.html 
+function readTensorFromDb(db, id) {
+  return new Promise((resolve, reject) => {
+    if (db == null) {
+      resolve(null);
+    }
+            
+      const transaction = db.transaction(['tensors'], 'readonly');
+      const store = transaction.objectStore('tensors');
+      const request = store.get(id);
+
+      transaction.onabort = (event) => {
+        console.log("Transaction error while reading tensor: " + event.target.error);
+        resolve(null);
+      };
+
+      request.onsuccess = (event) => {
+        const result = event.target.result;
+        if (result) {
+          resolve(result);
+        } else {
+          resolve(null);
+        }
+      };
+
+      request.onerror = (event) => {
+        console.error('Tensor retrieve failed: ', event.target.error);
+        resolve(null);
+      };
+  });
+}
+
+function getAllKeysFromDb(db) {
+  return new Promise((resolve, reject) => {
+    if (db == null) {resolve([]);}
+    const transaction = db.transaction(['tensors'], 'readonly');
+    const store = transaction.objectStore('tensors');
+    const request = store.getAllKeys();
+    transaction.onabort = (event) => {
+      console.log("Transaction error while reading IndexedDB keys: " + event.target.error);
+      resolve([]);
+    };
+    request.onsuccess = function (event) {resolve(event.target.result);};
+    request.onerror = (event) => {
+      console.error('Retrieval of IndexedDB keys failed: ', event.target.error);
+      resolve([]);
+    };
+  });
+}
+
+// modified from examples/webgpu/stable_diffusion/index.html 
+function saveTensorToDb(db, id, tensor) {
+  return readTensorFromDb(db, id).then((result) => {
+    if (!result) {
+      new Promise((resolve, reject) => {
+        if (db == null) {
+          resolve(null);
+        }
+
+        const transaction = db.transaction(['tensors'], 'readwrite');
+        const store = transaction.objectStore('tensors');
+        const request = store.put({ id: id, content: tensor });
+
+        transaction.onabort = (event) => {
+          console.log("Transaction error while saving tensor: " + event.target.error);
+          resolve(null);
+        };
+
+        request.onsuccess = () => {
+          console.log('Tensor saved successfully.');
+          resolve();
+        };
+
+        request.onerror = (event) => {
+          console.error('Tensor save failed:', event.target.error);
+          resolve(null);
+        };
+      });
+    } else {
+      return null;
+    }
+  }).catch(()=> null);
+}
+
+function deleteTensorFromDb(db, id) {
+  return new Promise((resolve, reject) => {
+    if (db == null) {
+      console.error("Database is not initialized.");
+      resolve(null);
+      return;
+    }
+
+    const transaction = db.transaction(['tensors'], 'readwrite');
+    const store = transaction.objectStore('tensors');
+    const request = store.delete(id);
+
+    transaction.oncomplete = () => {
+      console.log(`Tensor with ID '${id}' deleted successfully.`);
+      resolve();
+    };
+
+    transaction.onerror = (event) => {
+      console.error("Transaction error while deleting tensor:", event.target.error);
+      resolve(null);
+    };
+
+    request.onerror = (event) => {
+      console.error('Tensor deletion failed:', event.target.error);
+      resolve(null);
+    };
+
+    request.onsuccess = () => {
+      console.log(`Delete request for tensor with ID '${id}' succeeded.`);
+    };
+  });
+}
+
+async function hashBuffer(bytes) {
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const getAndDecompressGGUFChunks = async (device, progress) => {
+  let totalLoaded = 0;
+  let totalSize = 0;
+  let partSize = {};
+
+  const progressCallback = (part, loaded, total, message) => {
+    totalLoaded += loaded;
+
+    if (!partSize[part]) {
+      totalSize += total;
+      partSize[part] = true;
+    }
+                
+    progress(totalLoaded, totalSize, message);
+  };
+
+  // modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
+  const loadPart = async (part, progressCallback) => {
+      const response = await fetch(part);
+      const contentLength = response.headers.get('content-length');
+      const total = parseInt(contentLength, 10);
+
+      const res = new Response(new ReadableStream({
+          async start(controller) {
+              const reader = response.body.getReader();
+              for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  progressCallback(part, value.byteLength, total, "Downloading model:");
+                  controller.enqueue(value);
+              }
+                    
+              controller.close();
+          },
+      }));
+        
+      return res.arrayBuffer();
+  };
+
+  const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
+  // TODO: cache metadata
+  const data = await response.json();
+  const state_dict = data.metadata.state_dict;
+
+  let db = await initDb();
+
+  const getPart = async(filename, hash) => {
+    let part = await readTensorFromDb(db, hash);
+
+    if (part) {
+      console.log(`Cache hit: ${filename}, hash: ${hash}`);
+      totalLoaded += part.content.byteLength;
+      totalSize += part.content.byteLength;
+      progress(totalLoaded, totalSize, "Downloading model:")
+      return Promise.resolve(part.content);
+    } else {
+      console.log(`Cache miss: ${filename}, hash: ${hash}`);
+      return loadPart(`${window.MODEL_BASE_URL}/${filename}`, progressCallback);
+    }
+  }
+
+  const correctHashes = data.metadata.chunks.map(chunk => chunk.hash)
+  const compressedBuffers = await Promise.all(data.metadata.chunks.map(chunk => getPart(chunk.name, chunk.hash)));
+
+  // delete unused cached buffers to free disk space -- if we update weights, user will otherwise have obsolete cached buffers
+  const dbKeys = await getAllKeysFromDb(db);
+  const correctHashesSet = new Set(correctHashes);
+  const notInCorrectHashes = dbKeys.filter(key => !correctHashesSet.has(key));
+  for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
+
+  for (let i = 0; i < compressedBuffers.length; i++) {
+    compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
+    saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
+  }
+
+  totalLoaded = 0;
+  totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0);
+  const numCheckpoints = 90;
+  let nextCheckpoint = totalSize / numCheckpoints;
+  const decompProgressFraction = 0.90;
+  totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
+
+  const inChunkSize = 3144960; // max size that tinygrad compiled without exceptions; divisible by 210
+  let inChunk = new Uint8Array(inChunkSize);
+  const byteFactor = 1 / 210 * 256 * 4;
+  let chunkContents = {};
+
+  // decompression time goes from 15sec to 10sec by scheduling GPU jobs like below
+  // TODO: can we get tinygrad to give us bigger kernels? currently throws exceptions when trying to compile them
+  const num_decomposers = 8;
+
+  const t0 = performance.now();
+  const pipelinePool = await Promise.all(
+    Array
+      .from({ length: num_decomposers }, () => q6k_to_f32().setup(device))
+      .map(async (promise) => {
+        return {
+          pipeline: await promise,
+          busy: false
+        };
+      })
+  );
+
+  async function getFreePipeline() {
+    for (;;) {
+      const idx = pipelinePool.findIndex(obj => !obj.busy);
+      if (idx >= 0) {
+        pipelinePool[idx].busy = true;
+        return pipelinePool[idx].pipeline;
+      }
+      await new Promise(r => setTimeout(r, 5));
+    }
+  }
+
+  function releasePipeline(pipeline) {
+    const obj = pipelinePool.find(obj => obj.pipeline === pipeline);
+    if (obj) obj.busy = false;
+  }
+
+  const dequantize = async(inChunk, chunkContents, decomp) => {
+    let outChunk = await decomp(inChunk);
+    outChunk = new Uint8Array(outChunk.buffer);
+    for (const [t, start_end_tOffset] of Object.entries(chunkContents)) {
+      const start = parseInt(start_end_tOffset[0] * byteFactor);
+      const end = parseInt(start_end_tOffset[1] * byteFactor);
+      const offset = parseInt(start_end_tOffset[2] * byteFactor);
+      state_dict[t].bytes.set(outChunk.subarray(start, end), offset)
+    }
+    totalLoaded += inChunkSize;
+    if (totalLoaded >= nextCheckpoint) {
+      nextCheckpoint += totalSize * decompProgressFraction / numCheckpoints;
+      progress(totalLoaded, totalSize, "Decompressing model:");
+    }
+  }
+
+  function scheduleDequantizeJob() {
+    const reserved_inChunk = inChunk;
+    const reserved_chunkContents = chunkContents;
+    freeSpace = inChunkSize;
+    inChunk = new Uint8Array(inChunkSize);
+    chunkContents = {};
+    return (async () => {
+      const d = await getFreePipeline();
+      await dequantize(reserved_inChunk, reserved_chunkContents, d);
+      releasePipeline(d);
+    })();
+  }
+
+  const gpuJobs = [];
+  let freeSpace = inChunkSize;
+
+  for (const [k, v] of Object.entries(state_dict)) {
+    const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
+
+    if (v.dtype === "Q6_K") {
+      v.size = parseInt(v.size * byteFactor);
+      v.dtype = "float32";
+      v.bytes = new Uint8Array(v.size);
+
+      let tensor_cursor = 0;
+      while (tensor_cursor < tensor.byteLength) {
+        const inChunk_cursor = inChunkSize - freeSpace;
+        if (!(k in chunkContents)) {chunkContents[k] = [inChunk_cursor, inChunk_cursor, tensor_cursor]}
+
+        const end = Math.min(tensor_cursor + freeSpace, tensor.byteLength);
+        inChunk.set(tensor.subarray(tensor_cursor, end), inChunk_cursor);
+        freeSpace -= (end - tensor_cursor);
+        chunkContents[k][1] += (end - tensor_cursor);
+        tensor_cursor = end;
+
+        if (freeSpace === 0) {gpuJobs.push(scheduleDequantizeJob());}
+      }
+    } else {v.bytes = tensor;}
+  }
+
+  if (freeSpace < inChunkSize) {
+    inChunk.set(new Uint8Array(freeSpace), inChunkSize - freeSpace); // pad last partial chunk with zeroes
+    gpuJobs.push(scheduleDequantizeJob());
+  }
+
+  await Promise.all(gpuJobs);
+
+  const t1 = performance.now();
+  console.log(`decompression elapsed seconds: ${(t1 - t0) / 1000}`)
+
+  // FFD bin packing
+  const maxChunkSize = 1149173760; // byte size of float32 output.weight in llama-1B
+  const chunks = [];
+  const size_sorted_tensors = Object.entries(state_dict)
+    .map(([key, value]) => ({name: key, size: value.size}))
+    .sort((a, b) => b.size - a.size);
+  for (const t of size_sorted_tensors) {
+    let placed = false;
+    for (const chunk of chunks) {
+      const currentSum = chunk.reduce((sum, i) => sum + i.size, 0);
+      if (currentSum + t.size <= maxChunkSize) {
+        chunk.push(t);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) chunks.push([t]);
+  }
+  progress(totalSize * 0.95, totalSize, "Decompressing model:");
+
+  const decompressedBuffers = [];
+  for (let i=0; i<chunks.length; i++) {
+    const chunk = chunks[i];
+    const chunkSize = chunk.reduce((sum, j) => sum + j.size, 0);
+    decompressedBuffers.push(new Uint8Array(chunkSize));
+    let cursor = 0;
+    for (let j=0; j<chunk.length; j++) {
+      const t = chunk[j];
+      decompressedBuffers[i].set(state_dict[t.name].bytes, cursor);
+      state_dict[t.name].bytes = null;
+      state_dict[t.name].chunk = i;
+      state_dict[t.name].start_pos = cursor;
+      cursor += t.size;
+      if (j % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0)); // prevent browser lag
+    }
+  }
+
+  progress(totalSize * 1.0, totalSize, "Decompressing model:");
+  return {chunks: decompressedBuffers, metadata: state_dict};
+};
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
+    // loadingMessage updates the user on page load progress, including weights download and decompression
+    // if loadingMessage is not '', then prompt box will be hidden: this is default behavior on page load
+    loadingMessage: 'Loading...',
+    // model
+    nets: {},
+    tokenizer: null,
+    // TODO: implement context sliding; model currently outputs gibberish past max_context
+    max_context: 1024,
+    lastSeenToks: [],
+
+    progress(loaded, total, message) {
+      const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
+      document.querySelector('.progress').style.width = `${percentage}%`;
+      document.getElementById('progress-percentage').textContent = `${percentage}%`;
+      if (message) {
+        this.loadingMessage = message;
+        document.getElementById('loading-message').textContent = this.loadingMessage;
+      }
+    },
+
+    async init() {
+      try {
+        var device = await getDevice();
+        console.log("WebGPU device initialized");
+      } catch (error) {this.progress(0, 100, "Failed to launch WebGPU. Please check if WebGPU is enabled and reload the page. || Loading:"); console.log(error); return;}
+
+      try {
+        //const decomp = await q6k_to_f32().setup(device);
+        //var tensorData = await getAndDecompressGGUFChunks(decomp, this.progress.bind(this));
+        var tensorData = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
+      } catch (error) {this.progress(0, 100, "Error decompressing model"); console.log(error); return;}
+
+      var p = 0;
+      try {
+        this.progress(p, 100, "Loading tokenizer:");
+        const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
+        p = 10; this.progress(p, 100, "Loading tokenizer:");
+        const wasmBytes = await wasmResponse.arrayBuffer();
+        await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
+        p = 20; this.progress(p, 100, "Loading tokenizer:");
+
+        this.tokenizer = await createTokenizer(`${window.MODEL_BASE_URL}/llama3-2.tiktoken`);
+        const tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
+        console.log("tokenizer works:", tokenizer_works)
+        p = 30; this.progress(p, 100, "Loading tokenizer:");
+      } catch (error) {this.progress(p, 100, "Error launching tokenizer"); console.log(error); return;}
+
+      try {
+        p = 40; this.progress(p, 100, "Launching WebGPU model:");
+        let models = ["transformer"];
+        this.nets = await Promise.all([
+                transformer().setup(device, tensorData.chunks, tensorData.metadata, this.progress.bind(this)),
+            ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
+        this.progress(100, 100, "Launching WebGPU model:");
+        this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
+      } catch (error) {this.progress(p, 100, "Error launching model"); console.log(error); return;}
+    },
+
     // current state
     cstate: {
       time: null,
@@ -34,11 +481,12 @@ document.addEventListener("alpine:init", () => {
       if (!value) return;
 
       if (this.generating) return;
+      // TODO: fix bug: if we switch to another chat session during generation, prompt bar locks up with "Generating..."
       this.generating = true;
       if (this.home === 0) this.home = 1;
 
       // ensure that going back in history will go back to home
-      window.history.pushState({}, "", "/");
+      window.history.pushState({}, "", window.TINYCHAT_ROOT || "/");
 
       // add message to list
       this.cstate.messages.push({ role: "user", content: value });
@@ -65,6 +513,8 @@ document.addEventListener("alpine:init", () => {
         }
 
         // add chunk to the last message
+        // TODO: handle errors with localStorage overflow
+        //   possible example: this.cstate.messages[...] was undefined when trying to prompt within an old cstate (chat session)
         this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
 
         // calculate performance tracking
@@ -107,48 +557,56 @@ document.addEventListener("alpine:init", () => {
     },
 
     updateTotalTokens(messages) {
-      fetch(`${this.endpoint}/chat/token/encode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
-      }).then((response) => response.json()).then((data) => {
-        this.total_tokens = data.length;
-      }).catch(console.error);
+      try {
+        let toks = [this.tokenizer.bos_id];
+        messages.forEach((message) => {
+          if (!message.role || !message.content) {
+            throw new Error("Each message must have a 'role' and 'content' property.");
+          }
+          toks = toks.concat(this.tokenizer.encodeMessage(message.role, message.content));
+
+          if (messages.length > 0 && messages[messages.length - 1].role === "user") {
+            toks = toks.concat(this.tokenizer.encodeRole("assistant"));
+          }
+          this.total_tokens = toks.length;
+        });
+      } catch (error) {
+        console.error("Error updating total tokens:", error);
+      }
     },
 
     async *openaiChatCompletion(messages) {
-      // stream response
-      const response = await fetch(`${this.endpoint}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          "messages": messages,
-          "stream": true,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch");
+      let tokens = [this.tokenizer.bos_id];
+      for (const message of messages) {
+        tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
+      }
+      tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
+      let startPos = 0
+      let prefillToks = tokens.slice(0, -1);
+
+      // Skip the largest possible sequence of tokens already represented at the beginning of the model's kv caches
+      for (let i=0; i <= prefillToks.length; i++) {
+        startPos = i;
+        if (i == prefillToks.length) break;
+        if (i == this.lastSeenToks.length) break;
+        if (prefillToks[i] !== this.lastSeenToks[i]) break;
+      }
+      this.lastSeenToks = prefillToks;
+      prefillToks = prefillToks.slice(startPos);
+
+      for (const tok of prefillToks) {
+        await this.nets["transformer"](new Float32Array([[tok]]), startPos);
+        startPos += 1;
       }
 
-      const reader = response.body.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream()).getReader();
+      let lastTok = tokens[tokens.length - 1];
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        if (value.type === "event") {
-          const json = JSON.parse(value.data);
-          if (json.choices) {
-            const choice = json.choices[0];
-            if (choice.finish_reason === "stop") {
-              break;
-            }
-            yield choice.delta.content;
-          }
-        }
+        const tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos);
+        this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
+        startPos += 1;
+        lastTok = tok[0];
+        if (this.tokenizer.stop_tokens.has(lastTok)) break;
+        yield new TextDecoder().decode(this.tokenizer.decode([lastTok]));
       }
     },
   }));
@@ -310,4 +768,62 @@ function createParser(onParse) {
 const BOM = [239, 187, 191];
 function hasBom(buffer) {
   return BOM.every((charCode, index) => buffer.charCodeAt(index) === charCode);
+}
+
+const PAT_STR = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
+
+async function createTokenizer(bpeUrl) {
+  const num_base_tokens = 128000;
+  const special_tokens = {
+    "<|begin_of_text|>": 128000,
+    "<|end_of_text|>": 128001,
+    "<|start_header_id|>": 128006,
+    "<|end_header_id|>": 128007,
+    "<|eot_id|>": 128009
+  };
+  const model = await window.tiktokenLoad({
+        "load_tiktoken_bpe": bpeUrl,
+        "special_tokens": special_tokens,
+        "pat_str": PAT_STR
+    });
+  const tokenizer = new window.Tiktoken(model.bpe_ranks, model.special_tokens, model.pat_str)
+
+  return {
+    get bos_id() {
+      return special_tokens["<|begin_of_text|>"];
+    },
+
+    get stop_tokens() {
+      return new Set([
+        special_tokens["<|end_of_text|>"],
+        special_tokens["<|eot_id|>"],
+      ]);
+    },
+
+    decode(toks) {
+      const filtered = toks.filter((t) => t < num_base_tokens);
+      return tokenizer.decode(filtered);
+    },
+
+    encode(text, allow_special = false) {
+      const allowedSpecial = allow_special ? "all" : new Set();
+      const disallowedSpecial = new Set();
+      return tokenizer.encode(text, allowedSpecial, disallowedSpecial);
+    },
+
+    encodeRole(role) {
+      const tokens = [];
+      tokens.push(special_tokens["<|start_header_id|>"]);
+      tokens.push(...this.encode(role));
+      tokens.push(special_tokens["<|end_header_id|>"]);
+      tokens.push(...this.encode("\n\n"));
+      return tokens;
+    },
+
+    encodeMessage(role, content) {
+      const roleTokens = this.encodeRole(role);
+      const contentTokens = this.encode(content.trim());
+      return [...roleTokens, ...contentTokens, special_tokens["<|eot_id|>"]];
+    },
+  };
 }

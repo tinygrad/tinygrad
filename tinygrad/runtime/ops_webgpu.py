@@ -58,6 +58,10 @@ class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
     timestamp_supported = wgpu.FeatureName.timestamp_query in adapter.features
-    wgpu_device = adapter.request_device_sync(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
+    wgpu_device = adapter.request_device_sync(
+      required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [],
+      required_limits={"max-buffer-size": 2_147_483_648} # 2**31, default ~256 MB is not enough for examples/stable_diffusion/compile.py
+      )
+
     super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), Compiler(),
                      functools.partial(WebGPUProgram, (wgpu_device, timestamp_supported)))
