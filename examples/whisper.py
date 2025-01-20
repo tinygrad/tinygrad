@@ -1,14 +1,44 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections
+import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math
+import torch
+from scipy.special import log_softmax, logsumexp, softmax
+import torch.nn.functional as F
+from dataclasses import dataclass
 from typing import Optional, Union, Literal, List
 
-from tinygrad import Tensor, TinyJit, Variable, nn
+from tinygrad import Tensor, TinyJit, nn, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv, DEBUG, fetch
+from tinygrad.helpers import getenv, DEBUG, fetch, trange
+from tinygrad.ops import UOp
 
 import numpy as np
 import librosa
+import tiktoken
+from tiktoken import Encoding
+
+class CacheDict(collections.OrderedDict):
+  """Dict with a limited length, ejecting LRUs as needed."""
+
+  def __init__(self, *args, cache_len: int = 10, **kwargs):
+    assert cache_len > 0
+    self.cache_len = cache_len
+
+    super().__init__(*args, **kwargs)
+
+  def __setitem__(self, key, value):
+    super().__setitem__(key, value)
+    super().move_to_end(key)
+
+    while len(self) > self.cache_len:
+      oldkey = next(iter(self))
+      super().__delitem__(oldkey)
+
+  def __getitem__(self, key):
+    val = super().__getitem__(key)
+    super().move_to_end(key)
+
+    return val
 
 class MultiHeadAttention:
   def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
@@ -21,7 +51,7 @@ class MultiHeadAttention:
     self.kv_caching = kv_caching
     self.max_self_attn_cache_len = max_self_attn_cache_len
 
-  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
+  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[UOp,int]=None):
     if self.kv_caching == 'cross':
       if xa is not None:
         k, v = self.key(xa), self.value(xa)
@@ -55,6 +85,14 @@ class MultiHeadAttention:
     wv = attn.permute(0, 2, 1, 3).flatten(start_dim=2)
     return self.out(wv)
 
+  def rearrange_kv_cache(self, indices: list[int]):
+    if hasattr(self, "cache_k") and indices != list(range(len(self.cache_k))):
+      for i, idx in enumerate(indices):
+        self.cache_k[i] = self.cache_k[idx]
+        self.cache_v[i] = self.cache_v[idx]
+        self.cache_k.realize()
+        self.cache_v.realize()
+
 
 class ResidualAttentionBlock:
   def __init__(self, n_state, n_head, is_decoder_block=False, max_self_attn_cache_len=None):
@@ -67,7 +105,7 @@ class ResidualAttentionBlock:
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
-  def __call__(self, x, xa=None, mask=None, len: Union[Variable, int]=None):
+  def __call__(self, x, xa=None, mask=None, len: Union[UOp, int]=None):
     x = x + self.attn(self.attn_ln(x), mask=mask, len=len)
     if self.cross_attn: x = x + self.cross_attn(self.cross_attn_ln(x), xa)
     x = x + self.mlp_ln(x).sequential(self.mlp)
@@ -94,20 +132,27 @@ class AudioEncoder:
 class TextDecoder:
   def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer, **_):
     self.max_tokens_to_sample = n_text_ctx // 2
-    self.max_self_attn_cache_len = self.max_tokens_to_sample * 2 + 5  # roughly prompt + start toks + max_tokens_to_sample
+    self.max_self_attn_cache_len = self.max_tokens_to_sample * 3 + 5  # inferloop upper range + n_text_ctx + start_tokens
 
     self.token_embedding = nn.Embedding(n_vocab, n_text_state)
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, is_decoder_block=True, max_self_attn_cache_len=self.max_self_attn_cache_len) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
     self.mask = Tensor.full((n_text_ctx, n_text_ctx), -np.inf).triu(1).realize()
-    self.getjitted = collections.defaultdict(lambda: TinyJit(self.forward))
+    self.jit = CacheDict(cache_len=2)
+
+  def get_jitted(self, shape):
+    if shape in self.jit:
+      return self.jit[shape]
+    self.jit[shape] = TinyJit(self.forward)
+    return self.jit[shape]
 
   def __call__(self, x: Tensor, pos: int, encoded_audio: Tensor):
-    pos = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos) if pos else 0
-    return self.getjitted[x.shape](x, pos, encoded_audio)
+    pos = UOp.variable("self_attn_cache_len", 1, self.max_self_attn_cache_len).bind(pos) if pos else 0
+    # return self.forward(x, pos, encoded_audio)
+    return self.get_jitted(x.shape)(x, pos, encoded_audio)
 
-  def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
+  def forward(self, x:Tensor, pos:Union[UOp, Literal[0]], encoded_audio:Tensor):
     seqlen = x.shape[-1]
     x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
     for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
@@ -198,13 +243,14 @@ def get_encoding(encoding_name):
   ]
   special_tokens = dict(zip(specials, itertools.count(n_vocab)))
   n_vocab += len(specials)
-  import tiktoken
-  return tiktoken.Encoding(
+  return Encoding(
     name=encoding_name,
     explicit_n_vocab=n_vocab,
     pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
     mergeable_ranks=ranks,
     special_tokens=special_tokens)
+  
+enc = get_encoding("gpt2")
 
 MODEL_URLS = {
   "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
@@ -233,54 +279,278 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc, filename):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
+def transcribe_file(model, enc: Encoding, filename, output_fh):
+  return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh)
 
-def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
-  """
-  Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
-  Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
-  """
+def compression_ratio(text) -> float:
+  text_bytes = text.encode("utf-8")
+  return len(text_bytes) / len(zlib.compress(text_bytes))
 
+def argmax_sampling(logits: np.ndarray):
+  softmax: np.ndarray = log_softmax(logits, axis=-1)
+  idx = softmax.argmax(axis=-1)
+  prob = softmax.max(axis=-1)
+  return idx, prob
+
+  # return logits.log_softmax(axis=-1).argmax(axis=-1), logits.log_softmax(axis=-1).max(axis=-1)
+def multinomial_sampling(logits: Tensor, temperature: int):
+  scaled = (logits / (temperature if temperature != 0 else 1)).softmax(axis=-1)
+  next_tokens = scaled.multinomial(1)
+  probs = scaled[Tensor.arange(logits.shape[0]), next_tokens.flatten()]
+  return next_tokens.numpy().astype(np.int64), probs.numpy().astype(np.int64)
+
+def timestamp_filter(logits: np.ndarray, enc: Encoding):
+  logits[:, np.array([enc._special_tokens["<|notimestamps|>"]])] = -math.inf
+  timestamp = enc._special_tokens["<|0.00|>"]
+  log_probs: np.ndarray = log_softmax(logits, axis=-1)
+  timestamp_probs = logsumexp(log_probs[:, timestamp:], axis=-1)
+  text_probs = logsumexp(log_probs[:, :timestamp], axis=-1)
+  comparison = (timestamp_probs > text_probs)
+  logits[comparison, :timestamp] = -math.inf
+
+def timestamp_filter2(logits: np.ndarray, enc: Encoding, ctx: np.ndarray, sample_begin: int):
+  timestamp_begin = enc._special_tokens["<|0.00|>"]
+  for k in range(ctx.shape[0]):
+    sampled_tokens = ctx[k, sample_begin:]
+    seq = [t for t in sampled_tokens.tolist()]
+    last_was_timestamp = (
+        len(seq) >= 1 and seq[-1] >= enc._special_tokens["<|0.00|>"]
+    )
+    penultimate_was_timestamp = (
+        len(seq) < 2 or seq[-2] >= enc._special_tokens["<|0.00|>"]
+    )
+    if last_was_timestamp:
+      if penultimate_was_timestamp:  # has to be non-timestamp
+        logits[k, timestamp_begin :] = -np.inf
+      else:  # cannot be normal text tokens
+        logits[k, : enc._special_tokens["<|endoftext|>"]] = -np.inf
+    timestamps = sampled_tokens[
+        sampled_tokens >= timestamp_begin
+    ]
+    if timestamps.size > 0:
+        # timestamps shouldn't decrease; forbid timestamp tokens smaller than the last
+        # also force each segment to have a nonzero length, to prevent infinite looping
+      if last_was_timestamp and not penultimate_was_timestamp:
+        timestamp_last = timestamps[-1]
+      else:
+        timestamp_last = timestamps[-1] + 1
+      logits[k, timestamp_begin : timestamp_last] = -np.inf
+
+  if ctx.shape[1] == sample_begin:
+      # suppress generating non-timestamp tokens at the beginning
+    logits[:, : timestamp_begin] = -np.inf
+
+    # apply the `max_initial_timestamp` option
+    max_initial_timestamp_index = 50
+    last_allowed = (
+        timestamp_begin + max_initial_timestamp_index
+    )
+    logits[:, last_allowed + 1 :] = -np.inf
+
+def non_speech_filter(logits: np.ndarray):
+  tokens = np.array([1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63, 90, 91, 92, 93, 357, 366, 438, 532, 685, 705, 796, 930, 1058, 1220, 1267, 1279, 1303, 1343, 1377, 1391, 1635, 1782, 1875, 2162, 2361, 2488, 3467, 4008, 4211, 4600, 4808, 5299, 5855, 6329, 7203, 9609, 9959, 10563, 10786, 11420, 11709, 11907, 13163, 13697, 13700, 14808, 15306, 16410, 16791, 17992, 19203, 19510, 20724, 22305, 22935, 27007, 30109, 30420, 33409, 34949, 40283, 40493, 40549, 47282, 49146, 50358, 50357, 50257, 50360, 50359, 50361])
+  logits[:, tokens] = -math.inf
+
+def suppress_blank(logits: np.ndarray, enc: Encoding):
+  tokens = np.array([enc.encode(" ")[0], enc._special_tokens["<|endoftext|>"]])
+  logits[:, tokens] = -math.inf
+
+def replace_eot(tokens: np.ndarray, ctx: np.ndarray, eot: int):
+  last = ctx[:, -1]
+  tokens[last == eot] = eot
+  return tokens
+
+@dataclass
+class BeamSampled:
+  ctx: np.ndarray
+  next_tokens: np.ndarray
+  finished: np.ndarray
+  probs: np.ndarray
+  finished_prob: np.ndarray
+
+def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarray, ctx: np.ndarray, beam_size: int=5, topk: int=5):
+  eot = enc._special_tokens["<|endoftext|>"]
+  log_probs: np.ndarray = log_softmax(logits, axis=-1)
+  top_k_idx = np.argpartition(log_probs, -beam_size)[:, -beam_size:]
+  top_k_probs = np.take_along_axis(log_probs, top_k_idx, axis=-1)
+  for i in range(5):
+    _tokens = []
+    for j in range(top_k_idx.shape[1]):
+      _tokens.append(enc.decode([top_k_idx[i][j]]))
+  candidates = {}
+  for i in range(beam_size):
+    for j in range(topk):
+      _prob = top_k_probs[i][j]
+      prob = sum_probs[i] + _prob
+      candidates[prob.tolist()] = (i, j, _prob)
+  next_tokens = []
+  probs = []
+  indices = []
+  saved = 0
+  finished = []
+  finished_prob = []
+  selected_sequence = []
+  for prob, (new_i, j, _prob) in list(sorted(candidates.items(), key=lambda items: items[0], reverse=True)):
+    i = saved
+    token = top_k_idx[new_i][j]
+    sequence = np.concatenate((ctx[new_i], np.array([token])))
+    if token == eot:
+      _finished = sequence
+      finished.append(_finished)
+      finished_prob.append(prob)
+    else:
+      selected_sequence.append(sequence)
+      indices.append(new_i)
+      next_tokens.append(token)
+      probs.append(prob)
+      saved += 1
+    if saved >= 5:
+      break
+  next_tokens = np.array(next_tokens)
+  next_tokens = next_tokens.reshape((-1, 1))
+  if indices != list(range(beam_size)):
+    ctx = np.array(selected_sequence)
+  else:
+    ctx = np.concat((ctx, next_tokens), axis=1)
+  for block in model.decoder.blocks:
+    block.attn.rearrange_kv_cache(indices)
+  return BeamSampled(ctx=ctx, next_tokens=next_tokens, probs=np.array(probs), finished=finished, 
+                     finished_prob=finished_prob)
+
+def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperature: int, num_sample: int, enc: Encoding, beam=True) -> np.ndarray:
+  eot = enc._special_tokens["<|endoftext|>"]
+  pos, next_tokens = 0, ctx
+  sample_begin = ctx.shape[1]
+  sum_probs = np.zeros(ctx.shape[0])
+  beam_sequence = []
+  beam_sequence_probs = []
+  for i in (_trange:=trange(num_sample)):
+    to_decode = Tensor(next_tokens)
+    logits = model.decoder(to_decode, pos, encoded_audio)[:, -1].contiguous().numpy()
+    if i == 0: suppress_blank(logits, enc)
+    non_speech_filter(logits)
+    timestamp_filter2(logits, enc, ctx, sample_begin)
+    timestamp_filter(logits, enc)
+    if beam:
+      sampled = beamsearch_sampling(logits, model, sum_probs, ctx)
+      ctx = sampled.ctx
+      next_tokens = sampled.next_tokens
+      sum_probs = sampled.probs
+      if len(sampled.finished) > 0:
+        beam_sequence.extend(sampled.finished)
+        beam_sequence_probs.extend(sampled.finished_prob)
+        if len(beam_sequence) >= 5:
+          ctx = beam_sequence
+          sum_probs = np.array(beam_sequence_probs)
+          break
+    else:
+      if temperature == 0:
+        next_tokens, probs = argmax_sampling(logits)
+      else:
+        next_tokens, probs = multinomial_sampling(Tensor(logits), temperature)
+      sum_probs += probs
+      next_tokens = replace_eot(next_tokens.flatten(), ctx, eot)
+      done = (next_tokens == eot).all()
+      if done: break
+      next_tokens = next_tokens.reshape((-1, 1))
+      ctx = np.concat((ctx, next_tokens), axis=1)
+    pos = ctx.shape[-1] - 1
+  else:
+    return None
+  return ctx, sum_probs
+
+@dataclass
+class Segment:
+  start: int
+  end: int
+  text: str
+  tokens: list[int]
+  
+def parse(timetoken: str):
+  return float(timetoken[2:-2])
+
+def format_time(seconds: int):
+  timestamp = str(datetime.timedelta(seconds=seconds))
+  return timestamp
+
+def segment_and_seek(tokens: list[int], enc: Encoding, timeoffset: int):
+  timestamp_pos = [i for i, tok in enumerate(tokens) if tok > enc._special_tokens["<|notimestamps|>"]]
+  if len(timestamp_pos) < 2:
+    text = [tok for tok in tokens if tok < enc._special_tokens["<|notimestamps|>"]]
+    yield Segment(timeoffset, timeoffset + 30, enc.decode(text), text)
+  else:  
+    total_timestamps = len(timestamp_pos)
+    for i in range(0, total_timestamps - total_timestamps % 2,2):
+      s = timestamp_pos[i]
+      e = timestamp_pos[i+1]
+      start_time = parse(enc.decode([tokens[s]])) + timeoffset
+      end_time = parse(enc.decode([tokens[e]])) + timeoffset
+      selected = tokens[s+1:e]
+      selected_with_time = tokens[s: e+1]
+      yield Segment(start_time, end_time, enc.decode(selected), selected_with_time)
+  
+
+def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh, truncate=False):
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
 
-  def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
-    pos, next_tokens = 0, ctx
-    for i in range((nsample-len(start_tokens))*2):
-      next_tokens = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
-      next_tokens[ctx[:, -1] == eot] = eot
-      ctx = np.concatenate((ctx, next_tokens), axis=1)
-      pos = ctx.shape[-1] - 1
-      if (next_tokens == eot).all(): break
-    return ctx
-
-  def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]
   start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
   if model.is_multilingual:
     # TODO detect language
     language_token = enc._special_tokens["<|startoftranscript|>"] + 1 + tuple(LANGUAGES.keys()).index("en")
     start_tokens.append(language_token)
     start_tokens.append(enc._special_tokens["<|transcribe|>"])
-  start_tokens.append(enc._special_tokens["<|notimestamps|>"])
-
   eot = enc._special_tokens["<|endoftext|>"]
+  ctx = np.array(start_tokens)
 
-  ctx = np.tile(start_tokens, (model.batch_size,1))
-  transcriptions = [[] for _ in waveforms]
-
-  for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
+  curr_frame = 0
+  start_time = 0
+  total_time = log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
+  i = 0
+  while start_time < total_time:
+    curr_frame = int(start_time) * 100
+    end_frame = curr_frame + FRAMES_PER_SEGMENT
+    print(f"\n{curr_frame=} {end_frame=} {start_time=}")
+    if end_frame > log_spec.shape[2]:
+      log_spec = np.pad(log_spec, ((0, 0), (0, 0), (0, end_frame - log_spec.shape[2])))
     encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
+    print(f"\033[32mcontext to decoder: {enc.decode(ctx)=}\033[0m")
+    to_decode = np.tile(ctx, (5, 1))
 
-    if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
-    else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
+    for t in [0, 0.2, 0.4, 0.6, 0.8, 1.0]:
+      infer_result = inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc)
+      if infer_result is None: continue
+      inferred, sum_probs = infer_result
+      sum_probs = sum_probs.tolist()
+      avg_probs = []
+      for i, sequence in enumerate(inferred):
+        avg_probs.append(sum_probs[i] / len(sequence))
+      print(f"{avg_probs=}")
+      candidate_idx = avg_probs.index(max(avg_probs))
+      print(f"{candidate_idx=}")
+      selected: np.ndarray = inferred[candidate_idx]
+      eoti = index[0] if (index:=(np.where(selected == eot)[0])).size > 0 else None
+      soti = np.where(selected == start_tokens[-1])[0][0] + 1
+      tokens = selected[soti:eoti]
+      text = enc.decode(tokens)
+      print(f"Decoder output: {text=}")
+      if compression_ratio(text) < 2.4: # this threshold is taken from openai's implementation
+        print(f"{avg_probs=}")
+        segments = list(segment_and_seek(tokens, enc, start_time))
+        context_for_next = []
+        for segment in segments:
+          text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
+          print(f"\033[31m{text}\033[0m")
+          output_fh.write(f"{text}\n")
+          context_for_next.extend(segment.tokens)
+        start_time = segment.end
+        break
+    else:
+      selected = np.array([enc._special_tokens['<|nospeech|>']])
+      context_for_next = np.array([])
+      start_time += 30
+    ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
 
-    for i, (res, arr) in enumerate(zip(transcriptions, ctx)):
-      if curr_frame*HOP_LENGTH <= len(waveforms[i]):res.extend(arr[np.where(arr == start_tokens[-1])[0][0]+1:eoti[0] if len (eoti:=np.where(arr == eot)[0]) else None])
-    ctx = [[enc._special_tokens['<|startofprev|>']]+gettexttoks(cs)+start_tokens for cs in ctx]
-
-  transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcriptions))
-  return transcriptions if len(transcriptions) > 1 else transcriptions[0]
 
 CHUNK = 1600
 RECORD_SECONDS = 10
@@ -300,7 +570,8 @@ if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
 
   if len(sys.argv) > 1:
-    print(transcribe_file(model, enc, sys.argv[1]))
+    with open("transcribed.txt", "w") as output_fh:
+      transcribe_file(model, enc, sys.argv[1], output_fh)
   else:
     # online
     q = multiprocessing.Queue()
