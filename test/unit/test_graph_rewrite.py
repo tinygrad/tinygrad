@@ -2,7 +2,7 @@ import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
 from tinygrad.ops import GroupOp, UOp, Ops, exec_alu
-from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.rewriter import full_graph_rewrite
 
 # Helper function to apply the graph rewrite
 def apply_rewrite(expr):

@@ -12,7 +12,7 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
@@ -482,7 +482,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "uopgraph.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "rewriter.py")
     self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?

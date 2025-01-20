@@ -643,7 +643,7 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py",
                                                                                         "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
