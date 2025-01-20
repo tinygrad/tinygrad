@@ -496,7 +496,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
-  def device(self) -> str: return unwrap(self._device)
+  def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg

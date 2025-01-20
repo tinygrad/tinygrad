@@ -43,7 +43,7 @@ import tinygrad.function as F
 
 def _metaop(op, shape:tuple[sint,...], dtype:DType, device:Union[str, tuple[str, ...]], arg=None):
   if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
-  return MultiLazyBuffer([UOp.metaop(op, shape, dtype, d, arg) for d in device], None)
+  return UOp.multi(*[UOp.metaop(op, shape, dtype, d, arg) for d in device], axis=None)
 
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
@@ -201,7 +201,7 @@ class Tensor(SimpleMathTrait):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    if isinstance(device, str): self.lazydata:Union[UOp, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
+    if isinstance(device, str): self.lazydata:UOp = data if data.device == device else data.copy_to_device(device)
     # if device is a tuple, we should have/construct a MultiLazyBuffer
     elif isinstance(data, UOp) and isinstance(data.device, str): self.lazydata = Tensor(data).shard(device).lazydata
     else:
@@ -223,8 +223,8 @@ class Tensor(SimpleMathTrait):
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
   def __repr__(self):
-    if isinstance(ld:=self.lazydata, MultiLazyBuffer): ld_repr = f"{ld!r}"
-    else: ld_repr = f"<UOp {ld.device} {ld.shape} {str(ld.dtype)[7:]} {ld.st if ld.base is not ld else (ld.op, ld.realized)}>"
+    ld = self.lazydata
+    ld_repr = f"<UOp {ld.device} {ld.shape} {str(ld.dtype)[7:]} {ld.st if ld.base is not ld else (ld.op, ld.realized)}>"
     return f"<Tensor {ld_repr} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
@@ -419,7 +419,7 @@ class Tensor(SimpleMathTrait):
       lbs = [cast(UOp, t.lazydata) for t in self.split(sizes, axis)]
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
     # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    mlb = MultiLazyBuffer([lb.contiguous() for lb in sharded_lbs], axis)
+    mlb = UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
@@ -442,7 +442,7 @@ class Tensor(SimpleMathTrait):
   def _metaop(op, shape, device:Optional[Union[tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, arg=None, **kwargs):
     dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
     if isinstance(device, tuple):
-      return Tensor(MultiLazyBuffer([UOp.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], None),
+      return Tensor(UOp.multi(*[UOp.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], axis=None),
                     device, dtype, **kwargs)
     return Tensor(UOp.metaop(op, shape, dtype, Device.canonicalize(device), arg), device, dtype, **kwargs)
 
@@ -758,7 +758,7 @@ class Tensor(SimpleMathTrait):
       if self.lazydata.axis is None: return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
       contiguous = kwargs.pop("contiguous", True)
       rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata for lb in self.lazydata.lbs]
-      return Tensor(MultiLazyBuffer(cast(list[UOp], rands), self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
+      return Tensor(UOp.multi(*cast(list[UOp], rands), axis=self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
   # ***** rng hlops *****
@@ -933,9 +933,7 @@ class Tensor(SimpleMathTrait):
         ret.append(y)
       rets.append(ret)
     # create returned Tensors
-    if isinstance(self.lazydata, UOp): return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
-    return [Tensor(MultiLazyBuffer(list(u), cast(MultiLazyBuffer, t.lazydata).axis, cast(MultiLazyBuffer, t.lazydata).real),
-                   device=t.device) for t,u in zip(targets, zip(*rets))]
+    return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
 
   def _deepwalk(self) -> list[Tensor]:
     def _walk(node:Tensor, visited:set[Tensor]):

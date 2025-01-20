@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, flatten
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.ops import Ops, UOp, sint
 
 def all_reduce(bop: Ops, lbs: list[UOp]) -> list[UOp]:
@@ -39,7 +39,10 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
   if lbs[0].shape[axis] % len(lbs) != 0: raise RuntimeError(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
-def MultiLazyBuffer(lbs:list[UOp], axis:int|None, real:list[bool]|None=None):
+# MultiLazyBuffer is UOp
+MultiLazyBuffer = UOp
+
+def create_multi(lbs:list[UOp], axis:int|None, real:list[bool]|None=None):
   # TODO: handle real
   return UOp.multi(*lbs, axis=axis)
 
@@ -68,7 +71,7 @@ def alu_multi(root:UOp):
   # NOTE: const dtype should match real
   new_dtype = next(iter(new_real_lbs.values())).dtype
   new_lbs = [new_real_lbs.get(i, lsrcs[0].const_like(0).cast(new_dtype)) for i,lsrcs in enumerate(zip(*srcs))]
-  return MultiLazyBuffer(new_lbs, axis, new_real)
+  return create_multi(new_lbs, axis, new_real)
 
 def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
@@ -76,30 +79,30 @@ def reduce_multi(root:UOp, multi:UOp):
     # all-reduce on sharded axes
     reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
     # if all partitions are real, do all_reduce
-    if all(multi.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
+    if all(multi.real): return create_multi(all_reduce(op, reduced_parts), None)
     # only one partition is real, keep it
-    return MultiLazyBuffer(reduced_parts, None, multi.real)
+    return create_multi(reduced_parts, None, multi.real)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return MultiLazyBuffer([x.r(op, axis) for x in multi.src], multi.axis, multi.real)
+  return create_multi([x.r(op, axis) for x in multi.src], multi.axis, multi.real)
 
 def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
   return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
 
 def reshape_multi(root:UOp, multi:UOp):
   arg = root.arg
-  if multi.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in multi.src], None, multi.real)
+  if multi.axis is None: return create_multi([x.reshape(arg) for x in multi.src], None, multi.real)
   arg_acc:list[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
   # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
   # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
   new_axis = len(arg_acc) - arg_acc[::-1].index(prod(multi.shape[:multi.axis])) - 1
   assert all(prod(lb.shape[multi.axis:])%prod(arg[new_axis+1:])==0 for lb in multi.src), f"reshape cannot move items between shards {root.arg=}"
   lbs = [x.reshape(tuple(s if a!=new_axis else prod(x.shape[multi.axis:])//prod(arg[new_axis+1:]) for a,s in enumerate(arg))) for x in multi.src]
-  return MultiLazyBuffer(lbs, new_axis, multi.real)
+  return create_multi(lbs, new_axis, multi.real)
 
 def expand_multi(root:UOp, multi:UOp):
   # NOTE: this assert isn't needed, sharded axis can have dim 1
   assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
-  return MultiLazyBuffer([x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], multi.axis, multi.real)
+  return create_multi([x.expand(_shape_to_single_shard(multi.axis, root.arg, x)) for x in multi.src], multi.axis, multi.real)
 
 def pad_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == (0,0) or not all(multi.real), f"padding not supported for {root.arg=}"
@@ -109,12 +112,12 @@ def pad_multi(root:UOp, multi:UOp):
     assert all(root.arg[i] == (0, 0) for i in range(len(root.shape)) if i != multi.axis), "cannot pad sharded and non-sharded axis at the same time"
     dim, bound = sum(lb.shape[multi.axis] for lb in multi.src), multi.bounds[multi.real.index(True)]
     assert root.arg[multi.axis] == (bound[0], dim-bound[1]), "can only pad to whole axis"
-    return MultiLazyBuffer([x if r else x.const_like(0) for x,r in zip(multi.src, multi.real)], multi.axis)
-  return MultiLazyBuffer([x.pad(root.arg) for x in multi.src], multi.axis, multi.real)
+    return create_multi([x if r else x.const_like(0) for x,r in zip(multi.src, multi.real)], multi.axis)
+  return create_multi([x.pad(root.arg) for x in multi.src], multi.axis, multi.real)
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
-  return MultiLazyBuffer([x.permute(root.arg) for x in multi.src], root.arg.index(multi.axis) if multi.axis is not None else None, multi.real)
+  return create_multi([x.permute(root.arg) for x in multi.src], root.arg.index(multi.axis) if multi.axis is not None else None, multi.real)
 
 def shrink_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == (0, root.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \
@@ -125,14 +128,14 @@ def shrink_multi(root:UOp, multi:UOp):
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     idx = multi.bounds.index(root.arg[multi.axis])
     # zero out other lbs to not create lb reference
-    return MultiLazyBuffer([lb if i==idx else lb.const_like(0) for i,lb in enumerate(multi.src)],
+    return create_multi([lb if i==idx else lb.const_like(0) for i,lb in enumerate(multi.src)],
                             multi.axis, [i==idx for i in range(len(multi.src))])
-  return MultiLazyBuffer([x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
+  return create_multi([x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
                           multi.axis, multi.real)
 
 def stride_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == 1, "flipping not supported on sharded axis"
-  return MultiLazyBuffer([x.stride(root.arg) for x in multi.src], multi.axis, multi.real)
+  return create_multi([x.stride(root.arg) for x in multi.src], multi.axis, multi.real)
 
 def copy_multi(multi:UOp, device:UOp):
   # if we already have a copy on the device, return that
