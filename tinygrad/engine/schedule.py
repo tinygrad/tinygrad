@@ -494,7 +494,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+ops_folding, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
-  # add BUFFER uops and realize some of them
+  # add BUFFER uops and realizes
   sink = add_buffers(tensor_map[big_sink], rev_tensor_map, ctx, cache={})
   sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
   # group realizes into kernels
