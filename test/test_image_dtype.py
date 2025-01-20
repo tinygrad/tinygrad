@@ -113,6 +113,8 @@ class TestImageDType(unittest.TestCase):
     assert it.lazydata.base.realized._buf != b1
 
   # issue caused by: don't realize image to image casts. this is part of a larger problem
+  #@unittest.expectedFailure
+  # update: passing after tensor_map
   def test_lil_model(self):
     with Context(IMAGE=2):
       x = Tensor.zeros(1, 1)

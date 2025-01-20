@@ -2204,8 +2204,7 @@ class TestConst(unittest.TestCase):
     sched = add.schedule()
     self.assertEqual(len(sched), 0)
     # b+0 and b share the same underlying device memory
-    # NOTE: realized only exists on base
-    self.assertIs(add.lazydata.base.realized, b.lazydata.base.realized)
+    self.assertIs(add.lazydata.buffer, b.lazydata.buffer)
     self.assertListEqual(add.tolist(), [2, 2, 2, 2])
 
   def test_src_masked_const_folding(self):
