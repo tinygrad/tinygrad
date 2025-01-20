@@ -105,7 +105,7 @@ class AMPhysicalMemoryBlock:
   def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
 
 @dataclasses.dataclass(frozen=True)
-class AMVirtualMapping: va_addr:int; size:int; paddrs:list[int, int] # noqa: E702
+class AMMapping: va_addr:int; size:int; paddrs:list[int, int]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
   def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
@@ -142,7 +142,7 @@ class AMPageTableTraverseContext:
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
     return self.pt_stack[-1]
 
-  def _try_free_pt(self):
+  def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
     if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.get_entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
       self.adev.mm.pfree(AMPhysicalMemoryBlock(self.adev, pt.pm.paddr, 0x1000))
@@ -156,7 +156,7 @@ class AMPageTableTraverseContext:
       _, pt_cnt, _ = self.pt_stack.pop()
       if pt_cnt == 512: self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
-  def next(self, size, off=0):
+  def next(self, size:int, off=0):
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
@@ -181,8 +181,8 @@ class AMMemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
 
-  def map_range(self, vaddr, size, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False):
-    assert size == sum(p[1] for p in paddrs), "Size mismatch"
+  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
+    assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True)
     for paddr, psize in paddrs:
@@ -195,6 +195,7 @@ class AMMemoryManager:
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
     self.adev.gmc.flush_tlb(ip='MM', vmid=0)
+    return AMMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
     if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
@@ -205,24 +206,10 @@ class AMMemoryManager:
         assert pt.get_entry(pte_id) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.get_entry(pte_id):#x}"
         pt.set_page(pte_id, paddr=0x0, valid=False)
 
-  def map_from(self, vaddr:int, size:int, from_adev):
-    if AM_DEBUG >= 2: print(f"Mapping from {vaddr=:#x} {size=:#x} from {from_adev.devfmt}")
-
-    paddrs = []
-    ctx = AMPageTableTraverseContext(from_adev, from_adev.mm.root_page_table, vaddr)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
-      for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        entry = pt.get_entry(pte_id)
-        paddr = (entry & 0x0000FFFFFFFFF000) if entry & am.AMDGPU_PTE_SYSTEM else (entry & 0x0000FFFFFFFFF000) + from_adev.pcidev.regions[0].base_addr
-        paddrs.append((paddr, pte_covers))
-        uncached, snooped = bool(entry & am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC)), bool(entry & am.AMDGPU_PTE_SNOOPED)
-
-    self.map_range(vaddr, size, paddrs, uncached=uncached, system=True, snooped=snooped)
-
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMVirtualMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMMapping:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size, align)
 
@@ -236,10 +223,9 @@ class AMMemoryManager:
         for paddr, _ in paddrs: self.pa_allocator.free(paddr)
         raise
 
-    self.map_range(va, size, paddrs, uncached=uncached)
-    return AMVirtualMapping(va, size, paddrs)
+    return self.map_range(va, size, paddrs, uncached=uncached)
 
-  def vfree(self, vm:AMVirtualMapping):
+  def vfree(self, vm:AMMapping):
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
