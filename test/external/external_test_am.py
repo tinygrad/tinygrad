@@ -1,7 +1,8 @@
 import unittest
-from tinygrad.runtime.support.am.amdev import AMMemoryManager
+from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
 
 class FakeGMC:
+  def __init__(self): self.vm_base = 0x0
   def flush_tlb(self, *args, **kwargs): pass
 
 class FakePCIRegion:
@@ -12,10 +13,12 @@ class FakePCIDev:
 
 class FakeAM:
   def __init__(self):
+    self.is_booting = True
     self.pcidev = FakePCIDev()
     self.vram = memoryview(bytearray(4 << 30))
     self.gmc = FakeGMC()
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
+    self.is_booting = False
 
 #  * PTE format:
 #  * 63:59 reserved
@@ -51,30 +54,31 @@ class TestAMPageTable(unittest.TestCase):
     for va,sz in [(0x10000, 0x3000), (0x11000, 0x300000), (0x10000, 0x2000), (0x11000, 0x5000),
                   (0x2000000, 0x2000), (0x4000000, 0x4000000), (0x38000, 0x303000), (0x8000, 0x1000)]:
       exteranl_va = va + AMMemoryManager.va_allocator.base
-      mm.map_range(vaddr=exteranl_va, size=sz, paddr=va)
+      mm.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)])
 
-      results = list(mm.page_table_walker(mm.root_page_table, vaddr=va, size=sz))
+      ctx = AMPageTableTraverseContext(self.d[0], mm.root_page_table, exteranl_va, create_mode=False)
+      results = list(ctx.next(sz))
 
       total_covered = 0
       for tup in results:
-        _vaddr, _offset, _pte_idx, _n_ptes, _pte_covers, _pt = tup
+        _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         total_covered += _n_ptes * _pte_covers
 
       assert total_covered == sz, f"Expected total coverage {total_covered} to be {sz}"
 
       for tup in results:
-        _vaddr, _offset, pte_idx, n_ptes, pte_covers, pt = tup
-        for i in range(n_ptes):
-          pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
-          assert pte['paddr'] == va + _offset + i * pte_covers, f"Expected paddr {pte['paddr']:#x} to be {va + _offset + i * pte_covers:#x}"
+        _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
+        for i in range(_n_ptes):
+          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          assert pte['paddr'] == va + _offset + i * _pte_covers, f"Expected paddr {pte['paddr']:#x} to be {va + _offset + i * _pte_covers:#x}"
           assert pte['valid'] == 1
 
       mm.unmap_range(va, sz, free_paddrs=False)
 
       for tup in results:
-        _vaddr, _offset, pte_idx, n_ptes, pte_covers, pt = tup
-        for i in range(n_ptes):
-          pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
+        _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
+        for i in range(_n_ptes):
+          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
           assert pte['paddr'] == 0
           assert pte['valid'] == 0
 
@@ -83,29 +87,31 @@ class TestAMPageTable(unittest.TestCase):
 
     for va,sz in [(0x10000, 0x3000), (0x1000000, 0x1000000), (0x12000, 0x4000)]:
       exteranl_va = va + AMMemoryManager.va_allocator.base
-      mm0.map_range(vaddr=exteranl_va, size=sz, paddr=va)
+      mm0.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)])
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va, size=0x1000, paddr=va)
+        mm0.map_range(vaddr=exteranl_va, size=0x1000, paddrs=[(va, sz)])
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va, size=0x100000, paddr=va)
+        mm0.map_range(vaddr=exteranl_va, size=0x100000, paddrs=[(va, sz)])
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va + 0x1000, size=0x1000, paddr=va)
+        mm0.map_range(vaddr=exteranl_va + 0x1000, size=0x1000, paddrs=[(va, sz)])
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddr=va)
+        mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(va, sz)])
 
       mm0.unmap_range(vaddr=exteranl_va, size=sz, free_paddrs=False)
 
       # Finally can map and check paddrs
-      mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddr=0xdead0000)
-      for tup in mm0.page_table_walker(mm0.root_page_table, vaddr=va + 0x2000, size=0x100000):
-        _vaddr, _offset, pte_idx, n_ptes, pte_covers, pt = tup
-        for i in range(n_ptes):
-          pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
-          assert pte['paddr'] == 0xdead0000 + _offset + i * pte_covers, f"paddr {pte['paddr']:#x} not {0xdead0000 + _offset + i * pte_covers:#x}"
+      mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(0xdead0000, 0x1000), (0xdead1000, 0xff000)])
+
+      ctx = AMPageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va + 0x2000, create_mode=False)
+      for tup in ctx.next(0x100000):
+        _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
+        for i in range(_n_ptes):
+          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          assert pte['paddr'] == 0xdead0000 + _offset + i * _pte_covers, f"paddr {pte['paddr']:#x} not {0xdead0000 + _offset + i * _pte_covers:#x}"
           assert pte['valid'] == 1
 
       mm0.unmap_range(vaddr=exteranl_va + 0x2000, size=0x100000, free_paddrs=False)
@@ -117,8 +123,8 @@ class TestAMPageTable(unittest.TestCase):
     for va,sz in [(0x10000, 0x3000), (0x11000, 0x300000), (0x10000, 0x2000), (0x11000, 0x5000),
                   (0x2000000, 0x2000), (0x4000000, 0x4000000), (0x38000, 0x303000), (0x8000, 0x1000)]:
       exteranl_va = va + AMMemoryManager.va_allocator.base
-      mm0.map_range(vaddr=exteranl_va, size=sz, paddr=va)
-      mm1.map_range(vaddr=exteranl_va, size=sz, paddr=va)
+      mm0.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)])
+      mm1.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)])
 
       with self.assertRaises(AssertionError):
         mm0.map_from(vaddr=exteranl_va, size=sz, from_adev=mm0.adev) # self mapping -- bad
@@ -129,12 +135,14 @@ class TestAMPageTable(unittest.TestCase):
       mm0.unmap_range(vaddr=exteranl_va, size=sz, free_paddrs=False) # unmap from mm0
       mm0.map_from(vaddr=exteranl_va, size=sz, from_adev=mm1.adev) # mapping from mm1 to same addrs -- ok
 
+      ctx = AMPageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va, create_mode=False)
+
       d1_pci_base = self.d[1].pcidev.regions[0].base_addr
-      for tup in mm0.page_table_walker(mm0.root_page_table, vaddr=va, size=sz):
-        _vaddr, _offset, pte_idx, n_ptes, pte_covers, pt = tup
-        for i in range(n_ptes):
-          pte = helper_read_entry_components(pt.get_entry(pte_idx + i))
-          assert pte['paddr'] == d1_pci_base + va + _offset + i * pte_covers, f"paddr {pte['paddr']:#x} not {d1_pci_base+va+_offset+i*pte_covers:#x}"
+      for tup in ctx.next(sz):
+        _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
+        for i in range(_n_ptes):
+          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          assert pte['paddr'] == d1_pci_base + va + _offset + i*_pte_covers, f"paddr {pte['paddr']:#x} not {d1_pci_base+va+_offset+i*_pte_covers:#x}"
           assert pte['valid'] == 1
 
       mm0.unmap_range(vaddr=exteranl_va, size=sz, free_paddrs=False)
@@ -146,13 +154,13 @@ class TestAMPageTable(unittest.TestCase):
     with self.assertRaises(AssertionError):
       mm0.unmap_range(0x10000, 0x3000, free_paddrs=False)
 
-    mm0.map_range(0x10000, 0x3000, 0x10000)
+    mm0.map_range(0x10000, 0x3000, paddrs=[(0x10000, 0x3000)])
     mm0.unmap_range(0x10000, 0x3000, free_paddrs=False)
 
     with self.assertRaises(AssertionError):
       mm0.unmap_range(0x10000, 0x3000, free_paddrs=False)
 
-    mm0.map_range(0x10000, 0x3000, 0x10000)
+    mm0.map_range(0x10000, 0x3000, paddrs=[(0x10000, 0x3000)])
     mm0.unmap_range(0x10000, 0x3000, free_paddrs=False)
 
     with self.assertRaises(AssertionError):
