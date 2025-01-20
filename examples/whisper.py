@@ -417,7 +417,7 @@ def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarra
   return BeamSampled(ctx=ctx, next_tokens=next_tokens, probs=np.array(probs), finished=finished, 
                      finished_prob=finished_prob)
 
-def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperature: int, num_sample: int, enc: Encoding, beam=True) -> np.ndarray:
+def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperature: int, num_sample: int, enc: Encoding, beam=False) -> np.ndarray:
   eot = enc._special_tokens["<|endoftext|>"]
   pos, next_tokens = 0, ctx
   sample_begin = ctx.shape[1]
