@@ -1,6 +1,6 @@
 import random
 from tinygrad.helpers import round_up
-from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
+from tinygrad.runtime.support.am.amdev import AMPageTableTraverseContext
 from test.external.external_test_am import helper_read_entry_components, FakeAM
 
 class AMPTFuzzer:
@@ -18,9 +18,6 @@ class AMPTFuzzer:
   def generate_pattern(self, ptr: int, size: int) -> int: return random.randint(0, 0xff)
 
   def fill_memory(self, va, size: int, pattern: int):
-    # internal_va = va.va_addr - AMMemoryManager.va_allocator.base
-    # pages = list(self.d.mm.page_table_walker(self.d.mm.root_page_table, vaddr=internal_va, size=size))
-
     ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, va.va_addr)
     pages = list(ctx.next(size))
 

@@ -143,7 +143,7 @@ class AMPageTableTraverseContext:
     return self.pt_stack[-1]
 
   def _try_free_pt(self):
-    pt, pte_idx, _ = self.pt_stack[-1]
+    pt, _, _ = self.pt_stack[-1]
     if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.get_entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
       self.adev.mm.pfree(AMPhysicalMemoryBlock(self.adev, pt.pm.paddr, 0x1000))
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
