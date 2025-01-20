@@ -362,8 +362,8 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
-ops_folding = symbolic_simple+PatternMatcher([
-  # op with size 0 is zero
+sym = symbolic_simple+PatternMatcher([
+  # UOp with size 0 is zero
   (UPat(set(Ops)-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH is a NOOP here
@@ -494,7 +494,7 @@ remove_movement_ops = PatternMatcher([
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
-  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+ops_folding, ctx:=ScheduleContext())
+  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
   # add BUFFER uops
