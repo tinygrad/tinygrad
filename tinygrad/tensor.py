@@ -18,6 +18,31 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 all_tensors: set[weakref.ref[Tensor]] = set()
 
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
+  # get all children of keys in applied_map
+  all_uops: set[UOp] = set()
+  search_uops = list(applied_map)
+  while len(search_uops):
+    x = search_uops.pop(0)
+    if x in all_uops: continue
+    all_uops.add(x)
+    search_uops.extend([u for c in x.children if (u:=c()) is not None])
+
+  # link the found UOps back to Tensors. exit early if there's no Tensors to realize
+  # NOTE: this uses all_tensors, but it's fast
+  fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
+
+  if len(fixed_tensors):
+    # potentially rewrite all the discovered Tensors
+    sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
+    new_sink = sink.substitute(applied_map)
+
+    # set the relevant lazydata to the realized UOps
+    for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
+      if s is ns: continue
+      if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
+      else: t.lazydata = ns
+
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
@@ -229,32 +254,9 @@ class Tensor(SimpleMathTrait):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    schedule, var_vals, becomes_map = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
-
-    # get all children of keys in becomes_map
-    all_uops: set[UOp] = set()
-    search_uops = list(becomes_map)
-    while len(search_uops):
-      x = search_uops.pop(0)
-      if x in all_uops: continue
-      all_uops.add(x)
-      search_uops.extend([u for c in x.children if (u:=c()) is not None])
-
-    # link the found UOps back to Tensors. exit early if there's no Tensors to realize
-    # NOTE: this uses all_tensors, but it's fast
-    fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and any(x in all_uops for x in t.lazydata.lbs)]
-    if len(fixed_tensors) == 0: return [], {}
-
-    # potentially rewrite all the discovered Tensors
-    sink = UOp.sink(*[UOp.sink(*t.lazydata.lbs) if isinstance(t.lazydata, MultiLazyBuffer) else t.lazydata for t in fixed_tensors])
-    new_sink = sink.substitute(becomes_map)
-
-    # set the relevant lazydata to the realized UOps
-    for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
-      if s is ns: continue
-      if isinstance(t.lazydata, MultiLazyBuffer): t.lazydata.lbs = list(ns.src)
-      else: t.lazydata = ns
-
+    big_sink = UOp.sink(*flatten([x.lazydata.lbs for x in (self,)+lst]))
+    schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
+    _apply_map_to_tensors(becomes_map)
     return memory_planner(schedule), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -3565,8 +3567,7 @@ class Tensor(SimpleMathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
-                                   dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
     `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
@@ -3583,10 +3584,15 @@ class Tensor(SimpleMathTrait):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
-    if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
     qk = self.matmul(key.transpose(-2,-1), acc_dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
-    return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
+    # handle attention mask
+    if is_causal:
+      if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
+      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
+    if attn_mask is not None:
+      if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
+      qk = qk + attn_mask
+    return qk.softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
