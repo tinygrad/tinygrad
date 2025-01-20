@@ -3,7 +3,7 @@ from typing import cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType, ReductionStr
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten, make_tuple
-from extra.onnx import dtype_parse, to_python_const
+from extra.onnx import dtype_parse, _cached_to_python_const
 import numpy as np
 
 # **************** Free Ops ****************
@@ -282,7 +282,7 @@ def Gather(x:Tensor, indices:Tensor, axis:int=0):
     x_sh = list(x.shape)
     ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
     if indices.ndim > 1: indices = indices.flatten()
-    indices = [to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in to_python_const(indices)] # type: ignore
+    indices = [_cached_to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in _cached_to_python_const(indices)]
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices] # type: ignore
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
@@ -575,12 +575,9 @@ from tinygrad.nn.optim import SGD
 def onnx_training(input_group_size):
   def _decorator(func):
     def __wrapper(R:Tensor, T:int, *inputs:Tensor, **kwargs):
-      old_training = Tensor.training
-      Tensor.training = True
       R = R.detach()
       groups = len(inputs) // input_group_size
       ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
-      Tensor.training = old_training
       return tuple(flatten(zip(*ret)))
     return __wrapper
   return _decorator
