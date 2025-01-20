@@ -522,10 +522,10 @@ remove_movement_ops = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+  if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
   # if using VIZ, do a graph rewrite to vizualize the Tensor graph
   if getenv("VIZ"): graph_rewrite(big_sink, remove_movement_ops+ops_folding, ScheduleContext())
-  if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
-  # to_uop is removing (many) of the movement ops
+  # add BUFFER uops
   sink = add_buffers(big_sink, ctx:=ScheduleContext(), cache={})
   # const folding and fusion
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+do_realize, ctx)
@@ -538,8 +538,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   # preschedule realize groups
   prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
-    if len(stores:=[ctx.realizes[u] for u in store_uops if ctx.realizes[u].op is Ops.STORE]) == 0: continue
-    prescheduled.append(schedule_uop(UOp.sink(*stores), ctx))
+    small_sink = UOp.sink(*[ctx.realizes[u] for u in store_uops])
+    # TODO: this still exists because symbolic folding is happening after bufferization
+    if not all(x.op is Ops.STORE for x in small_sink.src): continue
+    prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
