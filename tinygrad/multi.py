@@ -40,9 +40,10 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
 # MultiLazyBuffer is UOp
-MultiLazyBuffer = UOp
+#MultiLazyBuffer = UOp
 
 def create_multi(lbs:list[UOp], axis:int|None, real:list[bool]|None=None):
+  print(real)
   # TODO: handle real
   return UOp.multi(*lbs, axis=axis)
 

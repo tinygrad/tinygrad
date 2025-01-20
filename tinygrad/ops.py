@@ -437,7 +437,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
 
   @property
-  def real(self): return [True]*len(self.src)
+  def real(self):
+    assert self.op is Ops.MULTI
+    return [True]*len(self.src)
 
   # *** from LazyBuffer ***
 
@@ -464,7 +466,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
-  def lbs(self): return [self]
+  def lbs(self):
+    # TODO: remove lbs
+    if self.op is Ops.MULTI: return list(self.src)
+    return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)
   @property

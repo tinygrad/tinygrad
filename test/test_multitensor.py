@@ -1,11 +1,11 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
-from tinygrad.multi import all_reduce, MultiLazyBuffer
+from tinygrad.multi import all_reduce
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.device import is_dtype_supported
@@ -30,7 +30,7 @@ N = 128
 def _test_allreduce(t:Tensor):
   aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
   ts = t.shard(devices_4, 0).realize()
-  b = Tensor(MultiLazyBuffer(all_reduce(Ops.ADD, ts.lazydata.lbs), 0))
+  b = Tensor(UOp.multi(*all_reduce(Ops.ADD, ts.lazydata.lbs), axis=0))
   b.realize()
   return aa, b
 
@@ -218,9 +218,9 @@ class TestMultiTensor(unittest.TestCase):
         shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
         t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
         with Context(RING=0):
-          a = Tensor(MultiLazyBuffer(all_reduce(Ops.ADD, t.lazydata.lbs), 0))
+          a = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.lbs), axis=0))
         with Context(RING=2):
-          b = Tensor(MultiLazyBuffer(all_reduce(Ops.ADD, t.lazydata.lbs), 0))
+          b = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.lbs), axis=0))
         diff = a - b
         mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
