@@ -340,10 +340,6 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
 
 # **** Schedule creation and BFS toposort
 
-class UPatScheduled(UPat):
-  def __init__(self, *args, **kwargs):
-    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
-
 # ** this is schedule level const folding
 
 def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
@@ -400,6 +396,10 @@ ops_folding = symbolic_simple+PatternMatcher([
 ])
 
 # ** this decides which ops get realized
+
+class UPatScheduled(UPat):
+  def __init__(self, *args, **kwargs):
+    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
 
 def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
 
