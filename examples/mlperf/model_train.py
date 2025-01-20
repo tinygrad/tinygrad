@@ -356,9 +356,11 @@ def train_retinanet():
   
   import numpy as np
 
+  config = {}
+
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASE_DIR = getenv("BASE_DIR", BASEDIR)
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
 
   for x in GPUS: Device[x]
 
@@ -398,12 +400,23 @@ def train_retinanet():
 
   # ** hyperparameters **
   # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
-  LR = 1e-4
-  LR_WARMUP_EPOCHS = 1
-  LR_WARMUP_FACTOR = 1e-3
-  SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  BS = getenv("BS", 128)
-  NUM_EPOCHS = getenv("EPOCHS", 4)
+  config["lr"] = lr = 1e-4
+  config["lr_warmup_epochs"] = lr_warmup_epochs = 1
+  config["lr_warmup_factor"] = lr_warmup_factor = 1e-3
+  config["seed"] = seed = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
+  config["bs"] = bs = getenv("BS", 128)
+  config["num_epochs"] = num_epochs = getenv("EPOCHS", 4)
+
+  # ** initialize wandb **
+  if (WANDB := getenv("WANDB")):
+    import wandb
+
+    wandb_args = {"project": "MLPerf-RetinaNet"}
+    if (wandb_id := getenv("WANDB_RESUME")):
+      wandb_args["id"] = wandb_id
+      wandb_args["resume"] = "must"
+
+    wandb.init(config=config, **wandb_args)
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
@@ -419,19 +432,21 @@ def train_retinanet():
   for p in params: p.realize().to_(GPUS)
 
   # ** optimizer **
-  optim = Adam(params, lr=LR)
+  optim = Adam(params, lr=lr)
 
   # ** dataset **
-  anchors = generate_anchors((800, 800), batch_size=BS)
+  anchors = generate_anchors((800, 800), batch_size=bs)
   batched_anchors = Tensor.stack(*[Tensor(a, requires_grad=False) for a in anchors]).shard(GPUS, axis=0)
 
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
   val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
 
+  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), bs) // bs
+
   # ** training loop **
-  for e in range(1, NUM_EPOCHS + 1):
-    train_dataloader = batch_load_retinanet(train_dataset, False, anchors[0], Path(BASE_DIR), batch_size=BS, seed=SEED)
-    it = iter(tqdm(train_dataloader, total=(train_dataset_len:=len(train_dataset.imgs.keys())) // BS, desc=f"epoch {e}"))
+  for e in range(1, num_epochs + 1):
+    train_dataloader = batch_load_retinanet(train_dataset, False, anchors[0], Path(BASE_DIR), batch_size=bs, seed=seed)
+    it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}"))
     i, proc = 0, _data_get(it)
 
     # if e < LR_WARMUP_EPOCHS:
@@ -469,6 +484,11 @@ def train_retinanet():
         f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {losses['classification_loss'].item():5.2f} classification loss, {losses['regression_loss'].item():5.2f} regression loss, "
         f"{optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
       )
+
+      if WANDB:
+        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/classification_loss": losses["classification_loss"].item(), "train/regression_loss": losses["regression_loss"].item(),
+                   "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                   "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
       st = cl
       prev_cookies.append(proc)
