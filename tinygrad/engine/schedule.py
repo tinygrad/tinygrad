@@ -193,7 +193,7 @@ to_si = PatternMatcher([
   # simplify and unbind the final VIEWs
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   # don't need SINK on COPY or BUFFER_VIEW
-  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
+  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
@@ -438,7 +438,7 @@ def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> Non
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
 
 def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> UOp|None:
-  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op in GroupOp.Meta: return None
+  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op is Ops.COPY: return None
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
@@ -454,8 +454,8 @@ def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
 do_realize = PatternMatcher([
   # always realize sinked ops
   (UPat(Ops.SINK, name="sink"), sink_outputs),
-  # always realize meta ops
-  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
+  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
   (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
