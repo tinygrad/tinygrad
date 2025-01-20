@@ -50,7 +50,7 @@ tensor_uop_spec = PatternMatcher([
 
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
-   lambda assign,target,new_val: (target.op is Ops.BUFFER or target.is_realized) and (assign.dtype == target.dtype == new_val.dtype)),
+   lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
 ])
 
 # **** ScheduleItem return type
@@ -90,24 +90,23 @@ class ScheduleContext:
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
 def add_buffers(buf:UOp, ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
+  # SINK is passthrough
   if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
-  # shapeless op is passthrough
-  # realized is passthrough
-  # constants are passthrough
-  if buf.st is None or buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND}: return buf
-  # view is passthrough
+  # skip creating buffers for CONST/BIND/DEVICE/BUFFER
+  if buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
+  # VIEW is passthrough
   if buf is not buf.base:
-    cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(buf.st)
+    cache[buf] = ret = add_buffers(buf.base, ctx, cache).view(unwrap(buf.st))
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
-  if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+  if isinstance(dtype, ImageDType) and (prod(buf.shape)!=prod(dtype.shape) or not any(buf.shape[x]%4==0 for x in unwrap(buf.st).unit_stride_axes())):
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
   # ASSIGN already has a target buffer, otherwise we create a new one
   buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
   op = buf.replace(dtype=dtype.base, src=tuple(add_buffers(x, ctx, cache) for x in buf.src))
-  # track the underlying tensor uop for this op
+  # track the underlying tensor uop for this buffer
   ctx.tensor_uops[buf_uop] = [buf]
   # (early) bufferize
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
@@ -426,8 +425,7 @@ merge_bufs = PatternMatcher([
 
 def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
 
-def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
-  if src.st is None: return None
+def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
@@ -437,13 +435,10 @@ def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> Non
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
 
-def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> UOp|None:
-  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op is Ops.COPY: return None
+def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs) -> UOp|None:
+  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(x.base).op is Ops.COPY: return None
   del ctx.realizes[b]
-  return to_cast.view(unwrap(view.st))
-
-def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
-  for x in sink.src: realize(ctx, x.buf_uop, x)
+  return x.view(unwrap(view.st))
 
 def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
   if not root.device.startswith("DISK"): return None
@@ -452,14 +447,15 @@ def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
   return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
 
 do_realize = PatternMatcher([
-  # always realize sinked ops
-  (UPat(Ops.SINK, name="sink"), sink_outputs),
+  # always realize SINK parents
+  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled(name="src").view(name="view"), realize_view),
+  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
   # don't realize image to image casts
-  (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
+  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="x"),), dtype=dtypes.float),)),
+   fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
