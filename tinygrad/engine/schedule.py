@@ -426,8 +426,7 @@ merge_bufs = PatternMatcher([
 
 def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
 
-def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
-  if src.st is None: return None
+def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
@@ -437,13 +436,10 @@ def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> Non
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
 
-def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> UOp|None:
-  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op in GroupOp.Meta: return None
+def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs) -> UOp|None:
+  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(x).op in GroupOp.Meta: return None
   del ctx.realizes[b]
-  return to_cast.view(unwrap(view.st))
-
-def sink_outputs(ctx:ScheduleContext, sink:UOp) -> None:
-  for x in sink.src: realize(ctx, x.buf_uop, x)
+  return x.view(unwrap(view.st))
 
 def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
   if not root.device.startswith("DISK"): return None
@@ -452,14 +448,15 @@ def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
   return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
 
 do_realize = PatternMatcher([
-  # always realize sinked ops
-  (UPat(Ops.SINK, name="sink"), sink_outputs),
-  # always realize meta ops
-  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
+  # always realize SINK parents
+  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
+  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled(name="src").view(name="view"), realize_view),
+  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
   # don't realize image to image casts
-  (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
+  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="x"),), dtype=dtypes.float),)),
+   fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
