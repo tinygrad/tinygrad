@@ -1856,8 +1856,8 @@ class Tensor(SimpleMathTrait):
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
   def _softmax(self, axis, dtype:Optional[DTypeLike]=None):
-    x = self.cast(dtype) if dtype is not None else self
-    m = x - x.max(axis=axis, keepdim=True).detach()
+    m = self - self.max(axis=axis, keepdim=True).detach()
+    if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
