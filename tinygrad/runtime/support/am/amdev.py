@@ -131,7 +131,7 @@ class AMPageTableTraverseContext:
   def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % 512
 
   def level_down(self):
-    pt, pte_idx, pte_covers = self.pt_stack[-1]
+    pt, pte_idx, _ = self.pt_stack[-1]
     entry = pt.get_entry(pte_idx)
     if entry & am.AMDGPU_PTE_VALID:
       assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.pm.paddr:#x}, {pte_idx=} {entry=:#x}"
@@ -233,7 +233,8 @@ class AMMemoryManager:
   def valloc(self, size:int, align=0x1000, uncached=False, contigous=False) -> AMVirtualMapping:
     paddrs = self._alloc_optimal_paddrs(va:=self.alloc_vaddr(size, align), size, contigous=contigous)
     self.map_range(va, size, paddrs=paddrs, uncached=uncached)
-    return AMVirtualMapping(va, size, AMPhysicalMemoryBlock(self.adev, *paddrs[0]).cpu_addr() if len(paddrs) == 1 else None, paddrs[0][0] if len(paddrs) == 1 else None)
+    return AMVirtualMapping(va, size, AMPhysicalMemoryBlock(self.adev, *paddrs[0]).cpu_addr() if len(paddrs) == 1 else None,
+      paddrs[0][0] if len(paddrs) == 1 else None)
 
   def vfree(self, vm:AMVirtualMapping):
     self.unmap_range(vm.va_addr, vm.size, free_paddrs=(vm.paddr is None))
