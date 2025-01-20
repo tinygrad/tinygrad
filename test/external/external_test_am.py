@@ -56,7 +56,7 @@ class TestAMPageTable(unittest.TestCase):
       exteranl_va = va + AMMemoryManager.va_allocator.base
       mm.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)])
 
-      ctx = AMPageTableTraverseContext(self.d[0], mm.root_page_table, exteranl_va, create_mode=False)
+      ctx = AMPageTableTraverseContext(self.d[0], mm.root_page_table, exteranl_va)
       results = list(ctx.next(sz))
 
       total_covered = 0
@@ -106,7 +106,7 @@ class TestAMPageTable(unittest.TestCase):
       # Finally can map and check paddrs
       mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(0xdead0000, 0x1000), (0xdead1000, 0xff000)])
 
-      ctx = AMPageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va + 0x2000, create_mode=False)
+      ctx = AMPageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va + 0x2000)
       for tup in ctx.next(0x100000):
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
@@ -135,7 +135,7 @@ class TestAMPageTable(unittest.TestCase):
       mm0.unmap_range(vaddr=exteranl_va, size=sz, free_paddrs=False) # unmap from mm0
       mm0.map_from(vaddr=exteranl_va, size=sz, from_adev=mm1.adev) # mapping from mm1 to same addrs -- ok
 
-      ctx = AMPageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va, create_mode=False)
+      ctx = AMPageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va)
 
       d1_pci_base = self.d[1].pcidev.regions[0].base_addr
       for tup in ctx.next(sz):

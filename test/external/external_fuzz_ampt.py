@@ -21,7 +21,7 @@ class AMPTFuzzer:
     # internal_va = va.va_addr - AMMemoryManager.va_allocator.base
     # pages = list(self.d.mm.page_table_walker(self.d.mm.root_page_table, vaddr=internal_va, size=size))
 
-    ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, va.va_addr, create_mode=False)
+    ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, va.va_addr)
     pages = list(ctx.next(size))
 
     for _offset, _pt, _pte_idx, _n_ptes, _pte_covers in pages:
@@ -40,7 +40,7 @@ class AMPTFuzzer:
         contig_ptes = contig_range // _pte_covers
         assert contig_ptes > 0
 
-        ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, start_vaddr, create_mode=False)
+        ctx = AMPageTableTraverseContext(self.d, self.d.mm.root_page_table, start_vaddr)
         frags_l = list(ctx.next(contig_range))
         for f_offset, f_pt, f_pte_idx, f_n_ptes, f_pte_covers in frags_l:
           for j in range(f_n_ptes):
