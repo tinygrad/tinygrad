@@ -125,7 +125,7 @@ class AMPageTableEntry:
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
     self.adev, self.vaddr, self.create_pts, self.free_pts = adev, vaddr - adev.gmc.vm_base, create_pts, free_pts
-    self.pt_stack = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
+    self.pt_stack:list[tuple[AMPageTableEntry, int, int]] = [(pt, self._pt_pte_idx(pt, vaddr), self._pt_pte_size(pt))]
 
   def _pt_pte_size(self, pt): return (1 << ((9 * (3-pt.lv)) + 12))
   def _pt_pte_idx(self, pt, va): return (va // self._pt_pte_size(pt)) % 512
@@ -231,7 +231,7 @@ class AMMemoryManager:
       paddrs = []
       try:
         ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
-        for _, _, _, pte_cnt, pte_covers in ctx.next(size): paddrs += [(self.palloc(pte_covers, zero=False).paddr, pte_covers) for _ in range(pte_cnt)]
+        for _, _, _, seg_cnt, seg_size in ctx.next(size): paddrs += [(self.palloc(seg_size, zero=False).paddr, seg_size) for _ in range(seg_cnt)]
       except MemoryError:
         for paddr, _ in paddrs: self.pa_allocator.free(paddr)
         raise
