@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from extra.onnx import get_run_onnx
+from extra.onnx import OnnxRunner
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -20,7 +20,7 @@ class TinygradModel(BackendRep):
 
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
     real_inputs = dict(zip(self.input_names, inputs))
-    ret = self.fxn(real_inputs, debug=True)
+    ret = self.fxn(real_inputs, debug=2)
     return tuple(x.numpy() if isinstance(x, Tensor) else [i.numpy() for i in x] if isinstance(x, list) else np.array(x) for x in ret.values())
 
 class TinygradBackend(Backend):
@@ -30,7 +30,7 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = get_run_onnx(model)
+    run_onnx = OnnxRunner(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod

@@ -1,14 +1,12 @@
 import sys, onnx, time
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, fetch
 from tinygrad.tensor import _from_np_dtype
-from extra.onnx import get_run_onnx
+from extra.onnx import OnnxRunner
 
 def load_onnx_model(fn):
   onnx_file = fetch(fn)
   onnx_model = onnx.load(onnx_file)
-  Tensor.no_grad = True
-  Tensor.training = False
-  run_onnx = get_run_onnx(onnx_model)
+  run_onnx = OnnxRunner(onnx_model)
 
   # find preinitted tensors and ignore them
   initted_tensors = {inp.name:None for inp in onnx_model.graph.initializer}
