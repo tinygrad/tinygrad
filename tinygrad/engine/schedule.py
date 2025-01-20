@@ -448,8 +448,7 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs)
   return x.view(unwrap(view.st))
 
 def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
-  if not root.device.startswith("DISK"): return None
-  if x.op is not Ops.VIEW: x = x.src[-1] # TODO: remove this once forced_realize is gone
+  if not b.device.startswith("DISK"): return None
   buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
 
