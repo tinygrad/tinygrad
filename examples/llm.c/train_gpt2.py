@@ -3,6 +3,17 @@ import os, math, time
 import numpy as np
 from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
+from tinygrad.helpers import prod, getenv
+
+GPUS = tuple(f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2)))
+
+def fsdp(obj, devices: tuple[str]):
+  for name, param in nn.state.get_state_dict(obj).items():
+    if(param.shape[0] == 1 or prod(param.shape) <= 1):
+      param.to_(devices)
+    else:
+      param.shard_(devices, axis=0)
+  return obj
 
 @dataclass
 class GPTConfig:
@@ -77,7 +88,7 @@ class GPT:
     self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
   def load_pretrained(self):
-    weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
+    weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2-large/resolve/main/pytorch_model.bin')) #Loading Large model that OOMs on 12GB VRAM with BS 16 without FSDP
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
       if k == "wte.weight":
@@ -99,8 +110,11 @@ class GPT:
 
   def __call__(self, idx:Tensor, targets=None):
     b, t = idx.shape
-    pos = Tensor.arange(0, t)
-
+    pos = Tensor.arange(0, t).reshape(1, t).expand(b, t) #We want our position embeddings to be sharded along batch axis.
+    if(b == 1):
+      pos.to_(("CUDA:0", "CUDA:1"))
+    else:
+      pos.shard_(("CUDA:0", "CUDA:1"), axis=0)
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
     x = tok_emb + pos_emb
@@ -120,17 +134,22 @@ if __name__ == "__main__":
   import tiktoken, argparse
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
-  parser.add_argument("--batch_size", type=int, default=4, help="batch size")
+  parser.add_argument("--num_iterations", type=int, default=5, help="number of iterations to run") 
+  parser.add_argument("--batch_size", type=int, default=16, help="batch size")
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
   args = parser.parse_args()
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
 
-  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
+  default_device = Device.DEFAULT
+  Device.DEFAULT = "CLANG" #initialize the parameters on CPU
+  model = GPT(GPTConfig(n_layer=36, n_head=20, n_embd=1280))
   model.load_pretrained()
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+  Device.DEFAULT = default_device #Revert default device to GPU
 
+  fsdp(optimizer, GPUS) #We call FSDP on optimizer.
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
   encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
@@ -163,10 +182,10 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
 
-  @TinyJit
   def step(x, y):
+    x.shard_(GPUS, axis=0)
+    y.shard_(GPUS, axis=0)
     _, loss = model(x, y)
     optimizer.zero_grad()
     loss.backward()
@@ -176,18 +195,24 @@ if __name__ == "__main__":
     for i in range(args.num_iterations):
       GlobalCounters.reset()
       t0 = time.time()
+      for param in optimizer.params:
+        param.lazydata.placement = "replicate" #This tells multi to all_gather parameters and later scatter gradients, in expand and sum
+
       loss = step(x.contiguous(), y.contiguous())
-      Device[Device.DEFAULT].synchronize()
       t1 = time.time()
       print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
   if not args.skip_test:
     start = "<|endoftext|>"
     start_ids = encode(start)
-    x = (Tensor(start_ids)[None, ...])
+    x = (Tensor(start_ids)[None, ...]).expand(2, -1).shard_(("CUDA:0", "CUDA:1"), axis=0)
     max_new_tokens = 16
     temperature = 1.0
     top_k = 40
+
+    for param in nn.state.get_parameters(model): 
+      param.lazydata.placement = "replicate" #these placement metadatas change after each step, so we set them again
+
     y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
     print(decode(y[0].tolist()))
 
