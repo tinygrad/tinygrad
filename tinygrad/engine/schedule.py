@@ -508,7 +508,6 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
     small_sink = UOp.sink(*[ctx.realizes[u] for u in store_uops])
-    # TODO: this still exists because symbolic folding is happening after bufferization
     if not all(x.op is Ops.STORE for x in small_sink.src): raise RuntimeError(f"expected all realized BUFFERs to get a STORE {sink}")
     prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
