@@ -276,9 +276,8 @@ class TestSubstitute(unittest.TestCase):
 
 class TestMulaccUnrolledAcc(unittest.TestCase):
   def test_unrolled2(self):
-    zero = UOp.const(dtypes.int, 0)
     acc_range = (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1))
-    acc = UOp(Ops.DEFINE_ACC, dtypes.int, (zero,) + acc_range, (0,))
+    acc = UOp(Ops.DEFINE_ACC, dtypes.int, (UOp.const(dtypes.int, 0),) + acc_range, (0,))
     a = UOp.variable('a', 0, 10)
     b = UOp.variable('b', 0, 10)
     expr = acc.assign(acc + (a*2 + b*3))
@@ -286,9 +285,8 @@ class TestMulaccUnrolledAcc(unittest.TestCase):
     self.assertIs(expr_with_mulacc, acc.assign(acc + a*2 + b*3))
 
   def test_unrolled4_float(self):
-    zero = UOp.const(dtypes.float32, 0)
     acc_range = (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 3))
-    acc = UOp(Ops.DEFINE_ACC, dtypes.float32, (zero,)+acc_range, (0,))
+    acc = UOp(Ops.DEFINE_ACC, dtypes.float32, (UOp.const(dtypes.int, 0),)+acc_range, (0,))
 
     a = [UOp.variable(f'a{i}', float("-inf"), float("inf"), dtype=dtypes.float32) for i in range(4)]
     b = [UOp.variable(f'b{i}', float("-inf"), float("inf"), dtype=dtypes.float32) for i in range(4)]
@@ -298,6 +296,18 @@ class TestMulaccUnrolledAcc(unittest.TestCase):
 
     # Verify it unrolls into individual multiply-accumulate operations
     expected = acc.assign(acc + a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3])
+    self.assertIs(expr_with_mulacc, expected)
+
+  def test_unrolled4_float_const(self):
+    acc_range = (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 3))
+    acc = UOp(Ops.DEFINE_ACC, dtypes.float32, (UOp.const(dtypes.int, 0),)+acc_range, (0,))
+
+    a = [UOp.variable(f'a{i}', float("-inf"), float("inf"), dtype=dtypes.float32) for i in range(4)]
+    expr = acc.assign(acc + (a[0]*3.0 + a[1]*4.0 + a[2]*5.0 + a[3]*6.0))
+    expr_with_mulacc = graph_rewrite(expr, mulacc_unrolled)
+
+    # Verify it unrolls into individual multiply-accumulate operations
+    expected = acc.assign(acc + a[0]*3.0 + a[1]*4.0 + a[2]*5.0 + a[3]*6.0)
     self.assertIs(expr_with_mulacc, expected)
 
 if __name__ == '__main__':
