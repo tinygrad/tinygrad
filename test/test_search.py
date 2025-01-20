@@ -102,6 +102,21 @@ class TestBEAM(unittest.TestCase):
     if Opt(OptOps.GROUPTOP, 0, 0) in actions:
       assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUPTOP, axis=0, amt=3)]) == 0, "did not de-dup GROUPTOP"
 
+  @unittest.skipIf(
+    len([tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in == dtypes.half and tc.dtype_out == dtypes.float]) < 2,
+    "only one shape available to search over",
+  )
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_search_for_tc_shape(self):
+    from test.test_linearizer import helper_realized_ast
+    a = Tensor.rand(32, 32, dtype=dtypes.half)
+    b = Tensor.rand(32, 32, dtypes=dtypes.half)
+    realized_ast, _ = helper_realized_ast(a @ b)
+    from tinygrad.engine.search import get_kernel_actions
+    lins = get_kernel_actions(Kernel(realized_ast), False).values()
+
+    print(lins)
+
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
