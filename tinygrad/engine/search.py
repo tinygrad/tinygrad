@@ -116,7 +116,7 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
           if c in {"magenta", "yellow"}: up *= s
           elif c in {"cyan", "green", "white"}: lcl *= s
         if up//tc_up > max_up or lcl > max_lcl: continue
-        acted_lins[_i+i+1] = lin2
+        acted_lins[(_i*len(actions))+i+1] = lin2
       except KernelOptError: pass
   return acted_lins
 
