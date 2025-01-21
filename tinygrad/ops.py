@@ -485,11 +485,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
-  def lbs(self):
-    # TODO: remove lbs
-    if self.op is Ops.MULTI: return list(self.src)
-    return [self]
-  @property
   def metadata(self): return all_metadata.get(self, None)
 
   # *** uop movement ops ***

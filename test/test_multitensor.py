@@ -30,7 +30,7 @@ N = 128
 def _test_allreduce(t:Tensor):
   aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
   ts = t.shard(devices_4, 0).realize()
-  b = Tensor(UOp.multi(*all_reduce(Ops.ADD, ts.lazydata.lbs), axis=0))
+  b = Tensor(UOp.multi(*all_reduce(Ops.ADD, ts.lazydata.src), axis=0))
   b.realize()
   return aa, b
 
@@ -39,7 +39,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_to(self):
     X = Tensor.ones(256).contiguous().realize()
     X.to_(devices_2)
-    for lb in X.lazydata.lbs:
+    for lb in X.lazydata.src:
       assert lb.shape == (256,)
     (X + X).realize()
 
@@ -52,7 +52,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
-    for lb in X.lazydata.lbs:
+    for lb in X.lazydata.src:
       assert lb.shape == (128,)
     (X + X).realize()
 
@@ -218,9 +218,9 @@ class TestMultiTensor(unittest.TestCase):
         shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
         t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
         with Context(RING=0):
-          a = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.lbs), axis=0))
+          a = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.src), axis=0))
         with Context(RING=2):
-          b = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.lbs), axis=0))
+          b = Tensor(UOp.multi(*all_reduce(Ops.ADD, t.lazydata.src), axis=0))
         diff = a - b
         mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
@@ -356,8 +356,8 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     shard_output = m(fake_image_sharded).log_softmax().realize()
-    assert shard_output.lazydata.lbs[0].shape == (1, 1000)
-    assert shard_output.lazydata.lbs[1].shape == (1, 1000)
+    assert shard_output.lazydata.src[0].shape == (1, 1000)
+    assert shard_output.lazydata.src[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
@@ -635,7 +635,7 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(t.device, t2.device)
     self.assertEqual(t.dtype, t2.dtype)
     self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
-    assert all(tlb.shape == t2lb.shape for tlb, t2lb in zip(t.lazydata.lbs, t2.lazydata.lbs))
+    assert all(tlb.shape == t2lb.shape for tlb, t2lb in zip(t.lazydata.src, t2.lazydata.src))
 
   def test_rand_like_none_shard(self):
     t = Tensor.empty((16, 16)).shard(devices_2)
@@ -718,7 +718,7 @@ class TestMultiTensor(unittest.TestCase):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
     t.shard_(devices, axis=0).realize()
-    assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.lazydata.lbs])
+    assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.lazydata.src])
 
   @unittest.skip("this is unreliable on OSX")
   def test_clone(self):
