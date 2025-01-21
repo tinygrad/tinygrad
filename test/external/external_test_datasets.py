@@ -132,14 +132,11 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     dataloader = batch_load_retinanet(dataset, subset == "validation", base_dir, batch_size=batch_size, shuffle=False, seed=seed)
     return iter(dataloader)
 
-  def setUp(self):
-    self.base_dir, self.train_ann_file = self._create_samples("train")
-    self.val_ann_file = self._create_samples("validation")[1]
-
   def test_training_set(self):
+    base_dir, ann_file = self._create_samples(subset := "train")
     img_size, img_mean, img_std, anchors = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], torch.ones((120087, 4))
-    tinygrad_dataloader = self._create_tinygrad_dataloader(self.base_dir, self.train_ann_file, subset := "train")
-    ref_dataloader = self._create_ref_dataloader(self.base_dir, self.train_ann_file, subset)
+    tinygrad_dataloader = self._create_tinygrad_dataloader(base_dir, ann_file, subset)
+    ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, subset)
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
     for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _, _, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
@@ -154,9 +151,10 @@ class TestOpenImagesDataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
 
   def test_validation_set(self):
+    base_dir, ann_file = self._create_samples(subset := "validation")
     img_size, img_mean, img_std = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]
-    tinygrad_dataloader = self._create_tinygrad_dataloader(self.base_dir, self.val_ann_file, "validation")
-    ref_dataloader = self._create_ref_dataloader(self.base_dir, self.val_ann_file, "val")
+    tinygrad_dataloader = self._create_tinygrad_dataloader(base_dir, ann_file, subset)
+    ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, "val")
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
     for ((tinygrad_img, _), (ref_img, _)) in zip(tinygrad_dataloader, ref_dataloader):
