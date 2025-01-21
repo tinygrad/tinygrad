@@ -218,6 +218,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
+  _device_cache:dict[UOp, str|None] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
@@ -242,6 +243,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
+
   def __del__(self):
     if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg))) is not None:
@@ -256,9 +258,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg) == new_args: return self
     return UOp(*new_args)
-  @functools.cached_property
+  @functools.cached_property # caching here is not ideal. Maybe create UOp._key_cache??
   def key(self) -> bytes:
-    return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
+    hasher = hashlib.sha256(str((self.op, self.dtype, self.arg)).encode())
+    stack = list(self.src[::-1])
+    while stack:
+      key = stack.pop()
+      hasher.update(str((key.op, key.dtype, key.arg)).encode())
+      stack.extend(key.src[::-1])
+    return hasher.digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
 
@@ -430,7 +438,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
-    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
+    ret = UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone)
+    op_arg = []
+    mop = self
+    while mop is not self.base:
+      op_arg.append((mop.op, mop.arg))
+      mop = mop.src[0]
+    for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
+    return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def lbs(self): return [self]
@@ -465,19 +480,25 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def device(self) -> str: return unwrap(self._device)
   @property
+  def device(self) -> str:
+    return unwrap(self.new_device)
+  @functools.cached_property
   def _device(self) -> Optional[str]:
+    # print(f"BEEN HERE, {self.op}")
+    if self.op is Ops.DEVICE: return self.arg
+    return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
+  @property
+  def new_device(self) -> Optional[str]:
     stack: list[tuple[UOp, bool]] = [(self, False)]
-    cache: dict[UOp, str|None] = {}
     while stack:
-      uop, processed = stack.pop()
-      if uop.op is Ops.DEVICE:
-        cache[uop] = uop.arg
-      if uop in cache: continue
+      u, processed = stack.pop()
+      if u.op is Ops.DEVICE: UOp._device_cache[u] = u.arg
+      if u in UOp._device_cache: continue
       if not processed:
-        stack.extend([(x, y) for x, y in zip((uop, *uop.src), itertools.chain([True], itertools.repeat(False))) if cache.get(x) is None])
+        stack.extend([(x, y) for x, y in zip((u, *u.src), itertools.chain([True], itertools.repeat(False))) if UOp._device_cache.get(x) is None])
       else:
-        cache[uop] = cache[dsrcs[0]] if len(dsrcs:=[x for x in uop.src if cache.get(x) is not None]) != 0 else None
-    return cache[self]
+        UOp._device_cache[u] = UOp._device_cache[dsrcs[0]] if len(dsrcs:=[x for x in u.src if UOp._device_cache.get(x) is not None]) != 0 else None
+    return UOp._device_cache[self]
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
@@ -866,7 +887,6 @@ class RewriteContext:
           old2new[n] = new_n
       else: self.replace[n] = self.replace[old2new[n]] # this is stage=2
     return self.replace[sink]
-
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n: UOp|None = n
