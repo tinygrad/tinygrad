@@ -152,7 +152,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       if v.shape != state_dict[k].shape:
         raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance(v.device, tuple):
-        v.replace(state_dict[k].shard(v.device, v.axis)).realize()
+        v.replace(state_dict[k].shard(v.device, v.lazydata.axis)).realize()
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 

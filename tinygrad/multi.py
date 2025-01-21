@@ -55,10 +55,10 @@ def alu_multi(root:UOp):
   new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else msrcs[0].real
   assert any(new_real), "output contains no real lb"
   for mlb in msrcs:
-    if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.src)
+    if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(list(mlb.src))
     else:
       assert axis is not None and bounds is not None
-      if mlb.axis is None: srcs.append(to_sharded(mlb.src, axis, bounds))
+      if mlb.axis is None: srcs.append(to_sharded(list(mlb.src), axis, bounds))
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.src], axis, bounds))
   new_real_lbs:dict[int,UOp] = {i:lsrcs[0].alu(root.op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
   # NOTE: const dtype should match real
@@ -141,6 +141,10 @@ def copy_multi(multi:UOp, device:UOp):
     llbs.append(lb.copy_to_device(device.arg).pad(pad_arg))
   return functools.reduce(operator.add, llbs)
 
+def assign_multi(dest:UOp, src:UOp):
+  assert dest.axis == src.axis, f"axis must match in multi assign {dest.axis} != {src.axis}"
+  return UOp.multi(*[x.assign(y) for x,y in zip(dest.src, src.src)], axis=dest.axis, real=dest.real)
+
 def passthrough_multi(root:UOp, multi:UOp): return UOp.multi(*[root.replace(src=(m,)) for m in multi.src], axis=multi.axis, real=multi.real)
 
 # NOTE: this is the same pattern as Ops.UNROLL
@@ -153,6 +157,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
   (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
   (UPat(Ops.STRIDE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), stride_multi),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH), src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])

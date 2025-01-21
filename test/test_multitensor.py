@@ -587,6 +587,7 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
+      t_none.schedule()
 
   def test_init_rand_with_multiple_devices_fail(self):
     # init rand with multi device is not allowed
@@ -809,8 +810,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       a = t.shrink(((0+2*i,2+2*i),None))
       b = Tensor(t.numpy()[0+2*i:2+2*i])
       assert a.shape == b.shape == (2, 8)
-      assert a.lazydata.real == [i==j for j in range(4)]
       np.testing.assert_allclose(a.numpy(), b.numpy())
+      assert a.lazydata.real == tuple(i==j for j in range(4))
       # cast
       np.testing.assert_allclose(a.float().numpy(), b.float().numpy())
 
@@ -943,8 +944,9 @@ class TestBatchNorm(unittest.TestCase):
 
       def __call__(self, x:Tensor):
         bn_ts = []
-        for bound, bn in zip(x.lazydata.bounds, self.bns):
-          xi = x.shrink((bound, None, None, None))
+        each = x.shape[0]//len(self.bns)
+        for i, bn in enumerate(self.bns):
+          xi = x.shrink(((each*(i), each*(i+1)), None, None, None))
           bni = bn(xi)
           bn_ts.append(bni)
         return bn_ts[0].cat(*bn_ts[1:])

@@ -356,7 +356,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # constants can optionally have a DEVICE source
     if self._device is None: return UOp.const(self.dtype, b)
     if isinstance(self.device, tuple): return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
-    else: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
+    return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -457,7 +457,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
-  def copy_to_device(self, device:str, clone:bool=False) -> UOp:
+  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False) -> UOp:
+    assert isinstance(self.device, str), "multi not supported"
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
@@ -499,11 +500,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
-  def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
+  def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
   def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
-    if self.op is Ops.MULTI: return tuple(x.device for x in self.src)
+    if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
@@ -519,6 +520,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
     from tinygrad.device import Buffer
+    assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
     return ret
   @property
@@ -526,7 +528,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return self.src[0].realized
     return self.buffer if self.op is Ops.BUFFER else None
   @property
-  def is_realized(self) -> bool: return self.base.realized is not None
+  def is_realized(self) -> bool:
+    if self.base.op is Ops.MULTI: return all(x.realized is not None for x in self.base.src)
+    return self.base.realized is not None
 
   # *** uop Variable stuff ***
 
