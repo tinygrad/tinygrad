@@ -576,7 +576,7 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self) -> UOp:
-    stack: list[UOp, bool] = [(self.ast, False)]
+    stack: list[tuple[UOp, bool]] = [(self.ast, False)]
     cache: dict[UOp, UOp] = {}
     while stack:
       op, processed = stack.pop()

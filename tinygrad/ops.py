@@ -468,15 +468,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def device(self) -> str: return unwrap(self._device)
   @property
   def _device(self) -> Optional[str]:
-    stack: list[UOp, bool] = [(self, False)]
-    cache: dict[UOp, UOp] = {}
+    stack: list[tuple[UOp, bool]] = [(self, False)]
+    cache: dict[UOp, str|None] = {}
     while stack:
       uop, processed = stack.pop()
       if uop.op is Ops.DEVICE:
         cache[uop] = uop.arg
       if uop in cache: continue
       if not processed:
-        stack.extend([(x, y) for x, y in zip((uop, *uop.src), itertools.chain([True], itertools.repeat(False)))])
+        stack.extend([(x, y) for x, y in zip((uop, *uop.src), itertools.chain([True], itertools.repeat(False))) if cache.get(x) is None])
       else:
         cache[uop] = cache[dsrcs[0]] if len(dsrcs:=[x for x in uop.src if cache.get(x) is not None]) != 0 else None
     return cache[self]
@@ -853,7 +853,7 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
   def top_down_rewrite(self, sink:UOp) -> UOp:
-    stack: list[UOp, int] = [(sink, 0)]
+    stack: list[tuple[UOp, int]] = [(sink, 0)]
     old2new: dict[UOp, UOp] = {}
     while stack:
       n, stage = stack.pop()
