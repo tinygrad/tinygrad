@@ -294,7 +294,7 @@ class Kernel:
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
     if use_tensor_cores and self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
-      tensor_cores = [self.opts.tensor_cores[tc_select]] if tc_select >= 0 else self.opts.tensor_cores
+      tensor_cores = self.opts.tensor_cores if tc_select < 0 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
         # can only fuse reduces with the same tc options
