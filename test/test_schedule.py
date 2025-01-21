@@ -2258,6 +2258,17 @@ class TestCopyFolding(unittest.TestCase):
     add = schedule_graph_rewrite(add)
     assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
+  def test_copy_to_same_device(self):
+    a = Tensor.empty(4).lazydata
+    b = a.copy_to_device(a.device)
+    check_schedule(b, 0, filter_sink=False)
+    b = schedule_graph_rewrite(b)
+    self.assertIs(b, a)
+
+  def test_clone(self):
+    a = Tensor.empty(4).lazydata
+    check_schedule(a.clone(), 1, filter_sink=False)
+
 class TestTensorUOpSpec(unittest.TestCase):
   def test_const_must_be_unmasked(self):
     a = Tensor.ones((4, 4)).pad((2, 2))
