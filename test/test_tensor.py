@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.rewriter import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.dtype import DType
 

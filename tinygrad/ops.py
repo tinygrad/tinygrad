@@ -161,8 +161,6 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
-  # meta ops
-  Meta = {Ops.COPY, Ops.BUFFER_VIEW}
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
@@ -235,7 +233,6 @@ class UOpMetaClass(type):
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
-forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -411,11 +408,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def contiguous(self):
-    if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      return self.alu(Ops.CONTIGUOUS)
-    forced_realize.add(self.base)
-    return self
+  def contiguous(self): return self.alu(Ops.CONTIGUOUS)
 
   # *** from LazyBuffer ***
 
@@ -434,19 +427,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
   def copy_to_device(self, device:str, clone:bool=False) -> UOp:
-    # no COPY
-    if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
-    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
+    ret = UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone)
+    op_arg = []
+    mop = self
+    while mop is not self.base:
+      op_arg.append((mop.op, mop.arg))
+      mop = mop.src[0]
+    for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
+    return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def lbs(self): return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)
-  @property
-  def forced_realize(self): return self in forced_realize
 
   # *** uop movement ops ***
 
@@ -643,7 +639,7 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py",
                                                                                         "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
@@ -824,10 +820,10 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl"), "wb") as f:
+      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl"))
+    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -1083,7 +1079,7 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
   if valid.op is Ops.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
     (s0:=valid.src[0]).op is Ops.CMPLT and s0.src[1].op is Ops.CONST: return s0.src[0], False, s0.src[1].arg
   # X < c -> X <= c-1
-  if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST: return valid.src[0], True, valid.src[1].arg-1
+  if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, valid.src[1].arg-1
   raise ValueError(f"not able to parse {valid=}")
 
 def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
