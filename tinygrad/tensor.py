@@ -309,7 +309,7 @@ class Tensor(SimpleMathTrait):
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.base).contiguous().to("CLANG").contiguous().realize()
+    cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
     buf = cast(UOp, cpu.lazydata).base.realized
     assert buf is not None, f"{cast(UOp, cpu.lazydata).base} was not realized"
     if self.device != "CLANG": buf.options = BufferSpec(nolru=True)
