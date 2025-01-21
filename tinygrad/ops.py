@@ -441,6 +441,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
+  def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
+    if axis is None: lbs = [self] * len(devices)
+    else:
+      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      sz = self.shape[axis] // len(devices)
+      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
+      lbs, off = [], 0
+      for sz in sizes:
+        lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
+        off += sz
+    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
+    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
+    return UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
+
   # *** from LazyBuffer ***
 
   @staticmethod

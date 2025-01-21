@@ -409,16 +409,7 @@ class Tensor(SimpleMathTrait):
     """
     assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
-    if axis is None: lbs = [self.lazydata] * len(devices)
-    else:
-      axis = self._resolve_dim(axis)
-      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
-      sz = self.shape[axis] // len(devices)
-      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs = [t.lazydata for t in self.split(sizes, axis)]
-    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
-    mlb = UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
+    mlb = self.lazydata.shard(devices, self._resolve_dim(axis) if axis is not None else None)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:Optional[int]=None):
