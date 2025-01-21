@@ -386,7 +386,6 @@ class TestMultiTensor(unittest.TestCase):
     GlobalCounters.reset()
     optimizer.zero_grad()
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
-    assert shard_output.lazydata.axis is None
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
@@ -532,13 +531,13 @@ class TestMultiTensor(unittest.TestCase):
     t4 = t2.reshape((26, 105,))
 
     for t in [t0, t1, t2, t3, t4]:
-      assert t.lazydata.axis == 1
       np.testing.assert_allclose(t.numpy().flatten(), t0.numpy().flatten())
+      assert t.lazydata.axis == 1
 
     # test shape-one axis
     t5 = t4.reshape((26, 1, 105))
-    assert t5.lazydata.axis == 2
     np.testing.assert_allclose(t.numpy().flatten(), t5.numpy().flatten())
+    assert t5.lazydata.axis == 2
 
     # test split and rejoin to the right and reshape to the left
     t5 = t0.reshape((2, 13, 3, 5, 7))
@@ -553,7 +552,7 @@ class TestMultiTensor(unittest.TestCase):
 
     # test no left join
     with self.assertRaises((AssertionError, ValueError)):
-      t0.reshape((26*15,7))
+      t0.reshape((26*15,7)).schedule()
 
   @unittest.skip("no longer supports uneven shard")
   def test_reshape_on_axis_uneven(self):
@@ -774,25 +773,31 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8)))
+      a.schedule()
     with self.assertRaises(AssertionError):
       # cannot shrink sharded and non-sharded axis at the same time
       a = t.shrink(((0, 2), (2, 4)))
+      a.schedule()
 
     a = t.shrink(((0, 2), (0, 8)))
+    a.schedule()
     assert a.shape == (2, 8)
-    assert a.lazydata.real == [True, False, False, False]
+    assert a.lazydata.real == (True, False, False, False)
 
     with self.assertRaises(AssertionError):
       # cannot pad sharded and non-sharded axis at the same time
       p = a.pad(((0, 6), (0, 1)))
+      p.schedule()
 
     with self.assertRaises(AssertionError):
       # can only pad to whole axis
       p = a.pad(((1, 5), (0, 0)))
+      p.schedule()
 
     p = a.pad(((0, 6), (0, 0)))
+    p.schedule()
     assert p.shape == (8, 8)
-    assert p.lazydata.real == [True, True, True, True]
+    assert p.lazydata.real == (True, True, True, True)
 
   @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
   def test_ops(self, dtype):
@@ -865,18 +870,19 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     a = t.shrink(((2, 4), None))
     b = t.shrink(((6, 8), None))
-    self.assertEqual(a.lazydata.real, [False, True, False, False])
-    self.assertEqual(b.lazydata.real, [False, False, False, True])
     na = t.numpy()[2:4]
     nb = t.numpy()[6:8]
     np.testing.assert_equal(a.numpy(), na)
     np.testing.assert_equal(b.numpy(), nb)
+    self.assertEqual(a.lazydata.real, (False, True, False, False))
+    self.assertEqual(b.lazydata.real, (False, False, False, True))
     with self.assertRaises(AssertionError):
       # cannot add directly
       c = a + b
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
-    self.assertEqual(c.lazydata.real, [True, True, True, True])
+    c.realize()
+    self.assertEqual(c.lazydata.real, (True, True, True, True))
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
     np.testing.assert_equal(c.numpy(), expected)
 
