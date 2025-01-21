@@ -407,6 +407,10 @@ def train_retinanet():
   config["bs"] = bs = getenv("BS", 128)
   config["num_epochs"] = num_epochs = getenv("EPOCHS", 4)
 
+  if seed:
+    Tensor.manual_seed(seed)
+    np.random.seed(seed=seed)
+
   # ** initialize wandb **
   if (WANDB := getenv("WANDB")):
     import wandb
