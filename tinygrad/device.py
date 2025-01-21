@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
-from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
                              cpu_time_execution
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
@@ -129,7 +129,7 @@ class Buffer:
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
-      del self._buf
+    del self._buf
   def __reduce__(self):
     buf = None
     if self._base is not None:
@@ -202,7 +202,7 @@ class LRUAllocator(Allocator):
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferSpec]=None):
-    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
+    if LRU and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
@@ -310,7 +310,7 @@ if PROFILE:
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(temp("profile.pkl"), "wb") as f: pickle.dump(Compiled.profile_events, f)
+    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
     from tinygrad.ops import launch_viz
-    launch_viz("PROFILE", temp("profile.pkl"))
+    launch_viz("PROFILE", fn)
