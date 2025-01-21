@@ -1,4 +1,4 @@
-import ctypes, time
+import ctypes, time, contextlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -106,22 +106,26 @@ class AM_SMU(AM_IP):
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
 
+  def is_smu_alive(self):
+    with contextlib.suppress(RuntimeError): self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
+
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
     time.sleep(0.5) # 500ms
 
-  def _smu_cmn_poll_stat(self): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1)
+  def _smu_cmn_poll_stat(self, timeout=10000): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1, timeout=timeout)
   def _smu_cmn_send_msg(self, msg, param=0):
     self.adev.mmMP1_SMN_C2PMSG_90.write(0) # resp reg
     self.adev.mmMP1_SMN_C2PMSG_82.write(param)
     self.adev.mmMP1_SMN_C2PMSG_66.write(msg)
 
-  def _smu_cmn_send_smc_msg_with_param(self, msg, param, poll=True, read_back_arg=False):
-    if poll: self._smu_cmn_poll_stat()
+  def _smu_cmn_send_smc_msg_with_param(self, msg, param, poll=True, read_back_arg=False, timeout=10000): # 10s
+    if poll: self._smu_cmn_poll_stat(timeout=timeout)
 
     self._smu_cmn_send_msg(msg, param)
-    self._smu_cmn_poll_stat()
+    self._smu_cmn_poll_stat(timeout=timeout)
     return self.adev.rreg(self.adev.mmMP1_SMN_C2PMSG_82) if read_back_arg else None
 
 class AM_GFX(AM_IP):
@@ -319,8 +323,9 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
-    for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
-    while not self.is_sos_alive(): time.sleep(0.01)
+    if not self.is_sos_alive():
+      for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
+      while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
     self._tmr_init()
@@ -357,6 +362,13 @@ class AM_PSP(AM_IP):
     self.tmr_paddr = self.adev.mm.palloc(self.tmr_size, align=am.PSP_TMR_ALIGNMENT, boot=True)
 
   def _ring_create(self):
+    # If the ring is already created, destroy it
+    if self.adev.regMP0_SMN_C2PMSG_71.read() != 0:
+      self.adev.regMP0_SMN_C2PMSG_64.write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+
+      # There might be handshake issue with hardware which needs delay
+      time.sleep(0.02)
+
     # Wait until the sOS is ready
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x80000000, value=0x80000000)
 
