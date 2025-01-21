@@ -89,7 +89,7 @@ class ScheduleContext:
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
 def add_buffers(sink:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext) -> UOp:
-  stack: List[Tuple[UOp, bool]] = [(sink, False)]
+  stack: list[tuple[UOp, bool]] = [(sink, False)]
   cache: dict[UOp, UOp] = {}
   while stack:
     # iterate through every UOp twice. once to preprocess the arguments and another to save them to cache
@@ -109,7 +109,8 @@ def add_buffers(sink:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext) 
     else:
       # make things that can't be images not images
       dtype = buf.dtype
-      if isinstance(dtype, ImageDType) and (prod(buf.shape)!=prod(dtype.shape) or not any(buf.shape[x]%4==0 for x in unwrap(buf.st).unit_stride_axes())):
+      if isinstance(dtype, ImageDType) and (prod(buf.shape)!=prod(dtype.shape)\
+          or not any(buf.shape[x]%4==0 for x in unwrap(buf.st).unit_stride_axes())):
         if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
         dtype = buf.dtype.base
       # ASSIGN already has a target buffer, otherwise we create a new one
@@ -117,7 +118,7 @@ def add_buffers(sink:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext) 
       op = buf.replace(dtype=dtype, src=tuple(cache[x] for x in buf.src))
       # track the underlying tensor uop for this buffer
       ctx.tensor_uops[buf_uop] = tensor_map[buf]
-      cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
+      cache[buf] = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
   return cache[sink]
 
 # **** AST graph rewrite

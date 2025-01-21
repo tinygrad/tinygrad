@@ -258,14 +258,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg) == new_args: return self
     return UOp(*new_args)
-  @functools.cached_property
+  @functools.cached_property # caching here is not ideal. Maybe create UOp._key_cache??
   def key(self) -> bytes:
     hasher = hashlib.sha256(str((self.op, self.dtype, self.arg)).encode())
-    stack = [x for x in self.src[::-1]]
+    stack = list(self.src[::-1])
     while stack:
       key = stack.pop()
       hasher.update(str((key.op, key.dtype, key.arg)).encode())
-      stack.extend([x for x in key.src[::-1]])
+      stack.extend(key.src[::-1])
     return hasher.digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
@@ -489,13 +489,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def new_device(self) -> Optional[str]:
     stack: list[tuple[UOp, bool]] = [(self, False)]
     while stack:
-      uop, processed = stack.pop()
-      if uop.op is Ops.DEVICE: UOp._device_cache[uop] = uop.arg
-      if uop in UOp._device_cache: continue
+      u, processed = stack.pop()
+      if u.op is Ops.DEVICE: UOp._device_cache[u] = u.arg
+      if u in UOp._device_cache: continue
       if not processed:
-        stack.extend([(x, y) for x, y in zip((uop, *uop.src), itertools.chain([True], itertools.repeat(False))) if UOp._device_cache.get(x) is None])
+        stack.extend([(x, y) for x, y in zip((u, *u.src), itertools.chain([True], itertools.repeat(False))) if UOp._device_cache.get(x) is None])
       else:
-        UOp._device_cache[uop] = UOp._device_cache[dsrcs[0]] if len(dsrcs:=[x for x in uop.src if UOp._device_cache.get(x) is not None]) != 0 else None
+        UOp._device_cache[u] = UOp._device_cache[dsrcs[0]] if len(dsrcs:=[x for x in u.src if UOp._device_cache.get(x) is not None]) != 0 else None
     return UOp._device_cache[self]
   @property
   def buf_uop(self) -> UOp:
@@ -870,7 +870,7 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
   def top_down_rewrite(self, sink:UOp) -> UOp:
-    stack: list[UOp, int] = [(sink, 0)]
+    stack: list[tuple[UOp, int]] = [(sink, 0)]
     old2new: dict[UOp, UOp] = {}
     while stack:
       n, stage = stack.pop()
@@ -882,7 +882,7 @@ class RewriteContext:
         if new_n is None: self.replace[n] = n
         else:
           stack.extend([(n, 2),(new_n, 0)])
-          old2new[n] = new_n 
+          old2new[n] = new_n
       else: self.replace[n] = self.replace[old2new[n]] # this is stage=2
     return self.replace[sink]
   def bottom_up_rewrite(self, n:UOp) -> UOp:
