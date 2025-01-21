@@ -1,4 +1,4 @@
-import ctypes, time
+import ctypes, time, contextlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -25,8 +25,8 @@ class AM_GMC(AM_IP):
     self.vm_base = self.adev.mm.va_allocator.base
     self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
 
-    self.memscratch_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
-    self.dummy_page_pm = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
+    self.memscratch_paddr = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
+    self.dummy_page_paddr = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
     self.hub_initted = {"MM": False, "GC": False}
 
   def init(self): self.init_hub("MM")
@@ -55,7 +55,7 @@ class AM_GMC(AM_IP):
   def enable_vm_addressing(self, page_table, ip:Literal["MM", "GC"], vmid):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
-    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.pm.paddr | 1)
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.paddr | 1)
     self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=(3 - page_table.lv))
 
   def init_hub(self, ip:Literal["MM", "GC"]):
@@ -66,8 +66,8 @@ class AM_GMC(AM_IP):
 
     self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.mc_base >> 18)
     self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.mc_end >> 18)
-    self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_pm.paddr >> 12)
-    self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_pm.paddr >> 12)
+    self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_paddr >> 12)
+    self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_paddr >> 12)
 
     self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1)
 
@@ -106,22 +106,26 @@ class AM_SMU(AM_IP):
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
       self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
 
+  def is_smu_alive(self):
+    with contextlib.suppress(RuntimeError): self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
+
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
     time.sleep(0.5) # 500ms
 
-  def _smu_cmn_poll_stat(self): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1)
+  def _smu_cmn_poll_stat(self, timeout=10000): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1, timeout=timeout)
   def _smu_cmn_send_msg(self, msg, param=0):
     self.adev.mmMP1_SMN_C2PMSG_90.write(0) # resp reg
     self.adev.mmMP1_SMN_C2PMSG_82.write(param)
     self.adev.mmMP1_SMN_C2PMSG_66.write(msg)
 
-  def _smu_cmn_send_smc_msg_with_param(self, msg, param, poll=True, read_back_arg=False):
-    if poll: self._smu_cmn_poll_stat()
+  def _smu_cmn_send_smc_msg_with_param(self, msg, param, poll=True, read_back_arg=False, timeout=10000): # 10s
+    if poll: self._smu_cmn_poll_stat(timeout=timeout)
 
     self._smu_cmn_send_msg(msg, param)
-    self._smu_cmn_poll_stat()
+    self._smu_cmn_poll_stat(timeout=timeout)
     return self.adev.rreg(self.adev.mmMP1_SMN_C2PMSG_82) if read_back_arg else None
 
 class AM_GFX(AM_IP):
@@ -232,27 +236,28 @@ class AM_GFX(AM_IP):
 class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
-    self.rings = [(self.adev.mm.palloc(512 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "", 0),
-      (self.adev.mm.palloc(512 << 10, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
+    self.ring_size = 512 << 10
+    self.rings = [(self.adev.mm.palloc(self.ring_size, boot=True), self.adev.mm.palloc(0x1000, boot=True), "", 0),
+      (self.adev.mm.palloc(self.ring_size, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
 
   def interrupt_handler(self):
-    ring_vm, rwptr_vm, suf, _ = self.rings[0]
-    wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
+    _, rwptr_vm, suf, _ = self.rings[0]
+    wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
 
     if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
-    self.adev.regIH_RB_RPTR.write(wptr % ring_vm.size)
+    self.adev.regIH_RB_RPTR.write(wptr % self.ring_size)
 
   def init(self):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm.mc_addr() >> 8)
+      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
 
-      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(ring_vm.size//4).bit_length(),
+      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(self.ring_size//4).bit_length(),
         mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
-      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.mc_addr())
+      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", self.adev.paddr2mc(rwptr_vm))
 
       self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
       self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
@@ -303,10 +308,12 @@ class AM_PSP(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
-    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
-    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
-    self.ring_pm = self.adev.mm.palloc(0x10000, zero=not self.adev.partial_boot, boot=True)
+    self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
+    self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
+    self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
+
+    self.ring_size = 0x10000
+    self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True)
 
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
@@ -316,8 +323,9 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
-    for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
-    while not self.is_sos_alive(): time.sleep(0.01)
+    if not self.is_sos_alive():
+      for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
+      while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
     self._tmr_init()
@@ -332,8 +340,8 @@ class AM_PSP(AM_IP):
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 
   def _prep_msg1(self, data):
-    ctypes.memset(self.msg1_pm.cpu_addr(), 0, self.msg1_pm.size)
-    self.msg1_pm.cpu_view()[:len(data)] = data
+    ctypes.memset(cpu_addr:=self.adev.paddr2cpu(self.msg1_paddr), 0, am.PSP_1_MEG)
+    to_mv(cpu_addr, len(data))[:] = data
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
@@ -342,7 +350,7 @@ class AM_PSP(AM_IP):
     self._wait_for_bootloader()
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
-    self.adev.regMP0_SMN_C2PMSG_36.write(self.msg1_pm.mc_addr() >> 20)
+    self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
     self.adev.regMP0_SMN_C2PMSG_35.write(compid)
 
     return self._wait_for_bootloader()
@@ -350,16 +358,22 @@ class AM_PSP(AM_IP):
   def _tmr_init(self):
     # Load TOC and calculate TMR size
     self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
-    resp = self._load_toc_cmd(len(fwm))
-
-    self.tmr_pm = self.adev.mm.palloc(resp.resp.tmr_size, align=am.PSP_TMR_ALIGNMENT, boot=True)
+    self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
+    self.tmr_paddr = self.adev.mm.palloc(self.tmr_size, align=am.PSP_TMR_ALIGNMENT, boot=True)
 
   def _ring_create(self):
+    # If the ring is already created, destroy it
+    if self.adev.regMP0_SMN_C2PMSG_71.read() != 0:
+      self.adev.regMP0_SMN_C2PMSG_64.write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+
+      # There might be handshake issue with hardware which needs delay
+      time.sleep(0.02)
+
     # Wait until the sOS is ready
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x80000000, value=0x80000000)
 
-    self.adev.wreg_pair("regMP0_SMN_C2PMSG", "_69", "_70", self.ring_pm.mc_addr())
-    self.adev.regMP0_SMN_C2PMSG_71.write(self.ring_pm.size)
+    self.adev.wreg_pair("regMP0_SMN_C2PMSG", "_69", "_70", self.adev.paddr2mc(self.ring_paddr))
+    self.adev.regMP0_SMN_C2PMSG_71.write(self.ring_size)
     self.adev.regMP0_SMN_C2PMSG_64.write(am.PSP_RING_TYPE__KM << 16)
 
     # There might be handshake issue with hardware which needs delay
@@ -369,28 +383,28 @@ class AM_PSP(AM_IP):
 
   def _ring_submit(self):
     prev_wptr = self.adev.regMP0_SMN_C2PMSG_67.read()
-    ring_entry_addr = self.ring_pm.cpu_addr() + prev_wptr * 4
+    ring_entry_addr = self.adev.paddr2cpu(self.ring_paddr) + prev_wptr * 4
 
     ctypes.memset(ring_entry_addr, 0, ctypes.sizeof(am.struct_psp_gfx_rb_frame))
     write_loc = am.struct_psp_gfx_rb_frame.from_address(ring_entry_addr)
-    write_loc.cmd_buf_addr_hi, write_loc.cmd_buf_addr_lo = data64(self.cmd_pm.mc_addr())
-    write_loc.fence_addr_hi, write_loc.fence_addr_lo = data64(self.fence_pm.mc_addr())
+    write_loc.cmd_buf_addr_hi, write_loc.cmd_buf_addr_lo = data64(self.adev.paddr2mc(self.cmd_paddr))
+    write_loc.fence_addr_hi, write_loc.fence_addr_lo = data64(self.adev.paddr2mc(self.fence_paddr))
     write_loc.fence_value = prev_wptr
 
     # Move the wptr
     self.adev.regMP0_SMN_C2PMSG_67.write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
 
-    while self.fence_pm.cpu_view().cast('I')[0] != prev_wptr: pass
+    while to_mv(self.adev.paddr2cpu(self.fence_paddr), 4).cast('I')[0] != prev_wptr: pass
     time.sleep(0.005)
 
-    resp = am.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
+    resp = am.struct_psp_gfx_cmd_resp.from_address(self.adev.paddr2cpu(self.cmd_paddr))
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
 
     return resp
 
   def _prep_ring_cmd(self, hdr):
-    ctypes.memset(self.cmd_pm.cpu_addr(), 0, 0x1000)
-    cmd = am.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
+    ctypes.memset(self.adev.paddr2cpu(self.cmd_paddr), 0, 0x1000)
+    cmd = am.struct_psp_gfx_cmd_resp.from_address(self.adev.paddr2cpu(self.cmd_paddr))
     cmd.cmd_id = hdr
     return cmd
 
@@ -400,22 +414,22 @@ class AM_PSP(AM_IP):
 
     self._prep_msg1(fw_bytes)
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_pm.mc_addr())
+    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
     cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
     cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
     return self._ring_submit()
 
   def _tmr_load_cmd(self):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.tmr_pm.mc_addr())
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_pm.paddr)
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr))
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
-    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_pm.size
+    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
     return self._ring_submit()
 
   def _load_toc_cmd(self, toc_size):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_TOC)
-    cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.msg1_pm.mc_addr())
+    cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
     cmd.cmd.cmd_load_toc.toc_size = toc_size
     return self._ring_submit()
 

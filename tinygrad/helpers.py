@@ -78,7 +78,8 @@ def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
-def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
+def temp(x:str, append_user:bool=False) -> str:
+  return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{os.getenv('USERNAME', os.getlogin())}" if append_user else x)).as_posix()
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
@@ -107,7 +108,7 @@ WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), 
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
-PICKLE_BUFFERS, PROFILE = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROFILE", getenv("VIZ"))
+PICKLE_BUFFERS, PROFILE, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROFILE", getenv("VIZ")), ContextVar("LRU", 1)
 
 @dataclass(frozen=True)
 class Metadata:

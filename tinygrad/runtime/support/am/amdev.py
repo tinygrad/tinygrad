@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os, signal
+import ctypes, collections, time, dataclasses, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -98,20 +98,14 @@ class AMFirmware:
 
   def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> tuple[int, memoryview]: return (typ, blob[offset:offset+size])
 
-class AMPhysicalMemoryBlock:
-  def __init__(self, adev:AMDev, paddr:int, size:int): self.adev, self.paddr, self.size = adev, paddr, size
-  def mc_addr(self): return self.adev.gmc.mc_base + self.paddr
-  def cpu_addr(self): return mv_address(self.adev.vram) + self.paddr
-  def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
-
 @dataclasses.dataclass(frozen=True)
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
-  def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
+  def __init__(self, adev, paddr, lv): self.paddr, self.view, self.lv = paddr, to_mv(adev.paddr2cpu(paddr), 0x1000).cast('Q'), lv
 
   def set_table(self, entry_id, pte:AMPageTableEntry, valid=True):
-    self.view[entry_id] = (pte.pm.paddr & 0x0000FFFFFFFFF000) | (am.AMDGPU_PTE_VALID if valid else 0)
+    self.view[entry_id] = (pte.paddr & 0x0000FFFFFFFFF000) | (am.AMDGPU_PTE_VALID if valid else 0)
 
   def set_page(self, entry_id, paddr, uncached=False, system=False, snooped=False, frag=0, valid=True):
     f = (am.AMDGPU_PTE_VALID if valid else 0) | am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE \
@@ -133,11 +127,11 @@ class AMPageTableTraverseContext:
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
     if (entry:=pt.get_entry(pte_idx)) & am.AMDGPU_PTE_VALID:
-      assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.pm.paddr:#x}, {pte_idx=} {entry=:#x}"
-      child_page_table = AMPageTableEntry(AMPhysicalMemoryBlock(pt.pm.adev, entry & 0x0000FFFFFFFFF000, 0x1000), lv=pt.lv+1)
+      assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
+      child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
     else:
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_table(pte_idx, child_page_table:=AMPageTableEntry(self.adev.mm.palloc(0x1000, zero=True), lv=pt.lv+1))
+      pt.set_table(pte_idx, child_page_table:=AMPageTableEntry(self.adev, self.adev.mm.palloc(0x1000, zero=True), lv=pt.lv+1))
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
     return self.pt_stack[-1]
@@ -145,7 +139,7 @@ class AMPageTableTraverseContext:
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
     if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.get_entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
-      self.adev.mm.pfree(AMPhysicalMemoryBlock(self.adev, pt.pm.paddr, 0x1000))
+      self.adev.mm.pfree(pt.paddr)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_page(parent_pte_idx, 0x0, valid=False)
       return True
@@ -179,7 +173,7 @@ class AMMemoryManager:
     self.adev, self.vram_size = adev, vram_size
     self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
-    self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
+    self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
@@ -213,12 +207,12 @@ class AMMemoryManager:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size, align)
 
-    if contigous: paddrs = [(self.palloc(size, zero=True).paddr, size)]
+    if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       paddrs = []
       try:
         ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
-        for _, _, _, seg_cnt, seg_size in ctx.next(size): paddrs += [(self.palloc(seg_size, zero=False).paddr, seg_size) for _ in range(seg_cnt)]
+        for _, _, _, seg_cnt, seg_size in ctx.next(size): paddrs += [(self.palloc(seg_size, zero=False), seg_size) for _ in range(seg_cnt)]
       except MemoryError:
         for paddr, _ in paddrs: self.pa_allocator.free(paddr)
         raise
@@ -230,13 +224,13 @@ class AMMemoryManager:
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
-  def palloc(self, size, align=0x1000, zero=True, boot=False) -> AMPhysicalMemoryBlock:
+  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
-    pm = AMPhysicalMemoryBlock(self.adev, (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align), size)
-    if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
-    return pm
+    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
+    if zero: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
+    return paddr
 
-  def pfree(self, pm:AMPhysicalMemoryBlock): self.pa_allocator.free(pm.paddr)
+  def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
   def __init__(self, pcidev, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
@@ -285,13 +279,10 @@ class AMDev:
       self.partial_boot = False
 
     if not self.partial_boot:
-      try: # do not interrupt the boot process
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        if self.psp.is_sos_alive(): self.smu.mode1_reset()
-        for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
-          ip.init()
-          if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
-      finally: signal.signal(signal.SIGINT, signal.default_int_handler)
+      if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
+      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+        ip.init()
+        if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # Booting done
     self.is_booting = False
@@ -309,6 +300,7 @@ class AMDev:
     for ip in [self.sdma, self.gfx]: ip.fini()
 
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
+  def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
 
@@ -337,8 +329,8 @@ class AMDev:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
-  def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff) -> int:
-    for _ in range(10000):
+  def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff, timeout=10000) -> int:
+    for _ in range(timeout):
       if ((rval:=reg.read()) & mask) == value: return rval
       time.sleep(0.001)
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.reg_off:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
@@ -348,9 +340,8 @@ class AMDev:
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
-    self.discovery_pm = AMPhysicalMemoryBlock(self, self.vram_size - (64 << 10), 10 << 10)
 
-    bhdr = am.struct_binary_header.from_address(self.discovery_pm.cpu_addr())
+    bhdr = am.struct_binary_header.from_address(self.paddr2cpu(self.vram_size - (64 << 10)))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 

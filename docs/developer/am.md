@@ -27,7 +27,7 @@ AM binds compute queues directly to MEC (bypassing MES). Tinygrad uses only one 
 
 The GPU being passed can be in one of several states:
 1. Not initialized
-2. Initialized by AMDGPU
+2. Initialized by amdgpu
 3. Initialized by AM
 
 The first and second states require a full GPU setup since their states are unknown. The second state also requires a mode1 reset to reinitialize all components.
@@ -36,4 +36,4 @@ The third state can be set up partially to optimize boot time. In this case, onl
 
 ### VM Management
 
-Each AM device sets up only a single `VMID=0` and one page directory. The page directory used is 3-level and thus supports up to 512TB of virtual addresses. All AM devices are located in one virtual address space.
+Each AM device sets up only a single `VMID=0` and one page directory. The page directory used is 3-level and thus supports up to 512GB of virtual addresses. All AM devices are located in one virtual address space.
