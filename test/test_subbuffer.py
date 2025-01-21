@@ -54,8 +54,8 @@ class TestSubBuffer(unittest.TestCase):
       self.buf.deallocate()
       vbuf.deallocate()
 
-      # Allocate on the same place
-      fake = Buffer(Device.DEFAULT, 10, dtypes.uint8).ensure_allocated()
+      # Allocate a fake one on the same place
+      _ = Buffer(Device.DEFAULT, 10, dtypes.uint8).ensure_allocated()
 
       self.buf.ensure_allocated()
       self.buf.copyin(memoryview(bytearray(range(10, 20))))
