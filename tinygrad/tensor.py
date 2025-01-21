@@ -405,7 +405,7 @@ class Tensor(SimpleMathTrait):
     print(t.shard((t.device, t.device), axis=1).lazydata)
     ```
     """
-    assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
+    assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
     if axis is None: lbs = [self.lazydata] * len(devices)
     else:
