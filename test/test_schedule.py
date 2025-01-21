@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same
 from tinygrad.codegen.kernel import verify_ast
-from tinygrad.engine.schedule import ScheduleItem, ScheduleContext, create_schedule_with_vars, view_right, view_left, remove_movement_ops, ops_folding
+from tinygrad.engine.schedule import ScheduleItem, ScheduleContext, create_schedule_with_vars, view_right, view_left, remove_movement_ops, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -67,7 +67,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
 @track_rewrites(named=True)
-def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+ops_folding, ScheduleContext())
+def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+sym, ScheduleContext())
 
 class TestSchedule(unittest.TestCase):
   def test_basic_binop_fusion(self):
@@ -220,7 +220,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = (a*b)/b
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0) # the scheduler can fold divs now!
     self.assertEqual(GlobalCounters.global_ops, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
 
@@ -229,7 +229,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = a/a
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
     self.assertEqual(GlobalCounters.global_ops, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
 
@@ -971,6 +971,26 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3))
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_softmax_upcast(self):
+    # input half, softmax in float
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
+    out = x.softmax(dtype=dtypes.float)
+    sched = out.schedule()
+    self.assertEqual(len(sched), 3)
+    self.assertEqual(len(sched[0].outputs), 1)
+    self.assertEqual(sched[0].outputs[0].dtype, dtypes.half)
+
+    # input float, softmax in float
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.float).realize()
+    out = x.softmax(dtype=dtypes.float)
+    sched = out.schedule()
+    self.assertEqual(len(sched), 3)
+    self.assertEqual(len(sched[0].outputs), 1)
+    self.assertEqual(sched[0].outputs[0].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
@@ -1804,7 +1824,7 @@ def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.
 
 # these pattern matchers should move to engine/schedule.py
 
-sym = symbolic_simple+PatternMatcher([
+ops_folding = symbolic_simple+PatternMatcher([
   (UPat(Ops.DETACH, name="x"), lambda x:x.src[0]),
 ])
 
@@ -1822,8 +1842,8 @@ def run_tensor_ast(r:Tensor):
   output = UOp.new_buffer(r.device, r.lazydata.size, r.dtype)
   glbl = UOp(Ops.DEFINE_GLOBAL, output.dtype.ptr(size=output.size), (), 0)
   sink = UOp(Ops.STORE, src=(glbl, ShapeTracker.from_shape(r.lazydata.base.shape).to_uop(), r.lazydata.base)).sink()
-  sink = graph_rewrite(sink, remove_movement_ops+sym+load_buffers+view_left, bufs:=[output])
-  sink = graph_rewrite(sink, remove_movement_ops+sym+view_right)
+  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+load_buffers+view_left, bufs:=[output])
+  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+view_right)
   si = ScheduleItem(sink, tuple(x.buffer for x in bufs), (), ())
   run_schedule([si])
   return output.realized.as_buffer().cast(output.dtype.fmt, r.shape).tolist()
@@ -2184,7 +2204,7 @@ class TestConst(unittest.TestCase):
     sched = add.schedule()
     self.assertEqual(len(sched), 0)
     # b+0 and b share the same underlying device memory
-    self.assertIs(add.lazydata.realized, b.lazydata.realized)
+    self.assertIs(add.lazydata.buffer, b.lazydata.buffer)
     self.assertListEqual(add.tolist(), [2, 2, 2, 2])
 
   def test_src_masked_const_folding(self):
@@ -2313,6 +2333,32 @@ class TestBufferUOp(unittest.TestCase):
     self.assertEqual(a.lazydata.base.realized.size, 4)
     a2 = a.contiguous().realize()
     self.assertEqual(a2.lazydata.base.realized.size, 16)
+
+class TestContiguous(unittest.TestCase):
+  def test_contiguous_buffer(self):
+    a = Tensor.empty(4)
+    b = a.contiguous()
+    check_schedule(b, 0)
+
+  def test_contiguous_buffer_view(self):
+    a = Tensor.empty(4)
+    b = a.reshape((2, 2)).contiguous()
+    check_schedule(b, 0)
+
+  def test_non_contiguous_buffer_view(self):
+    a = Tensor.empty(4, 1)
+    b = a.expand((4, 4)).contiguous()
+    check_schedule(b, 1)
+
+  def test_size_change_buffer_view(self):
+    a = Tensor.empty(4)
+    b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
+    check_schedule(b, 1)
+
+  def test_double_contiguous_realizes_once(self):
+    a = Tensor.empty(4, 1)
+    b = a.expand((4, 4)).contiguous().contiguous()
+    check_schedule(b, 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
