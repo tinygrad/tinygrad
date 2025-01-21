@@ -181,7 +181,7 @@ def random_horizontal_flip(img, tgt, prob=0.5):
   import torch
   import torchvision.transforms.functional as F
   if torch.rand(1) < prob:
-    w = img.size[::-1]
+    w = img.size[0]
     img = F.hflip(img)
     tgt["boxes"][:, [0, 2]] = w - tgt["boxes"][:, [2, 0]]
   return img, tgt
