@@ -161,8 +161,6 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
-  # meta ops
-  Meta = {Ops.COPY, Ops.BUFFER_VIEW}
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
@@ -235,7 +233,6 @@ class UOpMetaClass(type):
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
-forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -411,11 +408,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if DEBUG >= 3: print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
     return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)  # reduce original axes, then split
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def contiguous(self):
-    if not unwrap(self.st).contiguous or self.size != self.base.size or self.base.op is Ops.CONST:
-      return self.alu(Ops.CONTIGUOUS)
-    forced_realize.add(self.base)
-    return self
+  def contiguous(self): return self.alu(Ops.CONTIGUOUS)
 
   # *** from LazyBuffer ***
 
@@ -445,8 +438,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def lbs(self): return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)
-  @property
-  def forced_realize(self): return self in forced_realize
 
   # *** uop movement ops ***
 
@@ -475,10 +466,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
   def device(self) -> str: return unwrap(self._device)
-  @functools.cached_property
+  @property
   def _device(self) -> Optional[str]:
-    if self.op is Ops.DEVICE: return self.arg
-    return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
+    stack: list[tuple[UOp, bool]] = [(self, False)]
+    cache: dict[UOp, str|None] = {}
+    while stack:
+      uop, processed = stack.pop()
+      if uop.op is Ops.DEVICE:
+        cache[uop] = uop.arg
+      if uop in cache: continue
+      if not processed:
+        stack.extend([(x, y) for x, y in zip((uop, *uop.src), itertools.chain([True], itertools.repeat(False))) if cache.get(x) is None])
+      else:
+        cache[uop] = cache[dsrcs[0]] if len(dsrcs:=[x for x in uop.src if cache.get(x) is not None]) != 0 else None
+    return cache[self]
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
@@ -643,7 +644,7 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py",
                                                                                         "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
@@ -824,10 +825,10 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl"), "wb") as f:
+      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl"))
+    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -851,33 +852,23 @@ class RewriteContext:
     self.pm: PatternMatcher = pm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-  def top_down_rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_src = tuple(map(self.top_down_rewrite, n.src))
-    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-    self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
-    return ret
-  def top_down_rewrite_new(self, sink:UOp) -> UOp:
-    def update_new(old, new):
-      self.replace[old] = new
-      if old in new2old:
-        update_new(new2old[old], new)
-    stack: list[UOp, bool] = [(sink, False)]
-    new2old: dict[UOp, UOp] = {}
+  def top_down_rewrite(self, sink:UOp) -> UOp:
+    stack: list[tuple[UOp, int]] = [(sink, 0)]
+    old2new: dict[UOp, UOp] = {}
     while stack:
-      n, processed = stack.pop()
-      if self.replace.get(n) is not None: 
-        update_new(n, n)
-      if not processed:
-        stack.extend([(x, y) for x, y in zip((n, *(n.src[::-1])), itertools.chain([True], itertools.repeat(False)))])
-        continue
-      new_src = tuple(self.replace[x] for x in n.src)
-      new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-      if new_n is None: update_new(n, n)
-      else:
-        new2old[new_n] = n
-        stack.append((new_n, False))
+      n, stage = stack.pop()
+      if stage == 0:
+        if n not in self.replace: stack.extend([(x, y) for x, y in zip((n, *(n.src[::-1])), itertools.chain([1], itertools.repeat(0)))])
+      elif stage == 1:
+        new_src = tuple(self.replace[x] for x in n.src)
+        new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+        if new_n is None: self.replace[n] = n
+        else:
+          stack.extend([(n, 2),(new_n, 0)])
+          old2new[n] = new_n
+      else: self.replace[n] = self.replace[old2new[n]] # this is stage=2
     return self.replace[sink]
+
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n: UOp|None = n
@@ -1113,7 +1104,7 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
   if valid.op is Ops.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
     (s0:=valid.src[0]).op is Ops.CMPLT and s0.src[1].op is Ops.CONST: return s0.src[0], False, s0.src[1].arg
   # X < c -> X <= c-1
-  if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST: return valid.src[0], True, valid.src[1].arg-1
+  if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, valid.src[1].arg-1
   raise ValueError(f"not able to parse {valid=}")
 
 def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
