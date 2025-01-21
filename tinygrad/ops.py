@@ -458,7 +458,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False) -> UOp:
-    assert isinstance(self.device, str), "multi not supported"
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
