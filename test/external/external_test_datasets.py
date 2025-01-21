@@ -84,8 +84,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_sample[1], ref_sample[1])
 
 class TestOpenImagesDataset(ExternalTestDatasets):
-  @classmethod
-  def _create_samples(cls, subset):
+  def _create_samples(self, subset):
     os.makedirs((base_dir := Path(tempfile.gettempdir() + "/openimages")) / f"{subset}/data", exist_ok=True)
     os.makedirs(base_dir / Path(f"{subset}/labels"), exist_ok=True)
 
@@ -133,10 +132,9 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     dataloader = batch_load_retinanet(dataset, subset == "validation", base_dir, batch_size=batch_size, shuffle=False, seed=seed)
     return iter(dataloader)
 
-  @classmethod
-  def setUpClass(cls):
-    cls.base_dir, cls.train_ann_file = cls._create_samples("train")
-    _, cls.val_ann_file = cls._create_samples("validation")
+  def setUp(self):
+    self.base_dir, self.train_ann_file = self._create_samples("train")
+    self.val_ann_file = self._create_samples("validation")[1]
 
   def test_training_set(self):
     img_size, img_mean, img_std, anchors = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], torch.ones((120087, 4))
