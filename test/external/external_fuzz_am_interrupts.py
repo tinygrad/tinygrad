@@ -1,9 +1,7 @@
 import subprocess
 import random
 import time
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 
 def run_test(i, full_run=False):
   print(f"\rRunning iteration {i}...", end=" ", flush=True)
@@ -13,13 +11,9 @@ def run_test(i, full_run=False):
   if not full_run:
     time.sleep(random.uniform(0, 1200) / 1000)
     p.kill()
-  else: time.sleep(3)
-
-  try:
-    stdout, stderr = p.communicate(timeout=1)
-  except subprocess.TimeoutExpired:
-    p.kill()
-    stdout, stderr = p.communicate()
+    _, stderr = p.communicate()
+  else:
+    _, stderr = p.communicate()
 
   if full_run:
     stderr_text = stderr.decode()
