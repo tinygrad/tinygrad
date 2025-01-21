@@ -311,7 +311,7 @@ if PROFILE:
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(temp("profile.pkl"), "wb") as f: pickle.dump(Compiled.profile_events, f)
+    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
     from tinygrad.ops import launch_viz
-    launch_viz("PROFILE", temp("profile.pkl"))
+    launch_viz("PROFILE", fn)
