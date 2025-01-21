@@ -521,7 +521,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     # NOTE: only the base tensors get a BUFFER UOp
     if v.is_realized and k is k.base: ctx.becomes_map[k] = v.view(unwrap(k.st))
     # otherwise if it simplified to a CONST the UOp just becomes that CONST
-    elif v.op is Ops.CONST: ctx.becomes_map[k] = v.view(unwrap(k.st))
+    elif v.op is Ops.CONST: ctx.becomes_map[k] = v
 
   # add kernel children
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}

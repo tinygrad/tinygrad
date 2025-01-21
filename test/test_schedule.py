@@ -2395,6 +2395,16 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(b, 0)
     assert UPat(Ops.CONST, arg=0).match(b.lazydata.base, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
 
+  def test_become_const_in_view(self):
+    # if we shrink the base down to a size 0, only the VIEW becomes CONST, base is unchanged.
+    add = Tensor.empty(2, 2)+Tensor.empty(2, 2)
+    b = add.shrink(((0, 1), (0, 0)))
+    check_schedule(b, 0)
+    assert UPat(Ops.CONST, arg=0).match(b.lazydata, {})
+    self.assertEqual(b.shape, (1, 0))
+    # the base is untouched.
+    assert UPat(Ops.ADD).match(add.lazydata, {})
+
   def test_become_const_from_const(self):
     const_add = Tensor(1)+Tensor(2)
     assert UPat(Ops.ADD).match(const_add.lazydata, {})
