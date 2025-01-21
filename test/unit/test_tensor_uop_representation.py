@@ -73,7 +73,8 @@ class TestTensorUopRepresentation(unittest.TestCase):
     print(a.lazydata)
     pre_realize = a.lazydata
     a.realize()
-    assert a.lazydata is pre_realize
+    is_pattern(a, const_pattern)
+    self.assertEqual(a.lazydata.shape, (10, 10))
 
   # currently, CONSTs have a "fake" BUFFER. this should be fixed
   # current:
