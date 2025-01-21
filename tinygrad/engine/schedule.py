@@ -514,10 +514,14 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
 
-  # tensors can become an existing buffer, no ScheduleItem needed
+  # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
-    # NOTE: we only add base tensors to becomes_map
-    if k is not v and v.is_realized and k is k.base: ctx.becomes_map[k] = v.view(unwrap(k.st))
+    # NOOP
+    if k.base is v.base: continue
+    # NOTE: only the base tensors get a BUFFER UOp
+    if v.is_realized and k is k.base: ctx.becomes_map[k] = v.view(unwrap(k.st))
+    # otherwise if it simplified to a CONST the UOp just becomes that CONST
+    elif v.op is Ops.CONST: ctx.becomes_map[k] = v.view(unwrap(k.st))
 
   # add kernel children
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
