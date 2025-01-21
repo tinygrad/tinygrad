@@ -407,7 +407,7 @@ class Tensor(SimpleMathTrait):
     print(t.shard((t.device, t.device), axis=1).lazydata)
     ```
     """
-    assert isinstance(self.lazydata, UOp), "can't shard a MultiLazyBuffer"
+    assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
     mlb = self.lazydata.shard(devices, self._resolve_dim(axis) if axis is not None else None)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
