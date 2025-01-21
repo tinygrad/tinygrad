@@ -880,6 +880,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # cannot add directly
       c = a + b
+      c.schedule()
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
     c.realize()
