@@ -1092,7 +1092,7 @@ class TestLinearizer(unittest.TestCase):
         realized_ast, real_bufs = helper_realized_ast(c)
 
         k = Kernel(realized_ast)
-        k.apply_tensor_cores(1, axis=axis, tc_opt=2)
+        k.apply_tensor_cores(1, axis=axis, tc_select=-1, tc_opt=2)
         k.linearize()
         assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
@@ -1109,7 +1109,9 @@ class TestLinearizer(unittest.TestCase):
       # check that get_kernel_actions produces all 9 options
       from tinygrad.engine.search import get_kernel_actions
       tc_actions = [k for i, k in get_kernel_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
-      assert len(tc_actions) == 9, f"get_kernel_actions should contain 9 possible TC actions, only got {len(tc_actions)}"
+      assert len(tc_actions) >= 9 and len(tc_actions) % 9 == 0, (
+        f"get_kernel_actions should contain 9 possible TC actions for every valid TC, only got {len(tc_actions)}"
+      )
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
@@ -1958,7 +1960,7 @@ class TestKernelOpts(unittest.TestCase):
               UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)),)),)) # noqa: E501
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.TC, 0, 1))
+      k.apply_opt(Opt(OptOps.TC, 0, -1, 1))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):

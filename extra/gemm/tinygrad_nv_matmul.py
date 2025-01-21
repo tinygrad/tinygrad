@@ -21,7 +21,7 @@ if __name__ == "__main__":
     ]
   else:
     opts = [
-      Opt(op=OptOps.TC, axis=0, amt=0),
+      Opt(op=OptOps.TC, axis=0, amt=-1, arg=0),
       Opt(op=OptOps.UPCAST, axis=0, amt=4),
       Opt(op=OptOps.UPCAST, axis=1, amt=8),
       Opt(op=OptOps.LOCAL, axis=0, amt=2),
