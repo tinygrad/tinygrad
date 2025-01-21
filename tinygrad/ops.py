@@ -427,8 +427,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
   def copy_to_device(self, device:str, clone:bool=False) -> UOp:
-    # no COPY
-    if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
@@ -815,10 +813,10 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl"), "wb") as f:
+      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl"))
+    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):

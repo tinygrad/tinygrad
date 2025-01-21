@@ -2258,6 +2258,17 @@ class TestCopyFolding(unittest.TestCase):
     add = schedule_graph_rewrite(add)
     assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
+  def test_copy_to_same_device(self):
+    a = Tensor.empty(4).lazydata
+    b = a.copy_to_device(a.device)
+    check_schedule(b, 0, filter_sink=False)
+    b = schedule_graph_rewrite(b)
+    self.assertIs(b, a)
+
+  def test_clone(self):
+    a = Tensor.empty(4).lazydata
+    check_schedule(a.clone(), 1, filter_sink=False)
+
 class TestTensorUOpSpec(unittest.TestCase):
   def test_const_must_be_unmasked(self):
     a = Tensor.ones((4, 4)).pad((2, 2))
@@ -2271,6 +2282,12 @@ class TestTensorUOpSpec(unittest.TestCase):
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
+    create_schedule_with_vars(t)
+
+  def test_symbolic_shape_ok(self):
+    a = Tensor.ones(4)
+    vi = UOp.variable("i", 1, 10).bind(4)
+    t = graph_rewrite(a.reshape(vi).sum().lazydata, remove_movement_ops+merge_views)
     create_schedule_with_vars(t)
 
 class TestBufferUOp(unittest.TestCase):
@@ -2359,6 +2376,57 @@ class TestContiguous(unittest.TestCase):
     a = Tensor.empty(4, 1)
     b = a.expand((4, 4)).contiguous().contiguous()
     check_schedule(b, 1)
+
+
+class TestUOpBecome(unittest.TestCase):
+  # the simplest case, if we create a new BUFFER for this UOp
+  def test_new_buffer(self):
+    a = Tensor.empty(4, 4)
+    b = Tensor.empty(4, 4)
+    add = a+b
+    check_schedule(add, 1)
+    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(add.lazydata.base, {})
+
+  def test_new_buffer_view(self):
+    a = Tensor.empty(4, 4)
+    b = Tensor.empty(4, 4)
+    add = (a+b).reshape(8, 2)
+    check_schedule(add, 1)
+    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(add.lazydata.base, {})
+    # VIEW is preserverd after the becomes rewrite.
+    self.assertEqual(add.lazydata.shape, (8, 2))
+    assert add.lazydata is not add.lazydata.base
+
+  def test_become_existing_buffer(self):
+    a = Tensor.empty(4, 4)
+    b = a*1
+    assert UPat(Ops.MUL).match(b.lazydata, {}) # before scheduling it's a mul
+    check_schedule(b, 0)
+    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata.base, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
+    self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
+
+  def test_become_const_in_base(self):
+    a = Tensor.empty(4)
+    b = a*0
+    assert UPat(Ops.MUL).match(b.lazydata, {}) # before scheduling it's a mul
+    check_schedule(b, 0)
+    assert UPat(Ops.CONST, arg=0).match(b.lazydata.base, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
+
+  def test_become_const_in_view(self):
+    # if we shrink the base down to a size 0, only the VIEW becomes CONST, base is unchanged.
+    add = Tensor.empty(2, 2)+Tensor.empty(2, 2)
+    b = add.shrink(((0, 1), (0, 0)))
+    check_schedule(b, 0)
+    assert UPat(Ops.CONST, arg=0).match(b.lazydata, {})
+    self.assertEqual(b.shape, (1, 0))
+    # the base is untouched.
+    assert UPat(Ops.ADD).match(add.lazydata, {})
+
+  def test_become_const_from_const(self):
+    const_add = Tensor(1)+Tensor(2)
+    assert UPat(Ops.ADD).match(const_add.lazydata, {})
+    check_schedule(const_add, 0)
+    assert UPat(Ops.CONST, arg=3).match(const_add.lazydata.base, {})
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

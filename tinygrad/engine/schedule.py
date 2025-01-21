@@ -31,9 +31,9 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
   (UPat(Ops.DEFINE_VAR, src=(UPat(Ops.VIEW, arg=ShapeTracker.from_shape(()))), arg=None), lambda: True),
 
-  # Tensor const has an unmasked ShapeTracker of stride 0 and a device
+  # Tensor const has a device and an unmasked ShapeTracker of stride 0 or a ShapeTracker with symbolic shape
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
-   lambda st: len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides) and st.st.views[0].mask is None),
+   lambda st: st.st.views[0].mask is None and ((len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides)) or not all_int(st.shape))),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -514,10 +514,14 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
 
-  # tensors can become an existing buffer, no ScheduleItem needed
+  # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
-    # NOTE: we only add base tensors to becomes_map
-    if k is not v and v.is_realized and k is k.base: ctx.becomes_map[k] = v.view(unwrap(k.st))
+    # NOOP
+    if k.base is v.base: continue
+    # NOTE: only the base tensors get a BUFFER UOp
+    if v.is_realized and k is k.base: ctx.becomes_map[k] = v.view(unwrap(k.st))
+    # otherwise if it simplified to a CONST the UOp just becomes that CONST
+    elif v.op is Ops.CONST: ctx.becomes_map[k] = v
 
   # add kernel children
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
