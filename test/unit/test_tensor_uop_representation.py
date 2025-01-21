@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.ops import UPat, Ops, UOp
 
 realized_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
@@ -23,6 +23,19 @@ class TestTensorMutates(unittest.TestCase):
     # this is fine because realized exists on the base.
     # TODO: we can make this always be a VIEW(BUFFER) once BUFFER has a ShapeTracker of shape=(N,)
     for t in [a,b,ret]: is_pattern_uop(t.lazydata.base, realized_pattern)
+
+  def test_copy_reshape_nonzero(self):
+    a = Tensor([1,2,3])
+    out = a.to("clang").pad((0, 4))[:3]
+    out.realize()
+    is_pattern_uop(out.lazydata.base, realized_pattern)
+
+  @unittest.skipIf(Device.DEFAULT == "CLANG", "not on CLANG")
+  def test_copy_reshape_zero(self):
+    a = Tensor([1,2,3])
+    out = a.to("clang").pad((0, 4))[5:]
+    out.realize()
+    is_pattern_uop(out.lazydata.base, realized_pattern)
 
   def test_reshape_is_same_parent(self):
     a = Tensor([1,2,3])
