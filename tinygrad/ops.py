@@ -282,6 +282,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    if self.op is Ops.MULTI:
+      return ShapeTracker.from_shape(
+        tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape)))
     # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -295,8 +299,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # only reduce ops are allowed to change shape, everything else derives shape from sources
     elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
     else: shape = src_sts[0].shape
-    from tinygrad.shape.shapetracker import ShapeTracker
-    if self.op is Ops.MULTI: return ShapeTracker.from_shape(tuple(x*(len(self.src) if self.arg == i else 1) for i,x in enumerate(shape)))
     return ShapeTracker.from_shape(shape)
 
   @functools.cached_property
@@ -414,15 +416,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from MultiLazyBuffer ***
 
-  def multi(self, *more:UOp, axis:int|None):
+  def multi(self, *more:UOp, axis:int|None, real:list[bool]|None=None):
     parents = (self,)+more
     assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
-    return UOp(Ops.MULTI, self.dtype, parents, axis)
-
-  @property
-  def axis(self):
-    assert self.op is Ops.MULTI
-    return self.arg
+    return UOp(Ops.MULTI, self.dtype, parents, (axis, tuple(real if real is not None else [True]*len(parents))))
 
   @property
   def bounds(self):
@@ -430,9 +427,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
 
   @property
+  def axis(self):
+    assert self.op is Ops.MULTI
+    return self.arg[0]
+
+  @property
   def real(self):
     assert self.op is Ops.MULTI
-    return [True]*len(self.src)
+    return self.arg[1]
+
+  @property
+  def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   # *** from LazyBuffer ***
 
