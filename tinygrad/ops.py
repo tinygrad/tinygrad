@@ -466,10 +466,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
   def device(self) -> str: return unwrap(self._device)
-  @functools.cached_property
+  @property
   def _device(self) -> Optional[str]:
-    if self.op is Ops.DEVICE: return self.arg
-    return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
+    stack: list[UOp, bool] = [(self, False)]
+    cache: dict[UOp, UOp] = {}
+    while stack:
+      uop, processed = stack.pop()
+      if uop.op is Ops.DEVICE:
+        cache[uop] = uop.arg
+      if uop in cache: continue
+      if not processed:
+        stack.extend([(x, y) for x, y in zip((uop, *uop.src), itertools.chain([True], itertools.repeat(False)))])
+      else:
+        cache[uop] = cache[dsrcs[0]] if len(dsrcs:=[x for x in uop.src if cache.get(x) is not None]) != 0 else None
+    return cache[self]
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
@@ -842,12 +852,23 @@ class RewriteContext:
     self.pm: PatternMatcher = pm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-  def top_down_rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_src = tuple(map(self.top_down_rewrite, n.src))
-    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-    self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
-    return ret
+  def top_down_rewrite(self, sink:UOp) -> UOp:
+    stack: list[UOp, int] = [(sink, 0)]
+    old2new: dict[UOp, UOp] = {}
+    while stack:
+      n, stage = stack.pop()
+      if stage == 0:
+        if n not in self.replace: stack.extend([(x, y) for x, y in zip((n, *(n.src[::-1])), itertools.chain([1], itertools.repeat(0)))])
+      elif stage == 1:
+        new_src = tuple(self.replace[x] for x in n.src)
+        new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+        if new_n is None: self.replace[n] = n
+        else:
+          stack.extend([(n, 2),(new_n, 0)])
+          old2new[n] = new_n
+      else: self.replace[n] = self.replace[old2new[n]] # this is stage=2
+    return self.replace[sink]
+
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n: UOp|None = n

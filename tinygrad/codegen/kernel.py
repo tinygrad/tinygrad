@@ -576,13 +576,21 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self) -> UOp:
-    @functools.lru_cache(None)
-    def fixup_ast(op:UOp) -> UOp:
-      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
+    stack: list[UOp, bool] = [(self.ast, False)]
+    cache: dict[UOp, UOp] = {}
+    while stack:
+      op, processed = stack.pop()
+      if not processed:
+        stack.extend([(x, y) for x, y in zip((op, *(op.src[::-1])), itertools.chain([True], itertools.repeat(False)))])
+        continue
+      ret = op.replace(src=tuple(cache[x] for x in op.src))
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
-        return ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
-      if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+        cache[op] = ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
+        continue
+      if op.op is Ops.SINK:
+        cache[op] = ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+        continue
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -628,7 +636,9 @@ class Kernel:
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
-          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+          ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
+          cache[op] = ret
+          continue
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
@@ -641,13 +651,16 @@ class Kernel:
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), (f"temp{self.reduceops.index(op)+1}", local_size))
           local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
-          if op is self.reduceops[-1]: return grouped_reduce
+          if op is self.reduceops[-1]:
+            cache[op] = grouped_reduce
+            continue
           st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)])).to_uop()
-          return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
+          cache[op] = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
+          continue
 
-      return ret
+      cache[op] = ret
 
-    return graph_rewrite(fixup_ast(self.ast), view_left)
+    return graph_rewrite(cache[self.ast], view_left)
 
   # **** this is the lowerer ****
 
