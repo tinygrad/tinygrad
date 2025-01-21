@@ -433,7 +433,7 @@ def train_retinanet():
   model = RetinaNet(backbone, num_classes=NUM_CLASSES)
   params = get_parameters(model)
 
-  for p in params: p.realize().to_(GPUS)
+  for p in params: p.to_(GPUS)
 
   # ** optimizer **
   optim = Adam(params, lr=lr)
