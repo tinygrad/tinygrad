@@ -1092,7 +1092,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if is_emulated(tc): continue
+      if tc.dtype_in in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2] or tc.dtype_out in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]:
+        continue
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
       for axis in range(9):
