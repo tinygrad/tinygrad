@@ -2273,6 +2273,12 @@ class TestTensorUOpSpec(unittest.TestCase):
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule_with_vars(t)
 
+  def test_symbolic_shape_ok(self):
+    a = Tensor.ones(4)
+    vi = UOp.variable("i", 1, 10).bind(4)
+    t = graph_rewrite(a.reshape(vi).sum().lazydata, remove_movement_ops+merge_views)
+    create_schedule_with_vars(t)
+
 class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
   def test_buffer_has_buffer(self):
