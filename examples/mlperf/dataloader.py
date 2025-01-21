@@ -507,7 +507,7 @@ if __name__ == "__main__":
     dataset = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "validation" if val else "train"))
     anchors = np.ones((120087, 4))
     with tqdm(total=len(dataset.imgs.keys())) as pbar:
-      for x in batch_load_retinanet(dataset, val, anchors, base_dir):
+      for x in batch_load_retinanet(dataset, val, base_dir):
         pbar.update(x[0].shape[0])
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
