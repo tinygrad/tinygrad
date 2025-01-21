@@ -258,7 +258,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg) == new_args: return self
     return UOp(*new_args)
-  @functools.cached_property # caching here is not ideal. Maybe create UOp._key_cache??
+  @functools.cached_property # will create a key_cache just like _device_cache
   def key(self) -> bytes:
     hasher = hashlib.sha256(str((self.op, self.dtype, self.arg)).encode())
     stack = list(self.src[::-1])
@@ -480,15 +480,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def device(self) -> str: return unwrap(self._device)
   @property
-  def device(self) -> str:
-    return unwrap(self.new_device)
-  @functools.cached_property
   def _device(self) -> Optional[str]:
-    # print(f"BEEN HERE, {self.op}")
-    if self.op is Ops.DEVICE: return self.arg
-    return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
-  @property
-  def new_device(self) -> Optional[str]:
     stack: list[tuple[UOp, bool]] = [(self, False)]
     while stack:
       u, processed = stack.pop()
