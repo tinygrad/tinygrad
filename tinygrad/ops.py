@@ -430,7 +430,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
-    return UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).view(unwrap(self.st))
+    ret = UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone).reshape(self.base.shape)
+    op_arg = []
+    mop = self
+    while mop is not self.base:
+      op_arg.append((mop.op, mop.arg))
+      mop = mop.src[0]
+    for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
+    return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
   def lbs(self): return [self]
