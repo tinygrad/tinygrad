@@ -71,7 +71,6 @@ class TestTensorUopRepresentation(unittest.TestCase):
   def test_viewed_consts_do_not_realize(self):
     a = Tensor.ones(10, 10)
     print(a.lazydata)
-    pre_realize = a.lazydata
     a.realize()
     is_pattern(a, const_pattern)
     self.assertEqual(a.lazydata.shape, (10, 10))
