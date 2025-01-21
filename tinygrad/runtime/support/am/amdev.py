@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os, signal
+import ctypes, collections, time, dataclasses, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -279,13 +279,10 @@ class AMDev:
       self.partial_boot = False
 
     if not self.partial_boot:
-      try: # do not interrupt the boot process
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        if self.psp.is_sos_alive(): self.smu.mode1_reset()
-        for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
-          ip.init()
-          if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
-      finally: signal.signal(signal.SIGINT, signal.default_int_handler)
+      if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
+      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+        ip.init()
+        if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # Booting done
     self.is_booting = False
@@ -332,8 +329,8 @@ class AMDev:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
-  def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff) -> int:
-    for _ in range(10000):
+  def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff, timeout=10000) -> int:
+    for _ in range(timeout):
       if ((rval:=reg.read()) & mask) == value: return rval
       time.sleep(0.001)
     raise RuntimeError(f'wait_reg timeout reg=0x{reg.reg_off:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
