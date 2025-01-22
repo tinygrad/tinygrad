@@ -2396,6 +2396,16 @@ class TestUOpBecome(unittest.TestCase):
     # a new VIEW stacks on top (all the movement ops applied)
     assert UPat(Ops.VIEW, src=(UPat(Ops.VIEW))).match(add.lazydata, {})
 
+  def test_new_buffer_view_from_base(self):
+    a = Tensor.arange(4)
+    b = a.pad((0, 1))+0
+    # before scheduling, b is a base UOp with the larger size
+    self.assertEqual(b.lazydata.base.size, 5)
+    # after realization, b just simplifies to a view of a's buffer
+    check_schedule(b, 1)
+    self.assertEqual(b.lazydata.base.size, 4)
+    assert UPat(Ops.VIEW, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)),)).match(b.lazydata, {})
+
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
     b = a*1

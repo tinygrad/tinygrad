@@ -513,8 +513,9 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     # can only schedule once
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]:
-        becomes = buf_uop.view(unwrap(luop.base.st))
-        if luop is not luop.base: becomes = becomes.view(unwrap(luop.st))
+        sym_uop = tensor_map[luop]
+        becomes = buf_uop.view(unwrap(sym_uop.base.st))
+        if sym_uop is not sym_uop.base: becomes = becomes.view(unwrap(sym_uop.st))
         ctx.becomes_map[luop] = becomes
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
