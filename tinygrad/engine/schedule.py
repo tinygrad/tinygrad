@@ -513,7 +513,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     # can only schedule once
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]:
-        sym_uop = tensor_map[luop]
+        sym_uop = tensor_map.get(luop, luop)
         becomes = buf_uop.view(unwrap(sym_uop.base.st))
         if sym_uop is not sym_uop.base: becomes = becomes.view(unwrap(sym_uop.st))
         ctx.becomes_map[luop] = becomes
