@@ -203,7 +203,7 @@ def get_mlperf_bert_config():
     "intermediate_size": 4096,
     "max_position_embeddings": 512,
     "num_attention_heads": 16,
-    "num_hidden_layers": 24,
+    "num_hidden_layers": getenv("BERT_LAYERS", 24),
     "type_vocab_size": 2,
     "vocab_size": 30522
   }
