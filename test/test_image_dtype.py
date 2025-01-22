@@ -1,10 +1,9 @@
 import unittest
 import numpy as np
-from tinygrad import Device, dtypes, Tensor, Context, nn
+from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
-from tinygrad.helpers import IMAGE, all_same, prod, unwrap
-from tinygrad.ops import Ops
+from tinygrad.helpers import prod, unwrap
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageCopy(unittest.TestCase):
@@ -157,14 +156,17 @@ class TestImageRealization(unittest.TestCase):
     it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
     self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
     it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous()
-    alu = it_expanded+1
-    self.assertEqual(alu.dtype, dtypes.imagef((9,27,4)))
+    alu1 = it_expanded+1
+    alu2 = it_expanded.sum(3)
     it_expanded.realize()
-    # NOTE: the alu parent becomes a float32 after it is realized, but the alu child stays image
-    self.assertEqual(alu.dtype, dtypes.imagef((9,27,4)))
-    # if we realize it without shrinking it down to something that fits the dtype, the ALU also becomes float
-    alu.realize()
-    self.assertEqual(alu.dtype, dtypes.float32)
+    # NOTE: the parent becomes float, but the alu child will stay image until its output cannot fit the image
+    self.assertEqual(alu1.dtype, dtypes.imagef((9,27,4)))
+    alu1.realize()
+    self.assertEqual(alu1.dtype, dtypes.float32)
+    # alu2 is back in image because it fits the dtype again
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
+    alu2.realize()
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
 
 if __name__ == '__main__':
   unittest.main()
