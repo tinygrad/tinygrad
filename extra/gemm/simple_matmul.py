@@ -47,6 +47,20 @@ if __name__ == "__main__":
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()
+  if getenv("DEBUG_VALUES", 0) > 1:
+    print("\nA:")
+    for row in a.numpy():
+      print(" ".join(f"{value:.5f}" for value in row))
+    print("\nB:")
+    for row in b.numpy():
+      print(" ".join(f"{value:.5f}" for value in row))
+    print("-" * 80)
+    print("\nResult:")
+    for row in res:
+      print(" ".join(f"{value:.5f}" for value in row))
+    print("\nGround truth:")
+    for row in ref:
+      print(" ".join(f"{value:.5f}" for value in row))
   try:
     np.testing.assert_allclose(res, ref, rtol=RTOL, atol=ATOL)
   except AssertionError as e:
