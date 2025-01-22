@@ -428,7 +428,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
   def copy_to_device(self, device:str, clone:bool=False) -> UOp:
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
+    if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device, clone)
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
     ret = UOp(Ops.COPY, self.base.dtype, (UOp(Ops.DEVICE, arg=device), self.base), clone)
     op_arg = []
