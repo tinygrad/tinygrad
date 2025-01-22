@@ -4,10 +4,6 @@ from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 
-# Set up logging at the top of the file
-logging.basicConfig(filename='llvm_debug.log', level=logging.DEBUG)
-logging.getLogger().handlers[0].flush()  # Force flush the log handler
-
 def ldt(dt:DType):
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
   return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
@@ -102,9 +98,6 @@ class LLVMRenderer(Renderer):
     ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
-    print("RENDER CALLED")  # Regular print for now since logging isn't working
-    with open('llvm_debug.log', 'a') as f:
-        f.write(f"\nRender called with {len(uops)} ops\n")
     r: dict[UOp, str] = {}
     args: list[str] = []
     kernel: list[str] = []
@@ -114,10 +107,6 @@ class LLVMRenderer(Renderer):
     # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      print(f"Processing op: {u.op}")  # Regular print
-      with open('llvm_debug.log', 'a') as f:
-        f.write(f"Processing op: {u.op}\n")
-        f.flush()
       if u.op is Ops.ASSIGN:
         vc += 1
         r[u] = r[u.src[1]] = f"%assign{vc}"
