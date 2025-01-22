@@ -1,10 +1,10 @@
 import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, symbolic_simple, type_verify, graph_rewrite_map
-from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, ContextVar
+from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, type_verify, buffers
+from tinygrad.ops import can_pad, identity_element, resolve, symbolic_simple, view_left, merge_views
+from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -60,7 +60,6 @@ class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...]
-  assign_preloads: tuple[UOp, ...]
   @property
   def outputs(self) -> tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -84,6 +83,7 @@ class ScheduleContext:
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   contiguous: dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+  preloads: defaultdict[Buffer, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
   becomes_map: dict[UOp, UOp] = field(default_factory=dict)
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
@@ -212,14 +212,14 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
   ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
   # deal with ASSIGN
-  assign_preloads: list[UOp] = []
   if len(ctx.assigns) != 0:
+    assign_preloads = ctx.preloads[si_ctx.bufs[0].buffer]
     for x in list(sink.toposort)[::-1]:
       # we only allow a kernel to depend on either the before ASSIGN or after ASSIGN version of a BUFFER
       if x.op is Ops.LOAD and x.buf_uop in assign_preloads: raise RuntimeError("cycle detected in graph")
       # PRELOAD tells the toposort this kernel should run before ASSIGN
       if x.op is Ops.PRELOAD:
-        assign_preloads.append(x.buf_uop)
+        assign_preloads[x.buf_uop] = None
         # if this kernel also assigns to the buffer, we only allow either contiguous or masked views for the LOAD
         if x.buf_uop in store_bufs and not (st:=x.st_arg).contiguous:
           # if it has a single view and it's equal when you shrink a contig, it's fine
@@ -229,8 +229,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, ast))
-  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs if u.size != 0),
-                      tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)), tuple(dedup(assign_preloads)))
+  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)))
 
 PROCESS_REPLAY_CAPTURE: dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -530,7 +529,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   in_degree: defaultdict[ScheduleItem, int] = defaultdict(int)
   for si in prescheduled:
     # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(x.buffer)) and xsi is not si)
+    parents_assigns = dedup(xsi for x in ctx.preloads[si.bufs[0]] if (xsi:=schedule_targets.get(x.buffer)) and xsi is not si)
     for assign in parents_assigns:
       graph[si].append(assign)
       in_degree[assign] += 1

@@ -1844,7 +1844,7 @@ def run_tensor_ast(r:Tensor):
   sink = UOp(Ops.STORE, src=(glbl, ShapeTracker.from_shape(r.lazydata.base.shape).to_uop(), r.lazydata.base)).sink()
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+load_buffers+view_left, bufs:=[output])
   sink = graph_rewrite(sink, remove_movement_ops+ops_folding+view_right)
-  si = ScheduleItem(sink, tuple(x.buffer for x in bufs), (), ())
+  si = ScheduleItem(sink, tuple(x.buffer for x in bufs), ())
   run_schedule([si])
   return output.realized.as_buffer().cast(output.dtype.fmt, r.shape).tolist()
 
