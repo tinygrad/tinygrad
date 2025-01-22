@@ -667,6 +667,12 @@ class TestZeroShapeTensor(unittest.TestCase):
     b.realize()
     self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
+  def test_clone_with_shrink_realized(self):
+    a = Tensor.rand(16, 16).realize()
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
+
   def test_clone_with_grad(self):
     a = Tensor.rand(16, 16, requires_grad=True)
     a.mul(5.0).add(5.0).mean().backward()
