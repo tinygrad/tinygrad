@@ -97,7 +97,7 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # VIEW is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
-    ctx.tensor_uops[ret.buf_uop] += tensor_map[buf]
+    ctx.tensor_uops[ret.buf_uop] += tensor_map.get(buf, [buf])
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
