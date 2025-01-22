@@ -319,7 +319,6 @@ class TestDiskTensor(unittest.TestCase):
   def test_bf16_disk_write_read_float32(self):
     t, val = self._simulate_bf16_disk_tensor()
     assert t.cast(dtypes.float32).numpy().tolist() == val
-  
 
   def test_copy_from_disk(self):
     fn = pathlib.Path(temp("dt_copy_from_disk"))
