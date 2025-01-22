@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Optional, Callable
+from typing import Optional, Callable, cast
 import functools, math
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, dtypes, PtrDType
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
@@ -112,6 +112,10 @@ class ProgramSpec:
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
+
+def bf16_bitcast_to_float(buf:UOp, idx:UOp, root:UOp):
+  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
+  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
 
 class Renderer:
   device: str = ""
