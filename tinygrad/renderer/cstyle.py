@@ -174,11 +174,11 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([
         # Pattern for float64->float16 conversion via float32 intermediate
         (UPat.var("x", dtypes.float64).cast(dtypes.float16), 
-         lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
+        lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
         # BF16 uses explicit cast op pattern since float->BF16 requires 
         # special handling in hardware/software emulation
         (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),
-         lambda x: x.cast(dtypes.float32).cast(dtypes.bfloat16))
+        lambda x: x.cast(dtypes.float32).cast(dtypes.bfloat16))
     ]) + CStyleLanguage.extra_matcher
 
 
