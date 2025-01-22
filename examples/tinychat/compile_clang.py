@@ -117,6 +117,12 @@ if __name__=="__main__":
     # TODO: tell CLANG to assume specified ranges for symbolic vars, and for I/O buffer sizes?
     cprog += [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     cprog = "\n".join(cprog)
+    # TODO: make tinygrad output wasm-compatible absolute value of fp16
+    # the rendered clang for absolute value of fp16 numbers, compiles/works fine with clang, but causes exceptions while instantiating wasm module in browser
+    # for example: __fp16 alu23 = (alu10*(((_Bool)(alu10))?((alu10<((__fp16)(0.0f)))?((__fp16)(-1.0f)):((__fp16)(1.0f))):((__fp16)(0.0f))));
+    pattern = re.compile(r'__fp16\s+(\w+)\s*=\s*\((\w+)\s*\*\s*\(\(\(_Bool\)\(\2\)\)\?\(\(\2<\(\(__fp16\)\(0\.0f\)\)\)\?\(\(__fp16\)\(-1\.0f\)\):\(\(__fp16\)\(1\.0f\)\)\):\(\(__fp16\)\(0\.0f\)\)\)\);')
+    replacement = r'__fp16 \1 = (__fp16)fabsf((float)\2);'
+    cprog = pattern.sub(replacement, cprog)
 
     with open(os.path.join(os.path.dirname(__file__), f"{step.name}.c"), "w") as text_file:
       text_file.write(cprog)
