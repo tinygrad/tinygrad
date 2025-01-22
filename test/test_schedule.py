@@ -2377,7 +2377,6 @@ class TestContiguous(unittest.TestCase):
     b = a.expand((4, 4)).contiguous().contiguous()
     check_schedule(b, 1)
 
-
 class TestUOpBecome(unittest.TestCase):
   # the simplest case, if we create a new BUFFER for this UOp
   def test_new_buffer(self):
@@ -2392,10 +2391,10 @@ class TestUOpBecome(unittest.TestCase):
     b = Tensor.empty(4, 4)
     add = (a+b).reshape(8, 2)
     check_schedule(add, 1)
+    # the underlying base shape is preseverd in the first VIEW
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(add.lazydata.base, {})
-    # VIEW is preserverd after the becomes rewrite.
-    self.assertEqual(add.lazydata.shape, (8, 2))
-    assert add.lazydata is not add.lazydata.base
+    # a new VIEW stacks on top (all the movement ops applied)
+    assert UPat(Ops.VIEW, src=(UPat(Ops.VIEW))).match(add.lazydata, {})
 
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)

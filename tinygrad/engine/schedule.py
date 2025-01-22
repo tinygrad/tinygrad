@@ -97,6 +97,7 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # VIEW is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
+    ctx.tensor_uops[ret.buf_uop] += tensor_map[buf]
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
@@ -388,10 +389,10 @@ sym = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
-  # remove CONST/BIND/BUFFER/VIEW from SINK
+  # remove CONST/BIND/BUFFER from SINK
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
-      if (new_src:=tuple(x.base for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
+      if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
 # ** this decides which ops get realized
@@ -511,7 +512,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
     for buf_uop in store_uops:
-      for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
+      for luop in ctx.tensor_uops[buf_uop]:
+        becomes = buf_uop.view(unwrap(luop.base.st))
+        if luop is not luop.base: becomes = becomes.view(unwrap(luop.st))
+        ctx.becomes_map[luop] = becomes
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
