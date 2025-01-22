@@ -2377,6 +2377,33 @@ class TestContiguous(unittest.TestCase):
     b = a.expand((4, 4)).contiguous().contiguous()
     check_schedule(b, 1)
 
+  def test_view_does_not_realize(self):
+    a = Tensor.empty(4)
+    b = a.expand((4, 4))
+    check_schedule(b, 0)
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
+
+  def test_contiguous_view_realizes(self):
+    a = Tensor.empty(4)
+    b = a.expand((4, 4)).contiguous()
+    check_schedule(b, 1)
+    self.assertEqual(b.lazydata.base.buffer.size, 16)
+
+  # NOTE: moving copy before view might change this
+  def test_copy_realizes_shrink(self):
+    a = Tensor.empty(4)
+    view = a.shrink(((0, 2),))
+    b = view.clone()
+    check_schedule(b, 1, filter_sink=False)
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
+
+  def test_apply_expand_after_copy(self):
+    a = Tensor.empty(4, 1)
+    view = a.expand(4, 4)
+    b = view.clone()
+    check_schedule(b, 1, filter_sink=False)
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
+    self.assertEqual(b.lazydata.size, 16)
 
 class TestUOpBecome(unittest.TestCase):
   # the simplest case, if we create a new BUFFER for this UOp
