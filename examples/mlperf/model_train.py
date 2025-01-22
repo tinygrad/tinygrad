@@ -824,6 +824,7 @@ def train_bert():
         lm_acc, clsf_acc, lm_loss, clsf_loss = eval_step_bert(model,
           eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"],
           eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
+        lm_acc, clsf_acc, lm_loss, clsf_loss = lm_acc.item(), clsf_acc.item(), lm_loss.item(), clsf_loss.item()
 
         eval_lm_losses.append(lm_loss)
         eval_clsf_losses.append(clsf_loss)
