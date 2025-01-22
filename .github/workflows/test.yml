@@ -601,22 +601,18 @@ jobs:
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
         run: if ('${{ matrix.backend }}' -eq 'clang') { echo "CLANG=1" >> $env:GITHUB_ENV } elseif ('${{ matrix.backend }}' -eq 'gpu') { echo "GPU=1" >> $env:GITHUB_ENV } elseif ('${{ matrix.backend }}' -eq 'llvm') { echo "LLVM=1" >> $env:GITHUB_ENV } elseif ('${{ matrix.backend }}' -eq 'adm') { echo "AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1" >> $env:GITHUB_ENV }
-      #- name: Install OpenCL
-      #  if: matrix.backend == 'gpu'
-      #  run: choco install opencl-intel-cpu-runtime --version '16.1.1'
       - name: Install dependencies
         run: pip install -e ".[testing$(if ('${{ matrix.backend }}' -eq 'llvm') {',llvm'})]" --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
-      #- name: Check Device.DEFAULT and print some source
-      #  run: |
-      #    $env:PYTHONPATH = "${{ github.workspace }}"; python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
-      #    $env:PYTHONPATH = "${{ github.workspace }}"; $env:DEBUG = "5"; $env:FORWARD_ONLY = "1"; python test/test_ops.py TestOps.test_add
-      #- name: Run pytest (not cuda or amd)
-      #  if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-      #  run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
-      #- name: Run ONNX (only LLVM)
-      #  if: matrix.backend == 'llvm'
-      #  run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          $env:PYTHONPATH = "${{ github.workspace }}"; python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
+          $env:PYTHONPATH = "${{ github.workspace }}"; $env:DEBUG = "5"; $env:FORWARD_ONLY = "1"; python test/test_ops.py TestOps.test_add
+      - name: Run pytest (not cuda or amd)
+        if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
+        run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
+      - name: Run ONNX (only LLVM)
+        if: matrix.backend == 'llvm'
+        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   osxtests:
     strategy:
