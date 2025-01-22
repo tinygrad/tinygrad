@@ -3,7 +3,7 @@ import unittest, pickle
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
@@ -397,6 +397,17 @@ class TestSymbolic(unittest.TestCase):
     idx1 = Variable("idx1", 0, start_pos)
     self.helper_test_variable((idx0*v+idx1)//v, 0, 2, "(idx0)")
     self.helper_test_variable((idx0*v+idx1)%v, 0, start_pos, "idx1")
+
+  def test_divmod_variable_denom_fold_to_const(self):
+    x = Variable("x", 20, 23)
+    y = Variable("y", 8, 10)
+    self.helper_test_variable(x//y, 2, 2, "2")
+    self.helper_test_variable(x%y, 0, 7, "(x+(y*-2))")
+    # ensure all 4 corners are checked
+    x = Variable("x", -10, 10)
+    y = Variable("y", -8, 9)
+    self.helper_test_variable(x//y, -2147483648, 2147483647, "(x//y)")
+    self.helper_test_variable(x%y, -2147483648, 2147483647, "(x%y)")
 
   # TODO: simplify the expression
   def test_div_neg_all_range(self):

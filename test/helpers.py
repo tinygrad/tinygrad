@@ -1,4 +1,4 @@
-import time, logging, difflib
+import time
 from typing import Callable, Optional, Tuple
 import numpy as np
 from tinygrad import Tensor, dtypes
@@ -8,14 +8,14 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, getenv, colored
+from tinygrad.helpers import T
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.rewriter import full_graph_rewrite
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
 
 def derandomize_model(model):
   for p in get_parameters(model):
-    p.lazydata = Tensor.empty(p.shape, device=p.device, dtype=p.dtype).lazydata
+    p.replace(Tensor.empty(p.shape, device=p.device, dtype=p.dtype))
     p.realize()
 
 def assert_jit_cache_len(fxn, expected_len):
@@ -39,16 +39,6 @@ def rand_for_dtype(dt:DType, size:int):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
-
-def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
-  if not logging.getLogger().hasHandlers(): logging.basicConfig(level=logging.INFO, format="%(message)s")
-  if unified:
-    lines = list(difflib.unified_diff(str(s0).splitlines(), str(s1).splitlines()))
-    diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in lines)
-  else:
-    import ocdiff
-    diff = ocdiff.console_diff(str(s0), str(s1))
-  logging.info(diff)
 
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
   if st_src is None:

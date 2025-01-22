@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from extra.onnx import get_run_onnx
+from extra.onnx import OnnxRunner
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -20,7 +20,7 @@ class TinygradModel(BackendRep):
 
   def run(self, inputs: Any, **kwargs: Any) -> Tuple[Any, ...]:
     real_inputs = dict(zip(self.input_names, inputs))
-    ret = self.fxn(real_inputs, debug=True)
+    ret = self.fxn(real_inputs, debug=2)
     return tuple(x.numpy() if isinstance(x, Tensor) else [i.numpy() for i in x] if isinstance(x, list) else np.array(x) for x in ret.values())
 
 class TinygradBackend(Backend):
@@ -30,7 +30,7 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = get_run_onnx(model)
+    run_onnx = OnnxRunner(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
@@ -40,11 +40,15 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# TODO: there isn't an AttributeProto for `epsilon` in the NodeProto for 'test_adam_multiple_cpu'
-# [x.name for x in n.attribute] -> ['alpha', 'beta', 'norm_coefficient']
-# but in their documentation https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-176, it states there being an epsilon of 1e-2
-# test passes with epsilon = 1e-2
+# BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
+backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
+
+# BUG: onnxruntime 1.20.1 fails these tests too
+backend_test.exclude('test_qlinearmatmul_2D_int8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
@@ -74,17 +78,28 @@ backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_max_float16_cpu')
 backend_test.exclude('test_min_float16_cpu')
 
-backend_test.exclude('test_convinteger_*')
-backend_test.exclude('test_matmulinteger_*')
-
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
+backend_test.exclude('test_quantizelinear_int4_cpu')
+backend_test.exclude('test_quantizelinear_uint4_cpu')
+
+# no support for FLOAT8
+backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
+backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
 
-# no support for mod
-backend_test.exclude('test_mod_*')
+# no support for fmod
+backend_test.exclude('test_mod_int64_fmod_cpu')
+backend_test.exclude('test_mod_mixed_sign_float16_cpu')
+backend_test.exclude('test_mod_mixed_sign_float32_cpu')
+backend_test.exclude('test_mod_mixed_sign_float64_cpu')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
@@ -96,9 +111,6 @@ backend_test.exclude('test_regex_*')
 
 # no quantize
 backend_test.exclude('test_dynamicquantizelinear_*')
-backend_test.exclude('test_qlinearmatmul_*')
-backend_test.exclude('test_qlinearconv_*')
-backend_test.exclude('test_quantizelinear_*')
 
 # no rnn
 backend_test.exclude('test_gru_*')

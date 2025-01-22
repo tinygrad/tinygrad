@@ -47,6 +47,7 @@ class TestImageDType(unittest.TestCase):
     assert isinstance(it.lazydata.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
+  @unittest.expectedFailure # this isn't supported anymore, CAST to ImageDType stays ImageDType
   def test_image_cast_and_back_collapses(self):
     data = Tensor.randn(9*27*4).realize()
     tst = data.numpy()
@@ -113,6 +114,8 @@ class TestImageDType(unittest.TestCase):
     assert it.lazydata.base.realized._buf != b1
 
   # issue caused by: don't realize image to image casts. this is part of a larger problem
+  #@unittest.expectedFailure
+  # update: passing after tensor_map
   def test_lil_model(self):
     with Context(IMAGE=2):
       x = Tensor.zeros(1, 1)
@@ -121,6 +124,9 @@ class TestImageDType(unittest.TestCase):
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
       sched = unwrap(w1.grad).schedule()
+      # NOTE: the w1 grad must realize to a seperate kernel
+      assert w1.grad.lazydata.is_realized, f"never realized {w1.grad}"
+      self.assertEqual(w1.grad.lazydata.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()

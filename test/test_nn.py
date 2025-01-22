@@ -8,7 +8,6 @@ from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.device import is_dtype_supported
 
@@ -517,7 +516,7 @@ class TestNN(unittest.TestCase):
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
-    schedule = create_schedule([result.lazydata])
+    schedule = result.schedule()
     self.assertEqual(3, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
@@ -525,7 +524,7 @@ class TestNN(unittest.TestCase):
                 [4, 5, 6],
                 [7, 8, 9]])
     result = layer(b)
-    schedule = create_schedule([result.lazydata])
+    schedule = result.schedule()
     self.assertEqual(1, len([item for item in schedule if item.ast.op is Ops.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
 
@@ -552,7 +551,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_model(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
     layer = Conv2d(3, 5, kernel_size=3)
     layer.weight.shard_(devices, 3)
@@ -573,7 +572,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_dict(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
     layer = Conv2d(3, 5, kernel_size=3)
     state_dict = {
@@ -590,7 +589,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_model_dict_same_axis(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
     layer = Conv2d(3, 5, kernel_size=3)
     layer.weight.shard_(devices, 3)
@@ -611,7 +610,8 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_model_dict_different_axis(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
+    devices5 = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5")
 
     layer = Conv2d(3, 5, kernel_size=3)
     layer.weight.shard_(devices, 3)
@@ -620,14 +620,14 @@ class TestNN(unittest.TestCase):
     # different shard axis
     state_dict = {
       'weight': Tensor.randn(5, 3, 3, 3).shard(devices, None),
-      'bias': Tensor.randn(5).shard(devices, 0),
+      'bias': Tensor.randn(5).shard(devices5, 0),
     }
     load_state_dict(layer, state_dict)
 
     # NOTE: model and state_dict shard differently, use the state_dict sharding  # TODO: revisit this?
     self.assertEqual(layer.weight.device, devices)
     self.assertEqual(layer.weight.lazydata.axis, None)
-    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.device, devices5)
     self.assertEqual(layer.bias.lazydata.axis, 0)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())

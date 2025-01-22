@@ -1,4 +1,4 @@
-import pathlib, re, ctypes, mmap, collections, functools, copy
+import pathlib, re, ctypes, mmap, collections, functools, copy, os
 import tinygrad.runtime.autogen.kfd as kfd
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
@@ -49,6 +49,7 @@ class AMDDriver(VirtDriver):
     self.object_by_handle = {}
     self.doorbells = {}
     self.next_doorbell = collections.defaultdict(int)
+    self.mmu_event_ids = []
 
     for i in range(gpus): self._prepare_gpu(i)
 
@@ -76,6 +77,7 @@ class AMDDriver(VirtDriver):
     self.doorbells[gpu_id] = memoryview(bytearray(0x2000))
     self.gpus[gpu_id] = AMDGPU(gpu_id)
     self.tracked_files += [
+      VirtFile('/sys/module/amdgpu', functools.partial(TextFileDesc, text="1")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}', functools.partial(DirFileDesc, child_names=['gpu_id', 'properties'])),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
@@ -113,6 +115,8 @@ class AMDDriver(VirtDriver):
     elif nr == kfd_ioctls.AMDKFD_IOC_CREATE_EVENT:
       struct.event_slot_index = self._alloc_next_event_slot()
       struct.event_id = struct.event_slot_index
+
+      if struct.event_type == kfd.KFD_IOC_EVENT_MEMORY: self.mmu_event_ids.append(struct.event_id)
     elif nr == kfd_ioctls.AMDKFD_IOC_CREATE_QUEUE:
       gpu = self.gpus[struct.gpu_id]
       if struct.queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
@@ -125,7 +129,12 @@ class AMDDriver(VirtDriver):
       struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
       self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._emulate_execute())
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
-      pass
+      evs = (kfd.struct_kfd_event_data * struct.num_events).from_address(struct.events_ptr)
+      for ev in evs:
+        if ev.event_id in self.mmu_event_ids and "MOCKGPU_EMU_FAULTADDR" in os.environ:
+          ev.memory_exception_data.gpu_id = 1
+          ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
+          ev.memory_exception_data.failure.NotPresent = 1
     else:
       name = "unknown"
       for k,v in kfd_ioctls.__dict__.items():
