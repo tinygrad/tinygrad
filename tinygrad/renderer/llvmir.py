@@ -73,10 +73,6 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
 
-def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
-  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
-  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
-
 class LLVMRenderer(Renderer):
   device = "LLVM"
   supports_float4 = False
