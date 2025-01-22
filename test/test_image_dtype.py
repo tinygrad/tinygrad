@@ -137,60 +137,34 @@ class TestImageDType(unittest.TestCase):
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageRealization(unittest.TestCase):
-  def setUp(self):
-    self.old_image = IMAGE.value
-    IMAGE.value = 2
-  def tearDown(self):
-    IMAGE.value = self.old_image
+  def test_image_dtype_expand(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
+    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous().realize()
+    self.assertEqual(it_expanded.dtype, dtypes.float32)
 
-  def test_dtype_override(self):
-    # this is, "make things that can't be images not images"
-    a = Tensor.ones(9, 9).contiguous().cast(dtypes.imagef((3, 12, 4))).contiguous()
-    # before realize, it's an image
-    self.assertIsInstance(a.lazydata.dtype, ImageDType)
-    # after realize, it becomes a float32
-    # this is because we can't lower its ShapeTracker to index?
-    a = a.realize()
-    self.assertEqual(a.lazydata.dtype, dtypes.float)
+  def test_image_dtype_expand_and_back(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
+    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4))
+    it2 = it_expanded.sum(3).realize()
+    self.assertEqual(it2.dtype, dtypes.imagef((9,27,4)))
 
-  @unittest.expectedFailure
-  def test_dtype_overriden_alu(self):
-    # make something that can't be image
-    a = Tensor.ones(9, 9).contiguous().cast(dtypes.imagef((3, 12, 4))).contiguous()
-    # give it an ALU child
-    add = a+2
-    # realize the parent, it becomes a float32 BUFFER
-    a.realize()
-    # the child's dtype is still imagef, so the ADD becomes (float32)+(imagef)
-    self.assertIsInstance(add.dtype, ImageDType)
-    operand_dtypes = [x.dtype for x in add.lazydata.src]
-    assert all_same(operand_dtypes), f"expected dtypes to be the same for {add.lazydata}"
-
-  @unittest.expectedFailure
-  def test_linear_grad_dtype(self):
-    class TinyNet:
-      def __init__(self):
-        self.l1 = nn.Linear(784, 128)
-        self.l2 = nn.Linear(128, 10)
-      def __call__(self, x):
-        return self.l2(self.l1(x).relu()).relu()
-    with Tensor.train():
-      model = TinyNet()
-      # why is this needed?
-      for param in nn.state.get_state_dict(model).values():
-        if param.requires_grad is None: param.requires_grad = True
-      # realize the loss, some BUFFERs change dtype
-      X = Tensor.empty(32, 784)
-      Y = Tensor.empty(32, 10)
-      out = model(X)
-      loss = (out*Y).mean()
-      loss.backward()
-      loss.realize()
-      # then, try to realize the gradients
-      grad_uop = model.l1.weight.grad.lazydata.base
-      for x in grad_uop.toposort:
-        operand_dtypes = [y.dtype for y in (x.src if x.op is not Ops.WHERE else x.src[1:])]
-        assert all_same(operand_dtypes), f"expected dtypes to match for {x.op}, {operand_dtypes}"
+  def test_image_alu_children(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
+    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous()
+    alu = it_expanded+1
+    self.assertEqual(alu.dtype, dtypes.imagef((9,27,4)))
+    it_expanded.realize()
+    # NOTE: the alu parent becomes a float32 after it is realized, but the alu child stays image
+    self.assertEqual(alu.dtype, dtypes.imagef((9,27,4)))
+    # if we realize it without shrinking it down to something that fits the dtype, the ALU also becomes float
+    alu.realize()
+    self.assertEqual(alu.dtype, dtypes.float32)
 
 if __name__ == '__main__':
   unittest.main()
