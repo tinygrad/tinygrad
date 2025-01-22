@@ -1,8 +1,12 @@
 from typing import cast
-import math, struct
+import math, struct, logging
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
+
+# Set up logging at the top of the file
+logging.basicConfig(filename='llvm_debug.log', level=logging.DEBUG)
+logging.getLogger().handlers[0].flush()  # Force flush the log handler
 
 def ldt(dt:DType):
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
@@ -53,17 +57,18 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.SQRT, name="x"), lambda ctx,x:
    f"  {ctx[x]} = call{flags} {ldt(x.dtype)} @llvm.sqrt.{ldt(x.src[0].dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
-  (UPat(Ops.BF16, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.float32),)), lambda ctx,root,buf,idx:
-   f" {ctx[root]}_ptr = bitcast {ldt(buf.dtype)} {ctx[buf]} to i16*\n"
-   f" {ctx[root]}_gep = getelementptr inbounds i16, i16* {ctx[root]}_ptr, {ldt(idx.dtype)} {ctx[idx]}\n"
-   f" {ctx[root]}_16 = load i16, i16* {ctx[root]}_gep\n"
-   f" {ctx[root]}_32 = zext i16 {ctx[root]}_16 to i32\n"
-   f" {ctx[root]}_shifted = shl i32 {ctx[root]}_32, 16\n"
-   f" {ctx[root]} = bitcast i32 {ctx[root]}_shifted to float"),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.float32, src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16))),
+    lambda ctx,x,buf,idx: f"""  %{ctx[x]}_ptr = bitcast {ldt(buf.dtype)} %{ctx[buf]} to i16*
+    %{ctx[x]}_gep = getelementptr inbounds i16, i16* %{ctx[x]}_ptr, {ldt(idx.dtype)} %{ctx[idx]}
+    %{ctx[x]}_16 = load i16, i16* %{ctx[x]}_gep, align 2
+    %{ctx[x]}_32 = zext i16 %{ctx[x]}_16 to i32
+    %{ctx[x]}_shifted = shl nuw i32 %{ctx[x]}_32, 16
+    %{ctx[x]} = bitcast i32 %{ctx[x]}_shifted to float"""),
+  # Regular cast (this should come after the BF16 pattern)
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
@@ -77,11 +82,8 @@ llvm_rewrite = PatternMatcher([
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
-  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
+  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:")
 ])
-
-def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
-  return UOp(Ops.BF16, dtypes.float32, (idx, buf)).cast(root.dtype)
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
@@ -97,11 +99,12 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
-    # rewrite BF16 to CAST
-    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.float32),)), llvm_bf16_cast),
-  ])
+    ])
 
   def render(self, name: str, uops: list[UOp]) -> str:
+    print("RENDER CALLED")  # Regular print for now since logging isn't working
+    with open('llvm_debug.log', 'a') as f:
+        f.write(f"\nRender called with {len(uops)} ops\n")
     r: dict[UOp, str] = {}
     args: list[str] = []
     kernel: list[str] = []
@@ -111,6 +114,10 @@ class LLVMRenderer(Renderer):
     # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
+      print(f"Processing op: {u.op}")  # Regular print
+      with open('llvm_debug.log', 'a') as f:
+        f.write(f"Processing op: {u.op}\n")
+        f.flush()
       if u.op is Ops.ASSIGN:
         vc += 1
         r[u] = r[u.src[1]] = f"%assign{vc}"

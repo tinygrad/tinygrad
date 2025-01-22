@@ -120,7 +120,7 @@ class Ops(FastEnum):
   GEP = auto(); VECTORIZE = auto() # noqa: E702
 
   # UnaryOps
-  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto(); BF16 = auto() # noqa: E702
+  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # load/store before math
   LOAD = auto(); STORE = auto() # noqa: E702
