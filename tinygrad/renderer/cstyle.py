@@ -174,8 +174,7 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([
     (UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
     (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), bf16_bitcast_to_float),
-    ]) + \
-    CStyleLanguage.extra_matcher
+  ]) + CStyleLanguage.extra_matcher
 
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
