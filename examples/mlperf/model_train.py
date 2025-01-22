@@ -385,6 +385,7 @@ def train_retinanet():
     return LambdaLR(optim, _lr_lambda)
 
   @Tensor.train()
+  @TinyJit
   def _train_step(model, optim, lr_scheduler, x, **kwargs):
     optim.zero_grad()
 
