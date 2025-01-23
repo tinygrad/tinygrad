@@ -3,7 +3,7 @@ from test.unit.test_shapetracker_math import MultiShapeTracker
 from test.external.fuzz_shapetracker_math import shapetracker_ops
 from tinygrad.shape.view import View, unravel
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.helpers import getenv, prod, trange
+from tinygrad.helpers import getenv, prod, trange, tqdm
 import random, functools
 
 #@functools.lru_cache(maxsize=None)
@@ -68,7 +68,7 @@ if __name__ == "__main__":
   total_adds = 0
   false_adds = 0
   random.seed(getenv("SEED", 42))
-  for i in trange(getenv("CNT", 1000)):
+  for i in tqdm(range(getenv("I",0), getenv("CNT",1000))):
     # generate adds
     m1 = MultiShapeTracker([ShapeTracker.from_shape((random.randint(1, 10), random.randint(1, 10), random.randint(1, 10)))])
     for _ in range(4): random.choice(shapetracker_ops)(m1)
