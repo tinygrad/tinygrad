@@ -3,7 +3,9 @@ from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraver
 from tinygrad.helpers import mv_address
 
 class FakeGMC:
-  def __init__(self): self.vm_base = 0x0
+  def __init__(self):
+    self.vm_base = 0x0
+    self.address_space_mask = (1 << 44) - 1
   def flush_tlb(self, *args, **kwargs): pass
 
 class FakePCIRegion:
