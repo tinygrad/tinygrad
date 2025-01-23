@@ -97,7 +97,8 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # VIEW is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
-    tensor_map[ret.buf_uop] = tensor_map.get(buf, [buf])
+    # TODO: this is making openpilot 0.9.7 with CAPTURE_PROCESS_REPLAY=1 4x slower?
+    ctx.tensor_uops[ret.buf_uop] += tensor_map.get(buf, [buf])
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
