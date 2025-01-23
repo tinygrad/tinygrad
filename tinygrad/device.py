@@ -5,12 +5,13 @@ from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution
+                             cpu_time_execution, colored, Context
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -25,7 +26,7 @@ class _Device:
     cpn = multiprocessing.current_process().name
     assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) \
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) \
            if (cname.lower() == x.lower() + "device")][0](ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     self._opened_devices.add(ix)
@@ -33,7 +34,7 @@ class _Device:
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
-    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
+    for device in ALL_DEVICES:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
@@ -314,3 +315,18 @@ if PROFILE:
 
     from tinygrad.ops import launch_viz
     launch_viz("PROFILE", fn)
+
+if __name__ == "__main__":
+  for device in ALL_DEVICES:
+    try:
+      _ = Device[device].device
+      try:
+        from tinygrad import Tensor
+        with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
+        if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
+        result = colored("PASS", "green")
+      except Exception as e:
+        result = f"{colored("FAIL", "yellow")} {e}"
+    except Exception as e:
+      result = f"{colored("FAIL", "red")} {e}"
+    print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")
