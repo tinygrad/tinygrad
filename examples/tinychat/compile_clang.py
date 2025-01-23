@@ -61,16 +61,6 @@ if __name__=="__main__":
   quant_weight_shapes = ((2048, 2048), (512, 2048), (2048, 8192), (8192, 2048)) # these are shapes in gguf file, need to reverse
   sub_steps += [Step(name = f"q6k_to_int8_{s1}_{s0}", input = [Tensor.randn((s1 * s0 * 210) // 256, dtype=dtypes.uint8), (s1, s0)], forward = q6k_to_int8) for s0, s1 in quant_weight_shapes]
 
-  # For testing correctness
-  """
-  # byte location of 'blk.10.ffn_gate.weight' in the model_path file
-  data_start = 7831552
-  start = data_start + 329052288
-  end = data_start + 342814848
-  x = bytes(open(model_path, 'rb').read())[start:end]
-  sub_steps[-2] = Step(name = f"q6k_to_int8_{8192}_{2048}", input = [Tensor(x, dtype=dtypes.uint8), (8192, 2048)], forward = q6k_to_int8)
-  """
-
   # TODO: refactor to move some corrected CLANG rendering to export_model.py
   def compile_step(step: Step):
     run, special_names = jit_model(step, *step.input)
@@ -130,33 +120,24 @@ if __name__=="__main__":
     input_ptrs = OrderedDict((f"inputPtr{name.split("input")[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
     output_ptrs = OrderedDict((f"outputPtr{name.split("output")[1]}", (name, bufs[name][0])) for name in outputs)
     top = f"import {step.name}Module from './{step.name}.js'\n"
-    prg = f"""\nvar {step.name} = function() {{
-  return {{
-    "setup": async {f"(metadata, progress)" if bufs_to_save else "()"} => {{
+    prg = f"""\nvar {step.name} = async function{f"(metadata, progress)" if bufs_to_save else "()"} {{
 
-      const wasm = await {step.name}Module();
-      {f"""const weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
-      for (const [i, name] of weightNames.entries()) {{
-        const bufPtr = wasm._get_buffer_by_index(i);
-        const tensor = metadata[name];
-        wasm.HEAPU8.set(tensor.bytes, bufPtr);
-      }}""" if bufs_to_save else ""}
-      {"\n      ".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-      {"\n      ".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-      // TODO: ensure proper generic view dtype and byte size
-      {"\n      ".join(f"const {name}View = new Uint8Array(wasm.HEAPU8.buffer, {outputPtr}, {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+  const wasm = await {step.name}Module();
+  {f"""const weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
+  for (const [i, name] of weightNames.entries()) {{
+    const bufPtr = wasm._get_buffer_by_index(i);
+    const tensor = metadata[name];
+    wasm.HEAPU8.set(tensor.bytes, bufPtr);
+  }}""" if bufs_to_save else ""}
 
-      return {{
-        run: async ({",".join(name for name,_,_ in inputs)}) => {{
-          {"\n        ".join(f"wasm.HEAPU8.set({name}, {inputPtr})" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-          wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))})
-          return [{", ".join(f"{name}View" for name, n_bytes in output_ptrs.values())}]
-        }},
-        cleanup: () => {{
-          {"\n          ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
-        }}
-      }}
-    }}
+  return async ({",".join(name for name,_,_ in inputs)}) => {{
+    {"\n    ".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+    {"\n    ".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+    {"\n    ".join(f"wasm.HEAPU8.set({name}, {inputPtr})" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+    wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))})
+    {"\n    ".join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes})" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+    {"\n    ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
+    return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}]
   }}
 }}\n"""
 
@@ -173,6 +154,7 @@ if __name__=="__main__":
     top += step_top
     prg += step_prg
 
+  prg += f"export {{{", ".join(step.name for step in sub_steps)}}};"
   with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as text_file:
     text_file.write(top + prg)
 
