@@ -42,12 +42,10 @@ def ConstantOfShape(shape:list[int], value:Tensor|None=None):
 def Size(data:Tensor): return data.numel()
 def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
 
-
 # ***** Unary Ops (math) *****
 def Not(x:Tensor): return x.logical_not()
 def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):
     return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
-
 
 # ***** Unary Ops (activation) *****
 def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
@@ -67,7 +65,6 @@ def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
 def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
 def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
 
-
 # ***** Unary Ops (broadcasted) *****
 def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
 def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
@@ -84,12 +81,10 @@ def BitwiseOr(x:Tensor,y:Tensor): return x | y
 def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
 def BitwiseNot(x:Tensor): return ~x
 
-
 # ***** Casting Ops *****
 # TODO: saturate
 def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
 def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
-
 
 # ***** Reduce Ops *****
 def Max(*data_0:Tensor): return functools.reduce(Tensor.maximum, data_0)
@@ -122,7 +117,6 @@ def ArgMax(x:Tensor, axis:int=0, keepdims:int=1, select_last_index:int=0):
   return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis:int=0, keepdims:int=1, select_last_index:int=0):
   return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
-
 
 # ***** Movement Ops *****
 def Reshape(data:Tensor, shape:list[int], allowzero:int=0):
@@ -170,7 +164,6 @@ def CenterCropPad(t:Tensor, shape:list[int], axes:list[int]|None=None):
     if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
     elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
-
 
 # ***** Processing Ops *****
 AUTO_PAD_OPTIONS = Literal["NOTSET", "SAME_UPPER", "SAME_LOWER", "VALID"]
@@ -303,7 +296,6 @@ def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, si
   if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
   return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
-
 
 # ***** Neural Network Ops *****
 # TODO: try to factor out common implementations for these ops
@@ -444,7 +436,6 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present if past is not None else out
 
-
 # ***** Indexing Ops *****
 def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
@@ -496,7 +487,6 @@ def Compress(inp:Tensor, condition:list[bool], axis:int|None=None):
   if axis < 0: axis += inp.ndim
   con = Tensor(np.arange(len(condition))[condition]) # no boolean indexing in Tensor
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
-
 
 # ***** Quantization Ops *****
 def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
@@ -557,7 +547,6 @@ def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_poi
 
 def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_point: Tensor | int = 0) -> Tensor:
   return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
-
 
 # ***** Training Ops *****
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
