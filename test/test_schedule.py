@@ -1951,7 +1951,7 @@ class TestSwizzle(unittest.TestCase):
             UOp(Ops.ADD, dtypes.float, arg=None, src=(
               x6:=UOp(Ops.MUL, dtypes.float, arg=None, src=(
                 UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                  UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                     UOp(Ops.BUFFER, dtypes.float, arg=(8, 2925), src=(UOp(Ops.DEVICE, arg="METAL"),)),
                     x10:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(65, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
                   UOp(Ops.WHERE, dtypes.float, arg=None, src=(
@@ -1971,7 +1971,7 @@ class TestSwizzle(unittest.TestCase):
                 UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
                  x15,)),
               UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                   UOp(Ops.BUFFER, dtypes.float, arg=(2, 2925), src=(UOp(Ops.DEVICE, arg="METAL"),)),
                    x10,)),
                 UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(1, 89), offset=44, mask=None, contiguous=False),)), src=(
