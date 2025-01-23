@@ -844,7 +844,60 @@ def launch_viz(env_str:str, data:str):
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
 
-class TreeAutomaton: pass
+class TreeAutomaton:
+  def __init__(self, patterns: list[tuple[UPat, Callable]]):
+    self.patterns = patterns
+    self.alphabet = set()
+    self.pat_forest: dict[int, list[UPat]] = {}
+    self.tables: dict[tuple, dict[tuple, int]] = {}
+    self.final: dict[int, list[tuple[int, list[tuple[str, tuple[int]]], bool, Callable]]] = {}
+    self.num_states: int = 0
+
+    def _build_alphabet(pat: UPat):
+      std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
+      for s in std_src: _build_alphabet(s)
+      ops = (pat.op,) if pat.op is None else pat.op
+      dtypes = (pat.dtype,) if pat.dtype is None else pat.dtype
+      self.alphabet.update(set((op, dt, pat.arg) for op in ops for dt in dtypes))
+      
+    def _build_pat_forest(pat: UPat):
+      std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
+      height = max(_build_pat_forest(s) for s in std_src) if std_src else 0
+      self.pat_forest.setdefault(height, []).append(pat)
+      return height+1
+    
+    def _match(symbol, pat: UPat, srcs):
+      return all((pat.op is None or sym[0] in pat.op) and (pat.dtype is None or sym[1] in pat.dtype) and (pat.arg is None or sym[2] == pat.arg) \
+                 and sym[3] in srcs for sym in symbol)
+
+    for pat,_ in self.patterns:
+      _build_alphabet(pat)
+      _build_pat_forest(pat)
+
+    src_states, pat_srcs = {None: ()}, {}
+    for layer in self.pat_forest.values():
+      # record where each symbol appears
+      sym_indices = defaultdict(set)
+      for i,pat in enumerate(layer):
+        ops = (pat.op,) if pat.op is None else pat.op
+        dtype = (pat.dtype,) if pat.dtype is None else pat.dtype
+        std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) or pat._in_src is None else pat._in_src
+        srcs = tuple(itertools.product(*tuple(src_states[s] for s in std_src)))
+        pat_srcs[pat] = srcs = srcs if srcs else ((),)
+        symbols = set((op, dt, pat.arg, s) for op in ops for dt in dtype for s in srcs)
+        for sym in symbols: sym_indices[sym].add(i)
+      
+      # group symbols that always appear together
+      sym_groups = defaultdict(set)
+      for sym,i in sym_indices.items(): sym_groups[frozenset(i)].add(sym)
+      # TODO: not quite right, must include all symbols in the alphabet
+      # add new state transitions to the table of each matching symbol in the alphabet
+      for i,symbols in enumerate(sym_groups.values()):
+        for sym in symbols: self.tables.setdefault((sym[0], sym[1], sym[2]), {})[sym[3]] = i+self.num_states
+      # set possible states for each pat in layer
+      new_states = {pat:tuple(i+self.num_states for i,symbol in enumerate(sym_groups.values()) if _match(symbol, pat, pat_srcs[pat])) for pat in layer}
+      src_states.update(new_states)
+      self.num_states += len(sym_groups)
 
 # *** simple graph rewrite engine ***
 
