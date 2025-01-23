@@ -1940,7 +1940,7 @@ class TestSwizzle(unittest.TestCase):
     ret = swizzle_rewrite(sink)
     self.assertEqual(swizzle_cnt(ret), 0)
 
-  @unittest.skip # TODO: this swizzle can't be decided after the ADD
+  @unittest.skip("this swizzle can't be decided after the ADD")
   def test_swizzle_failure_permute(self):
     sink = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
