@@ -388,10 +388,10 @@ sym = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
-  # remove CONST/BIND/BUFFER/VIEW from SINK
+  # remove CONST/BIND/BUFFER from SINK
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
-      if (new_src:=tuple(x.base for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
+      if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
 # ** this decides which ops get realized
