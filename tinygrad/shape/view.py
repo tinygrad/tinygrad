@@ -260,7 +260,7 @@ class View:
     if milp(np.zeros(n1+n2+1), constraints=(valid_constr, lt0_constr), bounds=bounds, integrality=i9y).x is not None: return None
     return View.create(vm1.shape, tuple(int(x) for x in (st2@A)), int(st2@o+vm2.offset), None)
 
-#  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm2): return self._newadd(vm2) if getenv("NEWADD",0) else self._oldadd(vm2)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
