@@ -883,7 +883,7 @@ class TreeAutomaton:
         srcs = tuple(itertools.product(*tuple(src_states[s] for s in std_src)))
         # src permutations are valid
         if isinstance(pat._in_src, list): srcs = tuple(p for s in srcs for p in itertools.permutations(s))
-        srcs = srcs if srcs else ((),)
+        srcs = srcs or ((),)
         pat_syms[pat] = set((sym, s) for sym in self.alphabet if _match(sym, pat) for s in srcs)
         for sym in pat_syms[pat]: sym_indices[sym].add(i)
 
