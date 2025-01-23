@@ -848,22 +848,21 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
   def top_down_rewrite(self, sink:UOp) -> UOp:
-    stack: list[tuple[UOp, int]] = [(sink, 0)]
-    old2new: dict[UOp, UOp] = {}
+    stack: list[tuple[UOp, Optional[bool]]] = [(sink, False)]
     while stack:
-      n, stage = stack.pop()
-      if stage == 0:
+      n, processed = stack.pop()
+      if processed is False:
         if n not in self.replace:
-          stack.append((n, 1))
-          stack.extend([(x, 0) for x in n.src[::-1]])
-      elif stage == 1:
-        new_n = self.pm.rewrite(n, self.ctx) if (new_src:=tuple(self.replace[x] for x in n.src)) == n.src else UOp(n.op, n.dtype, new_src, n.arg)
-        if new_n is None: self.replace[n] = n
-        elif new_n in self.replace: self.replace[n] = self.replace[new_n]
+          stack.append((n, True))
+          stack.extend([(x, False) for x in n.src[::-1]])
         else:
-          stack.extend([(n, 2),(new_n, 0)])
-          old2new[n] = new_n
-      else: self.replace[n] = self.replace[old2new[n]] # this is stage=2
+          while stack and stack[-1][1] is None: self.replace[stack.pop()[0]] = n
+      elif processed is True:
+        new_n = self.pm.rewrite(n, self.ctx) if (new_src:=tuple(self.replace[x] for x in n.src)) == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+        if new_n is None:
+          self.replace[n] = n
+          while stack and stack[-1][1] is None: self.replace[stack.pop()[0]] = n
+        else: stack.extend(((n, None),(new_n, False)))
     return self.replace[sink]
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
