@@ -45,7 +45,7 @@ def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape
 # ***** Unary Ops (math) *****
 def Not(x:Tensor): return x.logical_not()
 def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):
-    return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
+  return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 # ***** Unary Ops (activation) *****
 def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
@@ -58,8 +58,8 @@ def FastGelu(x:Tensor, bias:Tensor|None=None):
   return (x + bias).gelu() if bias is not None else x.gelu()
 # TODO: fix this
 def PRelu(X:Tensor, slope:Tensor):
-    slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
-    return (X > 0).where(X, X * slope)
+  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
+  return (X > 0).where(X, X * slope)
 def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
 def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
