@@ -514,9 +514,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     for buf_uop in store_uops:
       for luop in ctx.tensor_uops[buf_uop]:
         sym_uop = tensor_map.get(luop, luop)
+        # first, we apply the base ShapeTracker on the buffer
         becomes = buf_uop.view(unwrap(sym_uop.base.st))
-        if sym_uop is not sym_uop.base: becomes = becomes.view(unwrap(sym_uop.st))
-        ctx.becomes_map[luop] = becomes
+        # we also apply a second VIEW if there are movement ops after STORE
+        ctx.becomes_map[luop] = becomes if sym_uop is sym_uop.base else becomes.view(unwrap(sym_uop.st))
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
