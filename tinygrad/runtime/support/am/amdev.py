@@ -179,10 +179,10 @@ class AMMemoryManager:
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
-        frag = 0 if pte_covers == 0x1000 else 0x9
         for pte_off in range(pte_cnt):
           assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, frag=frag, valid=True)
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers,
+            uncached=uncached, system=system, snooped=snooped, frag=0 if pte_covers == 0x1000 else 0x9, valid=True)
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
