@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
-from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
+from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv, getenv
 import numpy as np
 from scipy.optimize import LinearConstraint, Bounds, milp
 
@@ -211,7 +211,7 @@ class View:
     return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
 
 #  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def _newadd(self, vm1):
+  def _newadd(self, vm1, *, skip_mask=False):
     vm2 = self
     if vm2.contiguous: return vm1
     if vm1.contiguous and vm1.shape == vm2.shape: return vm2
@@ -221,6 +221,7 @@ class View:
       return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
     if not all_int(vm1.shape): return None
     
+#    import pdb; pdb.set_trace()
     n1, n2 = len(vm1.shape), len(vm2.shape)
     m1, M1 = (0,)*n1, vm1.shape
     m2, M2 = tuple(zip(*vm2.mask)) if vm2.mask is not None else ((0,)*n2, vm2.shape)
@@ -230,34 +231,37 @@ class View:
     A = np.array([unravel(vm2.shape, st+vm1.offset) for st in vm1.strides]).T - o[:,None]
     # basis for zeros of the unravel congruence
     K = np.array([ [vm2.shape[0]]+[0]*(n2-1), *([0]*(i)+[-1,vm2.shape[i+1]]+[0]*(n2-i-2) for i in range(0, n2-1)) ]).T
-    valid_constraint = LinearConstraint(np.concatenate((A,K,o[:,None]),1), m2, M2-1)
+    valid_constr = LinearConstraint(np.concatenate((A,K,o[:,None]),1), m2, M2-1)
     bounds = Bounds(np.array(list(m1) + [-np.inf]*n2 + [1]), np.array(list(M1) + [np.inf]*n2 + [2])-1)
     i9y = np.ones(n1+n2+1)
-    # check that the mask is not all-invalid
-    if milp(np.zeros(n1+n2+1), constraints=valid_constraint, bounds=bounds, integrality=i9y).x is None:
-      return View.create(vm1.shape, (0,)*n1, 0, ((0,0),)*n1)
-    m3, M3 = [], []
-    for j in range(n1):
-      m3.append(int(milp(np.arange(n1+n2+1)==j, constraints=valid_constraint, bounds=bounds, integrality=i9y).x[j]))
-      M3.append(int(milp(0-(np.arange(n1+n2+1)==j), constraints=valid_constraint, bounds=bounds, integrality=i9y).x[j]+1))
-    bounds = Bounds(np.array(list(m3) + [-np.inf]*n2 + [1]), np.array(list(M3) + [np.inf]*n2 + [2])-1)
-    # test all invalid regions in vm2 to make sure that the interior of the merged mask is never invalid
-    for j in range(n2):
-      constr = LinearConstraint(np.concatenate((A,K,o[:,None]),1), 0, np.where(np.arange(n2)==j, m2[j], sh2-1))
-      if milp(np.zeros(n1+n2+1), constraints=constr, bounds=bounds, integrality=i9y).x is not None: return None
-      constr = LinearConstraint(np.concatenate((A,K,o[:,None]),1), np.where(np.arange(n2)==j, M2[j], 0), sh2)
-      if milp(np.zeros(n1+n2+1), constraints=constr, bounds=bounds, integrality=i9y).x is not None: return None
+    if not skip_mask:
+      # check that the mask is not all-invalid
+      if milp(np.zeros(n1+n2+1), constraints=valid_constr, bounds=bounds, integrality=i9y).x is None:
+        return View.create(vm1.shape, (0,)*n1, 0, ((0,0),)*n1)
+      m3, M3 = [], []
+      for j in range(n1):
+        m3.append(int(milp(np.arange(n1+n2+1)==j, constraints=valid_constr, bounds=bounds, integrality=i9y).x[j]))
+        M3.append(int(milp(0-(np.arange(n1+n2+1)==j), constraints=valid_constr, bounds=bounds, integrality=i9y).x[j]+1))
+      bounds = Bounds(np.array(list(m3) + [-np.inf]*n2 + [1]), np.array(list(M3) + [np.inf]*n2 + [2])-1)
+      # test all invalid regions in vm2 to make sure that the interior of the merged mask is never invalid
+      for j in range(n2):
+        constr = LinearConstraint(np.concatenate((A,K,o[:,None]),1), 0, np.where(np.arange(n2)==j, m2[j]-1, sh2-1))
+        if milp(np.zeros(n1+n2+1), constraints=constr, bounds=bounds, integrality=i9y).x is not None: return None
+        constr = LinearConstraint(np.concatenate((A,K,o[:,None]),1), np.where(np.arange(n2)==j, M2[j], 0), sh2-1)
+        if milp(np.zeros(n1+n2+1), constraints=constr, bounds=bounds, integrality=i9y).x is not None: return None
+      # recalculate A and o to reflect the merged mask properly
+      if (merged := vm2._newadd(vm1.shrink(mask:=tuple(zip(m3, M3))), skip_mask=True)) is None: return None
+      return merged.pad(tuple((b,s-e) for (b,e),s in zip(mask, vm1.shape)))
     # check that the spanned copies of the principal region have a zero that is orthogonal to st2
     st2 = np.array(vm2.strides)
-    st3 = st2@K
-    gt0_constr = LinearConstraint(np.concatenate((np.zeros((1,n1)), st3[None,:], np.zeros((1,1))),1), 1, np.inf)
-    lt0_constr = LinearConstraint(np.concatenate((np.zeros((1,n1)), st3[None,:], np.zeros((1,1))),1), -np.inf, -1)
-    if milp(np.zeros(n1+n2+1), constraints=gt0_constr, bounds=bounds, integrality=i9y).x is not None: return None
-    if milp(np.zeros(n1+n2+1), constraints=lt0_constr, bounds=bounds, integrality=i9y).x is not None: return None
-    return View.create(vm1.shape, tuple(int(x) for x in st3), int(st2@o+vm2.offset), tuple(zip(m3, M3)))
+    gt0_constr = LinearConstraint(np.concatenate((np.zeros((1,n1)), (st2@K)[None,:], np.zeros((1,1))),1), 1, np.inf)
+    lt0_constr = LinearConstraint(np.concatenate((np.zeros((1,n1)), (st2@K)[None,:], np.zeros((1,1))),1), -np.inf, -1)
+    if milp(np.zeros(n1+n2+1), constraints=(valid_constr, gt0_constr), bounds=bounds, integrality=i9y).x is not None: return None
+    if milp(np.zeros(n1+n2+1), constraints=(valid_constr, lt0_constr), bounds=bounds, integrality=i9y).x is not None: return None
+    return View.create(vm1.shape, tuple(int(x) for x in (st2@A)), int(st2@o+vm2.offset), None)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __add__(self, vm2): return self._newadd(vm2)
+#  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def __add__(self, vm2): return self._newadd(vm2) if getenv("NEWADD",0) else self._oldadd(vm2)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[View]:
