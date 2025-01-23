@@ -30,7 +30,6 @@ def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-  # TODO: see if this can just use Tensor
   ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype is not None else x.dtype)
   return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
@@ -393,7 +392,6 @@ def LRN(x:Tensor, size:int, alpha:float=1e-4, beta:float=0.75, bias:float=1.0):
 
 def NegativeLogLikelihoodLoss(x:Tensor, target:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean"):
   return x.nll_loss(target, weight, ignore_index, reduction)
-
 def SoftmaxCrossEntropyLoss(scores:Tensor, labels:Tensor, weights:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean"):
   log_probs = scores.log_softmax(1)
   return log_probs.nll_loss(labels, weights, ignore_index, reduction), log_probs
@@ -490,6 +488,7 @@ def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reducti
 def GatherElements(x:Tensor, indices:Tensor, axis:int):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
+
 def Compress(inp:Tensor, condition:list[bool], axis:int|None=None):
   if axis is None:
     inp = inp.flatten()
