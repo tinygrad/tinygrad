@@ -326,7 +326,7 @@ if __name__ == "__main__":
         if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
         result = colored("PASS", "green")
       except Exception as e:
-        result = f"{colored("FAIL", "yellow")} {e}"
+        result = f"{colored('FAIL', 'yellow')} {e}"
     except Exception as e:
-      result = f"{colored("FAIL", "red")} {e}"
+      result = f"{colored('FAIL', 'red')} {e}"
     print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")
