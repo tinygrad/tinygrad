@@ -859,7 +859,7 @@ class TreeAutomaton:
       ops = (pat.op,) if pat.op is None else pat.op
       dtypes = (pat.dtype,) if pat.dtype is None else pat.dtype
       self.alphabet.update(set((op, dt, pat.arg) for op in ops for dt in dtypes))
-      
+
     def _build_pat_forest(pat: UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
       height = max(_build_pat_forest(s) for s in std_src) if std_src else 0
@@ -877,15 +877,15 @@ class TreeAutomaton:
     src_states = {None: ()}
     for layer in self.pat_forest.values():
       # record where each matching symbol appears
-      sym_indices, pat_symbols = defaultdict(set), {}
+      sym_indices, pat_syms = defaultdict(set), {}
       for i,pat in enumerate(layer):
         std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) or pat._in_src is None else pat._in_src
         srcs = tuple(itertools.product(*tuple(src_states[s] for s in std_src)))
         # src permutations are valid
         if isinstance(pat._in_src, list): srcs = tuple(p for s in srcs for p in itertools.permutations(s))
         srcs = srcs if srcs else ((),)
-        pat_symbols[pat] = set((sym, s) for sym in self.alphabet if _match(sym, pat) for s in srcs)
-        for sym in pat_symbols[pat]: sym_indices[sym].add(i)
+        pat_syms[pat] = set((sym, s) for sym in self.alphabet if _match(sym, pat) for s in srcs)
+        for sym in pat_syms[pat]: sym_indices[sym].add(i)
 
       # group symbols that always appear together
       sym_groups = defaultdict(set)
@@ -894,8 +894,7 @@ class TreeAutomaton:
       for i,syms in enumerate(sym_groups.values()):
         for sym in syms: self.tables.setdefault((sym[0]), {})[sym[1]] = i+self.num_states
       # set possible states for each pat in layer
-      src_states.update({pat:tuple(i+self.num_states for i,syms in enumerate(sym_groups.values()) \
-                                if all(sym in pat_symbols[pat] for sym in syms)) for pat in layer})
+      src_states.update({pat:tuple(i+self.num_states for i,syms in enumerate(sym_groups.values()) if syms.issubset(pat_syms[pat])) for pat in layer})
       self.num_states += len(sym_groups.values())
 
 # *** simple graph rewrite engine ***
