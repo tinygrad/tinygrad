@@ -1,12 +1,14 @@
 from typing import Callable, Any, Sequence
-import importlib, functools, dataclasses
+import functools, dataclasses
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType, dtypes
 from tinygrad.device import is_dtype_supported
+from extra.onnx_ops import collect_ops
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
+from onnx.helper import tensor_dtype_to_np_dtype, VERSION_TABLE
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
@@ -46,7 +48,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
   if onnx_tensor.HasField("raw_data"):
-    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
     if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
     return Tensor(np_buffer, dtype=dtype)
   return Tensor(None)
@@ -124,13 +126,8 @@ class OnnxRunner:
     self.variable_dims: dict[str, int] = {}
 
     # TODO: move extra.onnx_ops here so we don't have to deal with annoying circular import
-    # TODO: clean up opset stuff after moving extra.onnx_ops here
-    self.onnx_ops_module = importlib.import_module('extra.onnx_ops')
-    self.onnx_ops = {
-      **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
-      "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-      "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf", "Mod")},
-    }
+    self.onnx_ops = collect_ops(self.opset_version)
+    if unimplemented := {n.op for n in self.graph_nodes} - set(self.onnx_ops): raise NotImplementedError(f"Unimplemented ops: {unimplemented}")
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -147,18 +144,6 @@ class OnnxRunner:
       if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
-  def _dispatch_op(self, op, inps, opts):
-    if op in self.onnx_ops: return self.onnx_ops[op](*inps, **opts)
-    if hasattr(self.onnx_ops_module, op):
-      fxn = getattr(self.onnx_ops_module, op)
-      if isinstance(fxn, dict):
-        for k in sorted(fxn.keys()):
-          if k <= self.opset_version:
-            real_fxn = fxn[k]
-      else: real_fxn = fxn
-      return real_fxn(*inps, **opts)
-    raise NotImplementedError(f"{op=} not supported")
-
   def __call__(self, inputs:dict[str, Any], debug=debug):
     for name, input_spec in self.graph_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
@@ -174,7 +159,7 @@ class OnnxRunner:
 
       if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
-      ret = self._dispatch_op(node.op, inps, opts)
+      ret = self.onnx_ops[node.op](*inps, **opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
