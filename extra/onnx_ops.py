@@ -11,10 +11,10 @@ def Identity(x:Tensor): return x
 def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
             value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
   if value is not None: return value
-  if value_float is not None: return Tensor(value_float, dtype=dtypes.float32)
-  if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32)
-  if value_int is not None: return Tensor(value_int, dtype=dtypes.int64)
-  if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64)
+  if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
+  if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
+  if value_int is not None: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
+  if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
   if value_string is not None or value_strings is not None and sparse_value is not None:
     raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
