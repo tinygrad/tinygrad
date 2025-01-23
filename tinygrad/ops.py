@@ -857,6 +857,7 @@ class RewriteContext:
       elif stage == 1:
         new_n = self.pm.rewrite(n, self.ctx) if (new_src:=tuple(self.replace[x] for x in n.src)) == n.src else UOp(n.op, n.dtype, new_src, n.arg)
         if new_n is None: self.replace[n] = n
+        elif new_n in self.replace: self.replace[n] = self.replace[new_n] # This is important for speed
         else:
           stack.extend([(n, 2),(new_n, 0)])
           old2new[n] = new_n
