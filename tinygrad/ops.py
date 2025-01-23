@@ -853,11 +853,13 @@ class RewriteContext:
     while stack:
       n, stage = stack.pop()
       if stage == 0:
-        if n not in self.replace: stack.extend([(x, y) for x, y in zip((n, *(n.src[::-1])), itertools.chain([1], itertools.repeat(0)))])
+        if n not in self.replace:
+          stack.append((n, 1))
+          stack.extend([(x, 0) for x in n.src[::-1] if x not in self.replace])
       elif stage == 1:
         new_n = self.pm.rewrite(n, self.ctx) if (new_src:=tuple(self.replace[x] for x in n.src)) == n.src else UOp(n.op, n.dtype, new_src, n.arg)
         if new_n is None: self.replace[n] = n
-        elif new_n in self.replace: self.replace[n] = self.replace[new_n] # This is important for speed
+        elif new_n in self.replace: self.replace[n] = self.replace[new_n]
         else:
           stack.extend([(n, 2),(new_n, 0)])
           old2new[n] = new_n
