@@ -855,7 +855,7 @@ class RewriteContext:
       if stage == 0:
         if n not in self.replace:
           stack.append((n, 1))
-          stack.extend([(x, 0) for x in n.src[::-1] if x not in self.replace])
+          stack.extend([(x, 0) for x in n.src[::-1]])
       elif stage == 1:
         new_n = self.pm.rewrite(n, self.ctx) if (new_src:=tuple(self.replace[x] for x in n.src)) == n.src else UOp(n.op, n.dtype, new_src, n.arg)
         if new_n is None: self.replace[n] = n
