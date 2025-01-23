@@ -6,7 +6,7 @@ from tinygrad.helpers import prod, flatten, make_tuple
 from extra.onnx import dtype_parse, _cached_to_python_const
 import numpy as np
 
-# ***** Property Ops *****
+# ***** Property/Graph Ops *****
 def Identity(x:Tensor): return x
 def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
             value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
