@@ -97,6 +97,7 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # VIEW is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
+    tensor_map[ret.buf_uop] = tensor_map.get(buf, [buf])
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
@@ -107,7 +108,7 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
   op = buf.replace(dtype=dtype, src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this buffer
-  ctx.tensor_uops[buf_uop] = tensor_map[buf]
+  ctx.tensor_uops[buf_uop] = tensor_map.get(buf, [buf])
   # (early) bufferize
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
   return ret
@@ -511,7 +512,11 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
     for buf_uop in store_uops:
-      for luop in ctx.tensor_uops[buf_uop]: ctx.becomes_map[luop] = buf_uop.view(unwrap(luop.st))
+      for luop in ctx.tensor_uops[buf_uop]:
+        sym_uop = tensor_map.get(luop, luop)
+        buf_view = buf_uop.view(unwrap(sym_uop.base.st))
+        if sym_uop.op is Ops.VIEW: buf_view = buf_view.view(unwrap(sym_uop.st))
+        ctx.becomes_map[luop] = buf_view
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
