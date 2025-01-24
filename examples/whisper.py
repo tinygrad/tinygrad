@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math
+import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math, argparse
 import torch
 from scipy.special import log_softmax, logsumexp, softmax
 import torch.nn.functional as F
@@ -279,8 +279,8 @@ def load_file_waveform(filename):
   waveform, _ = librosa.load(filename, sr=RATE)
   return waveform
 
-def transcribe_file(model, enc: Encoding, filename, output_fh):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh)
+def transcribe_file(model, enc: Encoding, filename, output_fh, beam=False):
+  return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam)
 
 def compression_ratio(text) -> float:
   text_bytes = text.encode("utf-8")
@@ -426,12 +426,13 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
   beam_sequence_probs = []
   for i in (_trange:=trange(num_sample)):
     to_decode = Tensor(next_tokens)
-    logits = model.decoder(to_decode, pos, encoded_audio)[:, -1].contiguous().numpy()
+    logits = model.decoder(to_decode, pos, encoded_audio)
+    logits = logits[:, -1].contiguous().numpy()
     if i == 0: suppress_blank(logits, enc)
     non_speech_filter(logits)
     timestamp_filter2(logits, enc, ctx, sample_begin)
     timestamp_filter(logits, enc)
-    if beam:
+    if beam and temperature == 0:
       sampled = beamsearch_sampling(logits, model, sum_probs, ctx)
       ctx = sampled.ctx
       next_tokens = sampled.next_tokens
@@ -451,12 +452,11 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
       sum_probs += probs
       next_tokens = replace_eot(next_tokens.flatten(), ctx, eot)
       done = (next_tokens == eot).all()
+      next_tokens.shape[-1]
       if done: break
       next_tokens = next_tokens.reshape((-1, 1))
       ctx = np.concat((ctx, next_tokens), axis=1)
     pos = ctx.shape[-1] - 1
-  else:
-    return None
   return ctx, sum_probs
 
 @dataclass
@@ -489,23 +489,27 @@ def segment_and_seek(tokens: list[int], enc: Encoding, timeoffset: int):
       selected_with_time = tokens[s: e+1]
       yield Segment(start_time, end_time, enc.decode(selected), selected_with_time)
   
-
-def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh, truncate=False):
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
-  nsample = model.decoder.max_tokens_to_sample
-
+def get_start_tokens(enc: Encoding, is_multilingual: bool=False):
   start_tokens = [enc._special_tokens["<|startoftranscript|>"]]
-  if model.is_multilingual:
+  if is_multilingual:
     # TODO detect language
     language_token = enc._special_tokens["<|startoftranscript|>"] + 1 + tuple(LANGUAGES.keys()).index("en")
     start_tokens.append(language_token)
     start_tokens.append(enc._special_tokens["<|transcribe|>"])
+  return start_tokens
+  
+
+def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, output_fh, truncate=False, beam=False):
+  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  nsample = model.decoder.max_tokens_to_sample
   eot = enc._special_tokens["<|endoftext|>"]
+  start_tokens = get_start_tokens(enc, model.is_multilingual)
   ctx = np.array(start_tokens)
 
   curr_frame = 0
   start_time = 0
   total_time = log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
+  print(f"{total_time=}")
   i = 0
   while start_time < total_time:
     curr_frame = int(start_time) * 100
@@ -518,37 +522,47 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
     to_decode = np.tile(ctx, (5, 1))
 
     for t in [0, 0.2, 0.4, 0.6, 0.8, 1.0]:
-      infer_result = inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc)
-      if infer_result is None: continue
+      print("temperature", t)
+      infer_result = inferloop(model, to_decode, encoded_audio, t, (nsample-len(start_tokens))*2, enc, beam)
+      if infer_result is None:
+        print("infer result is None, resampling")
+        continue
       inferred, sum_probs = infer_result
       sum_probs = sum_probs.tolist()
       avg_probs = []
       for i, sequence in enumerate(inferred):
         avg_probs.append(sum_probs[i] / len(sequence))
-      print(f"{avg_probs=}")
       candidate_idx = avg_probs.index(max(avg_probs))
-      print(f"{candidate_idx=}")
+      print(f"\033[34m{avg_probs=} {candidate_idx=}\033[0m")
       selected: np.ndarray = inferred[candidate_idx]
+      selected_avg_prob = avg_probs[candidate_idx]
       eoti = index[0] if (index:=(np.where(selected == eot)[0])).size > 0 else None
       soti = np.where(selected == start_tokens[-1])[0][0] + 1
       tokens = selected[soti:eoti]
       text = enc.decode(tokens)
       print(f"Decoder output: {text=}")
-      if compression_ratio(text) < 2.4: # this threshold is taken from openai's implementation
-        print(f"{avg_probs=}")
-        segments = list(segment_and_seek(tokens, enc, start_time))
-        context_for_next = []
-        for segment in segments:
-          text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
-          print(f"\033[31m{text}\033[0m")
-          output_fh.write(f"{text}\n")
-          context_for_next.extend(segment.tokens)
-        start_time = segment.end
-        break
+      compression = compression_ratio(text)
+      print(f"\033[33m{compression=}, {selected_avg_prob=}\033[0m")
+      if compression >= 2.4:
+        print("Too repetivie, resample")
+        continue
+      if selected_avg_prob < -1.0:
+        print("Avg log prob too low, resample")
+        continue
+      segments = list(segment_and_seek(tokens, enc, start_time))
+      context_for_next = []
+      for segment in segments:
+        text = f"{format_time(int(segment.start))} -> {format_time(int(segment.end))}: {segment.text}"
+        print(f"\033[31m{text}\033[0m")
+        output_fh.write(f"{text}\n")
+        context_for_next.extend(segment.tokens)
+      start_time = segment.end
+      break
     else:
-      selected = np.array([enc._special_tokens['<|nospeech|>']])
       context_for_next = np.array([])
       start_time += 30
+      ctx = np.array(start_tokens)
+      continue
     ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
 
 
@@ -567,11 +581,16 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--model", type=str, default="tiny.en", help="name of model")
+  parser.add_argument("--audio", type=str, required=True, help="path to an mp3 audio file")
+  parser.add_argument("--beam", action=argparse.BooleanOptionalAction, default=False, help="Whether to use beam decoding")
+  args = parser.parse_args()
+  model, enc = init_whisper(args.model, batch_size=1)
 
   if len(sys.argv) > 1:
     with open("transcribed.txt", "w") as output_fh:
-      transcribe_file(model, enc, sys.argv[1], output_fh)
+      transcribe_file(model, enc, args.audio, output_fh, args.beam)
   else:
     # online
     q = multiprocessing.Queue()
