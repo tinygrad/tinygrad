@@ -3,12 +3,13 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, type_verify, buffers
 from tinygrad.ops import can_pad, identity_element, resolve, symbolic_simple, view_left, merge_views
-from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
+from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap, flatten
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY
 from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
+from tinygrad.multi import get_multi_map
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -38,6 +39,7 @@ tensor_uop_spec = PatternMatcher([
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
+  (UPat(Ops.MULTI, name="root"), lambda root: all_same([x.dtype for x in root.src]) and isinstance(root.arg, tuple)),
 
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
@@ -90,8 +92,8 @@ class ScheduleContext:
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
 def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
-  # SINK is passthrough
-  if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
+  # SINK/MULTI is passthrough
+  if buf.op in {Ops.SINK, Ops.MULTI}: return buf.replace(src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
   # skip creating buffers for CONST/BIND/DEVICE/BUFFER
   if buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
   # VIEW is passthrough
@@ -368,6 +370,8 @@ sym = symbolic_simple+PatternMatcher([
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH is a NOOP here
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
+  # MULTI in sources is a NOOP
+  (UPat(set(Ops), name="root"), lambda root: root.replace(src=a) if (a:=tuple(flatten(x.src if x.op is Ops.MULTI else [x] for x in root.src))) != root.src else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
@@ -494,9 +498,18 @@ remove_movement_ops = PatternMatcher([
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
-  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx:=ScheduleContext())
+  # remap multi
+  multi_map = get_multi_map(big_sink)
+  rev_multi_map: dict[UOp, list[UOp]] = {}
+  for k,v in multi_map.items(): rev_multi_map.setdefault(v, []).append(k)
+  # simplify tensors
+  tensor_map = graph_rewrite_map(big_sink:=multi_map.get(big_sink, big_sink), remove_movement_ops+sym, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
-  for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
+  for k,v in tensor_map.items():
+    if (multi_k:=rev_multi_map.get(k)) is not None:
+      rev_tensor_map.setdefault(v, []).extend(multi_k)
+    else:
+      rev_tensor_map.setdefault(v, []).append(k)
   # add BUFFER uops
   sink = add_buffers(tensor_map[big_sink], rev_tensor_map, ctx, cache={})
   # add realizes
