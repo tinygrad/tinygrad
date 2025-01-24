@@ -150,6 +150,7 @@ class Ops(FastEnum):
 
   # device
   DEVICE = auto()
+  MULTI = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -281,6 +282,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    if self.op is Ops.MULTI:
+      return ShapeTracker.from_shape(
+        tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape)))
     # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -294,7 +299,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # only reduce ops are allowed to change shape, everything else derives shape from sources
     elif self.op in {Ops.REDUCE_AXIS, Ops.WMMA}: shape = src_sts[0].reduce(self.axis_arg)
     else: shape = src_sts[0].shape
-    from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(shape)
 
   @functools.cached_property
@@ -350,7 +354,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    return UOp.const(self.dtype, b) if self._device is None else UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
+    if self._device is None: return UOp.const(self.dtype, b)
+    if isinstance(self.device, tuple): return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
+    return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -389,7 +395,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     new_shape = unwrap(self.st).reduce(axis)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
-    if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
+    # TODO: this shouldn't be here, it belongs in scheduler! that's why it broke multi
+    if not SPLIT_REDUCEOP or isinstance(self._device, tuple) or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
 
@@ -410,6 +417,45 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
 
+  # *** from MultiLazyBuffer ***
+
+  def multi(self, *more:UOp, axis:int|None, real:list[bool]|None=None):
+    parents = (self,)+more
+    assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
+    return UOp(Ops.MULTI, self.dtype, parents, (axis, tuple(real if real is not None else [True]*len(parents))))
+
+  @property
+  def bounds(self):
+    if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
+    return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
+
+  @property
+  def axis(self):
+    assert self.op is Ops.MULTI
+    return self.arg[0]
+
+  @property
+  def real(self):
+    assert self.op is Ops.MULTI
+    return self.arg[1]
+
+  @property
+  def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
+
+  def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
+    if axis is None: lbs = [self] * len(devices)
+    else:
+      if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      sz = self.shape[axis] // len(devices)
+      sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
+      lbs, off = [], 0
+      for sz in sizes:
+        lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
+        off += sz
+    sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
+    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
+    return UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
+
   # *** from LazyBuffer ***
 
   @staticmethod
@@ -426,7 +472,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
     # otherwise it's just a VIEW(BUFFER)
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
-  def copy_to_device(self, device:str, clone:bool=False) -> UOp:
+  def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False) -> UOp:
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # COPY is COPY(DEVICE, copyin.base) -> VIEW(copyin.st)
@@ -439,8 +485,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
     return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  @property
-  def lbs(self): return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)
 
@@ -470,10 +514,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
   @property
-  def device(self) -> str: return unwrap(self._device)
+  def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
-  def _device(self) -> Optional[str]:
+  def _device(self) -> Optional[str|tuple[str, ...]]:
     if self.op is Ops.DEVICE: return self.arg
+    if self.op is Ops.MULTI: return tuple(cast(str, x.device) for x in self.src)
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
@@ -489,6 +534,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
     from tinygrad.device import Buffer
+    assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
     return ret
   @property
@@ -496,7 +542,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return self.src[0].realized
     return self.buffer if self.op is Ops.BUFFER else None
   @property
-  def is_realized(self) -> bool: return self.base.realized is not None
+  def is_realized(self) -> bool:
+    return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
 
   # *** uop Variable stuff ***
 
@@ -639,7 +686,7 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py",
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py", "multi.py",
                                                                                         "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
@@ -1269,18 +1316,19 @@ Variable = UOp
 
 ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 
-# *** uop swizzling ***
+# *** UOp merge views and swizzling ***
 
 merge_views = PatternMatcher([
-  (UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st)),
-  (UPat(Ops.VIEW, name="mv", src=(UPat.var("x"),)), lambda mv,x: x if mv.st.contiguous and x.st is not None and x.shape == mv.shape else None),
+  # VIEW(VIEW) merges to a single VIEW
+  (UPat(Ops.VIEW, name="vm1", src=(UPat(Ops.VIEW, name="vm2"),)), lambda vm1,vm2: vm2.replace(arg=vm2.st+vm1.st)),
+  (UPat(Ops.VIEW, name="vm", src=(UPat.var("x"),)), lambda vm,x: x if vm.st.contiguous and x.st is not None and x.shape == vm.shape else None),
 ])
 
-# push VIEW to loads
+# push VIEW to parents
 view_left = merge_views+PatternMatcher([
-  # VIEW before elementwise ops
-  (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"),
-   lambda e,v: e.replace(src=tuple(s if s.st is None else s.view(v.st) if s is s.base else s.base.view(s.st+v.st) for s in e.src))),
-  # early merge VIEW buffer ops
-  (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+  # VIEW before elementwise/buffer ops
+  (UPat(Ops.VIEW, name="vm", src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e"),)),
+   lambda e,vm: e.replace(src=tuple(s if s.st is None else s.view(vm.st) if s is s.base else s.base.view(s.st+vm.st) for s in e.src))),
+  (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.Buffer, name="b"),)),
+   lambda b,vm: b.replace(src=tuple((s.st+vm.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
 ])
