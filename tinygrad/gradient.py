@@ -12,7 +12,6 @@ def reduce_gradient(ctx:UOp, ret:UOp):
     return ((max_is_1s/div) * ctx.expand(ret.src[0].shape),)
   if ret.arg[0] == Ops.MUL: return ((ctx * ret).expand(ret.src[0].shape) / ret.src[0],)
 
-
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
