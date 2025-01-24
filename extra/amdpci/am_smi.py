@@ -1,10 +1,8 @@
 import time, mmap, sys, shutil, os, glob
-from tinygrad.helpers import to_mv
-from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
+from tinygrad.helpers import to_mv, DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, colored, ansilen
-from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0, smu_v13_0_0
-from tinygrad.runtime.support.allocator import TLSFAllocator
+from tinygrad.runtime.autogen.am import smu_v13_0_0
+from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_VERSION = 0xA0000002
@@ -35,11 +33,22 @@ def same_line(strs:list[list[str]], split=8) -> list[str]:
     ret.append(' '.join(line))
   return ret
 
+def get_bar0_size(pcibus):
+  resource_file = f"/sys/bus/pci/devices/{pcibus}/resource"
+  if not os.path.exists(resource_file): raise FileNotFoundError(f"Resource file not found: {resource_file}")
+
+  with open(resource_file, "r") as f: lines = f.readlines()
+  bar0_info = lines[0].split()
+  if len(bar0_info) < 3: raise ValueError("Unexpected resource file format for BAR0.")
+
+  start_hex, end_hex, _flags = bar0_info
+  return int(end_hex, 16) - int(start_hex, 16) + 1
+
 class AMSMI(AMDev):
   def __init__(self, pcibus):
     self.pcibus = pcibus
     self.bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
-    self.bar_size = {0: (32 << 30), 2: os.fstat(self.bar_fds[2]).st_size, 5: os.fstat(self.bar_fds[5]).st_size}
+    self.bar_size = {0: get_bar0_size(self.pcibus), 2: os.fstat(self.bar_fds[2]).st_size, 5: os.fstat(self.bar_fds[5]).st_size}
 
     assert self.bar_size[0] > (1 << 30), "Large BAR is not enabled"
 
@@ -78,6 +87,7 @@ class SMICtx:
       self.devs.append(AMSMI(pcibus))
     except Exception as e:
       if DEBUG >= 2: print(f"Failed to open AM device {pcibus}: {e}")
+      return
 
     self.opened_pcidevs.append(pcibus)
     if DEBUG >= 2: print(f"Opened AM device {pcibus}")
@@ -92,6 +102,7 @@ class SMICtx:
       if d.reg("regSCRATCH_REG7").read() != AM_VERSION:
         self.devs.remove(d)
         self.opened_pcidevs.remove(d.pcibus)
+        os.system('clear')
         if DEBUG >= 2: print(f"Removed AM device {d.pcibus}")
 
   def collect(self): return {d: d.smu.read_metrics() for d in self.devs}
@@ -150,5 +161,5 @@ if __name__ == "__main__":
     while True:
       smi_ctx.rescan_devs()
       smi_ctx.draw()
-      time.sleep(1) # Update every second
-  except KeyboardInterrupt: print("\nExiting...")
+      time.sleep(1)
+  except KeyboardInterrupt: print("Exiting...")
