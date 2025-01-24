@@ -1,14 +1,15 @@
-import time, mmap
-import shutil
-import os
-import glob
+import time, mmap, sys, shutil, os, glob
 from tinygrad.helpers import to_mv
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.autogen import libc
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, colored
+from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, colored, ansilen
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0, smu_v13_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+
+AM_VERSION = 0xA0000002
+
+def bold(s): return f"\033[1m{s}\033[0m"
 
 def color_temp(temp):
   if temp >= 87: return colored(f"{temp:>4}", "red")
@@ -17,139 +18,22 @@ def color_temp(temp):
 
 def color_voltage(voltage): return colored(f"{voltage/1000:>5.3f}V", "cyan")
 
-COLORS = {
-  'red': '\033[91m',
-  'green': '\033[92m',
-  'yellow': '\033[93m',
-  'blue': '\033[94m',
-  'reset': '\033[0m'
-}
-
-from dataclasses import dataclass
-from typing import List, Any, Callable
-from enum import Enum
-
-def create_bar(value, max_val=100, width=15):
-   filled = int(width * value / max_val)
-   return f"{'█' * filled}{'░' * (width - filled)}"
-
-# def draw_bar(percentage, width=40, fill='█', empty='░', color='green'):
-#   filled_width = int(width * percentage / 100)
-#   bar = fill * filled_width + empty * (width - filled_width)
-#   return f'{COLORS[color]}[{bar}]{COLORS["reset"]} {percentage:.1f}%'
-
-def clear_screen():
-  os.system('cls' if os.name == 'nt' else 'clear')
-
 def draw_bar(percentage, width=40, fill='█', empty='░'):
-  filled_width = int(width * percentage / 100)
+  filled_width = int(width * percentage)
   bar = fill * filled_width + empty * (width - filled_width)
-  return f'[{bar}] {percentage:.1f}%'
+  return f'[{bar}] {percentage*100:.1f}%'
 
-# typedef struct {
-#   uint32_t CurrClock[PPCLK_COUNT];
-
-#   uint16_t AverageGfxclkFrequencyTarget;
-#   uint16_t AverageGfxclkFrequencyPreDs;
-#   uint16_t AverageGfxclkFrequencyPostDs;
-#   uint16_t AverageFclkFrequencyPreDs;
-#   uint16_t AverageFclkFrequencyPostDs;
-#   uint16_t AverageMemclkFrequencyPreDs  ; // this is scaled to actual memory clock
-#   uint16_t AverageMemclkFrequencyPostDs  ; // this is scaled to actual memory clock
-#   uint16_t AverageVclk0Frequency  ;
-#   uint16_t AverageDclk0Frequency  ;
-#   uint16_t AverageVclk1Frequency  ;
-#   uint16_t AverageDclk1Frequency  ;
-#   uint16_t PCIeBusy;
-#   uint16_t dGPU_W_MAX;
-#   uint16_t padding;
-
-#   uint32_t MetricsCounter;
-
-#   uint16_t AvgVoltage[SVI_PLANE_COUNT];
-#   uint16_t AvgCurrent[SVI_PLANE_COUNT];
-
-#   uint16_t AverageGfxActivity    ;
-#   uint16_t AverageUclkActivity   ;
-#   uint16_t Vcn0ActivityPercentage  ;
-#   uint16_t Vcn1ActivityPercentage  ;
-
-#   uint32_t EnergyAccumulator;
-#   uint16_t AverageSocketPower;
-#   uint16_t AverageTotalBoardPower;
-
-#   uint16_t AvgTemperature[TEMP_COUNT];
-#   uint16_t AvgTemperatureFanIntake;
-
-#   uint8_t  PcieRate               ;
-#   uint8_t  PcieWidth              ;
-
-#   uint8_t  AvgFanPwm;
-#   uint8_t  Padding[1];
-#   uint16_t AvgFanRpm;
-
-
-#   uint8_t ThrottlingPercentage[THROTTLER_COUNT];
-#   uint8_t VmaxThrottlingPercentage;
-#   uint8_t Padding1[3];
-
-#   //metrics for D3hot entry/exit and driver ARM msgs
-#   uint32_t D3HotEntryCountPerMode[D3HOT_SEQUENCE_COUNT];
-#   uint32_t D3HotExitCountPerMode[D3HOT_SEQUENCE_COUNT];
-#   uint32_t ArmMsgReceivedCountPerMode[D3HOT_SEQUENCE_COUNT];
-
-#   uint16_t ApuSTAPMSmartShiftLimit;
-#   uint16_t ApuSTAPMLimit;
-#   uint16_t AvgApuSocketPower;
-
-#   uint16_t AverageUclkActivity_MAX;
-
-#   uint32_t PublicSerialNumberLower;
-#   uint32_t PublicSerialNumberUpper;
-
-# } SmuMetrics_t;
-
-def same_line(strs:list[list[str]]) -> list[str]:
+def same_line(strs:list[list[str]], split=8) -> list[str]:
   ret = []
-  max_width_in_block = max(len(line) for block in strs for line in block)
+  max_width_in_block = [max(ansilen(line) for line in block) for block in strs]
   max_height = max(len(block) for block in strs)
   for i in range(max_height):
     line = []
-    for block in strs:
-      if i < len(block):
-        line.append(block[i].ljust(max_width_in_block))
-      else:
-        line.append(' ' * max_width_in_block)
+    for bid, block in enumerate(strs):
+      if i < len(block): line.append(block[i] + ' ' * (split + max_width_in_block[bid] - ansilen(block[i])))
+      else: line.append(' ' * (split + max_width_in_block[bid]))
     ret.append(' '.join(line))
   return ret
-
-def draw_am_metrics(metrics_info):
-  """Draw all system metrics in a formatted console UI"""
-  # Get terminal size
-  terminal_width, _ = shutil.get_terminal_size()
-
-  # Create the header
-  print('=' * terminal_width)
-  print('AM Monitor'.center(terminal_width))
-  print('=' * terminal_width)
-  print()
-
-  for dev, metrics in metrics_info.items():
-    # draw_metrics_table(metrics, dev)
-    temps_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_TEMP_e__enumvalues.items() if k < smu_v13_0_0.TEMP_COUNT]
-    temps_table = ["=== Temps (°C) ==="] + [f"{name}: {color_temp(metrics.SmuMetrics.AvgTemperature[k])}" for k, name in temps_keys]
-    
-    voltage_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_SVI_PLANE_e__enumvalues.items() if k < smu_v13_0_0.SVI_PLANE_COUNT]
-    voltages_table = ["=== Voltages ==="] + [f"{name}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys] \
-                   + ["\n=== Power ==="] \
-                   + [f"AVG Socket Power: {metrics.SmuMetrics.AverageTotalBoardPower}W / {metrics.SmuMetrics.dGPU_W_MAX}W"] \
-                   + [draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 30)] \
-                   + [f"AVG BoardPower: {metrics.SmuMetrics.AverageSocketPower}W"] \
-                   + [draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 30)] \
-
-    tables = same_line([temps_table, voltages_table])
-    print(tables)
-    print('\n'.join(tables))
 
 class AMSMI(AMDev):
   def __init__(self, pcibus):
@@ -165,8 +49,8 @@ class AMSMI(AMDev):
     self._run_discovery()
     self._build_regs()
 
-    if self.reg("regSCRATCH_REG7").read() != (am_version:=0xA0000002):
-      raise Exception(f"Unsupported AM version: {am_version:x}")
+    if self.reg("regSCRATCH_REG7").read() != AM_VERSION:
+      raise Exception(f"Unsupported AM version: {self.reg('regSCRATCH_REG7').read():x}")
 
     self.is_booting, self.smi_dev = True, True
     self.partial_boot = True # do not init anything
@@ -187,6 +71,7 @@ class SMICtx:
   def __init__(self):
     self.devs = []
     self.opened_pcidevs = []
+    self.prev_lines_cnt = 0
 
   def _open_am_device(self, pcibus):
     try:
@@ -203,32 +88,67 @@ class SMICtx:
       if d not in self.opened_pcidevs:
         self._open_am_device(d)
 
+    for d in self.devs:
+      if d.reg("regSCRATCH_REG7").read() != AM_VERSION:
+        self.devs.remove(d)
+        self.opened_pcidevs.remove(d.pcibus)
+        if DEBUG >= 2: print(f"Removed AM device {d.pcibus}")
+
   def collect(self): return {d: d.smu.read_metrics() for d in self.devs}
 
-# def find_am_lock_files(path='/tmp'):
-#   pattern = os.path.join(path, 'am_*.lock')
-#   return glob.glob(pattern)
+  def draw(self):
+    terminal_width, _ = shutil.get_terminal_size()
 
-# opened_devs = []
-# def update_device_list():
-#   files = find_am_lock_files()
-#   devs = [f[8:-5] for f in files]
-  
+    dev_metrics = self.collect()
+    dev_content = []
+    for dev, metrics in dev_metrics.items():
+      device_line = [f"PCIe device: {bold(dev.pcibus)}"] + [""]
+      activity_line = [f"GFX Activity  {draw_bar(metrics.SmuMetrics.AverageGfxActivity / 100, 50)}"] \
+                    + [f"UCLK Activity {draw_bar(metrics.SmuMetrics.AverageUclkActivity / 100, 50)}"] + [""]
 
-# def update_smu_info():
-#   files = find_am_lock_files()
-#   print([f[8:-5] for f in files])
+      # draw_metrics_table(metrics, dev)
+      temps_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_TEMP_e__enumvalues.items() if k < smu_v13_0_0.TEMP_COUNT]
+      temps_table = ["=== Temps (C) ==="] + [f"{name:<15}: {color_temp(metrics.SmuMetrics.AvgTemperature[k])}" for k, name in temps_keys]
 
-def main():
-  smi_ctx = SMICtx()
-  while True:
-    smi_ctx.rescan_devs()
-    clear_screen()
-    draw_am_metrics(smi_ctx.collect())
-    time.sleep(2)  # Update every second
+      voltage_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_SVI_PLANE_e__enumvalues.items() if k < smu_v13_0_0.SVI_PLANE_COUNT]
+      voltages_table = ["=== Voltages ==="] + [f"{name:<24}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys] \
+                    + ["", "=== Power ==="] \
+                    + [f"AVG Socket Power: {metrics.SmuMetrics.AverageTotalBoardPower}W / {metrics.SmuMetrics.dGPU_W_MAX}W"] \
+                    + [draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 30)] \
+
+      frequency_table = ["=== Frequencies ===",
+        f"GFXCLK Target : {metrics.SmuMetrics.AverageGfxclkFrequencyTarget} MHz",
+        f"GFXCLK PreDs  : {metrics.SmuMetrics.AverageGfxclkFrequencyPreDs} MHz",
+        f"GFXCLK PostDs : {metrics.SmuMetrics.AverageGfxclkFrequencyPostDs} MHz",
+        f"FCLK PreDs    : {metrics.SmuMetrics.AverageFclkFrequencyPreDs} MHz",
+        f"FCLK PostDs   : {metrics.SmuMetrics.AverageFclkFrequencyPostDs} MHz",
+        f"MCLK PreDs    : {metrics.SmuMetrics.AverageMemclkFrequencyPreDs} MHz",
+        f"MCLK PostDs   : {metrics.SmuMetrics.AverageMemclkFrequencyPostDs} MHz",
+        f"VCLK0         : {metrics.SmuMetrics.AverageVclk0Frequency} MHz",
+        f"DCLK0         : {metrics.SmuMetrics.AverageDclk0Frequency} MHz",
+        f"VCLK1         : {metrics.SmuMetrics.AverageVclk1Frequency} MHz",
+        f"DCLK1         : {metrics.SmuMetrics.AverageDclk1Frequency} MHz"]
+
+      dev_content.append(device_line + activity_line + same_line([temps_table, voltages_table, frequency_table]))
+
+    raw_text = 'AM Monitor'.center(terminal_width) + "\n" + "=" * terminal_width + "\n\n"
+    for i in range(0, len(dev_content), 2):
+      if i + 1 < len(dev_content): raw_text += '\n'.join(same_line([dev_content[i], dev_content[i+1]]))
+      else: raw_text += '\n'.join(dev_content[i])
+      if i + 2 < len(dev_content): raw_text += "\n" + "=" * terminal_width + "\n\n"
+
+    sys.stdout.write(f'\033[{self.prev_lines_cnt}A')
+    sys.stdout.flush()
+    print(raw_text)
+
+    self.prev_lines_cnt = len(raw_text.splitlines()) + 2
 
 if __name__ == "__main__":
   try:
-    main()
-  except KeyboardInterrupt:
-    print("\nExiting...")
+    os.system('clear')
+    smi_ctx = SMICtx()
+    while True:
+      smi_ctx.rescan_devs()
+      smi_ctx.draw()
+      time.sleep(1) # Update every second
+  except KeyboardInterrupt: print("\nExiting...")

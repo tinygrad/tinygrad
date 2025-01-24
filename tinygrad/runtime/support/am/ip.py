@@ -105,7 +105,6 @@ class AM_SMU(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=not self.adev.partial_boot, boot=True)
-    print(hex(self.driver_table_paddr))
 
   def init(self):
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
