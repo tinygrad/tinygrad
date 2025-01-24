@@ -372,8 +372,6 @@ sym = symbolic_simple+PatternMatcher([
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH is a NOOP here
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
-  # MULTI in sources is a NOOP
-  (UPat(set(Ops), name="root"), lambda root: root.replace(src=a) if (a:=tuple(flatten(x.src if x.op is Ops.MULTI else [x] for x in root.src))) != root.src else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
@@ -399,6 +397,9 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
       if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
+  # remove MULTI from SINK and spread its sources
+  (UPat(Ops.SINK, name="root"),
+   lambda root: root.replace(src=a) if (a:=tuple(flatten([x.src if x.op is Ops.MULTI else [x] for x in root.src]))) != root.src else None),
 ])
 
 # ** this decides which ops get realized
