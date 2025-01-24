@@ -99,6 +99,7 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # VIEW is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
+    # TODO: this is making openpilot 0.9.7 with CAPTURE_PROCESS_REPLAY=1 4x slower?
     ctx.tensor_uops[ret.buf_uop] += tensor_map.get(buf, [buf])
     return ret
   # make things that can't be images not images
@@ -518,12 +519,11 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
     for buf_uop in store_uops:
-      for tensor_uop in ctx.tensor_uops[buf_uop]:
-        sym_uop = tensor_map.get(tensor_uop, tensor_uop)
-        # first, we apply the base ShapeTracker on the buffer
+      for luop in ctx.tensor_uops[buf_uop]:
+        sym_uop = tensor_map.get(luop, luop)
         buf_view = buf_uop.view(unwrap(sym_uop.base.st))
-        # we also apply a second VIEW if there are movement ops to apply after STORE
-        ctx.becomes_map[tensor_uop] = buf_view.view(unwrap(sym_uop.st)) if sym_uop.op is Ops.VIEW else buf_view
+        if sym_uop.op is Ops.VIEW: buf_view = buf_view.view(unwrap(sym_uop.st))
+        ctx.becomes_map[luop] = buf_view
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
