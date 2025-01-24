@@ -94,7 +94,7 @@ class SMICtx:
 
   def rescan_devs(self):
     pattern = os.path.join('/tmp', 'am_*.lock')
-    for d in [f[8:-5] for f in glob.glob(pattern)]: 
+    for d in [f[8:-5] for f in glob.glob(pattern)]:
       if d not in self.opened_pcidevs:
         self._open_am_device(d)
 
