@@ -41,7 +41,7 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
 
 # ***** multi functions *****
 
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
+from tinygrad.ops import PatternMatcher, UPat, GroupOp
 
 def alu_multi(root:UOp):
   msrcs = root.src
@@ -163,6 +163,3 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH), src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
-
-@track_rewrites(named=True)
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return {k:v for k,v in graph_rewrite_map(big_sink, multi_pm).items() if k is not v}

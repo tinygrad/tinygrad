@@ -9,7 +9,7 @@ from tinygrad.dtype import DType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
-from tinygrad.multi import get_multi_map
+from tinygrad.multi import multi_pm
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -110,7 +110,7 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
   op = buf.replace(dtype=dtype, src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this buffer
-  ctx.tensor_uops[buf_uop] = tensor_map[buf]
+  ctx.tensor_uops[buf_uop] = tensor_map.get(buf, [buf])
   # (early) bufferize
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
   return ret
@@ -498,18 +498,10 @@ remove_movement_ops = PatternMatcher([
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
-  # remap multi
-  multi_map = get_multi_map(big_sink)
-  rev_multi_map: dict[UOp, list[UOp]] = {}
-  for k,v in multi_map.items(): rev_multi_map.setdefault(v, []).append(k)
-  # simplify tensors
-  tensor_map = graph_rewrite_map(big_sink:=multi_map.get(big_sink, big_sink), remove_movement_ops+sym, ctx:=ScheduleContext())
+  # multi fixup + simplify tensors
+  tensor_map = graph_rewrite_map(big_sink, multi_pm+remove_movement_ops+sym, ctx:=ScheduleContext())
   rev_tensor_map: dict[UOp, list[UOp]] = {}
-  for k,v in tensor_map.items():
-    if (multi_k:=rev_multi_map.get(k)) is not None:
-      rev_tensor_map.setdefault(v, []).extend(multi_k)
-    else:
-      rev_tensor_map.setdefault(v, []).append(k)
+  for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
   # add BUFFER uops
   sink = add_buffers(tensor_map[big_sink], rev_tensor_map, ctx, cache={})
   # add realizes
