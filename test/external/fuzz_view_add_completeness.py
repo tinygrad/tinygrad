@@ -81,7 +81,7 @@ if __name__ == "__main__":
       fast_sum = last_view + new_views[0]
       true_sum = brute_merge(last_view, new_views[0])
       if fast_sum != true_sum:
-        if fast_sum is not None:
+        if fast_sum is not None:  # this should never happen, means a bug in brute_merge
           import pdb; pdb.set_trace()
           brute_merge(last_view, new_views[0])
         false_adds += 1
