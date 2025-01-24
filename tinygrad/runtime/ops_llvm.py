@@ -1,10 +1,21 @@
-from __future__ import annotations
 import ctypes, functools
-from typing import Tuple
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import cpu_time_execution, getenv, cpu_objdump
 from tinygrad.renderer.llvmir import LLVMRenderer
 import llvmlite.binding as llvm
+
+class LLVMDevice(Compiled):
+  def __init__(self, device:str):
+    llvm.initialize()
+    llvm.initialize_native_target()
+    llvm.initialize_native_asmprinter()
+    llvm.initialize_native_asmparser()
+    # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
+    self.target_machine: llvm.targets.TargetMachine = llvm.Target.from_triple(llvm.get_process_triple()).create_target_machine(opt=2)
+    backing_mod = llvm.parse_assembly(str())
+    backing_mod.triple = llvm.get_process_triple()
+    self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
+    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self, getenv("LLVMOPT")), functools.partial(LLVMProgram, self))
 
 class LLVMCompiler(Compiler):
   def __init__(self, dev:LLVMDevice, opt:bool=False):
@@ -32,20 +43,7 @@ class LLVMProgram:
     self.fxn = dev.engine.get_function_address(name)
     assert self.fxn != 0, "LLVM failed to get function address"
 
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
     if not hasattr(self, 'cfunc'):
       self.cfunc = ctypes.CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
-
-class LLVMDevice(Compiled):
-  def __init__(self, device:str):
-    llvm.initialize()
-    llvm.initialize_native_target()
-    llvm.initialize_native_asmprinter()
-    llvm.initialize_native_asmparser()
-    # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
-    self.target_machine: llvm.targets.TargetMachine = llvm.Target.from_triple(llvm.get_process_triple()).create_target_machine(opt=2)
-    backing_mod = llvm.parse_assembly(str())
-    backing_mod.triple = llvm.get_process_triple()
-    self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
-    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self, getenv("LLVMOPT")), functools.partial(LLVMProgram, self))

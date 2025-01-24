@@ -7,7 +7,7 @@ from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI, Context, JIT
+from tinygrad.helpers import CI, Context, JIT, GlobalCounters
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -318,6 +318,7 @@ class TestJit(unittest.TestCase):
     assert len(res3) == 10, "All values should be different, rand works in jit."
     assert res3 != res2, "Jit rand is diff with diff seeds"
 
+  @unittest.expectedFailure # requires contiguous folding
   def test_jit_random_after_unrealized_random(self):
     @TinyJit
     def f(): return Tensor.rand()
@@ -397,6 +398,14 @@ class TestJit(unittest.TestCase):
     def g(x,y,z): return (x+y+z).realize()
     for i in range(5):
       np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
+
+  def test_jitted_clone(self):
+    def f(a): return a.clone().realize()
+    jf = TinyJit(f)
+    for _ in range(5):
+      a = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+      ja = jf(a)
+      np.testing.assert_allclose(a.numpy(), ja.numpy(), atol=1e-4, rtol=1e-5)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
   def test_jitted_transfers(self):
@@ -482,6 +491,85 @@ class TestJitInsideJit(unittest.TestCase):
     g(Tensor([1])).realize()
     with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
       g(Tensor([1])).realize()
+
+class TestCopyInsideJit(unittest.TestCase):
+  def test_copy_inside_jit(self):
+    @TinyJit
+    def add(x,y) -> Tensor: return x.to(Device.DEFAULT)+y
+    for _ in range(5):
+      # create a Tensor in CLANG
+      a = Tensor.rand(16,16,device="CLANG").realize()
+      b = Tensor.rand(16,16).realize()
+      out = add(a,b)
+      np.testing.assert_allclose(out.flatten().tolist(), [x+y for x,y in zip(a.flatten().tolist(), b.flatten().tolist())])
+
+class TestJitPrune(unittest.TestCase):
+  def test_simple_prune(self):
+    weights = Tensor.rand(16).realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous() + x
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+    assert len(w2_noprune.captured.jit_cache) == 2
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+    assert len(w2_prune.captured.jit_cache) == 1
+
+  def test_prune_w_copy_correct(self):
+    weights = Tensor.rand(16).realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous() + x.to(Device.DEFAULT)
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16, device="CLANG").realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    for _ in range(3):
+      a = Tensor.rand(16, device="CLANG").realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+class TestJitFree(unittest.TestCase):
+  def test_free_intermediates(self):
+    ext_tensor = Tensor([1,24,23,45,1])
+    @TinyJit
+    def fxn(x:Tensor):
+      out = (x*2+ext_tensor).reshape(5,1).expand(5, 100).contiguous()
+      return out.sum()
+    for i in range(5):
+      out = fxn(Tensor([i,1,2,3,4]))
+      self.assertEqual(out.item(), 11400+200*i)
+    pre_free = GlobalCounters.mem_used
+    fxn.captured.free_intermediates()
+    savings_after_free = pre_free - GlobalCounters.mem_used
+    self.assertEqual(savings_after_free, 2024)
+    out = fxn(Tensor([11,1,2,3,4]))
+    self.assertEqual(out.item(), 13600)
+
+  def test_updated_not_freed(self):
+    x = Tensor([1]).realize()
+    @TinyJit
+    def fxn(y):
+      nonlocal x
+      x += y
+      return x
+    for _ in range(5): fxn(Tensor([1]))
+    self.assertEqual(x.item(), 6)
+    pre_free = GlobalCounters.mem_used
+    fxn.captured.free_intermediates()
+    savings_after_free = pre_free - GlobalCounters.mem_used
+    self.assertEqual(savings_after_free, 0)
+    fxn(Tensor([2]))
+    self.assertEqual(x.item(), 8)
 
 if __name__ == '__main__':
   unittest.main()

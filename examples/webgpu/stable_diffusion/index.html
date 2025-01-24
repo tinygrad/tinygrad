@@ -165,10 +165,6 @@
         import ClipTokenizer from './clip_tokenizer.js';
         window.clipTokenizer = new ClipTokenizer();
     </script>
-    <script type="module">
-        import { f16tof32GPU } from 'https://unpkg.com/f16-to-f32-gpu@0.1.0/src/index.js';
-        window.f16tof32GPU = f16tof32GPU;
-    </script>
     <script src="./net.js"></script>
 </head>
 <body>
@@ -181,19 +177,21 @@
     </a>
     
     <div id="mybox">
-        <input id="promptText" type="text" placeholder="Enter your prompt here" value="a human standing on the surface of mars">
+        <form id="promptForm">
+            <input id="promptText" type="text" placeholder="Enter your prompt here" value="a human standing on the surface of mars">
 
-        <label>
-            Steps: <span id="stepValue">9</span>
-            <input id="stepRange" type="range" min="5" max="20" value="9" step="1">
-        </label>
+            <label>
+                Steps: <span id="stepValue">9</span>
+                <input id="stepRange" type="range" min="5" max="20" value="9" step="1">
+            </label>
 
-        <label>
-            Guidance: <span id="guidanceValue">8.0</span>
-            <input id="guidanceRange" type="range" min="3" max="15" value="8.0" step="0.1">
-        </label>
+            <label>
+                Guidance: <span id="guidanceValue">8.0</span>
+                <input id="guidanceRange" type="range" min="3" max="15" value="8.0" step="0.1">
+            </label>
 
-        <input id="btnRunNet" type="button" value="Run" disabled>
+            <input id="btnRunNet" type="button" value="Run" disabled>
+        </form>
 
         <div id="divModelDl" style="display: flex; align-items: center; width: 100%; gap: 10px;">
             <span id="modelDlTitle">Downloading model</span>
@@ -214,6 +212,8 @@
     <canvas id="canvas" width="512" height="512"></canvas>
 
 <script>
+    let f16decomp = null;
+
     function initDb() {
         return new Promise((resolve, reject) => {
             let db;
@@ -416,7 +416,7 @@
             const metadata = JSON.parse(new TextDecoder("utf8").decode(combinedBuffer.subarray(8, 8 + metadataLength)));
 
             const allToDecomp = combinedBuffer.byteLength - (8 + metadataLength);
-            const decodeChunkSize = 67107840;
+            const decodeChunkSize = 8388480;
             const numChunks = Math.ceil(allToDecomp/decodeChunkSize);
 
             console.log(allToDecomp + " bytes to decompress");
@@ -440,7 +440,8 @@
                 let chunkStartF16 = 8 + metadataLength + (decodeChunkSize * i);
                 let chunkEndF16 = chunkStartF16 + decodeChunkSize;
                 let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
-                let result = await f16tof32GPU(chunk);
+                let uint32Chunk = new Uint32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4);
+                let result = await f16decomp(uint32Chunk);
                 let resultUint8 = new Uint8Array(result.buffer);
                 let chunkStartF32 = 8 + metadataLength + (decodeChunkSize * i * 2);
                 let chunkEndF32 = chunkStartF32 + resultUint8.byteLength;
@@ -483,6 +484,7 @@
             }
 
             const device = await getDevice();
+            f16decomp =  await f16tof32().setup(device, safetensorParts),
             safetensorParts = await getAndDecompressF16Safetensors(device, progress);
 
             modelDlTitle.innerHTML = "Compiling model"
@@ -559,7 +561,7 @@
             });
         }
 
-        function renderImage(e, image) {
+        function renderImage(image) {
             let pixels = []
             let pixelCounter = 0
 
@@ -574,13 +576,15 @@
             }
 
             ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
-            e.target.disabled = false;
         }
 
-        document.getElementById("btnRunNet").addEventListener("click", function(e) {
-            e.target.disabled = true;
+        const handleRunNetAndRenderResult = () => {
+            document.getElementById("btnRunNet").disabled = true;
             const canvas = document.getElementById("canvas");
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const prevTitleValue = document.getElementById("modelDlTitle").innerHTML;
+            document.getElementById("modelDlTitle").innerHTML = "Running model";
 
             runStableDiffusion(
                 document.getElementById("promptText").value,
@@ -589,9 +593,21 @@
                 // Decode at each step
                 null
             ).then((image) => {
-                renderImage(e, image);
+                renderImage(image);
+            }).finally(() => {
+                document.getElementById("modelDlTitle").innerHTML = prevTitleValue;
+                document.getElementById("btnRunNet").disabled = false;
             });
-        }, false);
+        };
+
+        document.getElementById("btnRunNet").addEventListener("click", handleRunNetAndRenderResult, false);
+
+        document.getElementById("promptForm").addEventListener("submit", function (event) {
+            event.preventDefault();
+            if (document.getElementById("btnRunNet").disabled) return;
+
+            handleRunNetAndRenderResult();
+        })
 
         const stepSlider = document.getElementById('stepRange');
         const stepValue = document.getElementById('stepValue');

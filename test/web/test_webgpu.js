@@ -47,7 +47,7 @@ async function runTest() {
       console.log(`error from page ${message}`),
     );
 
-  const res = await page.goto("http://localhost:8000/examples/index.html");
+  const res = await page.goto("http://localhost:8000/examples/webgpu/efficientnet/index.html");
   if (res.status() !== 200) throw new Error("Failed to load page");
 
   const textSelector = await page.waitForSelector("#result");

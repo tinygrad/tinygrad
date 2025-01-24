@@ -75,10 +75,10 @@ class TestVerifyAST(unittest.TestCase):
 
   def test_buffer_uops_st(self):
     a = Tensor.randn(4, 4)+2
-    uop_sts = verify_ast(a.schedule()[-1].ast)
-    store_st = [st for u,st in uop_sts.items() if u.op is Ops.STORE][0]
+    verify_ast(ast:=a.schedule()[-1].ast)
+    store_st = [u.st for u in ast.toposort if u.op is Ops.STORE][0]
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [st for u,st in uop_sts.items() if u.op is Ops.VALID][0]
+    const_st = [u.st for u in ast.toposort if u.op is Ops.VALID][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   def test_assert_swizzle(self):
@@ -87,6 +87,12 @@ class TestVerifyAST(unittest.TestCase):
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)
     with self.assertRaisesRegex(InvalidASTException, "swizzle"): helper_test_verify_ast(st)
+
+  def test_flat_const_always_valid(self):
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    a = UOp.const(dtypes.int, 0).cast(dtypes.float)
+    st = UOp.store(buf, ShapeTracker.from_shape(()).to_uop(), a)
+    helper_test_verify_ast(st)
 
 if __name__ == '__main__':
   unittest.main()

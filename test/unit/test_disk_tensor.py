@@ -68,8 +68,8 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
-    with self.assertRaises(RuntimeError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16)
+    with self.assertRaises(NotImplementedError):
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
     with self.assertRaises(RuntimeError):
@@ -82,7 +82,7 @@ class TestRawDiskBuffer(unittest.TestCase):
 
     pathlib.Path(tmp).unlink()
 
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
+@unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")
 class TestSafetensors(unittest.TestCase):
   def test_real_safetensors(self):
     import torch
@@ -164,6 +164,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
+      if dtype in [dtypes.double] and Device.DEFAULT == "METAL": continue # not supported on METAL
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
@@ -361,10 +362,10 @@ class TestPathTensor(unittest.TestCase):
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_with_device(self):
-    t = Tensor(self.test_file, device="CPU")
+    t = Tensor(self.test_file, device="CLANG")
     self.assertEqual(t.shape, (100,))
     self.assertEqual(t.dtype, dtypes.uint8)
-    self.assertEqual(t.device, "CPU")
+    self.assertEqual(t.device, "CLANG")
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_empty_file(self):
@@ -389,8 +390,8 @@ class TestPathTensor(unittest.TestCase):
 
   def test_path_tensor_copy_to_device(self):
     t = Tensor(self.test_file)
-    t_cpu = t.to("CPU")
-    self.assertEqual(t_cpu.device, "CPU")
+    t_cpu = t.to("CLANG")
+    self.assertEqual(t_cpu.device, "CLANG")
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
 if __name__ == "__main__":
