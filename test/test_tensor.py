@@ -770,8 +770,8 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
   def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True).realize()
+    y = Tensor.rand(3, requires_grad=True).realize()
     out = (x.relu() * y.sigmoid()).sum()
     self.assertEqual(out.lazydata.metadata.name, "sum")
     out.backward()
