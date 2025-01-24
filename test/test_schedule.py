@@ -1365,7 +1365,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.cast(dtypes.half).expand(2, 4, 4)
     c = b.cast(dtypes.int).expand(2, 2, 4, 4)
-    run_schedule(check_schedule(c, 2))
+    run_schedule(check_schedule(c, 1))
     np.testing.assert_equal(c.numpy(), np.ones(((2, 2, 4, 4)), dtype=np.int32))
 
   def test_base_change_pad_expand(self):

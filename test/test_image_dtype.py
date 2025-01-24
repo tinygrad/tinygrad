@@ -126,7 +126,7 @@ class TestImageDType(unittest.TestCase):
       # NOTE: the w1 grad must realize to a seperate kernel
       assert w1.grad.lazydata.is_realized, f"never realized {w1.grad}"
       self.assertEqual(w1.grad.lazydata.base.buffer.dtype, dtypes.float32)
-      self.assertEqual(len(sched), 10)
+      self.assertEqual(len(sched), 9)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
         if s.outputs[0].dtype == dtypes.float:
