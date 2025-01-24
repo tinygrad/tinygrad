@@ -10,7 +10,7 @@ class Contiguous(Function):
   def backward(self, grad_output:UOp) -> UOp: return grad_output
 
 class ContiguousBackward(Function):
-  def forward(self, x:UOp) -> UOp: return x
+  def forward(self, x:UOp) -> UOp: return x.contiguous_backward()
   def backward(self, grad_output:UOp) -> UOp: return grad_output.contiguous()
 
 class Cast(Function):

@@ -923,7 +923,7 @@ class Tensor(SimpleMathTrait):
     for x in target_uops:
       if (y:=grads.get(x)) is None:
         if materialize_grads: y = x.const_like(0)
-        else: raise RuntimeError(f"{x}\n\nnot found in\n\n{uop}")
+        else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
       ret.append(y)
     rets.append(ret)
     # create returned Tensors
@@ -941,8 +941,8 @@ class Tensor(SimpleMathTrait):
     ```
     """
     all_uops = self.lazydata.toposort
-    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and
-                                       any(x in all_uops for x in t.lazydata.lbs) and t.requires_grad and not Tensor.no_grad]
+    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
+                                       t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
     # clear contexts
     for t in tensors_need_grad: t._ctx = None
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
