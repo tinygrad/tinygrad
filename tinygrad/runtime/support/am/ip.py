@@ -251,10 +251,9 @@ class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
     self.ring_size = 512 << 10
-    self.rings = [(self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True),
-      self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True), "", 0),
-      (self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True),
-    self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True), "_RING1", 1)]
+    def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=not self.adev.partial_boot, boot=True),
+                                    self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True))
+    self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
 
   def interrupt_handler(self):
     _, rwptr_vm, suf, _ = self.rings[0]
