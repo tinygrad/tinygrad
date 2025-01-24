@@ -1,6 +1,6 @@
 import unittest, functools, random
 from typing import List
-from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
+from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
@@ -390,6 +390,30 @@ class TestMultiTensor(unittest.TestCase):
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+  def test_assign_kv_cache_multi(self):
+    bsz, max_context = 2, 8
+
+    class Attn:
+      @TinyJit
+      def __call__(self, xk:Tensor, start_pos:UOp):
+        seqlen = xk.shape[1]
+        if not hasattr(self, "cache_k"):
+          self.cache_k = Tensor.zeros(bsz, max_context, 1, 1).shard(devices_2).contiguous().realize()
+        keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
+        self.cache_k.assign(keys.pad((None,(0,max_context-start_pos-seqlen),None,None)).contiguous()).realize()
+
+    attn = Attn()
+    xk = Tensor.ones(bsz, 3, 1, 1).shard(devices_2).contiguous()
+    attn(xk, 0)
+    for i in range(3,6):
+      # copied from LLaMA
+      start_pos = Variable("start_pos", 1, max_context).bind(i)
+      xk = Tensor.ones(bsz, 1, 1, 1).shard(devices_2).contiguous()
+      attn(xk, start_pos)
+
+    out = attn.cache_k.flatten().numpy()
+    np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
 
   def test_multi_tensor_jit_param(self):
     @TinyJit
