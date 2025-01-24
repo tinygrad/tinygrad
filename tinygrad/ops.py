@@ -849,7 +849,7 @@ class TreeAutomaton:
     self.patterns = patterns
     self.alphabet = set()
     self.pat_forest: dict[int, list[UPat]] = {}
-    self.tables: dict[tuple, dict[tuple, int]] = {}
+    self.table: dict[tuple, dict[tuple, int]] = {}
     self.final: dict[int, list[tuple[int, list[tuple[str, tuple[int]]], bool, Callable]]] = {}
     self.num_states: int = 0
 
@@ -873,14 +873,14 @@ class TreeAutomaton:
       _build_alphabet(pat)
       _build_pat_forest(pat)
 
-    # build automaton with minimal number of states
-    src_states = {None: ()}
+    # build deterministic automaton with minimal number of states
+    states = {None: ()}
     for layer in self.pat_forest.values():
       # record where each matching symbol appears
       sym_indices, pat_syms = defaultdict(set), {}
       for i,pat in enumerate(layer):
         std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) or pat._in_src is None else pat._in_src
-        srcs = tuple(itertools.product(*tuple(src_states[s] for s in std_src)))
+        srcs = tuple(itertools.product(*tuple(states[s] for s in std_src)))
         # src permutations are valid
         if isinstance(pat._in_src, list): srcs = tuple(p for s in srcs for p in itertools.permutations(s))
         srcs = srcs or ((),)
@@ -892,10 +892,19 @@ class TreeAutomaton:
       for sym,i in sym_indices.items(): sym_groups[frozenset(i)].add(sym)
       # add new state transitions to the table of each matching symbol in the alphabet
       for i,syms in enumerate(sym_groups.values()):
-        for sym in syms: self.tables.setdefault((sym[0]), {})[sym[1]] = i+self.num_states
+        for sym in syms: self.table.setdefault((sym[0]), {})[sym[1]] = i+self.num_states
       # set possible states for each pat in layer
-      src_states.update({pat:tuple(i+self.num_states for i,syms in enumerate(sym_groups.values()) if syms.issubset(pat_syms[pat])) for pat in layer})
+      for pat in layer: states[pat] = tuple(i+self.num_states for i,syms in enumerate(sym_groups.values()) if syms.issubset(pat_syms[pat]))
       self.num_states += len(sym_groups.values())
+
+    # set final states
+    for i,(pat,fxn) in enumerate(self.patterns):
+      assert pat.op is not None
+      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+      real_fxn = types.FunctionType(*tuple_fxn)
+      has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
+      # TODO: figure out how to do name assignment
+      for st in states[pat]: self.final.setdefault(st, []).append((i, None, has_ctx, real_fxn))
 
 # *** simple graph rewrite engine ***
 
