@@ -498,10 +498,7 @@ class PCIIface:
                   'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
-    if PCIIface.vfio:
-      vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
-      fd, sz, off = self.vfio_dev, size or reg.size, reg.offset + off
-    else: fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
+    fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
     return to_mv(fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
