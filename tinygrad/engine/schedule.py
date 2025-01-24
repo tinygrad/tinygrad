@@ -516,9 +516,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
       for luop in ctx.tensor_uops[buf_uop]:
         # NOTE: buf_uop realizes the output of the simplified UOp, which can be different from the Tensor UOp
         sym_uop = tensor_map.get(luop, luop)
-        # first we apply the base output ShapeTracker on the BUFFER
+        # first we apply the base ShapeTracker with a VIEW(BUFFER)
         buf_view = buf_uop.view(unwrap(sym_uop.base.st))
-        # if the Tensor simplified to just a VIEW, we apply the ShapeTracker on top of the base buffer view
+        # if the Tensor simplified to just a VIEW, we apply the movement ops with VIEW(VIEW(BUFFER))
+        # these don't get merged because the base VIEW has to stay?
         if sym_uop.op is Ops.VIEW: buf_view = buf_view.view(unwrap(sym_uop.st))
         ctx.becomes_map[luop] = buf_view
 
