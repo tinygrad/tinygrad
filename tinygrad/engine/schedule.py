@@ -330,7 +330,7 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(luop.op is Ops.CONTIGUOUS for tr in group for luop in ctx.tensor_uops[tr]): continue
+    if any(tensor_uop.op is Ops.CONTIGUOUS for tr in group for tensor_uop in ctx.tensor_uops[tr]): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
@@ -513,15 +513,17 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
     for buf_uop in store_uops:
-      for luop in ctx.tensor_uops[buf_uop]:
-        # NOTE: buf_uop realizes the output of the simplified UOp, which can be different from the Tensor UOp
-        sym_uop = tensor_map.get(luop, luop)
-        # first we apply the base ShapeTracker with a VIEW(BUFFER)
-        buf_view = buf_uop.view(unwrap(sym_uop.base.st))
-        # if the Tensor simplified to just a VIEW, we apply the movement ops with VIEW(VIEW(BUFFER))
-        # these don't get merged because the base VIEW has to stay?
-        if sym_uop.op is Ops.VIEW: buf_view = buf_view.view(unwrap(sym_uop.st))
-        ctx.becomes_map[luop] = buf_view
+      for tensor_uop in ctx.tensor_uops[buf_uop]:
+        sym_uop = tensor_map.get(tensor_uop, tensor_uop)
+        realized = buf_uop.view(unwrap(sym_uop.base.st))
+        if sym_uop.op is Ops.VIEW:
+          op_arg = []
+          mop = sym_uop
+          while mop is not sym_uop.base:
+            op_arg.append((mop.op, mop.arg))
+            mop = mop.src[0]
+          for op,arg in reversed(op_arg): realized = UOp(op, realized.dtype, (realized,), arg)
+        ctx.becomes_map[tensor_uop] = realized
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   for k,v in tensor_map.items():
