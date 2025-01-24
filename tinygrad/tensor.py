@@ -254,9 +254,13 @@ class Tensor(SimpleMathTrait):
     NOTE: A Tensor can only be scheduled once.
     """
     big_sink = UOp.sink(*[x.lazydata for x in (self,)+lst])
-    _apply_map_to_tensors(get_multi_map(big_sink))
 
-    big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
+    # TODO: move this to scheduler tensor_map pass
+    if any(x.op is Ops.MULTI for x in big_sink.toposort):
+      # multi fixup
+      _apply_map_to_tensors(get_multi_map(big_sink))
+      big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
+
     schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map)
     return memory_planner(schedule), var_vals

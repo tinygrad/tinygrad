@@ -395,7 +395,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     new_shape = unwrap(self.st).reduce(axis)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
-    if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
+    # TODO: this shouldn't be here, it belongs in scheduler! that's why it broke multi
+    if not SPLIT_REDUCEOP or isinstance(self._device, tuple) or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
 
