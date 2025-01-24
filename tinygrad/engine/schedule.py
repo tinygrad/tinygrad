@@ -43,6 +43,7 @@ tensor_uop_spec = PatternMatcher([
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
+  # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
   # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
    lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
