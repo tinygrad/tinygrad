@@ -542,7 +542,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.buffer if self.op is Ops.BUFFER else None
   @property
   def is_realized(self) -> bool:
-    return all(x.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
+    return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
 
   # *** uop Variable stuff ***
 
