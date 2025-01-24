@@ -45,15 +45,9 @@ def get_bar0_size(pcibus):
   return int(end_hex, 16) - int(start_hex, 16) + 1
 
 class AMSMI(AMDev):
-  def __init__(self, pcibus):
+  def __init__(self, pcibus, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
     self.pcibus = pcibus
-    self.bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
-    self.bar_size = {0: get_bar0_size(self.pcibus), 2: os.fstat(self.bar_fds[2]).st_size, 5: os.fstat(self.bar_fds[5]).st_size}
-
-    assert self.bar_size[0] > (1 << 30), "Large BAR is not enabled"
-
-    self.vram = self._map_pci_range(0)
-    self.mmio = self._map_pci_range(5).cast('I')
+    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
     self._run_discovery()
     self._build_regs()
@@ -72,19 +66,24 @@ class AMSMI(AMDev):
     self.psp:AM_PSP = AM_PSP(self)
     self.smu:AM_SMU = AM_SMU(self)
 
-  def _map_pci_range(self, bar, off=0, addr=0, size=None):
-    fd, sz = self.bar_fds[bar], self.bar_size[bar]
-    return to_mv(libc.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), fd, off), sz)
-
 class SMICtx:
   def __init__(self):
     self.devs = []
     self.opened_pcidevs = []
+    self.opened_pci_resources = {}
     self.prev_lines_cnt = 0
 
   def _open_am_device(self, pcibus):
+    if pcibus not in self.opened_pci_resources:
+      bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+      bar_size = {0: get_bar0_size(pcibus), 2: os.fstat(bar_fds[2]).st_size, 5: os.fstat(bar_fds[5]).st_size}
+
+      def map_pci_range(bar):
+        return to_mv(libc.mmap(0, bar_size[bar], mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, bar_fds[bar], 0), bar_size[bar])
+      self.opened_pci_resources[pcibus] = (map_pci_range(0), None, map_pci_range(5).cast('I'))
+
     try:
-      self.devs.append(AMSMI(pcibus))
+      self.devs.append(AMSMI(pcibus, *self.opened_pci_resources[pcibus]))
     except Exception as e:
       if DEBUG >= 2: print(f"Failed to open AM device {pcibus}: {e}")
       return
@@ -118,14 +117,17 @@ class SMICtx:
                     + [f"UCLK Activity {draw_bar(metrics.SmuMetrics.AverageUclkActivity / 100, 50)}"] + [""]
 
       # draw_metrics_table(metrics, dev)
-      temps_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_TEMP_e__enumvalues.items() if k < smu_v13_0_0.TEMP_COUNT]
+      temps_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_TEMP_e__enumvalues.items()
+                                if k < smu_v13_0_0.TEMP_COUNT and metrics.SmuMetrics.AvgTemperature[k] != 0]
       temps_table = ["=== Temps (C) ==="] + [f"{name:<15}: {color_temp(metrics.SmuMetrics.AvgTemperature[k])}" for k, name in temps_keys]
 
       voltage_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_SVI_PLANE_e__enumvalues.items() if k < smu_v13_0_0.SVI_PLANE_COUNT]
-      voltages_table = ["=== Voltages ==="] + [f"{name:<24}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys] \
-                    + ["", "=== Power ==="] \
-                    + [f"AVG Socket Power: {metrics.SmuMetrics.AverageTotalBoardPower}W / {metrics.SmuMetrics.dGPU_W_MAX}W"] \
-                    + [draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 30)] \
+      power_table = ["=== Power ==="] \
+                  + [f"Fan Speed: {metrics.SmuMetrics.AvgFanRpm} RPM"] \
+                  + [f"Fan Power: {metrics.SmuMetrics.AvgFanPwm} %"] \
+                  + [f"Power: {metrics.SmuMetrics.AverageSocketPower}W " +
+                       draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 16)] \
+                  + ["", "=== Voltages ==="] + [f"{name:<24}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys]
 
       frequency_table = ["=== Frequencies ===",
         f"GFXCLK Target : {metrics.SmuMetrics.AverageGfxclkFrequencyTarget} MHz",
@@ -140,7 +142,7 @@ class SMICtx:
         f"VCLK1         : {metrics.SmuMetrics.AverageVclk1Frequency} MHz",
         f"DCLK1         : {metrics.SmuMetrics.AverageDclk1Frequency} MHz"]
 
-      dev_content.append(device_line + activity_line + same_line([temps_table, voltages_table, frequency_table]))
+      dev_content.append(device_line + activity_line + same_line([temps_table, power_table, frequency_table]))
 
     raw_text = 'AM Monitor'.center(terminal_width) + "\n" + "=" * terminal_width + "\n\n"
     for i in range(0, len(dev_content), 2):

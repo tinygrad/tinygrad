@@ -127,9 +127,7 @@ class AM_SMU(AM_IP):
   def read_table(self, table_t, cmd):
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_TransferTableSmu2Dram, cmd, poll=True)
     return table_t.from_buffer(to_mv(self.adev.paddr2cpu(self.driver_table_paddr), ctypes.sizeof(table_t)))
-  # def read_pptable(self): return self.read_table(smu_v13_0_0.PPTable_t, smu_v13_0_0.TABLE_PPTABLE)
   def read_metrics(self): return self.read_table(smu_v13_0_0.SmuMetricsExternal_t, smu_v13_0_0.TABLE_SMU_METRICS)
-  # def read_activity_monitor(self): return self.read_table(smu_v13_0_0.DpmActivityMonitorCoeffIntExternal_t, smu_v13_0_0.TABLE_ACTIVITY_MONITOR_COEFF)
 
   def _smu_cmn_poll_stat(self, timeout=10000): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1, timeout=timeout)
   def _smu_cmn_send_msg(self, msg, param=0):
