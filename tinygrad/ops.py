@@ -848,7 +848,7 @@ class TreeAutomaton:
   def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
     self.alphabet = set()
-    self.pat_forest: dict[int, list[UPat]] = {}
+    self.layers: dict[int, list[UPat]] = {}
     self.table: dict[tuple, dict[tuple, int]] = {}
     self.final: dict[int, list[tuple[int, list[tuple[str, tuple[int]]], bool, Callable]]] = {}
     self.num_states: int = 0
@@ -860,10 +860,10 @@ class TreeAutomaton:
       dtypes = (pat.dtype,) if pat.dtype is None else pat.dtype
       self.alphabet.update(set((op, dt, pat.arg) for op in ops for dt in dtypes))
 
-    def _build_pat_forest(pat: UPat):
+    def _build_layers(pat: UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
-      height = max(_build_pat_forest(s) for s in std_src) if std_src else 0
-      self.pat_forest.setdefault(height, []).append(pat)
+      height = max(_build_layers(s) for s in std_src) if std_src else 0
+      self.layers.setdefault(height, []).append(pat)
       return height+1
 
     def _match(sym, pat: UPat):
@@ -871,11 +871,11 @@ class TreeAutomaton:
 
     for pat,_ in self.patterns:
       _build_alphabet(pat)
-      _build_pat_forest(pat)
+      _build_layers(pat)
 
     # build deterministic automaton with minimal number of states
     states = {None: ()}
-    for layer in self.pat_forest.values():
+    for layer in self.layers.values():
       # record where each matching symbol appears
       sym_indices, pat_syms = defaultdict(set), {}
       for i,pat in enumerate(layer):
@@ -902,9 +902,8 @@ class TreeAutomaton:
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
-      has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
       # TODO: figure out how to do name assignment
-      for st in states[pat]: self.final.setdefault(st, []).append((i, None, has_ctx, real_fxn))
+      for st in states[pat]: self.final.setdefault(st, []).append((i, None, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters))
 
 # *** simple graph rewrite engine ***
 
