@@ -44,9 +44,7 @@ tensor_uop_spec = PatternMatcher([
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
   # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
-  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
-   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)), lambda view,buf: view.dtype == buf.dtype),
 
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
@@ -516,7 +514,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
       for tensor_uop in ctx.tensor_uops[buf_uop]:
         sym_uop = tensor_map.get(tensor_uop, tensor_uop)
         realized = buf_uop.view(unwrap(sym_uop.base.st))
-        if sym_uop.op is Ops.VIEW: realized = buf_uop.view(unwrap(sym_uop.st)+unwrap(sym_uop.base.st))
+        if sym_uop.op is Ops.VIEW: realized = buf_uop.view(unwrap(sym_uop.base.st)+unwrap(sym_uop.st))
         ctx.becomes_map[tensor_uop] = realized
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
