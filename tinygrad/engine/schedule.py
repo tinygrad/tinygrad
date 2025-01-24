@@ -510,8 +510,11 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     # can only schedule once
     for buf_uop in store_uops:
       for tensor_uop in ctx.tensor_uops[buf_uop]:
+        # NOTE: this buf_uop realizes the output of the simplified UOp, which might be different from the Tensor UOp
         sym_uop = tensor_map.get(tensor_uop, tensor_uop)
+        # the realized tensor becomes a VIEW(BUFFER), with the base ShapeTracker applied
         realized = buf_uop.view(unwrap(sym_uop.base.st))
+        # if the Tensor UOp simplified to just a VIEW, we apply the movement ops with a second VIEW
         if sym_uop.op is Ops.VIEW: realized = realized.view(unwrap(sym_uop.st))
         ctx.becomes_map[tensor_uop] = realized
 
