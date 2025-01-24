@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, struct, atexit
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
@@ -12,7 +12,7 @@ from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.am.amdev import AMDev
+from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
@@ -419,6 +419,9 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
+@dataclass
+class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping # noqa: E702
+
 class PCIIface:
   vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
   vfio_fd:HWInterface
@@ -507,25 +510,27 @@ class PCIIface:
       va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
 
       # Read pagemap to get the physical address of each page. The pages are locked.
-      for off in range(0, size, mmap.PAGESIZE):
-        self.pagemap.seek(((va + off) // mmap.PAGESIZE) * 8)
-        pt_entry = struct.unpack("Q", self.pagemap.read(8, binary=True))[0] & ((1 << 55) - 1)
-        self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=pt_entry * mmap.PAGESIZE, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
+      self.pagemap.seek(va // mmap.PAGESIZE * 8)
+      paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
+      am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
 
-    vm = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
-    if cpu_access: self._map_pci_range(bar=0, off=vm.paddr, addr=vm.va_addr, size=vm.size)
-    return HCQBuffer(vm.va_addr, size, meta=(self.dev, [self.dev], vm))
+    am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
+    if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
+    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
 
   def free(self, mem):
-    if mem.meta[2] is not None:
-      for dev in mem.meta[1][1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size, free_paddrs=False)
-      self.adev.mm.vfree(mem.meta[2])
+    for dev in mem.meta.mapped_devs[1:]: dev.dev_iface.adev.mm.unmap_range(mem.va_addr, mem.size)
+    if not mem.meta.mapping.system: self.adev.mm.vfree(mem.meta.mapping)
 
   def map(self, mem):
-    if mem.meta[0] == self.dev or self.dev in mem.meta[1]: return
-    mem.meta[1].append(self.dev)
-    self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
+    # Check if the memory is already mapped on this device
+    if self.dev in mem.meta.mapped_devs: return
+    mem.meta.mapped_devs.append(self.dev)
+
+    owner_sys_base = mem.meta.owner.dev_iface.pcidev.regions[0].base_addr
+    paddrs = [(paddr if mem.meta.mapping.system else (paddr + owner_sys_base), size) for paddr, size in mem.meta.mapping.paddrs]
+    self.adev.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:

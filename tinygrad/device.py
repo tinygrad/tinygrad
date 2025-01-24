@@ -4,13 +4,14 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
-from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
+                             cpu_time_execution, colored, Context
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -25,7 +26,7 @@ class _Device:
     cpn = multiprocessing.current_process().name
     assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) \
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) \
            if (cname.lower() == x.lower() + "device")][0](ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     self._opened_devices.add(ix)
@@ -33,7 +34,7 @@ class _Device:
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
-    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
+    for device in ALL_DEVICES:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
@@ -129,7 +130,7 @@ class Buffer:
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
-      del self._buf
+    del self._buf
   def __reduce__(self):
     buf = None
     if self._base is not None:
@@ -202,7 +203,7 @@ class LRUAllocator(Allocator):
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferSpec]=None):
-    if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
+    if LRU and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
@@ -310,7 +311,22 @@ if PROFILE:
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(temp("profile.pkl"), "wb") as f: pickle.dump(Compiled.profile_events, f)
+    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
     from tinygrad.ops import launch_viz
-    launch_viz("PROFILE", temp("profile.pkl"))
+    launch_viz("PROFILE", fn)
+
+if __name__ == "__main__":
+  for device in ALL_DEVICES:
+    try:
+      _ = Device[device].device
+      try:
+        from tinygrad import Tensor
+        with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
+        if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
+        result = colored("PASS", "green")
+      except Exception as e:
+        result = f"{colored('FAIL', 'yellow')} {e}"
+    except Exception as e:
+      result = f"{colored('FAIL', 'red')} {e}"
+    print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")
