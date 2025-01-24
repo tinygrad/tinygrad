@@ -20,7 +20,7 @@ class TestPickle(unittest.TestCase):
     self.assertEqual(pm2.rewrite(sink).key, tt.key)
 
   def test_pickle_main_pattern_matcher(self):
-    from tinygrad.codegen.uopgraph import sym
+    from tinygrad.codegen.rewriter import sym
     pickle.dumps(sym)
 
   def test_pickle_realized_tensor(self):

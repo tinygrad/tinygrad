@@ -6,8 +6,8 @@ from typing import Optional, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop
-from tinygrad.codegen.uopgraph import sym
+from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop, Context
+from tinygrad.codegen.rewriter import sym
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
 
@@ -25,7 +25,9 @@ def upcast(u: UOp):
   return u.replace(src=tuple(srcs))
 
 # pooling op may overflow before folding causing unnecessary upcast
-def folded_upcast(u: UOp): return upcast(graph_rewrite(u, sym, {}))
+def folded_upcast(u: UOp):
+  with Context(TRACK_MATCH_STATS=0):
+    return upcast(graph_rewrite(u, sym, {}))
 
 @functools.lru_cache(None)
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...]]=None) -> tuple[UOp, UOp]:

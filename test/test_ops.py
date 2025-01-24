@@ -662,6 +662,8 @@ class TestOps(unittest.TestCase):
     ten0, ten1 = Tensor(data[0], dtype=dtypes.bool), Tensor(data[1], dtype=dtypes.bool)
     helper_test_op([], lambda: tor0&tor1, lambda: ten0&ten1, forward_only=True)
 
+    helper_test_op(None, lambda x: (1 < x) & (x < 2), forward_only=True, vals=[[1.2, 1.2, 1.2, 3.2]])
+
     self.helper_test_exception([(4), (4)], torch.bitwise_and, Tensor.bitwise_and, expected=RuntimeError)
 
   def test_or(self):
@@ -2575,19 +2577,24 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,5,6)], lambda src: y.scatter(dim=1, index=b, src=src, reduce="multiply"),
       lambda src: x.scatter(dim=1, index=a, src=src, reduce="multiply"), forward_only=True)
 
-  def test_scaled_product_attention(self):
+  def test_scaled_dot_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)],
                    lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,attn_mask=m),
                    lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,attn_mask=m))
 
-  def test_scaled_product_attention_mismatch_ls(self):
+  def test_scaled_dot_product_attention_mismatch_ls(self):
     helper_test_op([(32,8,4,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
 
-  def test_scaled_product_attention_causal(self):
+  def test_scaled_dot_product_attention_causal(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)],
                    lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,is_causal=True),
                    lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True))
+
+    self.helper_test_exception([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)],
+      lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,is_causal=True,attn_mask=m),
+      lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True,attn_mask=m),
+      expected=RuntimeError)
 
   def test_binary_crossentropy(self):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),torch.clip(y,0,1)),
