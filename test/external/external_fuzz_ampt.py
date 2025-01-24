@@ -25,7 +25,7 @@ class AMPTFuzzer:
       _vaddr = va.va_addr + _offset
 
       for i in range(_n_ptes):
-        pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+        pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
         self.d.vram[pte['paddr']] = pattern # Mark this page
         assert pte['valid'] == 1
 
@@ -41,7 +41,7 @@ class AMPTFuzzer:
         frags_l = list(ctx.next(contig_range))
         for f_offset, f_pt, f_pte_idx, f_n_ptes, f_pte_covers in frags_l:
           for j in range(f_n_ptes):
-            f_pte = helper_read_entry_components(f_pt.get_entry(f_pte_idx + j))
+            f_pte = helper_read_entry_components(f_pt.entries[f_pte_idx + j])
             assert f_pte['valid'] == 1
             assert f_pte['paddr'] == start_paddr+f_offset+j*f_pte_covers, f"paddr {f_pte['paddr']:#x} not {start_paddr+f_offset+j*f_pte_covers:#x}"
 
@@ -53,7 +53,7 @@ class AMPTFuzzer:
   def verify_memory(self, pages, pattern: int) -> bool:
     for _offset, _pt, _pte_idx, _n_ptes, _pte_covers in pages:
       for i in range(_n_ptes):
-        pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+        pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
         if self.d.vram[pte['paddr']] != pattern: return False
         if pte['valid'] == 0: return False
 
