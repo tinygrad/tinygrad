@@ -1,7 +1,15 @@
 window.TINYCHAT_ROOT = "/";
 window.MODEL_BASE_URL= ".";
-window.BACKEND = "WebGPU";
-// window.BACKEND = "WASM";
+//window.BACKEND = "WebGPU";
+window.BACKEND = "WASM";
+
+const tiktokenReady = (async () => {
+  const { init, get_encoding, Tiktoken, load } = await import('./tiktoken.js');
+  window.Tiktoken = Tiktoken;
+  window.tiktokenInit = init;
+  window.tiktokenGetEncoding = get_encoding;
+  window.tiktokenLoad = load;
+})();
 
 // copied from examples/webgpu/stable_diffusion/index.html
 const getDevice = async () => {
@@ -163,6 +171,28 @@ async function hashBuffer(bytes) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function sendMessageToWorker(worker, message) {
+  return new Promise((resolve, reject) => {
+    worker.addEventListener(
+      'message',
+      function handler(event) {
+        resolve(event.data);
+        worker.removeEventListener('message', handler);
+      }
+    );
+
+    worker.addEventListener(
+      'error',
+      function errorHandler(error) {
+        reject(error);
+        worker.removeEventListener('error', errorHandler);
+      }
+    );
+
+    worker.postMessage(message, [message.buffer]);
+  });
+}
+
 async function decompress(compressedBuffers, state_dict, device, progress) {
   let totalLoaded = 0;
   let totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0);
@@ -272,6 +302,12 @@ async function decompress(compressedBuffers, state_dict, device, progress) {
 
     await Promise.all(gpuJobs);
   } else if (window.BACKEND == "WASM") {
+    const worker = new Worker('worker.js');
+    const t = state_dict["layers.10.feed_forward.w1.weight"];
+    const shape = [t.gguf_shape[1], t.gguf_shape[0]];
+    const input0 = compressedBuffers[t.chunk].subarray(t.start_pos, t.start_pos + t.size);
+    const result = await sendMessageToWorker(worker, input0);
+    const done = 1;
 
   } else {throw new Error(`window.BACKEND is ${window.BACKEND}, but must be WebGPU or WASM`)}
 
@@ -429,8 +465,6 @@ document.addEventListener("alpine:init", () => {
       }
 
       try {
-        //const decomp = await q6k_to_f32().setup(device);
-        //var tensorData = await getAndDecompressGGUFChunks(decomp, this.progress.bind(this));
         var tensorData = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
       } catch (error) {this.progress(0, 100, "Error decompressing model"); console.log(error); return;}
 
@@ -440,6 +474,7 @@ document.addEventListener("alpine:init", () => {
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
         p = 10; this.progress(p, 100, "Loading tokenizer:");
         const wasmBytes = await wasmResponse.arrayBuffer();
+        await tiktokenReady;
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
         p = 20; this.progress(p, 100, "Loading tokenizer:");
 
