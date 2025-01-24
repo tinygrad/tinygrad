@@ -16,7 +16,7 @@ class FakePCIDev:
 
 class FakeAM:
   def __init__(self):
-    self.is_booting = True
+    self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
     self.vram = memoryview(bytearray(4 << 30))
     self.gmc = FakeGMC()
