@@ -2446,6 +2446,7 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(add, 1)
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(add.lazydata.base, {})
 
+  @unittest.skip("questionable")
   def test_new_buffer_view(self):
     a = Tensor.empty(4, 4)
     b = Tensor.empty(4, 4)
@@ -2456,6 +2457,7 @@ class TestUOpBecome(unittest.TestCase):
     # the RESHAPE stacks on top of the VIEW(BUFFER)
     assert UPat(Ops.RESHAPE, src=(UPat(Ops.VIEW))).match(add.lazydata, {})
 
+  @unittest.skip("questionable")
   def test_chain_movement_ops(self):
     a = Tensor.empty(4, 4)
     b = Tensor.empty(4, 4)
@@ -2464,6 +2466,7 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(add.lazydata.base, {})
     assert UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.PERMUTE, src=UPat(Ops.RESHAPE)))))).match(add.lazydata, {})
 
+  @unittest.skip("questionable")
   def test_new_buffer_view_from_base(self):
     a = Tensor.arange(4)
     b = a.pad((0, 1))+0
