@@ -512,7 +512,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
       for tensor_uop in ctx.tensor_uops[buf_uop]:
         sym_uop = tensor_map.get(tensor_uop, tensor_uop)
         realized = buf_uop.view(unwrap(sym_uop.base.st))
-        if sym_uop.op is Ops.VIEW: realized = buf_uop.view(unwrap(sym_uop.base.st)+unwrap(sym_uop.st))
+        if sym_uop.op is Ops.VIEW: realized = realized.view(unwrap(sym_uop.st))
         ctx.becomes_map[tensor_uop] = realized
 
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
