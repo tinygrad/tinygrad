@@ -12,14 +12,14 @@ def bold(s): return f"\033[1m{s}\033[0m"
 def color_temp(temp):
   if temp >= 87: return colored(f"{temp:>4}", "red")
   elif temp >= 80: return colored(f"{temp:>4}", "yellow")
-  return colored(f"{temp:>4}", "white")
+  return f"{temp:>4}"
 
 def color_voltage(voltage): return colored(f"{voltage/1000:>5.3f}V", "cyan")
 
 def draw_bar(percentage, width=40, fill='█', empty='░'):
   filled_width = int(width * percentage)
   bar = fill * filled_width + empty * (width - filled_width)
-  return f'[{bar}] {percentage*100:.1f}%'
+  return f'[{bar}] {percentage*100:5.1f}%'
 
 def same_line(strs:list[list[str]], split=8) -> list[str]:
   ret = []
