@@ -420,10 +420,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from MultiLazyBuffer ***
 
-  def multi(self, *more:UOp, axis:int|None, real:list[bool]|None=None):
+  def multi(self, *more:UOp, axis:int|None, real:tuple[bool,...]|None=None):
     parents = (self,)+more
     assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
-    return UOp(Ops.MULTI, self.dtype, parents, (axis, tuple(real if real is not None else [True]*len(parents))))
+    return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(parents)))
 
   @property
   def bounds(self):

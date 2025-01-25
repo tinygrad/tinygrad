@@ -52,7 +52,7 @@ def alu_multi(root:UOp):
   axis, bounds = axes[-1] if len(axes := dedup([(x.axis, x.bounds) for x in msrcs if x.axis is not None])) else (None, None)
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)
-  new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else msrcs[0].real
+  new_real = tuple(all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])) if not_all_real else msrcs[0].real
   assert any(new_real), "output contains no real lb"
   for mlb in msrcs:
     if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(list(mlb.src))
@@ -124,7 +124,7 @@ def shrink_multi(root:UOp, multi:UOp):
     idx = multi.bounds.index(root.arg[multi.axis])
     # zero out other lbs to not create lb reference
     return UOp.multi(*[lb if i==idx else lb.const_like(0) for i,lb in enumerate(multi.src)],
-                      axis=multi.axis, real=[i==idx for i in range(len(multi.src))])
+                      axis=multi.axis, real=tuple(i==idx for i in range(len(multi.src))))
   return UOp.multi(*[x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
                    axis=multi.axis, real=multi.real)
 
