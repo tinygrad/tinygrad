@@ -420,10 +420,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** from MultiLazyBuffer ***
 
-  def multi(self, *more:UOp, axis:int|None, real:list[bool]|None=None):
+  def multi(self, *more:UOp, axis:int|None, real:tuple[bool,...]|None=None):
     parents = (self,)+more
     assert all_same([x.dtype for x in parents]), "multi parents must have the same dtype"
-    return UOp(Ops.MULTI, self.dtype, parents, (axis, tuple(real if real is not None else [True]*len(parents))))
+    return UOp(Ops.MULTI, self.dtype, parents, (axis, real if real is not None else (True,)*len(parents)))
 
   @property
   def bounds(self):
@@ -823,9 +823,9 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: tuple[str, int]                                                                              # location that called graph_rewrite
-  sink: UOp                                                                                         # the sink input to graph_rewrite
-  matches: list[tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # before+after of all the matches
+  loc: tuple[str, int]                                                                       # location that called graph_rewrite
+  sink: UOp                                                                                  # the sink input to graph_rewrite
+  matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -856,10 +856,9 @@ class TrackedPatternMatcher(PatternMatcher):
           match_stats[p][0] += 1
           match_stats[p][3] += (et:=time.perf_counter()-st)
           if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p, et))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and len(tracked_ctxs) != 0: tracked_ctxs[-1][-1].matches.append((uop, ret, p))
           return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
-    if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0 and len(tracked_ctxs[-1]) != 0: tracked_ctxs[-1][-1].matches.append((uop, None, None, 0))
     return None
 
 if TRACK_MATCH_STATS:

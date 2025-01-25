@@ -648,10 +648,14 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
 
   def test_rand_like_from_alu(self):
-    a = Tensor.ones(4, 4).shard(devices_2, axis=0)
     # TODO: fix this, which will also fix multi device dropout
+    a = Tensor.ones(4, 4).shard(devices_2, axis=0)
     with self.assertRaises(AssertionError):
       (a + a).rand_like()
+
+    b = Tensor.empty(4, 4).shard(devices_2, axis=None)
+    with self.assertRaises(AssertionError):
+      (a + b).rand_like()
 
   @unittest.skip("no longer supports uneven shard")
   def test_rand_like_uneven_shard(self):
