@@ -53,17 +53,14 @@ def alu_multi(root:UOp):
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)
   new_real = tuple(all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])) if not_all_real else msrcs[0].real
-  assert any(new_real), "output contains no real lb"
   for mlb in msrcs:
     if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(list(mlb.src))
     else:
       assert axis is not None and bounds is not None
       if mlb.axis is None: srcs.append(to_sharded(list(mlb.src), axis, bounds))
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.src], axis, bounds))
-  new_real_lbs:dict[int,UOp] = {i:lsrcs[0].alu(root.op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
-  # NOTE: const dtype should match real
-  new_dtype = next(iter(new_real_lbs.values())).dtype
-  new_lbs = [new_real_lbs.get(i, lsrcs[0].const_like(0).cast(new_dtype)) for i,lsrcs in enumerate(zip(*srcs))]
+  new_lbs = [lsrcs[0].alu(root.op, *lsrcs[1:]) for lsrcs in zip(*srcs)]
+  new_lbs = [x if r else x.const_like(0) for r,x in zip(new_real, new_lbs)] # TODO: is this needed?
   return UOp.multi(*new_lbs, axis=axis, real=new_real)
 
 def reduce_multi(root:UOp, multi:UOp):
