@@ -1,10 +1,9 @@
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites, symbolic
 from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
-from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
+from tinygrad.viz.serve import get_metadata, uop_to_json, to_perfetto
 
 # NOTE: VIZ tests always use the tracked PatternMatcher instance
 symbolic = TrackedPatternMatcher(symbolic.patterns)
@@ -76,14 +75,14 @@ class TestViz(unittest.TestCase):
 
   @unittest.skip("TODO: bring this back with better testing")
   def test_bottom_up_rewrite(self):
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
-    n1 = a.sin()
-    uop = n1.sin()
-    pm = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-    ret = helper_test_viz(uop, pm, ctx={a.sin():a.sqrt(), n1.sin():n1.sqrt()}, bottom_up=True)
-    self.assertEqual(len(ret), 2)
-    self.assertIs(ret[0], a.sin().sqrt()) # first rewrite
-    self.assertIs(ret[1], a.sqrt().sqrt()) # second one
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 10)
+    c = UOp.variable("c", 0, 10)
+    UOp.substitute(a+b, {a+b:c})
+    ret = get_metadata(keys, contexts)
+    self.assertEqual(len(ret), 1)
+    _, _, vals = ret[0][0]
+    self.assertEqual(len(vals.upats), 1)
 
   # NOTE: calling graph_rewrite when the function isn't decorated with track_rewrites should not VIZ
   def test_rewrite_without_context(self):
