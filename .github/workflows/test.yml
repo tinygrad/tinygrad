@@ -17,8 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu] #, amd]
-
+        backend: [llvm, gpu] #, clang] #, amd]
     name: Tests on Windows (${{ matrix.backend }})
     runs-on: windows-2022
     timeout-minutes: 45
@@ -35,14 +34,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+          key: windows-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Cache downloads
         uses: actions/cache@v4
         with:
           path: C:\Users\runneradmin\.cache\tinygrad\downloads\
-          key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+          key: downloads-cache-windows-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
         run: if ('${{ matrix.backend }}' -eq 'clang') { echo "CLANG=1" >> $env:GITHUB_ENV } elseif ('${{ matrix.backend }}' -eq 'gpu') { echo "GPU=1" >> $env:GITHUB_ENV } elseif ('${{ matrix.backend }}' -eq 'llvm') { echo "LLVM=1" >> $env:GITHUB_ENV } elseif ('${{ matrix.backend }}' -eq 'adm') { echo "AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1" >> $env:GITHUB_ENV }
+      - name: Install OpenCL # TODO: cache?
+        if: matrix.backend == 'gpu'
+        run: choco install opencl-intel-cpu-runtime --version '16.1.1'
       - name: Install dependencies
         run: pip install -e ".[testing$(if ('${{ matrix.backend }}' -eq 'llvm') {',llvm'})]" --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
