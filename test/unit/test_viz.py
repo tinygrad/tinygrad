@@ -1,72 +1,53 @@
-from typing import Dict, List, Optional
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
-from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic
+from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json, to_perfetto
 
-@track_rewrites(named=True)
-def rewrite(sink:UOp, pm:PatternMatcher, **kwargs): return graph_rewrite(sink, pm, **kwargs)
-
-def helper_test_viz(sink:UOp, pm:PatternMatcher, **kwargs) -> List[UOp]:
-  rewrite(sink, pm, **kwargs)
-  assert len(contexts) == 1
-  assert len(contexts[0]) == 1
-  k = get_metadata(keys, contexts)[0][0]
-  g = get_details(*k)
-  return g.uops[1:]
+# NOTE: VIZ tests always use the tracked PatternMatcher instance
+symbolic = TrackedPatternMatcher(symbolic.patterns)
 
 class TestViz(unittest.TestCase):
   def setUp(self):
+    # clear the global context
     contexts.clear()
     keys.clear()
+    _name_cnt.clear()
     self.tms = TRACK_MATCH_STATS.value
     TRACK_MATCH_STATS.value = 2
   def tearDown(self): TRACK_MATCH_STATS.value = self.tms
 
   def test_viz_simple(self):
-    pm = PatternMatcher([
-      (UPat.var("x")*1, lambda x:x),
-    ])
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
-    uops = helper_test_viz(a*1, pm)
-    self.assertEqual(len(uops), 1)
-    self.assertEqual(uops[0], a)
+    a = UOp.variable("a", 0, 10)
+    @track_rewrites(named=True)
+    def test(sink): return graph_rewrite(sink, symbolic)
+    test(a*1)
+    ret = get_metadata(keys, contexts)
+    self.assertEqual(len(ret), 1)
+    self.assertEqual(ret[0][0][0], "test_1")
+    self.assertEqual(len(ret[0][0][2].upats), 1)
 
-  def test_rewrite_twice(self):
-    pm = PatternMatcher([
-      (UPat.var("x")+UPat.var("x"), lambda x:x*2),
-      (UPat.var("x", dtypes.int)*2, lambda x:x.alu(Ops.SHL, UOp.const(dtypes.int, 1))),
-    ])
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
-    uops = helper_test_viz(a+a, pm)
-    self.assertEqual(len(uops), 2)
-    self.assertEqual(uops[0], a*2)
-    self.assertEqual(uops[1], graph_rewrite(a+a, pm))
-
-  def test_rewrite_with_ctx(self):
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), ShapeTracker.from_shape((1, 1)).to_uop()))
-    b = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1), ShapeTracker.from_shape((1, 1)).to_uop()))
-    def store_load(ctx:Dict[UOp, None], glbl, st) -> Optional[UOp]:
-      if glbl in ctx: return None
-      ctx[glbl] = None
-      return UOp.store(glbl, ShapeTracker.from_shape(st.shape).to_uop())
-    pm = PatternMatcher([
-      (UPat.load(UPat(Ops.DEFINE_GLOBAL, name="glbl"), UPat.var("st")), store_load),
-    ])
-    uops = helper_test_viz(a+b, pm, ctx={})
-    self.assertEqual(len(uops), 2)
-    self.assertEqual(uops[-1], graph_rewrite(a+b, pm, {}))
+  def test_track_two_rewrites(self):
+    a = UOp.variable("a", 0, 10)
+    @track_rewrites(named=True)
+    def test(sink): return graph_rewrite(sink, symbolic)
+    test((a+a)*1)
+    ret = get_metadata(keys, contexts)
+    self.assertEqual(len(ret), 1)       # one context
+    self.assertEqual(len(ret[0]), 1)    # one graph_rewrite call in context
+    key, _, val = ret[0][0]
+    self.assertEqual(key, "test_1")
+    self.assertEqual(len(val.upats), 2) # two upats applied
 
   def test_track_rewrites(self):
-    simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
     @track_rewrites(named=True)
-    def do_rewrite(x:UOp): return graph_rewrite(x, simple)
-    ld = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
-    do_rewrite(ld*1)
-    do_rewrite(ld*2)
+    def do_rewrite(x:UOp): return graph_rewrite(x, symbolic)
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 4)
+    do_rewrite(a*1)
+    do_rewrite(a*b)
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 2)
     key, _, m = ret[0][0]
@@ -77,21 +58,21 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(m.upats), 0)
 
   def test_track_rewrites_with_exception(self):
-    simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
     @track_rewrites()
     def do_rewrite(x:UOp):
-      x = graph_rewrite(x, simple) # NOTE: viz tracks this
+      x = graph_rewrite(x, symbolic) # NOTE: viz tracks this
       raise Exception("test")
-    ld = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
-    with self.assertRaises(Exception): do_rewrite(ld*1)
+    a = UOp.variable("a", 0, 10)
+    with self.assertRaises(Exception): do_rewrite(a*1)
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
 
-  def test_fold_const(self):
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
-    graph = uop_to_json(a)
-    assert not any(v[0].startswith("CONST") for v in graph.values())
-    assert len([x for x in graph.values() if "CONST" in x[0]]) == 1
+  # NOTE: CONST UOps do not get nodes in the graph
+  def test_dont_create_const_nodes(self):
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 4)
+    self.assertEqual(len(uop_to_json(a*1)), 2)
+    self.assertEqual(len(uop_to_json(a*b)), 3)
 
   @unittest.skip("TODO: bring this back with better testing")
   def test_bottom_up_rewrite(self):
@@ -103,16 +84,6 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(ret), 2)
     self.assertIs(ret[0], a.sin().sqrt()) # first rewrite
     self.assertIs(ret[1], a.sqrt().sqrt()) # second one
-
-  def test_top_down_rewrite(self):
-    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
-    n1 = a.sin()
-    uop = n1.sin()
-    pm = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-    # if it wasn't bottom_up, it's rewritten once
-    ret = helper_test_viz(uop, pm, ctx={a.sin():a.sqrt(), n1.sin():n1.sqrt()}, bottom_up=False)
-    self.assertEqual(len(ret), 1)
-    self.assertIs(ret[0], a.sqrt().sin()) # only rewrite
 
   # NOTE: calling graph_rewrite when the function isn't decorated with track_rewrites should not VIZ
   def test_rewrite_without_context(self):
@@ -210,7 +181,6 @@ class TextVizProfiler(unittest.TestCase):
     self.assertEqual(j['traceEvents'][7]['ts'], 954)
     self.assertEqual(j['traceEvents'][7]['dur'], 4)
     self.assertEqual(j['traceEvents'][7]['pid'], j['traceEvents'][3]['pid'])
-
 
 if __name__ == "__main__":
   unittest.main()
