@@ -64,7 +64,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   ret:GraphRewriteDetails = {"uops":[pcall(str, sink:=ctx.sink)], "graphs":[uop_to_json(sink)], "code_line":lines(ctx.loc[0])[ctx.loc[1]-1].strip(),
-         "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "diffs":[], "upats":[], "changed_nodes":[], **metadata}
+                             "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "diffs":[], "upats":[], "changed_nodes":[], **metadata}
   replaces: dict[UOp, UOp] = {}
   for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches)):
     replaces[u0] = u1
@@ -169,10 +169,11 @@ if __name__ == "__main__":
 
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
+  # NOTE: this context is a tuple of list[keys] and list[values]
   kernels = get_metadata(*contexts) if contexts is not None else []
 
   if getenv("FUZZ_VIZ"):
-    ret = [get_details(*args) for v in tqdm(kernels) for args in v]
+    ret = [get_details(contexts[0][i], contexts[1][i][j], args) for i,v in tqdm(enumerate(kernels)) for j,args in enumerate(v[1])]
     print(f"fuzzed {len(ret)} rewrite details")
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None

@@ -25,8 +25,9 @@ class TestViz(unittest.TestCase):
     test(a*1)
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
-    self.assertEqual(ret[0][0][0], "test_1")
-    self.assertEqual(len(ret[0][0][2].upats), 1)
+    key, val = ret[0]
+    self.assertEqual(key, "test_1")
+    self.assertEqual(val[0]["match_count"], 1)
 
   def test_track_two_rewrites(self):
     a = UOp.variable("a", 0, 10)
@@ -34,11 +35,26 @@ class TestViz(unittest.TestCase):
     def test(sink): return graph_rewrite(sink, symbolic)
     test((a+a)*1)
     ret = get_metadata(keys, contexts)
-    self.assertEqual(len(ret), 1)       # one context
-    self.assertEqual(len(ret[0]), 1)    # one graph_rewrite call in context
-    key, _, val = ret[0][0]
+    key, val = ret[0]
+    self.assertEqual(len(ret), 1)              # one context
+    self.assertEqual(len(val), 1)              # one graph_rewrite call in context
     self.assertEqual(key, "test_1")
-    self.assertEqual(len(val.upats), 2) # two upats applied
+    self.assertEqual(val[0]["match_count"], 2) # two upats applied
+
+  def test_track_multiple_calls_one_ctx(self):
+    a = UOp.variable("a", 0, 10)
+    @track_rewrites(named=True)
+    def test(a, b):
+      a = graph_rewrite(a, symbolic)
+      b = graph_rewrite(b, symbolic)
+    test(a*1, a*5)
+    ret = get_metadata(keys, contexts)
+    key, val = ret[0]
+    self.assertEqual(len(ret), 1)              # one context
+    self.assertEqual(len(val), 2)              # two graph_rewrite calls in context
+    self.assertEqual(key, "test_1")
+    self.assertEqual(val[0]["match_count"], 1) # one rewrite for a*0
+    self.assertEqual(val[1]["match_count"], 0) # no rewrites for a*5
 
   def test_track_rewrites(self):
     @track_rewrites(named=True)
@@ -49,12 +65,12 @@ class TestViz(unittest.TestCase):
     do_rewrite(a*b)
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 2)
-    key, _, m = ret[0][0]
+    key, m = ret[0]
     self.assertEqual(key, "do_rewrite_1")
-    self.assertEqual(len(m.upats), 1)
-    key, _, m = ret[1][0]
+    self.assertEqual(m[0]["match_count"], 1)
+    key, m = ret[1]
     self.assertEqual(key, "do_rewrite_2")
-    self.assertEqual(len(m.upats), 0)
+    self.assertEqual(m[0]["match_count"], 0)
 
   def test_track_rewrites_with_exception(self):
     @track_rewrites()
