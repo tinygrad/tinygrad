@@ -198,12 +198,12 @@ class AMDCopyQueue(HWQueue):
     return self
 
   def bind(self, dev:AMDDevice):
-    if not dev.driverless: return
+    if not getenv("AMD_SDMA_BIND", 0) or not dev.driverless: return
 
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
-    for i, value in enumerate(self._q): hw_view[i] = value
+    for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
     self.indirect_cmd = [amd_gpu.SDMA_OP_INDIRECT | amd_gpu.SDMA_PKT_INDIRECT_HEADER_VMID(0), *data64_le(self.hw_page.va_addr), qsz, *data64_le(0)]
     self._q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
