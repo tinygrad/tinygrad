@@ -58,7 +58,7 @@ if __name__=="__main__":
     Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, model=model),
     Step(name = "q6k_to_f16", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f16),
   ]
-  quant_weight_shapes = ((2048, 2048), (512, 2048), (2048, 8192), (8192, 2048)) # these are shapes in gguf file, need to reverse
+  quant_weight_shapes = ((2048, 2048), (2048, 512), (2048, 8192), (8192, 2048)) # these are shapes in gguf file, need to reverse
   sub_steps += [Step(name = f"q6k_to_int8_{s1}_{s0}", input = [Tensor.randn((s1 * s0 * 210) // 256, dtype=dtypes.uint8), (s1, s0)], forward = q6k_to_int8) for s0, s1 in quant_weight_shapes]
 
   # TODO: refactor to move some corrected CLANG rendering to export_model.py
@@ -130,14 +130,17 @@ if __name__=="__main__":
     wasm.HEAPU8.set(tensor.bytes, bufPtr);
   }}""" if bufs_to_save else ""}
 
-  return async ({",".join(name for name,_,_ in inputs)}) => {{
-    {"\n    ".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-    {"\n    ".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-    {"\n    ".join(f"wasm.HEAPU8.set({name}, {inputPtr})" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-    wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))})
-    {"\n    ".join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes})" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-    {"\n    ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
-    return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}]
+  return {{
+    run: async ({",".join(name for name,_,_ in inputs)}) => {{
+      {"\n      ".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+      {"\n      ".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+      {"\n      ".join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+      wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))});
+      {"\n      ".join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+      {"\n      ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
+      return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}];
+    }},
+    wasm: wasm
   }}
 }}\n"""
 
