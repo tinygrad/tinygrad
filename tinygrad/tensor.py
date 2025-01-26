@@ -3560,6 +3560,14 @@ class Tensor(SimpleMathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
+  def flash_attention(self,key: Tensor,value: Tensor) -> Tensor:
+      """
+      Implements the flash attention mechanism
+
+      - Paper: https://arxiv.org/pdf/2205.14135
+      """
+      raise NotImplementedError("Implement Flash Attention")
+
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
