@@ -195,12 +195,13 @@ to_si = PatternMatcher([
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.VIEW, name="x", src=(UPat(Ops.DEVICE),)), lambda x:x.replace(src=())),
   # PRELOAD becomes LOAD
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # CONST(VIEW) becomes VALID too, TODO: doesn't have to
-  (UPat(Ops.CONST, name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: UOp.const(x.dtype, x.const_arg).valid(st.st)),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: x.replace(src=()).valid(st.st)),
 ])
 
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
@@ -444,8 +445,8 @@ do_realize = PatternMatcher([
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
   assert isinstance(val.const_arg, int), f"expected BIND value to be int {val}"
-  ctx.var_vals[ret:=var.replace(src=())] = val.const_arg
-  return ret.valid(unwrap(bind.st))
+  ctx.var_vals[var] = val.const_arg
+  return var
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
