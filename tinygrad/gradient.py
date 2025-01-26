@@ -1,7 +1,7 @@
 from typing import cast, Iterator
-import math, functools
+import math, functools, dataclasses
 from tinygrad.dtype import dtypes, sum_acc_dtype
-from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
+from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
@@ -66,4 +66,5 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       if v is None: continue
       if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
+      if (forward_metadata:=all_metadata.get(t0)) is not None: all_metadata[v] = dataclasses.replace(forward_metadata, backward=True)
   return grads
