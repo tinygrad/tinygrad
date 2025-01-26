@@ -897,17 +897,22 @@ class RewriteContext:
   def top_down_rewrite(self, sink:UOp) -> UOp:
     stack: list[tuple[UOp, Optional[bool]]] = [(sink, False)]
     # False means src not processed | True means src is processed | None means there is new_n
+    prev = None
     while stack:
       n, processed = stack.pop()
-      if processed is False:
+      if processed is False and n not in self.replace:
         stack.append((n, True))
-        if n not in self.replace: stack.extend([(x, False) for x in n.src[::-1]])
-      elif processed is True:
+        stack.extend([(x, False) for x in n.src[::-1]])
+      if processed is False and n in self.replace: prev = n
+      if processed is True:
         new_n = self.pm.rewrite(n, self.ctx) if (new_src:=tuple(self.replace[x] for x in n.src)) == n.src else UOp(n.op, n.dtype, new_src, n.arg)
         if new_n is None:
           self.replace[n] = n
-          while stack and stack[-1][1] is None: self.replace[stack.pop()[0]] = n
+          prev = n
         else: stack.extend(((n, None),(new_n, False)))
+      if processed is None:
+        assert prev is not None
+        self.replace[n] = prev
     return self.replace[sink]
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
