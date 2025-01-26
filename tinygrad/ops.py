@@ -1234,8 +1234,6 @@ symbolic = symbolic_simple+PatternMatcher([
   # Commutative ordering, if its a chain, move the chain to the left
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
       (x.src[1].op is x.op or (x.src[0].tuplize > x.src[1].tuplize)) else None),
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
