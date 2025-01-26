@@ -195,7 +195,6 @@ to_si = PatternMatcher([
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
-  (UPat(Ops.VIEW, name="x", src=(UPat(Ops.DEVICE),)), lambda x:x.replace(src=())),
   # PRELOAD becomes LOAD
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
@@ -445,7 +444,7 @@ do_realize = PatternMatcher([
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
   assert isinstance(val.const_arg, int), f"expected BIND value to be int {val}"
-  ctx.var_vals[var] = val.const_arg
+  ctx.var_vals[var.replace(src=())] = val.const_arg
   return var
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
