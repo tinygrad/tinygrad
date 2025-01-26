@@ -199,6 +199,8 @@ to_si = PatternMatcher([
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  # CONST(VIEW) becomes VALID too, TODO: doesn't have to
+  (UPat(Ops.CONST, name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: UOp.const(x.dtype, x.const_arg).valid(st.st)),
 ])
 
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
@@ -438,11 +440,11 @@ do_realize = PatternMatcher([
   (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
 ])
 
-# **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
+# **** rewrite VIEW into LOAD/STORE or fuse the underlying UOp
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
-  assert isinstance(val.src[1].const_arg, int), f"expected BIND value to be int {val}"
-  ctx.var_vals[ret:=var.replace(src=())] = val.src[1].const_arg
+  assert isinstance(val.const_arg, int), f"expected BIND value to be int {val}"
+  ctx.var_vals[ret:=var.replace(src=())] = val.const_arg
   return ret.valid(unwrap(bind.st))
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
@@ -456,8 +458,6 @@ def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
-  # CONST is always fused and generated
-  (UPat(Ops.CONST, name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: UOp.const(x.dtype, x.const_arg).valid(st.st)),
   (UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.var("val"))), unbind_variable),
   # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
@@ -481,9 +481,6 @@ remove_movement_ops = merge_views+PatternMatcher([
   # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
   (UPat(Ops.VIEW, name="view"),
    lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
-  # merge unmasked const views
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.CONST, name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
-   lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
 ])
 
 @track_rewrites(named=True)
