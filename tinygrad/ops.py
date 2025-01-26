@@ -1084,22 +1084,28 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
     return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
   return None
 
+
 def fold_unrolled_divs(chain, x, denominator):
   # div pattern in unrolled arange
-  # example: x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  offset = 0
-  # TODO: this might start a bad loop
-  for c in range(denominator.arg-1,-1,-1):
-    # check if (x+c)//d would have been folded
-    if (q:=(x.vmin+c)//denominator.arg)==(x.vmax+c)//denominator.arg:
-      offset -= q
-      continue
+  # example: x//4 + (x+1)//4 + (x+2)//4 + (x+3)//4 -> x
+  # some (x+c)//d would have been folded, so we won't find them in the chain
+  # we have to account for the constants the folded terms would have added, and subtract that
+  if x.vmax - x.vmin > (d:=denominator.arg):
+    non_folded_c = range(d)
+    offset = 0
+  elif (q1:=x.vmin//d)!=(q2:=x.vmax//d):
+    non_folded_c = itertools.chain(range(0, d-x.vmin%d), range(d-x.vmax%d, d-1))
+    offset = ((d-x.vmax%d) - (d-x.vmin%d)) * -q2
+  else: # q1 == q2
+    non_folded_c = range(d-x.vmax%d, d-x.vmin%d)
+    offset = (d-x.vmax%d)*-q1 + ((d-1) - (d-x.vmin%d))*-(q1+1)
+
+  # we assume the chain is sorted in ascending order so we look for (x+d-1)//d first
+  for c in reversed(non_folded_c):
     if chain is None: return None
     chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
-    # assumed the chain is sorted and CONST is the last of an ADD
-    if u is None or u.op is not Ops.IDIV or u.src[1] is not denominator: return None
-    if ((n:=u.src[0]).op is not Ops.ADD or n.src[0] is not x or n.src[1].op is not Ops.CONST or n.src[1].arg != c) and \
-      (c!=0 or n is not x): return None
+    expected = x//denominator if c==0 else (x+c)//denominator
+    if u is not expected: return None
   return chain+x-offset if chain is not None else x-offset
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
