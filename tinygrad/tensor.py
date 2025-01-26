@@ -44,6 +44,13 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
 
 # **** start with two base classes, Tensor and Function ****
 
+def apply_uop(fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
+  ret = Tensor.__new__(Tensor)
+  needs_input_grad = [t.requires_grad for t in x]
+  ret.requires_grad, ret.grad = True if any(needs_input_grad) else None if None in needs_input_grad else False, None
+  ret.lazydata = fxn(*[t.lazydata for t in x], **kwargs)
+  return ret
+
 class Function:
   def __init__(self, device:Union[str, tuple[str, ...]], *tensors:Tensor, metadata:Optional[Metadata]=None):
     self.device = device
@@ -2499,7 +2506,7 @@ class Tensor(SimpleMathTrait):
     """
     Returns a contiguous tensor.
     """
-    return F.Contiguous.apply(self)
+    return apply_uop(UOp.contiguous, self) #F.Contiguous.apply(self)
   def contiguous_backward(self):
     """
     Inserts a contiguous operation in the backward pass.
