@@ -1,6 +1,6 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math, argparse
+import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math, argparse, json
 import torch
 from scipy.special import log_softmax, logsumexp, softmax
 import torch.nn.functional as F
@@ -511,6 +511,9 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
   total_time = log_spec.shape[-1] // FRAMES_PER_SEGMENT * 30
   print(f"{total_time=}")
   i = 0
+  transcribed = {
+    "segments": [],
+  }
   while start_time < total_time:
     curr_frame = int(start_time) * 100
     end_frame = curr_frame + FRAMES_PER_SEGMENT
@@ -556,6 +559,11 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
         print(f"\033[31m{text}\033[0m")
         output_fh.write(f"{text}\n")
         context_for_next.extend(segment.tokens)
+        transcribed["segments"].append({
+          "text": segment.text,
+          "start": segment.start,
+          "end": segment.end
+        })
       start_time = segment.end
       break
     else:
@@ -564,7 +572,7 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
       ctx = np.array(start_tokens)
       continue
     ctx = np.array([enc._special_tokens['<|startofprev|>']]+context_for_next[-nsample+len(start_tokens):]+start_tokens)
-
+  return transcribed
 
 CHUNK = 1600
 RECORD_SECONDS = 10
@@ -584,13 +592,16 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", type=str, default="tiny.en", help="name of model")
   parser.add_argument("--audio", type=str, required=True, help="path to an mp3 audio file")
-  parser.add_argument("--beam", action=argparse.BooleanOptionalAction, default=False, help="Whether to use beam decoding")
+  parser.add_argument("--beam", action=argparse.BooleanOptionalAction, default=True, help="Whether to use beam decoding")
   args = parser.parse_args()
   model, enc = init_whisper(args.model, batch_size=1)
 
   if len(sys.argv) > 1:
     with open("transcribed.txt", "w") as output_fh:
-      transcribe_file(model, enc, args.audio, output_fh, args.beam)
+      transcribed = transcribe_file(model, enc, args.audio, output_fh, args.beam)
+      with open("transcribed.json", "w") as output_fh2:
+        json.dump(transcribed, output_fh2, indent=2)
+
   else:
     # online
     q = multiprocessing.Queue()
