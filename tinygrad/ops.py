@@ -1231,16 +1231,11 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-<<<<<<< HEAD
   # Commutative ordering, if its a chain, move the chain to the left
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
       (x.src[1].op is x.op or (x.src[0].tuplize > x.src[1].tuplize)) else None),
-  # group like
-  ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
-=======
   # ** COMMUTATIVE flipping **
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
->>>>>>> master
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -1249,11 +1244,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
-<<<<<<< HEAD
-  ((UPat.var("y")+UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
-=======
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
->>>>>>> master
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
