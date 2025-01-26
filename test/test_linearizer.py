@@ -121,6 +121,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(4,).realize()
     helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1*-1], opts=[])
 
+  @unittest.expectedFailure # CONST must have a ShapeTracker
   def test_const_alu_indexing_one_const_fine(self):
     st = ShapeTracker.from_shape((4,)).to_uop()
     load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)

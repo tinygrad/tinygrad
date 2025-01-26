@@ -1,3 +1,4 @@
+
 # ruff: noqa: E501
 import unittest, random
 import numpy as np
@@ -1206,18 +1207,13 @@ class TestLinearizerFailures(unittest.TestCase):
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(12, 1024, 1), strides=(1024, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
         UOp(Ops.RECIP, dtypes.half, arg=None, src=(
           UOp(Ops.ADD, dtypes.half, arg=None, src=(
-            UOp(Ops.WHERE, dtypes.half, arg=None, src=(
-              x6:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(12, 1024, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-              UOp(Ops.CONST, dtypes.half, arg=1.0, src=()),
-              x9:=UOp(Ops.CONST, dtypes.half, arg=0.0, src=()),)),
+            UOp(Ops.CONST, dtypes.half, arg=1.0, src=(
+              x6:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(12, 1024, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
             UOp(Ops.EXP2, dtypes.half, arg=None, src=(
               UOp(Ops.MUL, dtypes.half, arg=None, src=(
                 UOp(Ops.MUL, dtypes.half, arg=None, src=(
-                  UOp(Ops.WHERE, dtypes.half, arg=None, src=(
-                    x6,
-                    UOp(Ops.CONST, dtypes.half, arg=2.0, src=()),
-                    x9,)),
+                  UOp(Ops.CONST, dtypes.half, arg=2.0, src=(
+                     x6,)),
                   UOp(Ops.ADD, dtypes.half, arg=None, src=(
                     UOp(Ops.CAST, dtypes.half, arg=None, src=(
                       UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
@@ -1232,10 +1228,8 @@ class TestLinearizerFailures(unittest.TestCase):
                     UOp(Ops.LOAD, dtypes.half, arg=None, src=(
                       UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=3, src=()),
                       UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(12, 1024, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                UOp(Ops.WHERE, dtypes.half, arg=None, src=(
-                  x6,
-                  UOp(Ops.CONST, dtypes.half, arg=-1.4426950408889634, src=()),
-                  x9,)),)),)),)),)),)),))
+                UOp(Ops.CONST, dtypes.half, arg=-1.4426950408889634, src=(
+                   x6,)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=0, amt=2)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
@@ -1283,17 +1277,14 @@ class TestLinearizerFailures(unittest.TestCase):
                       UOp(Ops.WHERE, dtypes.int, arg=None, src=(
                         UOp(Ops.VALID, dtypes.bool, arg=None, src=(
                           UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50001, 99999), strides=(0, 0), offset=0, mask=((0, 50001), (49999, 99999)), contiguous=False), View(shape=(1024, 50000, 50000), strides=(0, 1, 100000), offset=0, mask=None, contiguous=False))), src=()),)),
-                        UOp(Ops.CONST, dtypes.int, arg=1, src=()),
-                        x20:=UOp(Ops.CONST, dtypes.int, arg=0, src=()),)),)),
-                    UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-                      x22:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                      UOp(Ops.CONST, dtypes.int, arg=-1, src=()),
-                      x20,)),)),)),
-                UOp(Ops.WHERE, dtypes.bool, arg=None, src=(
-                  x22,
-                  UOp(Ops.CONST, dtypes.bool, arg=True, src=()),
-                  UOp(Ops.CONST, dtypes.bool, arg=False, src=()),)),)),)),)),)),)),))
+                        UOp(Ops.CONST, dtypes.int, arg=1, src=(
+                          x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                        UOp(Ops.CONST, dtypes.int, arg=0, src=(
+                           x20,)),)),)),
+                    UOp(Ops.CONST, dtypes.int, arg=-1, src=(
+                      x23:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                UOp(Ops.CONST, dtypes.bool, arg=True, src=(
+                   x23,)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=1, amt=16)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["AMD", "GPU", "METAL", "NV", "CUDA"])
 
@@ -1348,11 +1339,8 @@ class TestLinearizerFailures(unittest.TestCase):
           UOp(Ops.MUL, dtypes.float, arg=None, src=(
             UOp(Ops.CAST, dtypes.float, arg=None, src=(
               UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
-                x7:=UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                  x8:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                  x10:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),
-                   x10,)),
+                x7:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=(
+                  x8:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
                 UOp(Ops.MAX, dtypes.float, arg=None, src=(
                   UOp(Ops.ADD, dtypes.float, arg=None, src=(
                     UOp(Ops.MUL, dtypes.float, arg=None, src=(
@@ -1364,20 +1352,18 @@ class TestLinearizerFailures(unittest.TestCase):
                           UOp(Ops.MUL, dtypes.float, arg=None, src=(
                             UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                               UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
-                              x22:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                               x8,
-                              UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
-                               x10,)),)),)),
+                              x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                            UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+                               x8,)),)),)),
                         UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=3, src=()),
-                           x22,)),)),
+                           x20,)),)),
                       UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=4, src=()),
-                         x22,)),)),
+                         x20,)),)),
                     UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                       UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=5, src=()),
-                       x22,)),)),
+                       x20,)),)),
                    x7,)),)),)),
             UOp(Ops.LOAD, dtypes.float, arg=None, src=(
               UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=6, src=()),
@@ -1394,11 +1380,8 @@ class TestLinearizerFailures(unittest.TestCase):
           UOp(Ops.MUL, dtypes.float, arg=None, src=(
             UOp(Ops.CAST, dtypes.float, arg=None, src=(
               UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
-                x7:=UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                  x8:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                  x10:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),
-                   x10,)),
+                x7:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=(
+                  x8:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
                 UOp(Ops.MAX, dtypes.float, arg=None, src=(
                   UOp(Ops.ADD, dtypes.float, arg=None, src=(
                     UOp(Ops.MUL, dtypes.float, arg=None, src=(
@@ -1410,20 +1393,18 @@ class TestLinearizerFailures(unittest.TestCase):
                           UOp(Ops.MUL, dtypes.float, arg=None, src=(
                             UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                               UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
-                              x22:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                               x8,
-                              UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
-                               x10,)),)),)),
+                              x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 11, 11), strides=(0, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                            UOp(Ops.CONST, dtypes.float, arg=-1.0, src=(
+                               x8,)),)),)),
                         UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=3, src=()),
-                           x22,)),)),
+                           x20,)),)),
                       UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=4, src=()),
-                         x22,)),)),
+                         x20,)),)),
                     UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                       UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=5, src=()),
-                       x22,)),)),
+                       x20,)),)),
                    x7,)),)),)),
             UOp(Ops.LOAD, dtypes.float, arg=None, src=(
               UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=6, src=()),
