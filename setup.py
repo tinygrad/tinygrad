@@ -15,7 +15,7 @@ setup(name='tinygrad',
       long_description=long_description,
       long_description_content_type='text/markdown',
       packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.engine',
-                  'tinygrad.runtime', 'tinygrad.runtime.support', 'tinygrad.runtime.graph', 'tinygrad.shape'],
+                  'tinygrad.runtime', 'tinygrad.runtime.support', 'tinygrad.runtime.support.am', 'tinygrad.runtime.graph', 'tinygrad.shape'],
       package_data = {'tinygrad': ['py.typed']},
       classifiers=[
         "Programming Language :: Python :: 3",
@@ -58,7 +58,8 @@ setup(name='tinygrad',
             "hypothesis",
             "nibabel",
             "bottle",
-            "ggml-python"
+            "ggml-python",
+            "capstone"
         ],
         'webgpu': ["wgpu"],
         'docs': [

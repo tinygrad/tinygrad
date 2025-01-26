@@ -66,7 +66,8 @@ class TestArange(unittest.TestCase):
     return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
 
 class TestIndexing(unittest.TestCase):
-  @unittest.expectedFailure
+  # update: passing after CAST_BEFORE_VIEW=1 deletion
+  # @unittest.expectedFailure
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
@@ -159,7 +160,8 @@ class TestIndexing(unittest.TestCase):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb_w = emb.weight.numpy()
+    # TODO: why is a new realize needed here
+    emb_w = emb.weight.realize().numpy()
     x = Tensor([1,2,3,4])
     with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()

@@ -36,7 +36,7 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   for u in x.src:
     if u.op is Ops.BLOCK:
       # merge sibling blocks. NOTE: blocks must only have one output source
-      assert u.arg.ctx not in old_blocks, "sibiling should never have been created"
+      assert u.arg.ctx not in old_blocks, "sibling should never have been created"
       old_blocks[u.arg.ctx] = u
     elif u.op not in DONT_PLACE_IN_BLOCK and set(children[u]).issubset(in_this_block):
       # if it can go in blocks and all its children are in the block, we add it to the block

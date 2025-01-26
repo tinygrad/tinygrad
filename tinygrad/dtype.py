@@ -73,7 +73,7 @@ class dtypes:
   @staticmethod
   @functools.lru_cache(None)
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
-  @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
+  @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
   @staticmethod

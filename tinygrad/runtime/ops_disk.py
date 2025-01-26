@@ -67,7 +67,7 @@ class DiskBuffer:
     self.device, self.size, self.offset = device, size, offset
   def __repr__(self): return f"<DiskBuffer size={self.size} offset={self.offset}>"
   def _buf(self) -> memoryview:
-    assert self.device.mem is not None, "DiskBuffer wasn't opened"
+    assert hasattr(self.device, "mem"), "DiskBuffer wasn't opened"
     return memoryview(self.device.mem)[self.offset:self.offset+self.size]
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)

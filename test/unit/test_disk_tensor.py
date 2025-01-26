@@ -68,8 +68,8 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
-    with self.assertRaises(RuntimeError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16)
+    with self.assertRaises(NotImplementedError):
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
     with self.assertRaises(RuntimeError):
@@ -164,6 +164,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
+      if dtype in [dtypes.double] and Device.DEFAULT == "METAL": continue # not supported on METAL
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)

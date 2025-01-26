@@ -6,7 +6,7 @@ from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
 from tinygrad.ops import UOp, Ops, graph_rewrite
-from tinygrad.codegen.uopgraph import sym
+from tinygrad.codegen.rewriter import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
@@ -832,6 +832,30 @@ class TestShapeTrackerSize(unittest.TestCase):
                                   offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (Variable('start_pos', 0, 8192)+1), 128),
                                                                                strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
     self.assertEqual(st.real_size(), 8389632)
+
+  def test_pad_size_simple(self):
+    st = ShapeTracker.from_shape((10,)).pad(((2,4),))
+    self.assertEqual(st.real_size(), 10)
+
+  def test_pad_size_multiview(self):
+    st = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).reshape((16*14,)).stride((17,))
+    self.assertEqual(st.real_size(), 100)
+
+  # TODO improve real_size accuracy in cases like this?
+  @unittest.expectedFailure
+  def test_stride_size(self):
+    st1 = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).reshape((16*14,)).stride((17,))
+    st2 = ShapeTracker.from_shape((10,10)).stride((2,1)).reshape((5*10,)).stride((17,))
+    self.assertEqual(st1.real_size(), 78)
+    self.assertEqual(st2.real_size(), 65)
+
+  def test_stride_size_bounds(self):
+    # lower bound checks that real_size doesn't give false positive for fitting in a buffer
+    # upper bound checks that real_size doesn't exceed N when movementops were applied to from_shape((N,))
+    st1 = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).reshape((16*14,)).stride((17,))
+    st2 = ShapeTracker.from_shape((10,10)).stride((2,1)).reshape((5*10,)).stride((17,))
+    self.assertTrue(78 <= st1.real_size() <= 100)
+    self.assertTrue(65 <= st2.real_size() <= 100)
 
 class TestConsecutive(unittest.TestCase):
   @classmethod
