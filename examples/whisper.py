@@ -1,9 +1,7 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
 import sys, base64, multiprocessing, itertools, collections, zlib, datetime, math, argparse, json
-import torch
 from scipy.special import log_softmax, logsumexp, softmax
-import torch.nn.functional as F
 from dataclasses import dataclass
 from typing import Optional, Union, Literal, List
 
