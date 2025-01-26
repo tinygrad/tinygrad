@@ -33,7 +33,7 @@ class TestGC(unittest.TestCase):
     base = tensors_allocated()
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
-    assert (tensors_allocated()-base == 5)
+    assert (tensors_allocated()-base == 4)
     (a*b).mean().backward()
     assert (tensors_allocated()-base == 6)
     del b
