@@ -162,7 +162,7 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
-  Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
+  Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
@@ -305,7 +305,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
     # TODO: this should check if st is None, it cannot because local reduce has implicit movement ops
-    return tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL,Ops.DEFINE_VAR,Ops.CONST}]))
+    return tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {Ops.DEFINE_GLOBAL,Ops.DEFINE_LOCAL} \
+        # TODO: this exists because wmma creates consts without ShapeTracker in the AST, there's probably a way to fix this
+        and not (x.op is Ops.CONST and x.st is None)]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -385,7 +387,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def valid(self, st:ShapeTracker):
     assert self.op in {Ops.CONST, Ops.DEFINE_VAR}, f"can only create VALID from a constant, got {self.op}"
-    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self, 0)
+    assert any(v.mask is not None for v in st.views), f"can only create VALID from an umasked ShapeTracker {st}"
+    from tinygrad.shape.shapetracker import ShapeTracker
+    # NOTE: the mask only exists on the VALID
+    unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape).to_uop()
+    return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self.replace(src=(unmasked_st,)), self.const_like(0).replace(src=(unmasked_st,)))
   @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
   def _reduce_op(self, op:Ops, axis:tuple[int, ...]):
@@ -928,7 +934,8 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
    lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
-  (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
+  # NOTE: DEFINE_VAR can have a ShapeTracker source
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),

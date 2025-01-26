@@ -581,7 +581,10 @@ class Kernel:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
-        return ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
+        # NOTE: if CONST got masked after applying opts, we create a new VALID
+        if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.valid(unwrap(st_uop.st))
+        # otherwise we just replace the ShapeTracker
+        return ret.replace(src=(st_uop,)) if op.op in {Ops.VALID, Ops.CONST, Ops.DEFINE_VAR} else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
@@ -696,7 +699,8 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> 
   if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to VIEW
   elif uop.op is Ops.VIEW:
-    assert len(uop.src) == 0, f"can't swizzle in kernel yet {uop}"
+    # NOTE: we allow VIEW(DEVICE) too
+    assert len(uop.src) == 0 or uop.src[0].op is Ops.DEVICE, f"can't swizzle in kernel yet {uop}"
     st = uop.arg
   # everything else inherits shape
   else:

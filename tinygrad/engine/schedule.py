@@ -199,8 +199,6 @@ to_si = PatternMatcher([
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  # CONST(VIEW) becomes VALID too, TODO: doesn't have to
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: x.replace(src=()).valid(st.st)),
 ])
 
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel

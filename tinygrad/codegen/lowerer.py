@@ -122,8 +122,13 @@ def lower_load_store(ctx: IndexContext, x: UOp):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
 
+def lower_const(x:UOp):
+  assert all(v.mask is None for v in x.st_arg.views), f"VIEW in CONST/DEFINE_VAR source must be unmasked, got {x.st_arg}"
+  return x.replace(src=())
+
 pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), src=(UPat(Ops.VIEW),), name="x"), lower_const),
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
