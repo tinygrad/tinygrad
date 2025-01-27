@@ -3266,8 +3266,7 @@ class Tensor(MathTrait):
     ```
     """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    # return self.mul(2 ** x)
-    return self._apply_broadcasted_uop(UOp.lshift, x, reverse)
+    return self.mul(2 ** x) # return self._apply_broadcasted_uop(UOp.lshift, x, reverse)
 
   def rshift(self, x:int, reverse=False):
     """
@@ -3279,8 +3278,7 @@ class Tensor(MathTrait):
     ```
     """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    # return self.idiv(2 ** x)
-    return self._apply_broadcasted_uop(UOp.rshift, x, reverse)
+    return self.idiv(2 ** x) # return self._apply_broadcasted_uop(UOp.rshift, x, reverse)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
