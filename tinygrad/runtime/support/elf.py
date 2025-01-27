@@ -1,6 +1,6 @@
 import struct, tinygrad.runtime.autogen.libc as libc
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, i2u
+from tinygrad.helpers import getbits, i2u, DEBUG
 
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
@@ -57,4 +57,5 @@ def jit_loader(obj: bytes) -> bytes:
   # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
   for ploc,tgt,r_type,r_addend in relocs:
     image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
+  if DEBUG>=4: print(f'JIT Loader:\nELF: {obj.hex()}\nSHELLCODE: {bytes(image).hex()}')
   return bytes(image)
