@@ -13,6 +13,7 @@ def expect(x, err, ret=None):
   return ret
 
 HOST_ARCH = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
+HOST_TRIPLE = {'AArch64': 'aarch64', 'X86': 'x86_64'}[HOST_ARCH]
 REQUIRED_COMPONENTS = ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']
 
 class LLVMCompiler(Compiler):
@@ -51,7 +52,7 @@ class LLVMDevice(Compiled):
     for component in REQUIRED_COMPONENTS:
       getattr(llvm, f'LLVMInitialize{HOST_ARCH}{component}')()
 
-    triple = f'{platform.machine()}-none-unknown-elf'.encode()
+    triple = f'{HOST_TRIPLE}-none-unknown-elf'.encode()
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
     features = b'+reserve-x18' if platform.machine() == 'arm64' else b''
     target_machine = llvm.LLVMCreateTargetMachine(target, triple, b'', features, llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC,
