@@ -623,7 +623,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm]
+        backend: [llvm, clang]
 
     name: Tests on Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -642,19 +642,26 @@ jobs:
         with:
           path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
           key: windows-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        shell: bash 
+        run: |
+          if [ "${{ matrix.backend }}" = "clang" ]; then
+            echo "CLANG=1" >> $GITHUB_ENV
+          elif [ "${{ matrix.backend }}" = "llvm" ]; then
+            echo "LLVM=1" >> $GITHUB_ENV
+          fi
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
         env:
           DEBUG: 5
-          LLVM: 1
           PYTHONPATH: ${{ github.workspace }}
+          FORWARD_ONLY: 1 
         run: |
           python3 test/test_ops.py TestOps.test_add
       - name: Run pytest
         env:
           DEBUG: 5
-          LLVM: 1
         run: python -m pytest -n=auto test/test_tiny.py --durations=20
 
   #testunicorn:
