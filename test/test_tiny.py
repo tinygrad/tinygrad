@@ -1,10 +1,11 @@
 # basic self-contained tests of the external functionality of tinygrad
-import unittest, random
+import unittest, random, os
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
 from tinygrad.helpers import IMAGE
 
-class TestTiny(unittest.TestCase):
+os.environ['IGNORE_BEAM_CACHE'] = '1' # stateless beam
 
+class TestTiny(unittest.TestCase):
   # *** basic functionality ***
 
   def test_plus(self):
