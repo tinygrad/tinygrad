@@ -9,6 +9,7 @@ from typing import List, Tuple, Any, NamedTuple
 from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Ops
 from collections import OrderedDict
+from examples.tinychat.compile import q6k_to_f32
 
 # from nn.state.ggml_data_to_tensor: TODO: move to namespace of nn.state so we can import?
 def q_to_uint8(t: Tensor, b: int) -> Tensor:
@@ -27,7 +28,8 @@ def q6k_to_f16(x: Tensor) -> Tensor:
   return (d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales).flatten()
 
 def q6k_to_int8(x: Tensor, shape: Tuple) -> Tuple:
-  x = q6k_to_f16(x).reshape(shape)
+  #x = q6k_to_f16(x).reshape(shape)
+  x = q6k_to_f32(x).reshape(shape)
   scale = x.abs().max(axis=1) / 127.0
   int8_weight = (x.T/scale).T.cast(dtype=dtypes.int8)
   return scale, int8_weight
@@ -56,7 +58,8 @@ if __name__=="__main__":
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
     Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, model=model),
-    Step(name = "q6k_to_f16", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f16),
+    #Step(name = "q6k_to_f16", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f16),
+    Step(name = "q6k_to_f32", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f32),
   ]
   quant_weight_shapes = ((2048, 2048), (2048, 512), (2048, 8192), (8192, 2048)) # these are shapes in gguf file, need to reverse
   sub_steps += [Step(name = f"q6k_to_int8_{s1}_{s0}", input = [Tensor.randn((s1 * s0 * 210) // 256, dtype=dtypes.uint8), (s1, s0)], forward = q6k_to_int8) for s0, s1 in quant_weight_shapes]
@@ -69,21 +72,17 @@ if __name__=="__main__":
     weightbuf_to_name = {id(x.lazydata.base.realized): name for name, x in state.items()}
     # this omits saving the random seeds, which therefore will be set in client by default to 0,0 (2x uint32)
     bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weightbuf_to_name}
-
     cprog = ["#include <tgmath.h>", "#include <stddef.h>"]
 
     # declare buffers that we'll load weights into from javascript
-    buf_to_name = []
     # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
     dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
-    for name,data in bufs_to_save.items():
-      n_bytes, dtype, weightbuf_id = data
-      cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
-      buf_to_name.append((f"{name}", f"{weightbuf_to_name[weightbuf_id]}"))
 
-    buf_to_name = tuple(buf_to_name) # buf_to_name must have unchanged order from hereafter. We rely on known ordering to map weights from JS
-    cprog.append(f"void* buffers[] = {{\n{",\n".join([buf_name for buf_name, weight_name in buf_to_name])}\n}};" if bufs_to_save else "")
-    cprog.append(f"""void* get_buffer_by_index(size_t index) {{\n  return buffers[index];\n}}""" if bufs_to_save else "")
+    # buf_to_name must have unchanged order from hereafter. We rely on known ordering to map weights from JS
+    buf_to_name = tuple((f"{name}", f"{weightbuf_to_name[data[2]]}") for name, data in bufs_to_save.items())
+    if bufs_to_save:
+      cprog.append(f"void* bufs[{len(buf_to_name)}];")
+      cprog.append(f"""void set_buf(size_t index, void* ptr) {{\n  bufs[index] = ptr;\n}}""")
 
     # declare zero-filled intermediate buffers
     for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(special_names.values()):
@@ -105,7 +104,10 @@ if __name__=="__main__":
     cprog += list(functions.values())
     cprog += [f"void net({output_c_args}, {input_c_args}) {{"]
     # TODO: tell CLANG to assume specified ranges for symbolic vars, and for I/O buffer sizes?
-    cprog += [f"  {name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    
+    conv_map = {buf_name: i for i, (buf_name, weight_name) in enumerate(buf_to_name)}
+    convert = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{conv_map[x]}]" if x in bufs_to_save else x
+    cprog += [f"  {name}({', '.join(map(convert, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     cprog = "\n".join(cprog)
     # TODO: make tinygrad output wasm-compatible absolute value of fp16
     # the rendered clang for absolute value of fp16 numbers, compiles/works fine with clang, but causes exceptions while instantiating wasm module in browser
@@ -125,9 +127,10 @@ if __name__=="__main__":
   const wasm = await {step.name}Module();
   {f"""const weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
   for (const [i, name] of weightNames.entries()) {{
-    const bufPtr = wasm._get_buffer_by_index(i);
-    const tensor = metadata[name];
-    wasm.HEAPU8.set(tensor.bytes, bufPtr);
+    const bufPtr = wasm._malloc(metadata[name].size);
+    wasm.HEAPU8.set(metadata[name].bytes, bufPtr);
+    metadata[name].bytes = null;
+    wasm._set_buf(i, bufPtr);
   }}""" if bufs_to_save else ""}
 
   return {{

@@ -4,9 +4,9 @@
 # point below path at your emscripten installation location
 source ~/emsdk/emsdk_env.sh
 which emcc
-inputs=("transformer" "q6k_to_f16" "q6k_to_int8_2048_2048" "q6k_to_int8_512_2048" "q6k_to_int8_8192_2048" "q6k_to_int8_2048_8192")
+inputs=("transformer" "q6k_to_f32" "q6k_to_int8_2048_2048" "q6k_to_int8_512_2048" "q6k_to_int8_8192_2048" "q6k_to_int8_2048_8192")
 # TODO: auto generate initial memories
-initial_memories=(1570701312 131072 393216 196608 1310720 1310720)
+initial_memories=(1570701312 196608 655360 262144 2228224 2228224)
 # TODO: tune max memories
 maximum_memories=(2500001792 65536000 65536000 65536000 65536000 65536000)
 for i in "${!inputs[@]}"; do
@@ -14,13 +14,21 @@ for i in "${!inputs[@]}"; do
     initial_memory="${initial_memories[i]}"
     maximum_memory="${maximum_memories[i]}"
 
+    if [[ "$input" == "transformer" ]]; then
+      exported_functions='["_net", "_malloc", "_free", "_set_buf"]'
+    else
+      exported_functions='["_net", "_malloc", "_free"]'
+    fi
+
     echo "Processing $input with INITIAL_MEMORY=$initial_memory and MAXIMUM_MEMORY=$maximum_memory"
+    echo $exported_functions
 
     emcc "${input}.c" \
+        -O3 -msimd128 \
         -o "${input}.js" \
         -s MODULARIZE=1 \
         -s EXPORT_ES6=1 \
-        -s EXPORTED_FUNCTIONS='["_net", "_malloc", "_free"]' \
+        -s EXPORTED_FUNCTIONS="${exported_functions}" \
         -s EXPORTED_RUNTIME_METHODS='["cwrap", "getValue", "setValue"]' \
         -s ENVIRONMENT='web,worker' \
         -s ALLOW_MEMORY_GROWTH=1 \

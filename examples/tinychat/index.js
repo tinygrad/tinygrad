@@ -325,7 +325,7 @@ async function decompress(compressedBuffers, state_dict, device, progress) {
         const pipeline = await getFreePipeline(pipelinePool);
         const new_v = await pipeline([k, v]);
         if (k.includes("feed_forward") || k.includes("attention.w")) {
-          state_dict[k.replace("weight", "scale")] = {"dtype": "float16", "bytes": new_v.scale}
+          state_dict[k.replace("weight", "scale")] = {"dtype": "float32", "bytes": new_v.scale, "size": new_v.scale.length}
         }
         state_dict[k] = new_v;
         releasePipeline(pipeline, pipelinePool);
@@ -545,6 +545,8 @@ document.addEventListener("alpine:init", () => {
         }
         else if (window.BACKEND === "WASM") {
           await kernelsReady;
+          const t = await transformer(tensorData.metadata, this.progress.bind(this));
+          this.nets = {"transformer": t.run};
         }
         this.progress(100, 100, `Launching ${window.BACKEND} model:`);
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
@@ -699,13 +701,26 @@ document.addEventListener("alpine:init", () => {
       prefillToks = prefillToks.slice(startPos);
 
       for (const tok of prefillToks) {
-        await this.nets["transformer"](new Float32Array([[tok]]), startPos);
+        if (window.BACKEND === "WebGPU") {
+          await this.nets["transformer"](new Float32Array([[tok]]), startPos);
+        } else {
+          const int32tok = new Int32Array([tok]);
+          const uint8tok = new Uint8Array(int32tok.buffer);
+          await this.nets["transformer"](uint8tok, startPos);
+        }
         startPos += 1;
       }
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
-        const tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos);
+        if (window.BACKEND === "WebGPU") {
+          var tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos);
+        } else {
+          const int32tok = new Int32Array([lastTok]);
+          const uint8tok = new Uint8Array(int32tok.buffer);
+          const out = await this.nets["transformer"](uint8tok, startPos);
+          var tok = new Int32Array(out[0].buffer)
+        }
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
         startPos += 1;
         lastTok = tok[0];

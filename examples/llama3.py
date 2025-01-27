@@ -70,10 +70,12 @@ class Int8Linear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
     self.weight = Tensor.ones(out_features, in_features, dtype=dtypes.int8)
-    self.scale = Tensor.ones(out_features, dtype=dtypes.half)
+    #self.scale = Tensor.ones(out_features, dtype=dtypes.half)
+    self.scale = Tensor.ones(out_features, dtype=dtypes.float32)
 
   def __call__(self, x):
-    return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
+    #return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
+    return x.dot(self.weight.cast(dtype=dtypes.float32).T*self.scale)
 
   @staticmethod
   def quantize(tensors, device):
