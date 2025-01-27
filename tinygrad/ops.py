@@ -1091,17 +1091,17 @@ def fold_unrolled_divs(chain, x, denominator):
   # some (x+c)//d would have been folded, so we won't find them in the chain
   # we have to account for the constants the folded terms would have added, and subtract that
   if x.vmax - x.vmin > (d:=denominator.arg):
-    non_folded_c = range(d)
+    non_folded_c = reversed(range(d))
     offset = 0
   elif (q1:=x.vmin//d)!=(q2:=x.vmax//d):
-    non_folded_c = itertools.chain(range(0, d-x.vmin%d), range(d-x.vmax%d, d-1))
-    offset = ((d-x.vmax%d) - (d-x.vmin%d)) * -q2
+    non_folded_c = itertools.chain(reversed(range(d-x.vmax%d, d)), reversed(range(0, d-x.vmin%d)))
+    offset = ((d-x.vmax%d) - (d-x.vmin%d)) * q2
   else: # q1 == q2
-    non_folded_c = range(d-x.vmax%d, d-x.vmin%d)
-    offset = (d-x.vmax%d)*-q1 + ((d-1) - (d-x.vmin%d))*-(q1+1)
+    non_folded_c = reversed(range(d-x.vmax%d, d-x.vmin%d))
+    offset = (d-x.vmax%d)*q1 + (d - (d-x.vmin%d))*(q1+1)
 
   # we assume the chain is sorted in ascending order so we look for (x+d-1)//d first
-  for c in reversed(non_folded_c):
+  for c in non_folded_c:
     if chain is None: return None
     chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
     expected = x//denominator if c==0 else (x+c)//denominator
