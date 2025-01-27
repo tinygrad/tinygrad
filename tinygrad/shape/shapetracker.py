@@ -7,9 +7,49 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop, Context
+from tinygrad.ops import highs_pre, highs_reduce
 from tinygrad.codegen.rewriter import sym
 import numpy as np
 import highspy
+
+def solve_highs(constrs, min_obj) -> Optional[int]:
+  # None if the constaints are infeasible
+  cs = [highs_inst.addConstr(c) for c in constrs]
+  highs_inst.minimize(x)
+  if highs_inst.getModelStatus() == highspy.HighsModelStatus.kInfeasible: return None
+  assert higs_inst.getModelStatus() == highspy.HighsModelStatus.kOptimal, "highs returned something other than Infeasible or Optimal"
+  for _ in range(len(cs)): highs_inst.removeConstr(cs[0].index)  # weird constr indexing behaviour
+  return highs_inst.getSolution().col_value[0]
+
+def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
+  # presolve messes with completeness
+  highs_inst.clear(); highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("log_to_console", False)
+
+  hx = highs_inst.addVariable(0, prod(st.shape)-1, type=highspy.HighsVarType.kInteger)
+  x = UOp(Ops.HIGHS_EXPR, arg=(hx, 0, prod(st.shape)-1), dtype=dtypes.int)
+  idx, valid = st.to_indexed_uops(unravel(st.shape, x))
+  idx, invalid = graph_rewrite(graph_rewrite(idx, highs_pre), highs_reduce), graph_rewrite(graph_rewrite(valid!=True, highs_pre), highs_reduce)
+  assert idx.op == Ops.HIGHS_EXPR, invalid.op == Ops.HIGHS_EXPR, "failed rewrite to highs program"
+  hidx, hinvalid = idx.arg[0], invalid.arg[0]
+  if solve_highs([hinvalid==0], hx) is None: return View.create(st.shape, (0,)*len(st.shape), 0, ((0,0),)*len(st.shape))
+
+  # find mask  TODO check all-valid to skip this for speed
+  vshape, mask, denom, offset = [], [], 1, 0
+  while denom < prod(st.shape):
+    x_mod_d = graph_rewrite(x%denom, highs_reduce).arg[0]  # factor out parts of the mask we already found
+    a = solve_highs([hinvalid==0, x_mod_d==offset], hx)  # first valid section
+    b = solve_highs([hinvalid>=0, x_mod_d==offset, hx>=a], hx)  # second (or first) invalid section
+    c = solve_highs([hinvalid==0, x_mod_d==offset, hx>=b], hx)  # second valid section
+    vshape.append(c-a if c is not None else prod(st.shape)//denom)
+    mask.append((a%vshape[-1], b%vshape[-1]))
+    denom *= vshape[-1]
+    if prod(st.shape) % denom != 0: return None
+    offset = a % denom
+  vshape, mask = vshape[::-1], mask[::-1]
+  vidxs = [graph_rewrite(graph_rewrite(i, highs_pre), highs_reduce).arg[0] for i in unravel(vshape,x)]
+  if solve_highs([hinvalid>=0]+[mask[j][0] <= vidxs[j] < mask[j][1] for j in range(len(vidxs))], hx) is not None: return None
+  
+  # find strides
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
 
