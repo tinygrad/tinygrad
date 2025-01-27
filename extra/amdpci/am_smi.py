@@ -129,7 +129,6 @@ class SMICtx:
                        draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 16)] \
                   + ["", "=== Voltages ==="] + [f"{name:<20}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys]
 
-      smu_busy_threshold = 15
       frequency_table = ["=== Frequencies ===",
         f"GFXCLK Target : {metrics.SmuMetrics.AverageGfxclkFrequencyTarget:>4} MHz",
         f"GFXCLK PreDs  : {metrics.SmuMetrics.AverageGfxclkFrequencyPreDs:>4} MHz",
