@@ -216,9 +216,9 @@ class _MallocAllocator(LRUAllocator):
 MallocAllocator = _MallocAllocator()
 
 if sys.platform == 'win32':
-  from tinygrad.runtime.support.jit_nt import CPUProgram # noqa: F401
+  from tinygrad.runtime.support.jit_nt import CPUProgram # noqa: F401 pylint: disable=unused-import
 else:
-  from tinygrad.runtime.support.jit_unix import CPUProgram # noqa: F401
+  from tinygrad.runtime.support.jit_unix import CPUProgram # noqa: F401 pylint: disable=unused-import
 
 # **************** for Compiled Devices ****************
 

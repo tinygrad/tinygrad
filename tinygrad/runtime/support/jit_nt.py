@@ -1,8 +1,8 @@
 import ctypes, ctypes.util
 from mmap import PAGESIZE
-from tinygrad.helpers import round_up, cpu_time_execution
+from tinygrad.helpers import round_up, cpu_time_execution, DEBUG
 
-helper_handle = ctypes.CDLL(ctypes.util.find_library('kernel32'), use_errno=True)
+helper_handle = ctypes.CDLL(ctypes.util.find_library('kernel32'), use_last_error=True)
 
 MEM_COMMIT = 0x00001000
 PAGE_EXECUTE_READWRITE = 0x40
@@ -23,11 +23,14 @@ FlushInstructionCache.restype = ctypes.c_bool
 class CPUProgram:
   def __init__(self, name:str, lib:bytes):
     mem = VirtualAlloc(None, round_up(len(lib), PAGESIZE), MEM_COMMIT, PAGE_EXECUTE_READWRITE)
-    if mem is None: raise RuntimeError(f"failed to allcoate memory: {ctypes.get_errno():#x}")
+    if mem is None: raise RuntimeError(f"failed to allcoate memory: {ctypes.get_last_error():#x}")
+    if DEBUG>=4:
+      print(f'Allocated JIT memory: {mem:#x}')
+      print(f'Writing shelllcode: {lib.hex()}')
 
     ctypes.memmove(mem, lib, len(lib))
     if not FlushInstructionCache(GetCurrentProcess(), mem, round_up(len(lib), PAGESIZE)):
-      raise RuntimeError(f'failed to flush cache: {ctypes.get_errno():#x}')
+      raise RuntimeError(f'failed to flush cache: {ctypes.get_last_error():#x}')
 
     self.fxn = ctypes.CFUNCTYPE(None)(mem)
 
