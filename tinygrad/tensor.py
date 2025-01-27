@@ -2479,6 +2479,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(dtypes.bool)._apply_broadcasted_uop(UOp.ne, True)
+
   def neg(self):
     """
     Negates the tensor element-wise.
@@ -2488,16 +2489,19 @@ class Tensor(MathTrait):
     ```
     """
     return self*-1 if self.dtype != dtypes.bool else self.logical_not()
+
   def contiguous(self):
     """
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous)
+
   def contiguous_backward(self):
     """
     Inserts a contiguous operation in the backward pass.
     """
     return self._apply_uop(UOp.contiguous_backward)
+
   def log(self):
     """
     Computes the natural logarithm element-wise.
@@ -2509,6 +2513,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.log2()*math.log(2)
+
   def log2(self):
     """
     Computes the base-2 logarithm element-wise.
@@ -2520,6 +2525,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
+
   def exp(self):
     """
     Computes the exponential function element-wise.
@@ -2531,6 +2537,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.mul(1/math.log(2)).exp2()
+
   def exp2(self):
     """
     Computes the base-2 exponential function element-wise.
@@ -2542,6 +2549,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
+
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2670,6 +2678,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(dtypes.int32).cast(self.dtype)
+
   def ceil(self: Tensor) -> Tensor:
     """
     Rounds the tensor element-wise towards positive infinity.
@@ -2679,6 +2688,7 @@ class Tensor(MathTrait):
     ```
     """
     return (self > (b := self.trunc())).where(b+1, b)
+
   def floor(self: Tensor) -> Tensor:
     """
     Rounds the tensor element-wise towards negative infinity.
@@ -2688,6 +2698,7 @@ class Tensor(MathTrait):
     ```
     """
     return (self < (b := self.trunc())).where(b-1, b)
+
   def round(self: Tensor) -> Tensor:
     """
     Rounds the tensor element-wise with rounding half to even.
@@ -2707,6 +2718,7 @@ class Tensor(MathTrait):
     ```
     """
     return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
+
   def isnan(self:Tensor):
     """
     Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
@@ -2740,6 +2752,7 @@ class Tensor(MathTrait):
     ```
     """
     return self*self
+
   def clamp(self, min_=None, max_=None):
     """
     Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
@@ -2752,11 +2765,13 @@ class Tensor(MathTrait):
     if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
     ret = self.maximum(min_) if min_ is not None else self
     return ret.minimum(max_) if max_ is not None else ret
+
   def clip(self, min_=None, max_=None):
     """
     Alias for `Tensor.clamp`.
     """
     return self.clamp(min_, max_)
+
   def sign(self):
     """
     Returns the sign of the tensor element-wise.
@@ -2766,6 +2781,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.ne(0).where((self<0).where(self.full_like(-1), self.full_like(1)), self.full_like(0)) + self*0
+
   def abs(self):
     """
     Computes the absolute value of the tensor element-wise.
@@ -2775,6 +2791,7 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sign()
+
   def reciprocal(self):
     """
     Compute `1/x` element-wise.
