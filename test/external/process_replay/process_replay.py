@@ -71,7 +71,7 @@ def diff(offset:int, name:str, fxn:Callable) -> tuple[int, int]|bool:
     try: assert args[-1] == good
     except AssertionError:
       changed += 1
-      logging.info("PROCESS REPLAY DETECTED CHANGE")
+      warnings.warn("PROCESS REPLAY DETECTED CHANGE")
       for x in args[:-1]: logging.info(x)
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       additions += len([x for x in changes if x.startswith("+")])
@@ -113,6 +113,7 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
+  print(f"running process replay with {ASSERT_DIFF=}")
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
