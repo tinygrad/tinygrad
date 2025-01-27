@@ -145,7 +145,7 @@ class LLVMRenderer(Renderer):
 
     # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
     return f'''\
-define{' '+self.abi if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
+define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
 {chr(10).join(kernel)}
   ret void
 }}

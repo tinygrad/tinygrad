@@ -1,6 +1,6 @@
 import ctypes, ctypes.util
 from mmap import PAGESIZE
-from tinygrad.helpers import round_up, cpu_time_execution, DEBUG
+from tinygrad.helpers import round_up, cpu_time_execution
 
 helper_handle = ctypes.CDLL(ctypes.util.find_library('kernel32'), use_last_error=True)
 
@@ -24,9 +24,6 @@ class CPUProgram:
   def __init__(self, name:str, lib:bytes):
     mem = VirtualAlloc(None, round_up(len(lib), PAGESIZE), MEM_COMMIT, PAGE_EXECUTE_READWRITE)
     if mem is None: raise RuntimeError(f"failed to allcoate memory: {ctypes.get_last_error():#x}")
-    if DEBUG>=4:
-      print(f'Allocated JIT memory: {mem:#x}')
-      print(f'Writing shelllcode: {lib.hex()}')
 
     ctypes.memmove(mem, lib, len(lib))
     if not FlushInstructionCache(GetCurrentProcess(), mem, round_up(len(lib), PAGESIZE)):
