@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, heapq
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -1091,7 +1091,7 @@ def fold_unrolled_divs(chain, x, denominator):
   # some (x+c)//d would have been folded, so we won't find them in the chain
   # we have to account for the constants the folded terms would have added, and subtract that
   if x.vmax - x.vmin > (d:=denominator.arg):
-    non_folded_c = reversed(range(d))
+    non_folded_c: Iterator[int] = reversed(range(d))
     offset = 0
   elif (q1:=x.vmin//d)!=(q2:=x.vmax//d):
     non_folded_c = itertools.chain(reversed(range(d-x.vmax%d, d)), reversed(range(0, d-x.vmin%d)))
