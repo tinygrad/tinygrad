@@ -32,8 +32,8 @@ def check(cond:bool, msg:str=""):
 class Opt:
   op: OptOps
   axis: Optional[int] = None
-  amt: Optional[int] = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
+  arg: Optional[int] = None
+  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
   def real_axis(self, k:Kernel):
     if self.axis is None: return -1
     if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
@@ -353,18 +353,18 @@ class Kernel:
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
-      check(opt.axis is not None and opt.amt is not None, "tensor core opts must have an axis and amt")
+      check(opt.axis is not None and opt.arg is not None, "tensor core opts must have an axis and arg")
       check((use_tensor_cores:=USE_TC.value) == 2 or len(self.opts.tensor_cores) > 0, "must have tensor cores or TC=2")
-      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.amt)), "no tensor core available")
+      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), cast(int, opt.arg)), "no tensor core available")
       self.applied_opts.append(opt)
       return
 
     axis = opt.real_axis(self)
     check(axis < len(self.full_shape), "invalid axis")
 
-    if opt.op is OptOps.SWAP: amt = cast(int, opt.amt)  # amt is an axis in the SWAPs
-    elif opt.amt is not None:
-      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+    if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
+    elif opt.arg is not None:
+      amt = opt.arg if opt.arg != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
       if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
     else: amt = -1
