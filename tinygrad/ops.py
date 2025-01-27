@@ -1348,7 +1348,7 @@ view_left = merge_views+PatternMatcher([
 
 # *** convert shapetracker indexed uops to highs ilp programs, run highs_inst.clear() and _highs_mod_cache={} first ***
 
-# hackish, this stops exception in ucache
+# hack, this stops exception in ucache
 class hashable_highs_linexp(highspy.highs.highs_linear_expression):
   def __hash__(self): return id(self)
 highspy.highs.highs_linear_expression = hashable_highs_linexp

@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import functools
 from typing import Optional, Callable
-from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.view import View, strides_for_shape, unravel
+from tinygrad.helpers import merge_dicts, getenv, prod
+from tinygrad.shape.view import View, strides_for_shape, unravel, _reshape_mask
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop, Context
-from tinygrad.ops import highs_pre, highs_reduce
+from tinygrad.ops import highs_pre, highs_reduce, highs_inst
 from tinygrad.codegen.rewriter import sym
 import numpy as np
 import highspy
@@ -15,41 +15,68 @@ import highspy
 def solve_highs(constrs, min_obj) -> Optional[int]:
   # None if the constaints are infeasible
   cs = [highs_inst.addConstr(c) for c in constrs]
-  highs_inst.minimize(x)
-  if highs_inst.getModelStatus() == highspy.HighsModelStatus.kInfeasible: return None
-  assert higs_inst.getModelStatus() == highspy.HighsModelStatus.kOptimal, "highs returned something other than Infeasible or Optimal"
+  highs_inst.minimize(min_obj)
+  assert highs_inst.getModelStatus() in {highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible}, "highs returned something other than Infeasible or Optimal"
+  if highs_inst.getModelStatus() == highspy.HighsModelStatus.kInfeasible: ret = None
+  else: ret = round(highs_inst.getSolution().col_value[0])
   for _ in range(len(cs)): highs_inst.removeConstr(cs[0].index)  # weird constr indexing behaviour
-  return highs_inst.getSolution().col_value[0]
+  return ret
 
 def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
-  # presolve messes with completeness
+  # presolve sometimes returns "infeasible" incorrectly
   highs_inst.clear(); highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("log_to_console", False)
+#  import pdb; pdb.set_trace()
 
   hx = highs_inst.addVariable(0, prod(st.shape)-1, type=highspy.HighsVarType.kInteger)
   x = UOp(Ops.HIGHS_EXPR, arg=(hx, 0, prod(st.shape)-1), dtype=dtypes.int)
   idx, valid = st.to_indexed_uops(unravel(st.shape, x))
   idx, invalid = graph_rewrite(graph_rewrite(idx, highs_pre), highs_reduce), graph_rewrite(graph_rewrite(valid!=True, highs_pre), highs_reduce)
-  assert idx.op == Ops.HIGHS_EXPR, invalid.op == Ops.HIGHS_EXPR, "failed rewrite to highs program"
+  assert idx.op == Ops.HIGHS_EXPR and invalid.op == Ops.HIGHS_EXPR, "failed rewrite to highs program"
   hidx, hinvalid = idx.arg[0], invalid.arg[0]
   if solve_highs([hinvalid==0], hx) is None: return View.create(st.shape, (0,)*len(st.shape), 0, ((0,0),)*len(st.shape))
 
   # find mask  TODO check all-valid to skip this for speed
-  vshape, mask, denom, offset = [], [], 1, 0
+  vshape, mask, denom, valid_start = [], [], 1, 0
   while denom < prod(st.shape):
     x_mod_d = graph_rewrite(x%denom, highs_reduce).arg[0]  # factor out parts of the mask we already found
-    a = solve_highs([hinvalid==0, x_mod_d==offset], hx)  # first valid section
-    b = solve_highs([hinvalid>=0, x_mod_d==offset, hx>=a], hx)  # second (or first) invalid section
-    c = solve_highs([hinvalid==0, x_mod_d==offset, hx>=b], hx)  # second valid section
+    a = solve_highs([hinvalid==0, x_mod_d==valid_start], hx)  # first valid section
+    b = solve_highs([hinvalid>=1, x_mod_d==valid_start, hx>=a+1], hx) or prod(st.shape)  # second (or first) invalid section
+    c = solve_highs([hinvalid==0, x_mod_d==valid_start, hx>=b+1], hx)  # second valid section
     vshape.append(c-a if c is not None else prod(st.shape)//denom)
-    mask.append((a%vshape[-1], b%vshape[-1]))
+    mask.append((a//denom%vshape[-1], (b-1)//denom%vshape[-1]+1))
     denom *= vshape[-1]
     if prod(st.shape) % denom != 0: return None
-    offset = a % denom
+    valid_start = a % denom
   vshape, mask = vshape[::-1], mask[::-1]
   vidxs = [graph_rewrite(graph_rewrite(i, highs_pre), highs_reduce).arg[0] for i in unravel(vshape,x)]
-  if solve_highs([hinvalid>=0]+[mask[j][0] <= vidxs[j] < mask[j][1] for j in range(len(vidxs))], hx) is not None: return None
+  # check there are no invalid points in the new mask
+  if solve_highs([hinvalid>=1] + [mask[j][0] <= vidxs[j] <= mask[j][1]-1 for j in range(len(vidxs))], hx) is not None: return None
   
   # find strides
+#  import pdb; pdb.set_trace()
+  while True:
+    strides = []
+    out_idx_at_valid_start = st.to_indexed_uops(unravel(st.shape, valid_start))[0].simplify().arg
+    running_product = [prod(vshape[j+1:]) for j in range(len(vshape))]
+    for p in running_product:
+      strides.append(st.to_indexed_uops(unravel(st.shape, valid_start+p))[0].simplify().arg - out_idx_at_valid_start)
+    offset = out_idx_at_valid_start - sum(strides[j]*mask[j][0] for j in range(len(mask)))
+    unravelled = unravel(vshape, x)
+    test_idx = graph_rewrite(graph_rewrite(offset+sum(strides[j]*unravelled[j] for j in range(len(vshape))), highs_pre), highs_reduce)
+    test_hidx = test_idx.arg[0] if test_idx.op is Ops.HIGHS_EXPR else test_idx.arg  # can cancel to 0 here
+    x_gt, x_lt = solve_highs([hinvalid==0, test_hidx>=(hidx+1)], hx), solve_highs([hinvalid==0, test_hidx<=(hidx-1)], hx)
+    if x_gt is None and x_lt is None: break
+    diff = [unravel(vshape, min(x_gt or np.inf, x_lt or np.inf))[j] - unravel(vshape,valid_start)[j] for j in range(len(vshape))]
+    if sum(d != 0 for d in diff) != 1: return None
+    ax, newsh = [d != 0 for d in diff].index(True), sum(diff)
+    if vshape[ax] % newsh != 0: return None
+    oldshape = [s for s in vshape]
+    vshape[ax] //= newsh
+    vshape.insert(ax+1, newsh)
+    if (mask := _reshape_mask(tuple(mask), tuple(oldshape), tuple(vshape))) is None: return None
+
+  final =  View.create(tuple(vshape), tuple(strides), offset, mask)
+  return final if not keep_shape else final.reshape(st.shape)
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
 
@@ -161,9 +188,10 @@ class ShapeTracker:
     return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort if x.op is Ops.RANGE]
 
   def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-    return self
+    return ShapeTracker((collapse_st(self),))
+#    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
+#      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+#    return self
 
   # *** under this line are the movement ops ***
 
