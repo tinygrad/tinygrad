@@ -139,15 +139,15 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, subset)
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
-    for ((tinygrad_img, _, tinygrad_labels, _, _, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
+    for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _, _, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
       ref_tgt = [ref_tgt]
 
       ref_img, ref_tgt = transform(ref_img.unsqueeze(0), ref_tgt)
       ref_tgt = postprocess_targets(ref_tgt, anchors.unsqueeze(0))
-      _, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
+      ref_boxes, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
 
       np.testing.assert_equal(tinygrad_img.numpy(), ref_img.tensors.transpose(1, 3).numpy())
-      # np.testing.assert_equal(tinygrad_boxes[0].numpy(), ref_boxes.numpy())
+      np.testing.assert_equal(tinygrad_boxes[0].numpy(), ref_boxes.numpy())
       np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
 
   def test_validation_set(self):
