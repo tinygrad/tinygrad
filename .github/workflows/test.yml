@@ -375,8 +375,7 @@ jobs:
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Install dawn (WebGPU)
       run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
     - name: Install dependencies for software-based vulkan
       run: |
         sudo apt update -y || true
