@@ -486,6 +486,15 @@ remove_movement_ops = merge_views+PatternMatcher([
    lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
 ])
 
+class KernelUOp:
+  def __init__(self, x):
+    self.x = x
+
+create_kernels = PatternMatcher([
+  (UPat((Ops.SINK, Ops.KERNEL), name="x"), lambda x: x.replace(src=tuple(UOp(Ops.KERNEL, src=s.src, arg=KernelUOp(s)) for s in x.src))
+   if any(s.op is not Ops.KERNEL for s in x.src) else None),
+])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   if not skip_check: type_verify(list(big_sink.toposort), tensor_uop_spec)
@@ -499,6 +508,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     if v.is_realized and k is k.base: becomes_map[k] = v.view(unwrap(k.st))
     # otherwise if it simplified to a CONST the UOp just becomes that CONST
     elif v.op is Ops.CONST: becomes_map[k] = v
+
+  # create kernels
+  # at this point, each kernel only has one output
+  graph_rewrite(tensor_map[big_sink], create_kernels)
 
   # we group the rest of UOps into ScheduleItems
   rev_tensor_map: dict[UOp, list[UOp]] = {}
