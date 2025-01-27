@@ -1364,12 +1364,12 @@ highs_pre = symbolic_simple+PatternMatcher([
 ])
 
 def _highs_mod(x, d):
-  q = highs_inst.addVariable(lb=-np.inf, ub=np.inf, type=highspy.HighsVarType.kInteger)
+  q = highs_inst.addVariable(lb=x.vmin//d.arg, ub=x.vmax//d.arg, type=highspy.HighsVarType.kInteger)
   highs_inst.addConstr(0 <= x.arg[0] - q*d.arg <= d.arg-1)
   arg = (x.arg[0]-q*d.arg).simplify(), 0, d.arg-1
   return UOp(Ops.HIGHS_EXPR, arg=arg, dtype=dtypes.int)
 def _highs_idiv(x, d):
-  q = highs_inst.addVariable(lb=-np.inf, ub=np.inf, type=highspy.HighsVarType.kInteger)
+  q = highs_inst.addVariable(lb=x.vmin//d.arg, ub=x.vmax//d.arg, type=highspy.HighsVarType.kInteger)
   highs_inst.addConstr(0 <= x.arg[0] - q*d.arg <= d.arg-1)
   arg = q, x.vmin//d.arg, x.vmax//d.arg
   return UOp(Ops.HIGHS_EXPR, arg=arg, dtype=dtypes.int)

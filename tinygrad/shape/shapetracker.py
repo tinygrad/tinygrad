@@ -7,32 +7,42 @@ from tinygrad.helpers import merge_dicts, getenv, prod
 from tinygrad.shape.view import View, strides_for_shape, unravel, _reshape_mask
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop, Context
-from tinygrad.ops import highs_pre, highs_reduce, highs_inst
+from tinygrad.ops import highs_pre, highs_reduce, highs_inst, H_EXPR_OR_CONST
 from tinygrad.codegen.rewriter import sym
 import numpy as np
 import highspy
 
 def solve_highs(constrs, min_obj) -> Optional[int]:
-  # None if the constaints are infeasible
+  # None if the constaints are infeasible, otherwise returns the value of the first variable (x)
   cs = [highs_inst.addConstr(c) for c in constrs]
   highs_inst.minimize(min_obj)
+  if highs_inst.getModelStatus() == highspy.HighsModelStatus.kTimeLimit: raise RuntimeError("highs timeout")
   assert highs_inst.getModelStatus() in {highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible}, "highs returned something other than Infeasible or Optimal"
   if highs_inst.getModelStatus() == highspy.HighsModelStatus.kInfeasible: ret = None
   else: ret = round(highs_inst.getSolution().col_value[0])
   for _ in range(len(cs)): highs_inst.removeConstr(cs[0].index)  # weird constr indexing behaviour
   return ret
 
-def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
+def collapse_st(st, keep_shape=False):
+  try: return _collapse_st(st, keep_shape)
+  except RuntimeError: return None
+
+def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
+  # Look for views whose action is equiv. to st; this is complete
   # presolve sometimes returns "infeasible" incorrectly
-  highs_inst.clear(); highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("log_to_console", False)
+  if len(st.views) == 0: raise ValueError()
+  if len(st.views) == 1: return st.views[0]
+  highs_inst.clear(); highs_inst.setOptionValue("time_limit", 1);
+  highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("log_to_console", False)
+
 #  import pdb; pdb.set_trace()
 
   hx = highs_inst.addVariable(0, prod(st.shape)-1, type=highspy.HighsVarType.kInteger)
   x = UOp(Ops.HIGHS_EXPR, arg=(hx, 0, prod(st.shape)-1), dtype=dtypes.int)
   idx, valid = st.to_indexed_uops(unravel(st.shape, x))
   idx, invalid = graph_rewrite(graph_rewrite(idx, highs_pre), highs_reduce), graph_rewrite(graph_rewrite(valid!=True, highs_pre), highs_reduce)
-  assert idx.op == Ops.HIGHS_EXPR and invalid.op == Ops.HIGHS_EXPR, "failed rewrite to highs program"
-  hidx, hinvalid = idx.arg[0], invalid.arg[0]
+  assert idx.op in H_EXPR_OR_CONST and invalid.op in H_EXPR_OR_CONST, "failed rewrite to highs program"
+  hidx, hinvalid = idx.arg[0] if idx.op is Ops.HIGHS_EXPR else 0*hx + idx.arg, invalid.arg[0] if invalid.op is Ops.HIGHS_EXPR else 0*hx + invalid.arg
   if solve_highs([hinvalid==0], hx) is None: return View.create(st.shape, (0,)*len(st.shape), 0, ((0,0),)*len(st.shape))
 
   # find mask  TODO check all-valid to skip this for speed
@@ -55,6 +65,8 @@ def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   # find strides
 #  import pdb; pdb.set_trace()
   while True:
+    if len(vshape) > 20:
+      import pdb; pdb.set_trace()
     strides = []
     out_idx_at_valid_start = st.to_indexed_uops(unravel(st.shape, valid_start))[0].simplify().arg
     running_product = [prod(vshape[j+1:]) for j in range(len(vshape))]
@@ -75,7 +87,7 @@ def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
     vshape.insert(ax+1, newsh)
     if (mask := _reshape_mask(tuple(mask), tuple(oldshape), tuple(vshape))) is None: return None
 
-  final =  View.create(tuple(vshape), tuple(strides), offset, mask)
+  final =  View.create(tuple(vshape), tuple(strides), offset, tuple(mask))
   return final if not keep_shape else final.reshape(st.shape)
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
@@ -130,9 +142,13 @@ class ShapeTracker:
   views: tuple[View, ...]
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    ret = self
-    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
-    return ret
+    if len(st.views) == 0: return self
+    if len(self.views) == 0: return st
+    new_views = (merged,) if (merged := self.views[-1]+st.views[0]) is not None else (self.views[-1], st.views[0])
+    return ShapeTracker(self.views[:-1] + new_views) + ShapeTracker(st.views[1:])
+#    ret = self
+#    for v in st.views: ret = ShapeTracker(ret.views[:-1])
+#    return ret
 
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[ShapeTracker]:
     inverted_views:list[View] = []
@@ -187,8 +203,13 @@ class ShapeTracker:
     _, valid = self.to_indexed_uops()
     return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort if x.op is Ops.RANGE]
 
-  def simplify(self) -> ShapeTracker:
-    return ShapeTracker((collapse_st(self),))
+  def simplify(self, *, keep_shape=True) -> ShapeTracker:
+    print(self)
+    if len(self.views) == 0: return self
+    for j in range(len(self.views)):
+      if (new := collapse_st(ShapeTracker(self.views[j:]), keep_shape=keep_shape)) is not None:
+        return ShapeTracker(self.views[:j]).simplify(keep_shape=False) + ShapeTracker((new,))  # guaranteed to return when j=-1
+    raise Exception()  # TODO get rid of this after testing that this works
 #    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
 #      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
 #    return self
