@@ -145,7 +145,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-_libraries['libwebgpu_dawn.so'] = ctypes.CDLL(ctypes.util.find_library('libwebgpu_dawn'))
+_libraries['libwebgpu_dawn.so'] = ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))
 
 WGPUFlags = ctypes.c_uint64
 WGPUBool = ctypes.c_uint32
