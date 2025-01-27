@@ -2,10 +2,11 @@ import functools, struct
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
-from pydawn import utils, webgpu
+from tinygrad.runtime.autogen import webgpu
+from tinygrad.runtime.support.webgpu import utils
 
 def create_uniform(wgpu_device, val):
-  buf = utils.create_buffer(wgpu_device, 4, webgpu.WGPUBufferUsage_Uniform | webgpu.WGPUBufferUsage_CopyDst)
+  buf = webgpu.wgpuDeviceCreateBuffer(wgpu_device, webgpu.WGPUBufferDescriptor(size=4, usage=webgpu.WGPUBufferUsage_Uniform | webgpu.WGPUBufferUsage_CopyDst))
   utils.write_buffer(wgpu_device, buf, 0, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
   return buf
 
@@ -21,7 +22,8 @@ class WebGPUProgram:
     # WebGPU does not allow using the same buffer for input and output
     for i in range(1, len(bufs)):
       if bufs[i] == bufs[0]:
-        tmp_bufs[0] = utils.create_buffer(self.dev, webgpu.wgpuBufferGetSize(bufs[0]), webgpu.wgpuBufferGetUsage(bufs[0]))
+        tmp_bufs[0] = webgpu.wgpuDeviceCreateBuffer(self.dev,
+          webgpu.WGPUBufferDescriptor(size=webgpu.wgpuBufferGetSize(bufs[0]), usage=webgpu.wgpuBufferGetUsage(bufs[0])))
         buf_patch = True
 
     binding_layouts = [{"binding": 0, "visibility": webgpu.WGPUShaderStage_Compute, "buffer": {"type": webgpu.WGPUBufferBindingType_Uniform }}]
@@ -34,22 +36,23 @@ class WebGPUProgram:
     pipeline_layout = utils.create_pipeline_layout(self.dev, bind_group_layouts=[bind_group_layout])
     bind_group = utils.create_bind_group(self.dev, layout=bind_group_layout, entries=bindings)
     compute_pipeline = utils.create_compute_pipeline(self.dev, layout=pipeline_layout,compute={"module": self.prg, "entry_point": self.name})
-    command_encoder = utils.create_command_encoder(self.dev)
+    command_encoder = webgpu.wgpuDeviceCreateCommandEncoder(self.dev, webgpu.WGPUCommandEncoderDescriptor())
 
     if wait:
-      query_set = utils.create_query_set(self.dev, type=webgpu.WGPUQueryType_Timestamp, count=2)
-      query_buf = utils.create_buffer(self.dev, size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc)
+      query_set = webgpu.wgpuDeviceCreateQuerySet(self.dev, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
+      query_buf = webgpu.wgpuDeviceCreateBuffer(self.dev,
+        webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc))
       timestamp_writes = {"query_set": query_set, "beginning_of_pass_write_index": 0, "end_of_pass_write_index": 1}
 
     compute_pass = utils.begin_compute_pass(command_encoder, timestamp_writes if wait else None) # pylint: disable=E0606
-    utils.set_pipeline(compute_pass, compute_pipeline)
-    utils.set_bind_group(compute_pass, bind_group)
-    utils.dispatch_workgroups(compute_pass, *global_size)
-    utils.end_compute_pass(compute_pass)
+    webgpu.wgpuComputePassEncoderSetPipeline(compute_pass, compute_pipeline)
+    webgpu.wgpuComputePassEncoderSetBindGroup(compute_pass, 0, bind_group, 0, None)
+    webgpu.wgpuComputePassEncoderDispatchWorkgroups(compute_pass, *global_size)
+    webgpu.wgpuComputePassEncoderEnd(compute_pass)
 
-    if wait: utils.resolve_query_set(command_encoder, query_set, 0, 2, query_buf, 0)
+    if wait: webgpu.wgpuCommandEncoderResolveQuerySet(command_encoder, query_set, 0, 2, query_buf, 0)
 
-    cmd_buf = utils.command_encoder_finish(command_encoder)
+    cmd_buf = webgpu.wgpuCommandEncoderFinish(command_encoder, webgpu.WGPUCommandBufferDescriptor())
     utils.submit(self.dev, [cmd_buf])
     utils.sync(self.dev)
 
@@ -67,8 +70,9 @@ class WebGpuAllocator(Allocator):
   def __init__(self, dev): self.dev = dev
   def _alloc(self, size: int, options):
     # WebGPU buffers have to be 4-byte aligned
-    return utils.create_buffer(
-      self.dev, round_up(size, 4), webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc)
+    return webgpu.wgpuDeviceCreateBuffer(
+      self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
+      usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc))
   def _copyin(self, dest, src: memoryview):
     if src.nbytes % 4:
       padded_src = bytearray(round_up(src.nbytes, 4))
@@ -78,7 +82,8 @@ class WebGpuAllocator(Allocator):
     buffer_data = utils.read_buffer(self.dev, src)
     src_len = webgpu.wgpuBufferGetSize(src)
     dest[:] = buffer_data[:dest.nbytes] if src_len  > dest.nbytes else buffer_data
-  def _free(self, opaque, options): webgpu.wgpuBufferDestroy(opaque)
+  def _free(self, opaque, options):
+    webgpu.wgpuBufferDestroy(opaque)
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):

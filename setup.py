@@ -61,7 +61,6 @@ setup(name='tinygrad',
             "ggml-python",
             "capstone"
         ],
-        'webgpu': ["dawn-python"],
         'docs': [
             "mkdocs",
             "mkdocs-material",

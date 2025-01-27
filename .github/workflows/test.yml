@@ -72,6 +72,9 @@ jobs:
         sudo apt update -y || true
         sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
           flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
+    - name: Install packages (webgpu)
+      run: |
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
     - name: Install packages (amd)
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -127,6 +130,11 @@ jobs:
         ./autogen_stubs.sh io_uring
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+    - name: Verify WebGPU autogen
+      run: |
+        cp tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
+        ./autogen_stubs.sh webgpu
+        diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
 
   uops:
     name: uops tests
@@ -364,7 +372,9 @@ jobs:
         path: ~/.local/lib/python3.11/site-packages
         key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Install dawn (WebGPU)
+      run: sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
     - name: Install dependencies for software-based vulkan
       run: |
         sudo apt update -y || true
@@ -410,6 +420,8 @@ jobs:
         key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Install dawn (WebGPU)
+      run: sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
     - name: Cache downloads
       uses: actions/cache@v4
       with:
