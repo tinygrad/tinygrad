@@ -225,7 +225,7 @@ generate_libc() {
 generate_llvm() {
   INC="$(llvm-config-14 --includedir)"
   clang2py -k cdefstum \
-    $(find "$INC/llvm-c/" -type f -name '*.h') \
+    $(find "$INC/llvm-c/" -type f -name '*.h' | sort) \
     "$INC/llvm/Config/Targets.def" \
     "$INC/llvm/Config/AsmPrinters.def" \
     "$INC/llvm/Config/AsmParsers.def" \
