@@ -17,7 +17,7 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-class SimpleMathTrait:
+class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
@@ -38,6 +38,8 @@ class SimpleMathTrait:
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
+  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
+  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
 
   def __neg__(self): return self.neg()
 
@@ -50,6 +52,8 @@ class SimpleMathTrait:
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
+  def __lshift__(self, x): return self.lshift(x)
+  def __rshift__(self, x): return self.rshift(x)
 
   def __radd__(self, x): return self.add(x, True)
   def __rsub__(self, x): return self.sub(x, True)
@@ -60,6 +64,8 @@ class SimpleMathTrait:
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
+  def __rlshift__(self, x): return self.lshift(x, True)
+  def __rrshift__(self, x): return self.rshift(x, True)
 
   def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
   def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
@@ -70,15 +76,6 @@ class SimpleMathTrait:
   def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
-
-class MathTrait(SimpleMathTrait):
-  # TODO: move to Tensor when new backward is done
-  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
-  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
-  def __lshift__(self, x): return self.lshift(x)
-  def __rshift__(self, x): return self.rshift(x)
-  def __rlshift__(self, x): return self.lshift(x, True)
-  def __rrshift__(self, x): return self.rshift(x, True)
 
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
