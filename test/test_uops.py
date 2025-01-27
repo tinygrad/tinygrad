@@ -389,12 +389,11 @@ class TestUOpMethod(unittest.TestCase):
 
   def test_uop_variables(self):
     a = UOp.variable("a", 1, 10)
-    uop_var = UOp.const(dtypes.int, a)
-    st_var = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0),
-                                           ShapeTracker.from_shape((2, a)).to_uop()))
-    ast_vars = (st_var+uop_var).variables()
-    self.assertEqual(len(ast_vars), 1)
-    self.assertEqual(ast_vars[0], a)
+    uop_var = Tensor(a.bind(1))
+    st_var = Tensor.empty((2, 1)).reshape((2, a.bind(1)))
+    _, var_vals = (uop_var+st_var).schedule_with_vars()
+    self.assertEqual(len(var_vals), 1)
+    self.assertEqual(list(var_vals)[0], a)
 
   def test_const_factor(self):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 8))
