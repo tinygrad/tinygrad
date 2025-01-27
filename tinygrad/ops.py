@@ -73,8 +73,8 @@ class SimpleMathTrait:
 
 class MathTrait(SimpleMathTrait):
   # TODO: move to Tensor when new backward is done
-  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
-  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
+  def lshift(self, x:int, reverse=False): return self._binop(Ops.SHL, x, reverse)
+  def rshift(self, x:int, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
   def __rshift__(self, x): return self.rshift(x)
   def __rlshift__(self, x): return self.lshift(x, True)

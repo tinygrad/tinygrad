@@ -3256,7 +3256,7 @@ class Tensor(MathTrait):
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
-  def lshift(self, x:int):
+  def lshift(self, x:int, reverse):
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
     Equivalent to `self << x`.
@@ -3268,7 +3268,7 @@ class Tensor(MathTrait):
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
     return self.mul(2 ** x)
 
-  def rshift(self, x:int):
+  def rshift(self, x:int, reverse):
     """
     Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
     Equivalent to `self >> x`.
