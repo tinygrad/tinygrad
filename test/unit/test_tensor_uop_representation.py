@@ -53,7 +53,8 @@ class TestTensorUopRepresentation(unittest.TestCase):
     b = Tensor([4.,5,6]).realize()
     c = a+b
     print(c.lazydata)
-    is_pattern(c, UPat(Ops.ADD, src=(UPat(Ops.VIEW, src=(realized_pattern,)), UPat(Ops.VIEW, src=(realized_pattern,)))))
+    is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+    #is_pattern(c, UPat(Ops.ADD, src=(UPat(Ops.VIEW, src=(realized_pattern,)), UPat(Ops.VIEW, src=(realized_pattern,)))))
 
   def test_const_pattern(self):
     a = Tensor(1)
@@ -111,7 +112,8 @@ class TestTensorUopRepresentation(unittest.TestCase):
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.lazydata)
     # TODO: COPY on a Tensor becomes a VIEW(COPY), this should be done in the scheduler not in ops
-    is_pattern(c, UPat(Ops.VIEW, src=(UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)),)))
+    is_pattern(c, UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)))
+    #is_pattern(c, UPat(Ops.VIEW, src=(UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)),)))
 
 if __name__ == '__main__':
   unittest.main()

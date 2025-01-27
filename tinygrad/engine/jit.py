@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
-from tinygrad.ops import UOp, Variable, sym_infer
+from tinygrad.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
@@ -194,7 +194,8 @@ def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if tensors: Tensor.realize(*tensors)
-  lbs: list[UOp] = flatten([t.lazydata.lbs for t in tensors])
+  # TODO: should we be unpacking multi here?
+  lbs: list[UOp] = flatten([t.lazydata.src if t.lazydata.op is Ops.MULTI else [t.lazydata] for t in tensors])
   input_buffers: list[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
   st_varval_dtype_device = [(*unwrap(lb.st).unbind(), lb.dtype, lb.device) for lb in lbs]

@@ -2,7 +2,7 @@
 # compare kernels created by HEAD against master
 from collections import defaultdict
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
-from typing import Callable, List, Tuple, Union, cast
+from typing import Callable, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.engine.schedule import ScheduleContext, schedule_uop
 from tinygrad.codegen.kernel import Kernel, Opt
@@ -33,15 +33,15 @@ class ProcessReplayWarning(Warning): pass
 def recreate_sched(ast:UOp) -> UOp:
   # NOTE: process replay isn't meant to actually schedule anything
   return schedule_uop(ast, ScheduleContext(tensor_uops=defaultdict(list))).ast
-def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str) -> str:
+def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master
-  return k.opts.render(name, cast(List,k.to_program().uops))
+  return k.opts.render(name, cast(list,k.to_program().uops))
 
 # *** diff a "good" recreation against the generated version
 
-def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
+def diff(offset:int, name:str, fxn:Callable) -> tuple[int, int]|bool:
   if early_stop.is_set(): return True
   conn = db_connection()
   cur = conn.cursor()
@@ -95,7 +95,7 @@ def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
   cur.close()
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    ret: List[Union[bool, Tuple[int, int]]] = list(tqdm(pool.imap_unordered(functools.partial(diff, name=name, fxn=fxn), inputs), total=len(inputs)))
+    ret: list[tuple[int, int]|bool] = list(tqdm(pool.imap_unordered(functools.partial(diff, name=name, fxn=fxn), inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()

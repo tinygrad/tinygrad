@@ -77,9 +77,6 @@ class LARS(Optimizer):
 
   def schedule_step_with_grads(self, grads:list[Tensor]) -> list[Tensor]:
     for i, (t, g) in enumerate(zip(self.params, grads)):
-      # contiguous is needed since the grads can allegedly form a "diamond"
-      # TODO: fix this in lazy.py
-      g = g.contiguous()
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
