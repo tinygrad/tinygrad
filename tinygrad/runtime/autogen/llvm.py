@@ -7653,6 +7653,13 @@ try:
     LLVMCreatePerfJITEventListener.argtypes = []
 except AttributeError:
     pass
+LLVM_C_IRREADER_H = True # macro
+try:
+    LLVMParseIRInContext = _libraries['llvm'].LLVMParseIRInContext
+    LLVMParseIRInContext.restype = LLVMBool
+    LLVMParseIRInContext.argtypes = [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueModule)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+except AttributeError:
+    pass
 LLVM_C_INITIALIZATION_H = True # macro
 try:
     LLVMInitializeTransformUtils = _libraries['llvm'].LLVMInitializeTransformUtils
@@ -7724,31 +7731,6 @@ try:
     LLVMInitializeTarget = _libraries['llvm'].LLVMInitializeTarget
     LLVMInitializeTarget.restype = None
     LLVMInitializeTarget.argtypes = [LLVMPassRegistryRef]
-except AttributeError:
-    pass
-LLVM_C_IRREADER_H = True # macro
-try:
-    LLVMParseIRInContext = _libraries['llvm'].LLVMParseIRInContext
-    LLVMParseIRInContext.restype = LLVMBool
-    LLVMParseIRInContext.argtypes = [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueModule)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError:
-    pass
-LLVM_C_LINKER_H = True # macro
-
-# values for enumeration 'c__EA_LLVMLinkerMode'
-c__EA_LLVMLinkerMode__enumvalues = {
-    0: 'LLVMLinkerDestroySource',
-    1: 'LLVMLinkerPreserveSource_Removed',
-}
-LLVMLinkerDestroySource = 0
-LLVMLinkerPreserveSource_Removed = 1
-c__EA_LLVMLinkerMode = ctypes.c_uint32 # enum
-LLVMLinkerMode = c__EA_LLVMLinkerMode
-LLVMLinkerMode__enumvalues = c__EA_LLVMLinkerMode__enumvalues
-try:
-    LLVMLinkModules2 = _libraries['llvm'].LLVMLinkModules2
-    LLVMLinkModules2.restype = LLVMBool
-    LLVMLinkModules2.argtypes = [LLVMModuleRef, LLVMModuleRef]
 except AttributeError:
     pass
 LLVM_C_LLJIT_H = True # macro
@@ -8525,583 +8507,22 @@ try:
     LLVMOrcLLJITGetDataLayoutStr.argtypes = [LLVMOrcLLJITRef]
 except AttributeError:
     pass
-LLVM_C_LTO_H = True # macro
-LTO_API_VERSION = 29 # macro
-lto_bool_t = ctypes.c_bool
+LLVM_C_LINKER_H = True # macro
 
-# values for enumeration 'c__EA_lto_symbol_attributes'
-c__EA_lto_symbol_attributes__enumvalues = {
-    31: 'LTO_SYMBOL_ALIGNMENT_MASK',
-    224: 'LTO_SYMBOL_PERMISSIONS_MASK',
-    160: 'LTO_SYMBOL_PERMISSIONS_CODE',
-    192: 'LTO_SYMBOL_PERMISSIONS_DATA',
-    128: 'LTO_SYMBOL_PERMISSIONS_RODATA',
-    1792: 'LTO_SYMBOL_DEFINITION_MASK',
-    256: 'LTO_SYMBOL_DEFINITION_REGULAR',
-    512: 'LTO_SYMBOL_DEFINITION_TENTATIVE',
-    768: 'LTO_SYMBOL_DEFINITION_WEAK',
-    1024: 'LTO_SYMBOL_DEFINITION_UNDEFINED',
-    1280: 'LTO_SYMBOL_DEFINITION_WEAKUNDEF',
-    14336: 'LTO_SYMBOL_SCOPE_MASK',
-    2048: 'LTO_SYMBOL_SCOPE_INTERNAL',
-    4096: 'LTO_SYMBOL_SCOPE_HIDDEN',
-    8192: 'LTO_SYMBOL_SCOPE_PROTECTED',
-    6144: 'LTO_SYMBOL_SCOPE_DEFAULT',
-    10240: 'LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN',
-    16384: 'LTO_SYMBOL_COMDAT',
-    32768: 'LTO_SYMBOL_ALIAS',
+# values for enumeration 'c__EA_LLVMLinkerMode'
+c__EA_LLVMLinkerMode__enumvalues = {
+    0: 'LLVMLinkerDestroySource',
+    1: 'LLVMLinkerPreserveSource_Removed',
 }
-LTO_SYMBOL_ALIGNMENT_MASK = 31
-LTO_SYMBOL_PERMISSIONS_MASK = 224
-LTO_SYMBOL_PERMISSIONS_CODE = 160
-LTO_SYMBOL_PERMISSIONS_DATA = 192
-LTO_SYMBOL_PERMISSIONS_RODATA = 128
-LTO_SYMBOL_DEFINITION_MASK = 1792
-LTO_SYMBOL_DEFINITION_REGULAR = 256
-LTO_SYMBOL_DEFINITION_TENTATIVE = 512
-LTO_SYMBOL_DEFINITION_WEAK = 768
-LTO_SYMBOL_DEFINITION_UNDEFINED = 1024
-LTO_SYMBOL_DEFINITION_WEAKUNDEF = 1280
-LTO_SYMBOL_SCOPE_MASK = 14336
-LTO_SYMBOL_SCOPE_INTERNAL = 2048
-LTO_SYMBOL_SCOPE_HIDDEN = 4096
-LTO_SYMBOL_SCOPE_PROTECTED = 8192
-LTO_SYMBOL_SCOPE_DEFAULT = 6144
-LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = 10240
-LTO_SYMBOL_COMDAT = 16384
-LTO_SYMBOL_ALIAS = 32768
-c__EA_lto_symbol_attributes = ctypes.c_uint32 # enum
-lto_symbol_attributes = c__EA_lto_symbol_attributes
-lto_symbol_attributes__enumvalues = c__EA_lto_symbol_attributes__enumvalues
-
-# values for enumeration 'c__EA_lto_debug_model'
-c__EA_lto_debug_model__enumvalues = {
-    0: 'LTO_DEBUG_MODEL_NONE',
-    1: 'LTO_DEBUG_MODEL_DWARF',
-}
-LTO_DEBUG_MODEL_NONE = 0
-LTO_DEBUG_MODEL_DWARF = 1
-c__EA_lto_debug_model = ctypes.c_uint32 # enum
-lto_debug_model = c__EA_lto_debug_model
-lto_debug_model__enumvalues = c__EA_lto_debug_model__enumvalues
-
-# values for enumeration 'c__EA_lto_codegen_model'
-c__EA_lto_codegen_model__enumvalues = {
-    0: 'LTO_CODEGEN_PIC_MODEL_STATIC',
-    1: 'LTO_CODEGEN_PIC_MODEL_DYNAMIC',
-    2: 'LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC',
-    3: 'LTO_CODEGEN_PIC_MODEL_DEFAULT',
-}
-LTO_CODEGEN_PIC_MODEL_STATIC = 0
-LTO_CODEGEN_PIC_MODEL_DYNAMIC = 1
-LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = 2
-LTO_CODEGEN_PIC_MODEL_DEFAULT = 3
-c__EA_lto_codegen_model = ctypes.c_uint32 # enum
-lto_codegen_model = c__EA_lto_codegen_model
-lto_codegen_model__enumvalues = c__EA_lto_codegen_model__enumvalues
-class struct_LLVMOpaqueLTOModule(Structure):
-    pass
-
-lto_module_t = ctypes.POINTER(struct_LLVMOpaqueLTOModule)
-class struct_LLVMOpaqueLTOCodeGenerator(Structure):
-    pass
-
-lto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueLTOCodeGenerator)
-class struct_LLVMOpaqueThinLTOCodeGenerator(Structure):
-    pass
-
-thinlto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueThinLTOCodeGenerator)
-try:
-    lto_get_version = _libraries['llvm'].lto_get_version
-    lto_get_version.restype = ctypes.POINTER(ctypes.c_char)
-    lto_get_version.argtypes = []
-except AttributeError:
-    pass
-try:
-    lto_get_error_message = _libraries['llvm'].lto_get_error_message
-    lto_get_error_message.restype = ctypes.POINTER(ctypes.c_char)
-    lto_get_error_message.argtypes = []
-except AttributeError:
-    pass
-try:
-    lto_module_is_object_file = _libraries['llvm'].lto_module_is_object_file
-    lto_module_is_object_file.restype = lto_bool_t
-    lto_module_is_object_file.argtypes = [ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_is_object_file_for_target = _libraries['llvm'].lto_module_is_object_file_for_target
-    lto_module_is_object_file_for_target.restype = lto_bool_t
-    lto_module_is_object_file_for_target.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_has_objc_category = _libraries['llvm'].lto_module_has_objc_category
-    lto_module_has_objc_category.restype = lto_bool_t
-    lto_module_has_objc_category.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
-    pass
-try:
-    lto_module_is_object_file_in_memory = _libraries['llvm'].lto_module_is_object_file_in_memory
-    lto_module_is_object_file_in_memory.restype = lto_bool_t
-    lto_module_is_object_file_in_memory.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
-    pass
-try:
-    lto_module_is_object_file_in_memory_for_target = _libraries['llvm'].lto_module_is_object_file_in_memory_for_target
-    lto_module_is_object_file_in_memory_for_target.restype = lto_bool_t
-    lto_module_is_object_file_in_memory_for_target.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_create = _libraries['llvm'].lto_module_create
-    lto_module_create.restype = lto_module_t
-    lto_module_create.argtypes = [ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_create_from_memory = _libraries['llvm'].lto_module_create_from_memory
-    lto_module_create_from_memory.restype = lto_module_t
-    lto_module_create_from_memory.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
-    pass
-try:
-    lto_module_create_from_memory_with_path = _libraries['llvm'].lto_module_create_from_memory_with_path
-    lto_module_create_from_memory_with_path.restype = lto_module_t
-    lto_module_create_from_memory_with_path.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_create_in_local_context = _libraries['llvm'].lto_module_create_in_local_context
-    lto_module_create_in_local_context.restype = lto_module_t
-    lto_module_create_in_local_context.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_create_in_codegen_context = _libraries['llvm'].lto_module_create_in_codegen_context
-    lto_module_create_in_codegen_context.restype = lto_module_t
-    lto_module_create_in_codegen_context.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char), lto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    lto_module_create_from_fd = _libraries['llvm'].lto_module_create_from_fd
-    lto_module_create_from_fd.restype = lto_module_t
-    lto_module_create_from_fd.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
-    pass
-off_t = ctypes.c_int64
-try:
-    lto_module_create_from_fd_at_offset = _libraries['llvm'].lto_module_create_from_fd_at_offset
-    lto_module_create_from_fd_at_offset.restype = lto_module_t
-    lto_module_create_from_fd_at_offset.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t, size_t, off_t]
-except AttributeError:
-    pass
-try:
-    lto_module_dispose = _libraries['llvm'].lto_module_dispose
-    lto_module_dispose.restype = None
-    lto_module_dispose.argtypes = [lto_module_t]
-except AttributeError:
-    pass
-try:
-    lto_module_get_target_triple = _libraries['llvm'].lto_module_get_target_triple
-    lto_module_get_target_triple.restype = ctypes.POINTER(ctypes.c_char)
-    lto_module_get_target_triple.argtypes = [lto_module_t]
-except AttributeError:
-    pass
-try:
-    lto_module_set_target_triple = _libraries['llvm'].lto_module_set_target_triple
-    lto_module_set_target_triple.restype = None
-    lto_module_set_target_triple.argtypes = [lto_module_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_module_get_num_symbols = _libraries['llvm'].lto_module_get_num_symbols
-    lto_module_get_num_symbols.restype = ctypes.c_uint32
-    lto_module_get_num_symbols.argtypes = [lto_module_t]
-except AttributeError:
-    pass
-try:
-    lto_module_get_symbol_name = _libraries['llvm'].lto_module_get_symbol_name
-    lto_module_get_symbol_name.restype = ctypes.POINTER(ctypes.c_char)
-    lto_module_get_symbol_name.argtypes = [lto_module_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    lto_module_get_symbol_attribute = _libraries['llvm'].lto_module_get_symbol_attribute
-    lto_module_get_symbol_attribute.restype = lto_symbol_attributes
-    lto_module_get_symbol_attribute.argtypes = [lto_module_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    lto_module_get_linkeropts = _libraries['llvm'].lto_module_get_linkeropts
-    lto_module_get_linkeropts.restype = ctypes.POINTER(ctypes.c_char)
-    lto_module_get_linkeropts.argtypes = [lto_module_t]
-except AttributeError:
-    pass
-try:
-    lto_module_get_macho_cputype = _libraries['llvm'].lto_module_get_macho_cputype
-    lto_module_get_macho_cputype.restype = lto_bool_t
-    lto_module_get_macho_cputype.argtypes = [lto_module_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
-    pass
-try:
-    lto_module_has_ctor_dtor = _libraries['llvm'].lto_module_has_ctor_dtor
-    lto_module_has_ctor_dtor.restype = lto_bool_t
-    lto_module_has_ctor_dtor.argtypes = [lto_module_t]
-except AttributeError:
-    pass
-
-# values for enumeration 'c__EA_lto_codegen_diagnostic_severity_t'
-c__EA_lto_codegen_diagnostic_severity_t__enumvalues = {
-    0: 'LTO_DS_ERROR',
-    1: 'LTO_DS_WARNING',
-    3: 'LTO_DS_REMARK',
-    2: 'LTO_DS_NOTE',
-}
-LTO_DS_ERROR = 0
-LTO_DS_WARNING = 1
-LTO_DS_REMARK = 3
-LTO_DS_NOTE = 2
-c__EA_lto_codegen_diagnostic_severity_t = ctypes.c_uint32 # enum
-lto_codegen_diagnostic_severity_t = c__EA_lto_codegen_diagnostic_severity_t
-lto_codegen_diagnostic_severity_t__enumvalues = c__EA_lto_codegen_diagnostic_severity_t__enumvalues
-lto_diagnostic_handler_t = ctypes.CFUNCTYPE(None, c__EA_lto_codegen_diagnostic_severity_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(None))
-try:
-    lto_codegen_set_diagnostic_handler = _libraries['llvm'].lto_codegen_set_diagnostic_handler
-    lto_codegen_set_diagnostic_handler.restype = None
-    lto_codegen_set_diagnostic_handler.argtypes = [lto_code_gen_t, lto_diagnostic_handler_t, ctypes.POINTER(None)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_create = _libraries['llvm'].lto_codegen_create
-    lto_codegen_create.restype = lto_code_gen_t
-    lto_codegen_create.argtypes = []
-except AttributeError:
-    pass
-try:
-    lto_codegen_create_in_local_context = _libraries['llvm'].lto_codegen_create_in_local_context
-    lto_codegen_create_in_local_context.restype = lto_code_gen_t
-    lto_codegen_create_in_local_context.argtypes = []
-except AttributeError:
-    pass
-try:
-    lto_codegen_dispose = _libraries['llvm'].lto_codegen_dispose
-    lto_codegen_dispose.restype = None
-    lto_codegen_dispose.argtypes = [lto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    lto_codegen_add_module = _libraries['llvm'].lto_codegen_add_module
-    lto_codegen_add_module.restype = lto_bool_t
-    lto_codegen_add_module.argtypes = [lto_code_gen_t, lto_module_t]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_module = _libraries['llvm'].lto_codegen_set_module
-    lto_codegen_set_module.restype = None
-    lto_codegen_set_module.argtypes = [lto_code_gen_t, lto_module_t]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_debug_model = _libraries['llvm'].lto_codegen_set_debug_model
-    lto_codegen_set_debug_model.restype = lto_bool_t
-    lto_codegen_set_debug_model.argtypes = [lto_code_gen_t, lto_debug_model]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_pic_model = _libraries['llvm'].lto_codegen_set_pic_model
-    lto_codegen_set_pic_model.restype = lto_bool_t
-    lto_codegen_set_pic_model.argtypes = [lto_code_gen_t, lto_codegen_model]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_cpu = _libraries['llvm'].lto_codegen_set_cpu
-    lto_codegen_set_cpu.restype = None
-    lto_codegen_set_cpu.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_assembler_path = _libraries['llvm'].lto_codegen_set_assembler_path
-    lto_codegen_set_assembler_path.restype = None
-    lto_codegen_set_assembler_path.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_assembler_args = _libraries['llvm'].lto_codegen_set_assembler_args
-    lto_codegen_set_assembler_args.restype = None
-    lto_codegen_set_assembler_args.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    lto_codegen_add_must_preserve_symbol = _libraries['llvm'].lto_codegen_add_must_preserve_symbol
-    lto_codegen_add_must_preserve_symbol.restype = None
-    lto_codegen_add_must_preserve_symbol.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_write_merged_modules = _libraries['llvm'].lto_codegen_write_merged_modules
-    lto_codegen_write_merged_modules.restype = lto_bool_t
-    lto_codegen_write_merged_modules.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_compile = _libraries['llvm'].lto_codegen_compile
-    lto_codegen_compile.restype = ctypes.POINTER(None)
-    lto_codegen_compile.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_compile_to_file = _libraries['llvm'].lto_codegen_compile_to_file
-    lto_codegen_compile_to_file.restype = lto_bool_t
-    lto_codegen_compile_to_file.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError:
-    pass
-try:
-    lto_codegen_optimize = _libraries['llvm'].lto_codegen_optimize
-    lto_codegen_optimize.restype = lto_bool_t
-    lto_codegen_optimize.argtypes = [lto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    lto_codegen_compile_optimized = _libraries['llvm'].lto_codegen_compile_optimized
-    lto_codegen_compile_optimized.restype = ctypes.POINTER(None)
-    lto_codegen_compile_optimized.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    lto_api_version = _libraries['llvm'].lto_api_version
-    lto_api_version.restype = ctypes.c_uint32
-    lto_api_version.argtypes = []
-except AttributeError:
-    pass
-try:
-    lto_set_debug_options = _libraries['llvm'].lto_set_debug_options
-    lto_set_debug_options.restype = None
-    lto_set_debug_options.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    lto_codegen_debug_options = _libraries['llvm'].lto_codegen_debug_options
-    lto_codegen_debug_options.restype = None
-    lto_codegen_debug_options.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_codegen_debug_options_array = _libraries['llvm'].lto_codegen_debug_options_array
-    lto_codegen_debug_options_array.restype = None
-    lto_codegen_debug_options_array.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    lto_initialize_disassembler = _libraries['llvm'].lto_initialize_disassembler
-    lto_initialize_disassembler.restype = None
-    lto_initialize_disassembler.argtypes = []
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_should_internalize = _libraries['llvm'].lto_codegen_set_should_internalize
-    lto_codegen_set_should_internalize.restype = None
-    lto_codegen_set_should_internalize.argtypes = [lto_code_gen_t, lto_bool_t]
-except AttributeError:
-    pass
-try:
-    lto_codegen_set_should_embed_uselists = _libraries['llvm'].lto_codegen_set_should_embed_uselists
-    lto_codegen_set_should_embed_uselists.restype = None
-    lto_codegen_set_should_embed_uselists.argtypes = [lto_code_gen_t, lto_bool_t]
-except AttributeError:
-    pass
-class struct_LLVMOpaqueLTOInput(Structure):
-    pass
-
-lto_input_t = ctypes.POINTER(struct_LLVMOpaqueLTOInput)
-try:
-    lto_input_create = _libraries['llvm'].lto_input_create
-    lto_input_create.restype = lto_input_t
-    lto_input_create.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lto_input_dispose = _libraries['llvm'].lto_input_dispose
-    lto_input_dispose.restype = None
-    lto_input_dispose.argtypes = [lto_input_t]
-except AttributeError:
-    pass
-try:
-    lto_input_get_num_dependent_libraries = _libraries['llvm'].lto_input_get_num_dependent_libraries
-    lto_input_get_num_dependent_libraries.restype = ctypes.c_uint32
-    lto_input_get_num_dependent_libraries.argtypes = [lto_input_t]
-except AttributeError:
-    pass
-try:
-    lto_input_get_dependent_library = _libraries['llvm'].lto_input_get_dependent_library
-    lto_input_get_dependent_library.restype = ctypes.POINTER(ctypes.c_char)
-    lto_input_get_dependent_library.argtypes = [lto_input_t, size_t, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    lto_runtime_lib_symbols_list = _libraries['llvm'].lto_runtime_lib_symbols_list
-    lto_runtime_lib_symbols_list.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
-    lto_runtime_lib_symbols_list.argtypes = [ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-class struct_c__SA_LTOObjectBuffer(Structure):
-    pass
-
-struct_c__SA_LTOObjectBuffer._pack_ = 1 # source:False
-struct_c__SA_LTOObjectBuffer._fields_ = [
-    ('Buffer', ctypes.POINTER(ctypes.c_char)),
-    ('Size', ctypes.c_uint64),
-]
-
-LTOObjectBuffer = struct_c__SA_LTOObjectBuffer
-try:
-    thinlto_create_codegen = _libraries['llvm'].thinlto_create_codegen
-    thinlto_create_codegen.restype = thinlto_code_gen_t
-    thinlto_create_codegen.argtypes = []
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_dispose = _libraries['llvm'].thinlto_codegen_dispose
-    thinlto_codegen_dispose.restype = None
-    thinlto_codegen_dispose.argtypes = [thinlto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_add_module = _libraries['llvm'].thinlto_codegen_add_module
-    thinlto_codegen_add_module.restype = None
-    thinlto_codegen_add_module.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_process = _libraries['llvm'].thinlto_codegen_process
-    thinlto_codegen_process.restype = None
-    thinlto_codegen_process.argtypes = [thinlto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    thinlto_module_get_num_objects = _libraries['llvm'].thinlto_module_get_num_objects
-    thinlto_module_get_num_objects.restype = ctypes.c_uint32
-    thinlto_module_get_num_objects.argtypes = [thinlto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    thinlto_module_get_object = _libraries['llvm'].thinlto_module_get_object
-    thinlto_module_get_object.restype = LTOObjectBuffer
-    thinlto_module_get_object.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    thinlto_module_get_num_object_files = _libraries['llvm'].thinlto_module_get_num_object_files
-    thinlto_module_get_num_object_files.restype = ctypes.c_uint32
-    thinlto_module_get_num_object_files.argtypes = [thinlto_code_gen_t]
-except AttributeError:
-    pass
-try:
-    thinlto_module_get_object_file = _libraries['llvm'].thinlto_module_get_object_file
-    thinlto_module_get_object_file.restype = ctypes.POINTER(ctypes.c_char)
-    thinlto_module_get_object_file.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_pic_model = _libraries['llvm'].thinlto_codegen_set_pic_model
-    thinlto_codegen_set_pic_model.restype = lto_bool_t
-    thinlto_codegen_set_pic_model.argtypes = [thinlto_code_gen_t, lto_codegen_model]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_savetemps_dir = _libraries['llvm'].thinlto_codegen_set_savetemps_dir
-    thinlto_codegen_set_savetemps_dir.restype = None
-    thinlto_codegen_set_savetemps_dir.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    thinlto_set_generated_objects_dir = _libraries['llvm'].thinlto_set_generated_objects_dir
-    thinlto_set_generated_objects_dir.restype = None
-    thinlto_set_generated_objects_dir.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cpu = _libraries['llvm'].thinlto_codegen_set_cpu
-    thinlto_codegen_set_cpu.restype = None
-    thinlto_codegen_set_cpu.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_disable_codegen = _libraries['llvm'].thinlto_codegen_disable_codegen
-    thinlto_codegen_disable_codegen.restype = None
-    thinlto_codegen_disable_codegen.argtypes = [thinlto_code_gen_t, lto_bool_t]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_codegen_only = _libraries['llvm'].thinlto_codegen_set_codegen_only
-    thinlto_codegen_set_codegen_only.restype = None
-    thinlto_codegen_set_codegen_only.argtypes = [thinlto_code_gen_t, lto_bool_t]
-except AttributeError:
-    pass
-try:
-    thinlto_debug_options = _libraries['llvm'].thinlto_debug_options
-    thinlto_debug_options.restype = None
-    thinlto_debug_options.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    lto_module_is_thinlto = _libraries['llvm'].lto_module_is_thinlto
-    lto_module_is_thinlto.restype = lto_bool_t
-    lto_module_is_thinlto.argtypes = [lto_module_t]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_add_must_preserve_symbol = _libraries['llvm'].thinlto_codegen_add_must_preserve_symbol
-    thinlto_codegen_add_must_preserve_symbol.restype = None
-    thinlto_codegen_add_must_preserve_symbol.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_add_cross_referenced_symbol = _libraries['llvm'].thinlto_codegen_add_cross_referenced_symbol
-    thinlto_codegen_add_cross_referenced_symbol.restype = None
-    thinlto_codegen_add_cross_referenced_symbol.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cache_dir = _libraries['llvm'].thinlto_codegen_set_cache_dir
-    thinlto_codegen_set_cache_dir.restype = None
-    thinlto_codegen_set_cache_dir.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cache_pruning_interval = _libraries['llvm'].thinlto_codegen_set_cache_pruning_interval
-    thinlto_codegen_set_cache_pruning_interval.restype = None
-    thinlto_codegen_set_cache_pruning_interval.argtypes = [thinlto_code_gen_t, ctypes.c_int32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_final_cache_size_relative_to_available_space = _libraries['llvm'].thinlto_codegen_set_final_cache_size_relative_to_available_space
-    thinlto_codegen_set_final_cache_size_relative_to_available_space.restype = None
-    thinlto_codegen_set_final_cache_size_relative_to_available_space.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cache_entry_expiration = _libraries['llvm'].thinlto_codegen_set_cache_entry_expiration
-    thinlto_codegen_set_cache_entry_expiration.restype = None
-    thinlto_codegen_set_cache_entry_expiration.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cache_size_bytes = _libraries['llvm'].thinlto_codegen_set_cache_size_bytes
-    thinlto_codegen_set_cache_size_bytes.restype = None
-    thinlto_codegen_set_cache_size_bytes.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cache_size_megabytes = _libraries['llvm'].thinlto_codegen_set_cache_size_megabytes
-    thinlto_codegen_set_cache_size_megabytes.restype = None
-    thinlto_codegen_set_cache_size_megabytes.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError:
-    pass
-try:
-    thinlto_codegen_set_cache_size_files = _libraries['llvm'].thinlto_codegen_set_cache_size_files
-    thinlto_codegen_set_cache_size_files.restype = None
-    thinlto_codegen_set_cache_size_files.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+LLVMLinkerDestroySource = 0
+LLVMLinkerPreserveSource_Removed = 1
+c__EA_LLVMLinkerMode = ctypes.c_uint32 # enum
+LLVMLinkerMode = c__EA_LLVMLinkerMode
+LLVMLinkerMode__enumvalues = c__EA_LLVMLinkerMode__enumvalues
+try:
+    LLVMLinkModules2 = _libraries['llvm'].LLVMLinkModules2
+    LLVMLinkModules2.restype = LLVMBool
+    LLVMLinkModules2.argtypes = [LLVMModuleRef, LLVMModuleRef]
 except AttributeError:
     pass
 LLVM_C_OBJECT_H = True # macro
@@ -9718,13 +9139,6 @@ try:
     LLVMPassManagerBuilderAddCoroutinePassesToExtensionPoints.argtypes = [LLVMPassManagerBuilderRef]
 except AttributeError:
     pass
-LLVM_C_TRANSFORMS_INSTCOMBINE_H = True # macro
-try:
-    LLVMAddInstructionCombiningPass = _libraries['llvm'].LLVMAddInstructionCombiningPass
-    LLVMAddInstructionCombiningPass.restype = None
-    LLVMAddInstructionCombiningPass.argtypes = [LLVMPassManagerRef]
-except AttributeError:
-    pass
 LLVM_C_TRANSFORMS_IPO_H = True # macro
 try:
     LLVMAddArgumentPromotionPass = _libraries['llvm'].LLVMAddArgumentPromotionPass
@@ -9820,6 +9234,13 @@ try:
     LLVMAddStripSymbolsPass = _libraries['llvm'].LLVMAddStripSymbolsPass
     LLVMAddStripSymbolsPass.restype = None
     LLVMAddStripSymbolsPass.argtypes = [LLVMPassManagerRef]
+except AttributeError:
+    pass
+LLVM_C_TRANSFORMS_INSTCOMBINE_H = True # macro
+try:
+    LLVMAddInstructionCombiningPass = _libraries['llvm'].LLVMAddInstructionCombiningPass
+    LLVMAddInstructionCombiningPass.restype = None
+    LLVMAddInstructionCombiningPass.argtypes = [LLVMPassManagerRef]
 except AttributeError:
     pass
 LLVM_C_TRANSFORMS_PASSBUILDER_H = True # macro
@@ -10194,6 +9615,585 @@ try:
     LLVMAddSLPVectorizePass = _libraries['llvm'].LLVMAddSLPVectorizePass
     LLVMAddSLPVectorizePass.restype = None
     LLVMAddSLPVectorizePass.argtypes = [LLVMPassManagerRef]
+except AttributeError:
+    pass
+LLVM_C_LTO_H = True # macro
+LTO_API_VERSION = 29 # macro
+lto_bool_t = ctypes.c_bool
+
+# values for enumeration 'c__EA_lto_symbol_attributes'
+c__EA_lto_symbol_attributes__enumvalues = {
+    31: 'LTO_SYMBOL_ALIGNMENT_MASK',
+    224: 'LTO_SYMBOL_PERMISSIONS_MASK',
+    160: 'LTO_SYMBOL_PERMISSIONS_CODE',
+    192: 'LTO_SYMBOL_PERMISSIONS_DATA',
+    128: 'LTO_SYMBOL_PERMISSIONS_RODATA',
+    1792: 'LTO_SYMBOL_DEFINITION_MASK',
+    256: 'LTO_SYMBOL_DEFINITION_REGULAR',
+    512: 'LTO_SYMBOL_DEFINITION_TENTATIVE',
+    768: 'LTO_SYMBOL_DEFINITION_WEAK',
+    1024: 'LTO_SYMBOL_DEFINITION_UNDEFINED',
+    1280: 'LTO_SYMBOL_DEFINITION_WEAKUNDEF',
+    14336: 'LTO_SYMBOL_SCOPE_MASK',
+    2048: 'LTO_SYMBOL_SCOPE_INTERNAL',
+    4096: 'LTO_SYMBOL_SCOPE_HIDDEN',
+    8192: 'LTO_SYMBOL_SCOPE_PROTECTED',
+    6144: 'LTO_SYMBOL_SCOPE_DEFAULT',
+    10240: 'LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN',
+    16384: 'LTO_SYMBOL_COMDAT',
+    32768: 'LTO_SYMBOL_ALIAS',
+}
+LTO_SYMBOL_ALIGNMENT_MASK = 31
+LTO_SYMBOL_PERMISSIONS_MASK = 224
+LTO_SYMBOL_PERMISSIONS_CODE = 160
+LTO_SYMBOL_PERMISSIONS_DATA = 192
+LTO_SYMBOL_PERMISSIONS_RODATA = 128
+LTO_SYMBOL_DEFINITION_MASK = 1792
+LTO_SYMBOL_DEFINITION_REGULAR = 256
+LTO_SYMBOL_DEFINITION_TENTATIVE = 512
+LTO_SYMBOL_DEFINITION_WEAK = 768
+LTO_SYMBOL_DEFINITION_UNDEFINED = 1024
+LTO_SYMBOL_DEFINITION_WEAKUNDEF = 1280
+LTO_SYMBOL_SCOPE_MASK = 14336
+LTO_SYMBOL_SCOPE_INTERNAL = 2048
+LTO_SYMBOL_SCOPE_HIDDEN = 4096
+LTO_SYMBOL_SCOPE_PROTECTED = 8192
+LTO_SYMBOL_SCOPE_DEFAULT = 6144
+LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = 10240
+LTO_SYMBOL_COMDAT = 16384
+LTO_SYMBOL_ALIAS = 32768
+c__EA_lto_symbol_attributes = ctypes.c_uint32 # enum
+lto_symbol_attributes = c__EA_lto_symbol_attributes
+lto_symbol_attributes__enumvalues = c__EA_lto_symbol_attributes__enumvalues
+
+# values for enumeration 'c__EA_lto_debug_model'
+c__EA_lto_debug_model__enumvalues = {
+    0: 'LTO_DEBUG_MODEL_NONE',
+    1: 'LTO_DEBUG_MODEL_DWARF',
+}
+LTO_DEBUG_MODEL_NONE = 0
+LTO_DEBUG_MODEL_DWARF = 1
+c__EA_lto_debug_model = ctypes.c_uint32 # enum
+lto_debug_model = c__EA_lto_debug_model
+lto_debug_model__enumvalues = c__EA_lto_debug_model__enumvalues
+
+# values for enumeration 'c__EA_lto_codegen_model'
+c__EA_lto_codegen_model__enumvalues = {
+    0: 'LTO_CODEGEN_PIC_MODEL_STATIC',
+    1: 'LTO_CODEGEN_PIC_MODEL_DYNAMIC',
+    2: 'LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC',
+    3: 'LTO_CODEGEN_PIC_MODEL_DEFAULT',
+}
+LTO_CODEGEN_PIC_MODEL_STATIC = 0
+LTO_CODEGEN_PIC_MODEL_DYNAMIC = 1
+LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = 2
+LTO_CODEGEN_PIC_MODEL_DEFAULT = 3
+c__EA_lto_codegen_model = ctypes.c_uint32 # enum
+lto_codegen_model = c__EA_lto_codegen_model
+lto_codegen_model__enumvalues = c__EA_lto_codegen_model__enumvalues
+class struct_LLVMOpaqueLTOModule(Structure):
+    pass
+
+lto_module_t = ctypes.POINTER(struct_LLVMOpaqueLTOModule)
+class struct_LLVMOpaqueLTOCodeGenerator(Structure):
+    pass
+
+lto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueLTOCodeGenerator)
+class struct_LLVMOpaqueThinLTOCodeGenerator(Structure):
+    pass
+
+thinlto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueThinLTOCodeGenerator)
+try:
+    lto_get_version = _libraries['llvm'].lto_get_version
+    lto_get_version.restype = ctypes.POINTER(ctypes.c_char)
+    lto_get_version.argtypes = []
+except AttributeError:
+    pass
+try:
+    lto_get_error_message = _libraries['llvm'].lto_get_error_message
+    lto_get_error_message.restype = ctypes.POINTER(ctypes.c_char)
+    lto_get_error_message.argtypes = []
+except AttributeError:
+    pass
+try:
+    lto_module_is_object_file = _libraries['llvm'].lto_module_is_object_file
+    lto_module_is_object_file.restype = lto_bool_t
+    lto_module_is_object_file.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_is_object_file_for_target = _libraries['llvm'].lto_module_is_object_file_for_target
+    lto_module_is_object_file_for_target.restype = lto_bool_t
+    lto_module_is_object_file_for_target.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_has_objc_category = _libraries['llvm'].lto_module_has_objc_category
+    lto_module_has_objc_category.restype = lto_bool_t
+    lto_module_has_objc_category.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    lto_module_is_object_file_in_memory = _libraries['llvm'].lto_module_is_object_file_in_memory
+    lto_module_is_object_file_in_memory.restype = lto_bool_t
+    lto_module_is_object_file_in_memory.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    lto_module_is_object_file_in_memory_for_target = _libraries['llvm'].lto_module_is_object_file_in_memory_for_target
+    lto_module_is_object_file_in_memory_for_target.restype = lto_bool_t
+    lto_module_is_object_file_in_memory_for_target.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_create = _libraries['llvm'].lto_module_create
+    lto_module_create.restype = lto_module_t
+    lto_module_create.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_create_from_memory = _libraries['llvm'].lto_module_create_from_memory
+    lto_module_create_from_memory.restype = lto_module_t
+    lto_module_create_from_memory.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    lto_module_create_from_memory_with_path = _libraries['llvm'].lto_module_create_from_memory_with_path
+    lto_module_create_from_memory_with_path.restype = lto_module_t
+    lto_module_create_from_memory_with_path.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_create_in_local_context = _libraries['llvm'].lto_module_create_in_local_context
+    lto_module_create_in_local_context.restype = lto_module_t
+    lto_module_create_in_local_context.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_create_in_codegen_context = _libraries['llvm'].lto_module_create_in_codegen_context
+    lto_module_create_in_codegen_context.restype = lto_module_t
+    lto_module_create_in_codegen_context.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char), lto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    lto_module_create_from_fd = _libraries['llvm'].lto_module_create_from_fd
+    lto_module_create_from_fd.restype = lto_module_t
+    lto_module_create_from_fd.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
+except AttributeError:
+    pass
+off_t = ctypes.c_int64
+try:
+    lto_module_create_from_fd_at_offset = _libraries['llvm'].lto_module_create_from_fd_at_offset
+    lto_module_create_from_fd_at_offset.restype = lto_module_t
+    lto_module_create_from_fd_at_offset.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t, size_t, off_t]
+except AttributeError:
+    pass
+try:
+    lto_module_dispose = _libraries['llvm'].lto_module_dispose
+    lto_module_dispose.restype = None
+    lto_module_dispose.argtypes = [lto_module_t]
+except AttributeError:
+    pass
+try:
+    lto_module_get_target_triple = _libraries['llvm'].lto_module_get_target_triple
+    lto_module_get_target_triple.restype = ctypes.POINTER(ctypes.c_char)
+    lto_module_get_target_triple.argtypes = [lto_module_t]
+except AttributeError:
+    pass
+try:
+    lto_module_set_target_triple = _libraries['llvm'].lto_module_set_target_triple
+    lto_module_set_target_triple.restype = None
+    lto_module_set_target_triple.argtypes = [lto_module_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_module_get_num_symbols = _libraries['llvm'].lto_module_get_num_symbols
+    lto_module_get_num_symbols.restype = ctypes.c_uint32
+    lto_module_get_num_symbols.argtypes = [lto_module_t]
+except AttributeError:
+    pass
+try:
+    lto_module_get_symbol_name = _libraries['llvm'].lto_module_get_symbol_name
+    lto_module_get_symbol_name.restype = ctypes.POINTER(ctypes.c_char)
+    lto_module_get_symbol_name.argtypes = [lto_module_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    lto_module_get_symbol_attribute = _libraries['llvm'].lto_module_get_symbol_attribute
+    lto_module_get_symbol_attribute.restype = lto_symbol_attributes
+    lto_module_get_symbol_attribute.argtypes = [lto_module_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    lto_module_get_linkeropts = _libraries['llvm'].lto_module_get_linkeropts
+    lto_module_get_linkeropts.restype = ctypes.POINTER(ctypes.c_char)
+    lto_module_get_linkeropts.argtypes = [lto_module_t]
+except AttributeError:
+    pass
+try:
+    lto_module_get_macho_cputype = _libraries['llvm'].lto_module_get_macho_cputype
+    lto_module_get_macho_cputype.restype = lto_bool_t
+    lto_module_get_macho_cputype.argtypes = [lto_module_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    lto_module_has_ctor_dtor = _libraries['llvm'].lto_module_has_ctor_dtor
+    lto_module_has_ctor_dtor.restype = lto_bool_t
+    lto_module_has_ctor_dtor.argtypes = [lto_module_t]
+except AttributeError:
+    pass
+
+# values for enumeration 'c__EA_lto_codegen_diagnostic_severity_t'
+c__EA_lto_codegen_diagnostic_severity_t__enumvalues = {
+    0: 'LTO_DS_ERROR',
+    1: 'LTO_DS_WARNING',
+    3: 'LTO_DS_REMARK',
+    2: 'LTO_DS_NOTE',
+}
+LTO_DS_ERROR = 0
+LTO_DS_WARNING = 1
+LTO_DS_REMARK = 3
+LTO_DS_NOTE = 2
+c__EA_lto_codegen_diagnostic_severity_t = ctypes.c_uint32 # enum
+lto_codegen_diagnostic_severity_t = c__EA_lto_codegen_diagnostic_severity_t
+lto_codegen_diagnostic_severity_t__enumvalues = c__EA_lto_codegen_diagnostic_severity_t__enumvalues
+lto_diagnostic_handler_t = ctypes.CFUNCTYPE(None, c__EA_lto_codegen_diagnostic_severity_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(None))
+try:
+    lto_codegen_set_diagnostic_handler = _libraries['llvm'].lto_codegen_set_diagnostic_handler
+    lto_codegen_set_diagnostic_handler.restype = None
+    lto_codegen_set_diagnostic_handler.argtypes = [lto_code_gen_t, lto_diagnostic_handler_t, ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_create = _libraries['llvm'].lto_codegen_create
+    lto_codegen_create.restype = lto_code_gen_t
+    lto_codegen_create.argtypes = []
+except AttributeError:
+    pass
+try:
+    lto_codegen_create_in_local_context = _libraries['llvm'].lto_codegen_create_in_local_context
+    lto_codegen_create_in_local_context.restype = lto_code_gen_t
+    lto_codegen_create_in_local_context.argtypes = []
+except AttributeError:
+    pass
+try:
+    lto_codegen_dispose = _libraries['llvm'].lto_codegen_dispose
+    lto_codegen_dispose.restype = None
+    lto_codegen_dispose.argtypes = [lto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    lto_codegen_add_module = _libraries['llvm'].lto_codegen_add_module
+    lto_codegen_add_module.restype = lto_bool_t
+    lto_codegen_add_module.argtypes = [lto_code_gen_t, lto_module_t]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_module = _libraries['llvm'].lto_codegen_set_module
+    lto_codegen_set_module.restype = None
+    lto_codegen_set_module.argtypes = [lto_code_gen_t, lto_module_t]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_debug_model = _libraries['llvm'].lto_codegen_set_debug_model
+    lto_codegen_set_debug_model.restype = lto_bool_t
+    lto_codegen_set_debug_model.argtypes = [lto_code_gen_t, lto_debug_model]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_pic_model = _libraries['llvm'].lto_codegen_set_pic_model
+    lto_codegen_set_pic_model.restype = lto_bool_t
+    lto_codegen_set_pic_model.argtypes = [lto_code_gen_t, lto_codegen_model]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_cpu = _libraries['llvm'].lto_codegen_set_cpu
+    lto_codegen_set_cpu.restype = None
+    lto_codegen_set_cpu.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_assembler_path = _libraries['llvm'].lto_codegen_set_assembler_path
+    lto_codegen_set_assembler_path.restype = None
+    lto_codegen_set_assembler_path.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_assembler_args = _libraries['llvm'].lto_codegen_set_assembler_args
+    lto_codegen_set_assembler_args.restype = None
+    lto_codegen_set_assembler_args.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    lto_codegen_add_must_preserve_symbol = _libraries['llvm'].lto_codegen_add_must_preserve_symbol
+    lto_codegen_add_must_preserve_symbol.restype = None
+    lto_codegen_add_must_preserve_symbol.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_write_merged_modules = _libraries['llvm'].lto_codegen_write_merged_modules
+    lto_codegen_write_merged_modules.restype = lto_bool_t
+    lto_codegen_write_merged_modules.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_compile = _libraries['llvm'].lto_codegen_compile
+    lto_codegen_compile.restype = ctypes.POINTER(None)
+    lto_codegen_compile.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_compile_to_file = _libraries['llvm'].lto_codegen_compile_to_file
+    lto_codegen_compile_to_file.restype = lto_bool_t
+    lto_codegen_compile_to_file.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+except AttributeError:
+    pass
+try:
+    lto_codegen_optimize = _libraries['llvm'].lto_codegen_optimize
+    lto_codegen_optimize.restype = lto_bool_t
+    lto_codegen_optimize.argtypes = [lto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    lto_codegen_compile_optimized = _libraries['llvm'].lto_codegen_compile_optimized
+    lto_codegen_compile_optimized.restype = ctypes.POINTER(None)
+    lto_codegen_compile_optimized.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    lto_api_version = _libraries['llvm'].lto_api_version
+    lto_api_version.restype = ctypes.c_uint32
+    lto_api_version.argtypes = []
+except AttributeError:
+    pass
+try:
+    lto_set_debug_options = _libraries['llvm'].lto_set_debug_options
+    lto_set_debug_options.restype = None
+    lto_set_debug_options.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    lto_codegen_debug_options = _libraries['llvm'].lto_codegen_debug_options
+    lto_codegen_debug_options.restype = None
+    lto_codegen_debug_options.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_codegen_debug_options_array = _libraries['llvm'].lto_codegen_debug_options_array
+    lto_codegen_debug_options_array.restype = None
+    lto_codegen_debug_options_array.argtypes = [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    lto_initialize_disassembler = _libraries['llvm'].lto_initialize_disassembler
+    lto_initialize_disassembler.restype = None
+    lto_initialize_disassembler.argtypes = []
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_should_internalize = _libraries['llvm'].lto_codegen_set_should_internalize
+    lto_codegen_set_should_internalize.restype = None
+    lto_codegen_set_should_internalize.argtypes = [lto_code_gen_t, lto_bool_t]
+except AttributeError:
+    pass
+try:
+    lto_codegen_set_should_embed_uselists = _libraries['llvm'].lto_codegen_set_should_embed_uselists
+    lto_codegen_set_should_embed_uselists.restype = None
+    lto_codegen_set_should_embed_uselists.argtypes = [lto_code_gen_t, lto_bool_t]
+except AttributeError:
+    pass
+class struct_LLVMOpaqueLTOInput(Structure):
+    pass
+
+lto_input_t = ctypes.POINTER(struct_LLVMOpaqueLTOInput)
+try:
+    lto_input_create = _libraries['llvm'].lto_input_create
+    lto_input_create.restype = lto_input_t
+    lto_input_create.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    lto_input_dispose = _libraries['llvm'].lto_input_dispose
+    lto_input_dispose.restype = None
+    lto_input_dispose.argtypes = [lto_input_t]
+except AttributeError:
+    pass
+try:
+    lto_input_get_num_dependent_libraries = _libraries['llvm'].lto_input_get_num_dependent_libraries
+    lto_input_get_num_dependent_libraries.restype = ctypes.c_uint32
+    lto_input_get_num_dependent_libraries.argtypes = [lto_input_t]
+except AttributeError:
+    pass
+try:
+    lto_input_get_dependent_library = _libraries['llvm'].lto_input_get_dependent_library
+    lto_input_get_dependent_library.restype = ctypes.POINTER(ctypes.c_char)
+    lto_input_get_dependent_library.argtypes = [lto_input_t, size_t, ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
+    lto_runtime_lib_symbols_list = _libraries['llvm'].lto_runtime_lib_symbols_list
+    lto_runtime_lib_symbols_list.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
+    lto_runtime_lib_symbols_list.argtypes = [ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+class struct_c__SA_LTOObjectBuffer(Structure):
+    pass
+
+struct_c__SA_LTOObjectBuffer._pack_ = 1 # source:False
+struct_c__SA_LTOObjectBuffer._fields_ = [
+    ('Buffer', ctypes.POINTER(ctypes.c_char)),
+    ('Size', ctypes.c_uint64),
+]
+
+LTOObjectBuffer = struct_c__SA_LTOObjectBuffer
+try:
+    thinlto_create_codegen = _libraries['llvm'].thinlto_create_codegen
+    thinlto_create_codegen.restype = thinlto_code_gen_t
+    thinlto_create_codegen.argtypes = []
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_dispose = _libraries['llvm'].thinlto_codegen_dispose
+    thinlto_codegen_dispose.restype = None
+    thinlto_codegen_dispose.argtypes = [thinlto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_add_module = _libraries['llvm'].thinlto_codegen_add_module
+    thinlto_codegen_add_module.restype = None
+    thinlto_codegen_add_module.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_process = _libraries['llvm'].thinlto_codegen_process
+    thinlto_codegen_process.restype = None
+    thinlto_codegen_process.argtypes = [thinlto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    thinlto_module_get_num_objects = _libraries['llvm'].thinlto_module_get_num_objects
+    thinlto_module_get_num_objects.restype = ctypes.c_uint32
+    thinlto_module_get_num_objects.argtypes = [thinlto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    thinlto_module_get_object = _libraries['llvm'].thinlto_module_get_object
+    thinlto_module_get_object.restype = LTOObjectBuffer
+    thinlto_module_get_object.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    thinlto_module_get_num_object_files = _libraries['llvm'].thinlto_module_get_num_object_files
+    thinlto_module_get_num_object_files.restype = ctypes.c_uint32
+    thinlto_module_get_num_object_files.argtypes = [thinlto_code_gen_t]
+except AttributeError:
+    pass
+try:
+    thinlto_module_get_object_file = _libraries['llvm'].thinlto_module_get_object_file
+    thinlto_module_get_object_file.restype = ctypes.POINTER(ctypes.c_char)
+    thinlto_module_get_object_file.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_pic_model = _libraries['llvm'].thinlto_codegen_set_pic_model
+    thinlto_codegen_set_pic_model.restype = lto_bool_t
+    thinlto_codegen_set_pic_model.argtypes = [thinlto_code_gen_t, lto_codegen_model]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_savetemps_dir = _libraries['llvm'].thinlto_codegen_set_savetemps_dir
+    thinlto_codegen_set_savetemps_dir.restype = None
+    thinlto_codegen_set_savetemps_dir.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    thinlto_set_generated_objects_dir = _libraries['llvm'].thinlto_set_generated_objects_dir
+    thinlto_set_generated_objects_dir.restype = None
+    thinlto_set_generated_objects_dir.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cpu = _libraries['llvm'].thinlto_codegen_set_cpu
+    thinlto_codegen_set_cpu.restype = None
+    thinlto_codegen_set_cpu.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_disable_codegen = _libraries['llvm'].thinlto_codegen_disable_codegen
+    thinlto_codegen_disable_codegen.restype = None
+    thinlto_codegen_disable_codegen.argtypes = [thinlto_code_gen_t, lto_bool_t]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_codegen_only = _libraries['llvm'].thinlto_codegen_set_codegen_only
+    thinlto_codegen_set_codegen_only.restype = None
+    thinlto_codegen_set_codegen_only.argtypes = [thinlto_code_gen_t, lto_bool_t]
+except AttributeError:
+    pass
+try:
+    thinlto_debug_options = _libraries['llvm'].thinlto_debug_options
+    thinlto_debug_options.restype = None
+    thinlto_debug_options.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    lto_module_is_thinlto = _libraries['llvm'].lto_module_is_thinlto
+    lto_module_is_thinlto.restype = lto_bool_t
+    lto_module_is_thinlto.argtypes = [lto_module_t]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_add_must_preserve_symbol = _libraries['llvm'].thinlto_codegen_add_must_preserve_symbol
+    thinlto_codegen_add_must_preserve_symbol.restype = None
+    thinlto_codegen_add_must_preserve_symbol.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_add_cross_referenced_symbol = _libraries['llvm'].thinlto_codegen_add_cross_referenced_symbol
+    thinlto_codegen_add_cross_referenced_symbol.restype = None
+    thinlto_codegen_add_cross_referenced_symbol.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cache_dir = _libraries['llvm'].thinlto_codegen_set_cache_dir
+    thinlto_codegen_set_cache_dir.restype = None
+    thinlto_codegen_set_cache_dir.argtypes = [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cache_pruning_interval = _libraries['llvm'].thinlto_codegen_set_cache_pruning_interval
+    thinlto_codegen_set_cache_pruning_interval.restype = None
+    thinlto_codegen_set_cache_pruning_interval.argtypes = [thinlto_code_gen_t, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_final_cache_size_relative_to_available_space = _libraries['llvm'].thinlto_codegen_set_final_cache_size_relative_to_available_space
+    thinlto_codegen_set_final_cache_size_relative_to_available_space.restype = None
+    thinlto_codegen_set_final_cache_size_relative_to_available_space.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cache_entry_expiration = _libraries['llvm'].thinlto_codegen_set_cache_entry_expiration
+    thinlto_codegen_set_cache_entry_expiration.restype = None
+    thinlto_codegen_set_cache_entry_expiration.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cache_size_bytes = _libraries['llvm'].thinlto_codegen_set_cache_size_bytes
+    thinlto_codegen_set_cache_size_bytes.restype = None
+    thinlto_codegen_set_cache_size_bytes.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cache_size_megabytes = _libraries['llvm'].thinlto_codegen_set_cache_size_megabytes
+    thinlto_codegen_set_cache_size_megabytes.restype = None
+    thinlto_codegen_set_cache_size_megabytes.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    thinlto_codegen_set_cache_size_files = _libraries['llvm'].thinlto_codegen_set_cache_size_files
+    thinlto_codegen_set_cache_size_files.restype = None
+    thinlto_codegen_set_cache_size_files.argtypes = [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError:
     pass
 __all__ = \
