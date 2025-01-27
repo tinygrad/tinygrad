@@ -3419,8 +3419,6 @@ class Tensor(MathTrait):
   def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
   def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
-  def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
-
   # ***** functional nn ops *****
 
   def linear(self, weight:Tensor, bias:Optional[Tensor]=None):
