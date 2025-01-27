@@ -95,6 +95,9 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
+  def __init__(self, abi:str|None=None):
+    self.abi = abi
+
   def render(self, name: str, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
     args: list[str] = []
@@ -142,7 +145,7 @@ class LLVMRenderer(Renderer):
 
     # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
     return f'''\
-define void @{name}({','.join(args)}) #0 {{
+define{' '+self.abi if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
 {chr(10).join(kernel)}
   ret void
 }}

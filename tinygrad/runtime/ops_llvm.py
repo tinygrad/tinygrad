@@ -1,4 +1,4 @@
-import ctypes, platform
+import ctypes, platform, sys
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import getenv, capstone_flatdump
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -58,4 +58,4 @@ class LLVMDevice(Compiled):
     target_machine = llvm.LLVMCreateTargetMachine(target, triple, b'', features, llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC,
                                                   llvm.LLVMCodeModelDefault)
 
-    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(target_machine, getenv("LLVMOPT")), CPUProgram)
+    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None), LLVMCompiler(target_machine, getenv("LLVMOPT")), CPUProgram)
