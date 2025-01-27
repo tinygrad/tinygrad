@@ -3379,9 +3379,6 @@ class Tensor(MathTrait):
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
 
-  def __lshift__(self, x) -> Tensor: return self.lshift(x)
-  def __rshift__(self, x) -> Tensor: return self.rshift(x)
-
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
 
