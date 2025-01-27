@@ -12,7 +12,7 @@ def expect(x, err, ret=None):
   if x: raise RuntimeError(llvm.string_cast(err.contents) if not isinstance(err, str) else err)
   return ret
 
-HOST_ARCH = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86'}[platform.machine()]
+HOST_ARCH = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
 REQUIRED_COMPONENTS = ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']
 
 class LLVMCompiler(Compiler):

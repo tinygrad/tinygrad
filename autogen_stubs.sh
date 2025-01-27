@@ -235,7 +235,7 @@ generate_llvm() {
 
   sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support\g" "$BASE/llvm.py"
   sed -i "s\FIXME_STUB\llvm\g" "$BASE/llvm.py"
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVMS[llvm_support.LLVM_VER])\g" "$BASE/llvm.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVM_PATH)\g" "$BASE/llvm.py"
 
   fixup "$BASE/llvm.py"
 }

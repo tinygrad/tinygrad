@@ -146,7 +146,7 @@ class FunctionFactoryStub:
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['llvm'] = ctypes.CDLL(llvm_support.LLVMS[llvm_support.LLVM_VER]) #  ctypes.CDLL('llvm')
+_libraries['llvm'] = ctypes.CDLL(llvm_support.LLVM_PATH) #  ctypes.CDLL('llvm')
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
