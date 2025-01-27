@@ -337,7 +337,7 @@ generate_webgpu() {
   clang2py -l /usr/local/lib/libwebgpu_dawn.so extra/webgpu/webgpu.h -o $BASE/webgpu.py
   fixup $BASE/webgpu.py
   sed -i 's/import ctypes/import ctypes, ctypes.util/g' $BASE/webgpu.py
-  sed -i "s|ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))|g" $BASE/webgpu.py
+  sed -i "s|ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|ctypes.CDLL(ctypes.util.find_library('libwebgpu_dawn'))|g" $BASE/webgpu.py
   python3 -c "import tinygrad.runtime.autogen.webgpu"
 }
 

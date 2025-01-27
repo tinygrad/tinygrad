@@ -374,7 +374,9 @@ jobs:
     - name: Install Dependencies
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Install dawn (WebGPU)
-      run: sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
     - name: Install dependencies for software-based vulkan
       run: |
         sudo apt update -y || true
@@ -421,7 +423,9 @@ jobs:
     - name: Install Dependencies
       run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Install dawn (WebGPU)
-      run: sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
     - name: Cache downloads
       uses: actions/cache@v4
       with:
