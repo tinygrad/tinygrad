@@ -8,7 +8,7 @@ from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio, pci
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
@@ -568,51 +568,51 @@ class USBTrackedMemoryView:
   def __len__(self): return self.size // self.elsz
   def __repr__(self): return "USBTrackedMemoryView"
 
-class USBIface(VFIOIface):
+class USBIface(PCIIface):
   iommu_set:bool = False
   gpus:List[Any] = []
 
   def __init__(self, dev, dev_id):
     self.dev = dev
-    self.usb = Asm236x("/dev/sg0")
+    self.usb = Asm236x("/dev/sg1")
 
     # setup pci switch
-    self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
-    self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0x2000, size=2)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0x2000, size=2)
 
-    self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x4000, size=2)
-    self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0xffff, size=2)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x4000, size=2)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0xffff, size=2)
 
     for bus in [1, 2]:
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1, size=2)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
 
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
 
-      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=3, size=1)
-      self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=(2 if bus == 1 else 3), size=1)
-      self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=1, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=3, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=(2 if bus == 1 else 3), size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=1, size=1)
 
-      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_BRIDGE_CTL_BUS_RESET, size=1)
       time.sleep(1)
-      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)      
-      self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_BRIDGE_CTL_PARITY|libpciaccess.PCI_BRIDGE_CTL_SERR, size=1)      
+      self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_IO | libpciaccess.PCI_COMMAND_MEMORY | libpciaccess.PCI_COMMAND_MASTER, size=1)
 
     bar_next_addr, bar_off, self.bars = [0x10000, 0x40000000], 0, {}
     for bar_id in range(4):
-      bar_cfg = self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)
-      if bar_cfg & pci.PCI_BASE_ADDRESS_SPACE == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
-        self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, value=0xffffffff, size=4)
-        bar_size = 0xffffffff - (self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4) & 0xFFFFFFF0) + 1
+      bar_cfg = self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)
+      if bar_cfg & libpciaccess.PCI_BASE_ADDRESS_SPACE == libpciaccess.PCI_BASE_ADDRESS_SPACE_MEMORY:
+        self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, value=0xffffffff, size=4)
+        bar_size = 0xffffffff - (self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4) & 0xFFFFFFF0) + 1
         if bar_id in {0, 1, 3}:
-          is_pref = int(bool(bar_cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH))
-          self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
+          is_pref = int(bool(bar_cfg & libpciaccess.PCI_BASE_ADDRESS_MEM_PREFETCH))
+          self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
           self.bars[bar_id] = (bar_next_addr[is_pref], bar_size)
           bar_next_addr[is_pref] += round_up(bar_size, 2 << 20)
-          print(bar_id, hex(self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)))
+          print(bar_id, hex(self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)))
       print(bar_id, hex(bar_cfg))
-      bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
+      bar_off += 8 if bar_cfg & libpciaccess.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
 
     cap_ptr = self.usb.pcie_cfg_req(0x34, bus=3, dev=0, fn=0, value=None, size=1)
     caps = {}
@@ -631,7 +631,7 @@ class USBIface(VFIOIface):
     self.usb.pcie_cfg_req(caps[0x1]+4, bus=3, dev=0, fn=0, value=0x0, size=1)
     # print("PM cap now", pm_state)
 
-    self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=3, dev=0, fn=0, value=pci.PCI_COMMAND_MEMORY, size=1)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=3, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_MEMORY, size=1)
 
     # print(caps)
 
