@@ -199,6 +199,8 @@ to_si = PatternMatcher([
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  # CONST(VIEW) becomes VALID too, TODO: doesn't have to
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: x.replace(src=()).valid(st.st)),
 ])
 
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
@@ -220,10 +222,13 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
         assign_preloads[x.buf_uop] = None
         # if this kernel also assigns to the buffer, we only allow either contiguous or masked views for the LOAD
         if x.buf_uop in store_bufs and not (st:=x.st_arg).contiguous:
+          # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
+          if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: pass
           # if it has a single view and it's equal when you shrink a contig, it's fine
-          if len(st.views) != 1 or (mask:=st.views[0].mask) is None or ShapeTracker.from_shape(st.shape).shrink(mask) != st.shrink(mask):
-            raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                               +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+          elif len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): pass
+          # otherwise, it's not fine
+          else: raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                                   +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, ast))
@@ -438,12 +443,12 @@ do_realize = PatternMatcher([
   (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
 ])
 
-# **** rewrite VIEW into LOAD/STORE/VALID or fuse the underlying UOp
+# **** rewrite VIEW into LOAD/STORE or fuse the underlying UOp
 
 def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
-  assert isinstance(val.src[1].const_arg, int), f"expected BIND value to be int {val}"
-  ctx.var_vals[ret:=var.replace(src=())] = val.src[1].const_arg
-  return ret.valid(unwrap(bind.st))
+  assert isinstance(val.const_arg, int), f"expected BIND value to be int {val}"
+  ctx.var_vals[var.replace(src=())] = val.const_arg
+  return var
 
 def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
@@ -456,8 +461,6 @@ def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
-  # CONST is always fused and generated
-  (UPat(Ops.CONST, name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: UOp.const(x.dtype, x.const_arg).valid(st.st)),
   (UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.var("val"))), unbind_variable),
   # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
@@ -481,9 +484,6 @@ remove_movement_ops = merge_views+PatternMatcher([
   # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
   (UPat(Ops.VIEW, name="view"),
    lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
-  # merge unmasked const views
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.CONST, name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
-   lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
 ])
 
 @track_rewrites(named=True)
