@@ -301,17 +301,17 @@
     const kernelListParent = document.querySelector(".container.kernel-list-parent");
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
-    kernels.forEach((k, i) => {
+    kernels.forEach(([key, items], i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
       if (i === currentKernel) {
         requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
-      const p = Object.assign(document.createElement("p"), { id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED",
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerText: key ?? "UNPARENTED",
         style: "cursor: pointer;"});
       kernelUl.appendChild(p)
-      k.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
+      items.forEach((u, j) => {
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
           className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         if (j === currentUOp) {
           requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
@@ -460,7 +460,7 @@
         event.preventDefault()
         currentUOp = 0;
         currentRewrite = 0;
-        currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
+        currentKernel = Math.min(kernels.length-1, currentKernel+1);
        return main()
       }
     }
@@ -486,7 +486,7 @@
     if (event.key == "ArrowDown") {
       event.preventDefault()
       currentRewrite = 0;
-      const totalUOps = kernels[currentKernel].length-1;
+      const totalUOps = kernels[currentKernel][1].length-1;
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
