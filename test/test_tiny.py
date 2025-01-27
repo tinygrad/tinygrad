@@ -4,6 +4,7 @@ from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
 from tinygrad.helpers import IMAGE
 
 class TestTiny(unittest.TestCase):
+
   # *** basic functionality ***
 
   def test_plus(self):
