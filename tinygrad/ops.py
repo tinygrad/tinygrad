@@ -42,7 +42,6 @@ class MathTrait:
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def cmplt(self, x, reverse=False): return self._binop(Ops.CMPLT, x, reverse)
-  def max(self, x, reverse=False): return self._binop(Ops.MAX, x, reverse)
 
   def reciprocal(self): return self.alu(Ops.RECIP)
   def sqrt(self): return self.alu(Ops.SQRT)
@@ -86,7 +85,7 @@ class MathTrait:
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-  def maximum(self, x): return self.max(x)
+  def maximum(self, x): return self._binop(Ops.MAX, x, False)
   def minimum(self, x): return -(-self).maximum(-x)
   def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
 
