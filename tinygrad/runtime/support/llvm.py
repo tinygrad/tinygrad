@@ -2,7 +2,7 @@ import ctypes, ctypes.util, contextlib, os, sys, subprocess
 from tinygrad.helpers import DEBUG, OSX, getenv
 
 if OSX and 'tinygrad.runtime.ops_metal' in sys.modules:
-  raise RuntimeError("Metal can't be used together with llvm")
+  raise RuntimeError("LLVM can't be opened in the same process with metal")
 
 if sys.platform == 'win32':
   # Windows llvm distribution doesn't seem to add itself to PATH or anywhere else where it can be easily retrieved from.
