@@ -10,10 +10,6 @@ from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
-import numpy as np
-import highspy
-
-highs_inst = highspy.Highs()
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -117,9 +113,6 @@ class Ops(FastEnum):
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
-  # used in converting uops to highspy symbolic
-  HIGHS_EXPR = auto()
-
   # reduce
   REDUCE_AXIS = auto()
 
@@ -166,7 +159,7 @@ class GroupOp:
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 
-  Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE, Ops.HIGHS_EXPR}
+  Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
@@ -638,7 +631,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    if self.op is Ops.HIGHS_EXPR: return self.arg[1], self.arg[2]
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
@@ -1005,10 +997,6 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-
-  # HIGHS_EXPR arg is (highspy object, vmin, vmax)
-  (UPat(Ops.HIGHS_EXPR, name="x"), lambda x: x.src==() and isinstance(x.arg,tuple) and len(x.arg)==3 and x.arg[2] >= x.arg[1] \
-   and isinstance(x.arg[0], highspy.highs.highs_linear_expression | highspy.highs.highs_var)),
 ])
 
 def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
@@ -1344,54 +1332,4 @@ view_left = merge_views+PatternMatcher([
    lambda e,vm: e.replace(src=tuple(s if s.st is None else s.view(vm.st) if s is s.base else s.base.view(s.st+vm.st) for s in e.src))),
   (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.Buffer, name="b"),)),
    lambda b,vm: b.replace(src=tuple((s.st+vm.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
-])
-
-# *** convert shapetracker indexed uops to highs ilp programs, run highs_inst.clear() and _highs_mod_cache={} first ***
-
-# hack, this stops exception in ucache
-class hashable_highs_linexp(highspy.highs.highs_linear_expression):
-  def __hash__(self): return id(self)
-highspy.highs.highs_linear_expression = hashable_highs_linexp
-
-highs_pre = symbolic_simple+PatternMatcher([
-  ((UPat.var("x")!=True)!=True, lambda x: x),
-  # change AND to OR per de morgan
-  ((UPat.var("x") & UPat.var("y")) != True, lambda x,y: (x != True) | (y != True)),
-  # need all inequalities as const < var
-  ((UPat.var("x") < UPat.cvar("a")) != True, lambda x,a: a-1 < x),
-  ((UPat.cvar("a") < UPat.var("x")) != True, lambda a,x: x < a+1),
-  (UPat.var("x") < UPat.cvar("a"), lambda x,a: -a < -x ),
-])
-
-def _highs_mod(x, d):
-  q = highs_inst.addVariable(lb=x.vmin//d.arg, ub=x.vmax//d.arg, type=highspy.HighsVarType.kInteger)
-  highs_inst.addConstr(0 <= x.arg[0] - q*d.arg <= d.arg-1)
-  arg = (x.arg[0]-q*d.arg).simplify(), 0, d.arg-1
-  return UOp(Ops.HIGHS_EXPR, arg=arg, dtype=dtypes.int)
-def _highs_idiv(x, d):
-  q = highs_inst.addVariable(lb=x.vmin//d.arg, ub=x.vmax//d.arg, type=highspy.HighsVarType.kInteger)
-  highs_inst.addConstr(0 <= x.arg[0] - q*d.arg <= d.arg-1)
-  arg = q, x.vmin//d.arg, x.vmax//d.arg
-  return UOp(Ops.HIGHS_EXPR, arg=arg, dtype=dtypes.int)
-def _highs_mul(x, y):
-  if x.op == y.op == Ops.HIGHS_EXPR: return None
-  prod = (x.arg[0] if x.op == Ops.HIGHS_EXPR else x.arg)*(y.arg[0] if y.op == Ops.HIGHS_EXPR else y.arg)
-  arg = (prod, min(vals:=(x.vmin*y.vmin, x.vmin*y.vmax, x.vmax*y.vmin, x.vmax*y.vmax)), max(vals))
-  return UOp(Ops.HIGHS_EXPR, arg=arg, dtype=dtypes.int)
-def _highs_add(x, y):
-  sum = (x.arg[0] if x.op == Ops.HIGHS_EXPR else x.arg)+(y.arg[0] if y.op == Ops.HIGHS_EXPR else y.arg)
-  return UOp(Ops.HIGHS_EXPR, arg=(sum, x.vmin+y.vmin, x.vmax+y.vmax), dtype=dtypes.int)
-
-H_EXPR_OR_CONST = {Ops.HIGHS_EXPR, Ops.CONST}
-
-# run these when ready to call highs_inst.addVariable()
-highs_reduce = PatternMatcher([
-  (UPat(H_EXPR_OR_CONST, name="x") + UPat(H_EXPR_OR_CONST, name="y"), _highs_add),
-  (UPat(H_EXPR_OR_CONST, name="x") * UPat(H_EXPR_OR_CONST, name="y"), _highs_mul),
-  (UPat(Ops.HIGHS_EXPR, name="x") % UPat(Ops.CONST, name="d"), _highs_mod),
-  (UPat(Ops.HIGHS_EXPR, name="x") // UPat(Ops.CONST, name="d"), _highs_idiv),
-  # express bools as integers >= 0, false if ==0, true if >0
-  (UPat(H_EXPR_OR_CONST, name="a") | UPat(H_EXPR_OR_CONST, name="b"), lambda a,b: a+b),
-  # numerator needs to be >= 0 for this to work
-  (UPat.cvar("a") < UPat.var("x"), lambda a,x: (x-x.vmin)//(a.arg-x.vmin+1)),
 ])

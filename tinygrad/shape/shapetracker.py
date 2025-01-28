@@ -3,91 +3,117 @@ from __future__ import annotations
 from dataclasses import dataclass
 import functools
 from typing import Optional, Callable
-from tinygrad.helpers import merge_dicts, getenv, prod
+from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
 from tinygrad.shape.view import View, strides_for_shape, unravel, _reshape_mask
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid, simplify_valid, sint_to_uop, Context
-from tinygrad.ops import highs_pre, highs_reduce, highs_inst, H_EXPR_OR_CONST
 from tinygrad.codegen.rewriter import sym
 import numpy as np
 import highspy
+
+highs_inst = highspy.Highs()
+
+def st_to_highs(st, idxs) -> tuple:
+  # add necessary auxiliary variables to highs_inst and return:
+  # (linear expression for idx, [constrs for valid], [constrs whose disjunction gives invalid])
+  # i.e. all the constrs in valid must be true to be valid, and one of the constrs in invalid must be true to be invalid
+  valid, invalid = [], []
+  for j in range(len(st.views)-1, 0, -1):
+    mask = st.views[j-1].mask or tuple((0,sh) for sh in st.views[j-1].shape)
+    A = np.array([unravel(st.views[j-1].shape, st.views[j].strides[k]) for k in range(len(st.views[j].strides))]).T
+    K = np.diag(st.views[j-1].shape) + np.diag([-1]*(len(st.views[j-1].shape)-1), 1)
+    u = [highs_inst.addVariable(lb=-np.inf, ub=np.inf, type=highspy.HighsVarType.kInteger) for k in range(len(st.views[j-1].shape))]
+    idxs = A@idxs + K@u + unravel(st.views[j-1].shape, st.views[j].offset)
+    for k in range(len(idxs)):
+      highs_inst.addConstr(0 <= idxs[k] <= st.views[j-1].shape[k]-1)
+      valid.append(mask[k][0] <= idxs[k] <= mask[k][1]-1)
+      invalid += [idxs[k] <= mask[k][0]-1, idxs[k] >= mask[k][1]]
+  idx = np.array(st.views[0].strides)@idxs + st.views[0].offset
+  return idx, valid, invalid
 
 def solve_highs(constrs, min_obj) -> Optional[int]:
   # None if the constaints are infeasible, otherwise returns the value of the first variable (x)
   cs = [highs_inst.addConstr(c) for c in constrs]
   highs_inst.minimize(min_obj)
   if highs_inst.getModelStatus() == highspy.HighsModelStatus.kTimeLimit: raise RuntimeError("highs timeout")
-  assert highs_inst.getModelStatus() in {highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible}, "highs returned something other than Infeasible or Optimal"
+  assert highs_inst.getModelStatus() in {highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible}, \
+    "highs returned something other than Infeasible or Optimal"
   if highs_inst.getModelStatus() == highspy.HighsModelStatus.kInfeasible: ret = None
   else: ret = round(highs_inst.getSolution().col_value[0])
   for _ in range(len(cs)): highs_inst.removeConstr(cs[0].index)  # weird constr indexing behaviour
   return ret
 
-def collapse_st(st, keep_shape=False):
-  try: return _collapse_st(st, keep_shape)
-  except RuntimeError: return None
-
-def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
-  # Look for views whose action is equiv. to st; this is complete
-  # presolve sometimes returns "infeasible" incorrectly
+@functools.lru_cache(maxsize=None)
+def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
+  # Look for a view whose action is equiv. to st; this is complete
   if len(st.views) == 0: raise ValueError()
   if len(st.views) == 1: return st.views[0]
-  highs_inst.clear(); highs_inst.setOptionValue("time_limit", 1);
-  highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("log_to_console", False)
+  # TODO work symbolic offset into this
+  if not all_int(flatten(((*v.shape, *v.strides, v.offset, *flatten(v.mask or ((0,),))) for v in st.views))):
+#    import pdb; pdb.set_trace()
+    return None
+  highs_inst.clear(); highs_inst.setOptionValue("time_limit", 0.5); highs_inst.setOptionValue("log_to_console", False)
+  # presolve sometimes returns "infeasible" incorrectly
+  highs_inst.setOptionValue("presolve", "off")
 
 #  import pdb; pdb.set_trace()
+#  print(st)
 
-  hx = highs_inst.addVariable(0, prod(st.shape)-1, type=highspy.HighsVarType.kInteger)
-  x = UOp(Ops.HIGHS_EXPR, arg=(hx, 0, prod(st.shape)-1), dtype=dtypes.int)
-  idx, valid = st.to_indexed_uops(unravel(st.shape, x))
-  idx, invalid = graph_rewrite(graph_rewrite(idx, highs_pre), highs_reduce), graph_rewrite(graph_rewrite(valid!=True, highs_pre), highs_reduce)
-  assert idx.op in H_EXPR_OR_CONST and invalid.op in H_EXPR_OR_CONST, "failed rewrite to highs program"
-  hidx, hinvalid = idx.arg[0] if idx.op is Ops.HIGHS_EXPR else 0*hx + idx.arg, invalid.arg[0] if invalid.op is Ops.HIGHS_EXPR else 0*hx + invalid.arg
-  if solve_highs([hinvalid==0], hx) is None: return View.create(st.shape, (0,)*len(st.shape), 0, ((0,0),)*len(st.shape))
+  x = highs_inst.addVariable(0, prod(st.shape)-1, type=highspy.HighsVarType.kInteger)
+  in_idxs = [highs_inst.addVariable(0, st.shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(st.shape))]
+  highs_inst.addConstr(sum(in_idxs[k]*prod(st.shape[k+1:]) for k in range(len(st.shape))) == x)
+  idx, valid, invalid = st_to_highs(st, in_idxs)
+  valid_start = solve_highs(valid, x)
+  if valid_start is None: return View.create(st.shape, (0,)*len(st.shape), 0, ((0,0),)*len(st.shape))
 
-  # find mask  TODO check all-valid to skip this for speed
-  vshape, mask, denom, valid_start = [], [], 1, 0
+  # find mask, TODO skip this if all points are valid
+  shape, mask, denom = [], [], 1
+  x_step = highs_inst.addVariable(-np.inf, np.inf, type=highspy.HighsVarType.kInteger)
   while denom < prod(st.shape):
-    x_mod_d = graph_rewrite(x%denom, highs_reduce).arg[0]  # factor out parts of the mask we already found
-    a = solve_highs([hinvalid==0, x_mod_d==valid_start], hx)  # first valid section
-    b = solve_highs([hinvalid>=1, x_mod_d==valid_start, hx>=a+1], hx) or prod(st.shape)  # second (or first) invalid section
-    c = solve_highs([hinvalid==0, x_mod_d==valid_start, hx>=b+1], hx)  # second valid section
-    vshape.append(c-a if c is not None else prod(st.shape)//denom)
-    mask.append((a//denom%vshape[-1], (b-1)//denom%vshape[-1]+1))
-    denom *= vshape[-1]
+    a = min(solve_highs([constr] + [x==valid_start+denom*x_step, x>=valid_start], x) or prod(st.shape) for constr in invalid)
+    b = solve_highs(valid + [x==valid_start+denom*x_step, x>=a], x)
+    shape.append((b-valid_start)//denom if b is not None else prod(st.shape)//denom)
+    mask.append((valid_start//denom%shape[-1], a//denom%shape[-1]))
+    denom *= shape[-1]
     if prod(st.shape) % denom != 0: return None
-    valid_start = a % denom
-  vshape, mask = vshape[::-1], mask[::-1]
-  vidxs = [graph_rewrite(graph_rewrite(i, highs_pre), highs_reduce).arg[0] for i in unravel(vshape,x)]
-  # check there are no invalid points in the new mask
-  if solve_highs([hinvalid>=1] + [mask[j][0] <= vidxs[j] <= mask[j][1]-1 for j in range(len(vidxs))], hx) is not None: return None
+  shape, mask = shape[::-1], mask[::-1]
+  # new indexes based on the found shape
+  new_in_idxs = [highs_inst.addVariable(0, shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(shape))]
+  new_in_constr = [sum(in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
+  new_valid = [mask[k][0] <= new_in_idxs[k] <= mask[k][1]-1 for k in range(len(shape))]
+  new_invalid = sum(([new_in_idxs[k] <= mask[k][0]-1, new_in_idxs[k] >= mask[k][1]] for k in range(len(shape))), start=[])
+  # check all points in new mask are valid, and all valid points are in new mask
+  if any(solve_highs(new_in_constr + new_valid + [constr], x) is not None for constr in invalid): return None
+  if any(solve_highs(new_in_constr + valid + [constr], x) is not None for constr in new_invalid): return None
   
   # find strides
 #  import pdb; pdb.set_trace()
   while True:
-    if len(vshape) > 20:
+    if len(shape) > 20:  # TODO remove
       import pdb; pdb.set_trace()
+    # get strides for current shape
     strides = []
     out_idx_at_valid_start = st.to_indexed_uops(unravel(st.shape, valid_start))[0].simplify().arg
-    running_product = [prod(vshape[j+1:]) for j in range(len(vshape))]
+    running_product = [prod(shape[j+1:]) for j in range(len(shape))]
     for p in running_product:
       strides.append(st.to_indexed_uops(unravel(st.shape, valid_start+p))[0].simplify().arg - out_idx_at_valid_start)
     offset = out_idx_at_valid_start - sum(strides[j]*mask[j][0] for j in range(len(mask)))
-    unravelled = unravel(vshape, x)
-    test_idx = graph_rewrite(graph_rewrite(offset+sum(strides[j]*unravelled[j] for j in range(len(vshape))), highs_pre), highs_reduce)
-    test_hidx = test_idx.arg[0] if test_idx.op is Ops.HIGHS_EXPR else test_idx.arg  # can cancel to 0 here
-    x_gt, x_lt = solve_highs([hinvalid==0, test_hidx>=(hidx+1)], hx), solve_highs([hinvalid==0, test_hidx<=(hidx-1)], hx)
+    # look for necessary extra axes
+    new_in_idxs = [highs_inst.addVariable(0, shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(shape))]
+    new_in_constr = [sum(in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
+    test_idx = offset + sum(new_in_idxs[j]*strides[j] for j in range(len(shape)))
+    x_gt, x_lt = solve_highs(new_in_constr + valid + [idx>=test_idx+1], x), solve_highs(new_in_constr + valid + [idx<=test_idx-1], x)
     if x_gt is None and x_lt is None: break
-    diff = [unravel(vshape, min(x_gt or np.inf, x_lt or np.inf))[j] - unravel(vshape,valid_start)[j] for j in range(len(vshape))]
+    diff = [unravel(shape, min(x_gt or np.inf, x_lt or np.inf))[j] - unravel(shape,valid_start)[j] for j in range(len(shape))]
     if sum(d != 0 for d in diff) != 1: return None
     ax, newsh = [d != 0 for d in diff].index(True), sum(diff)
-    if vshape[ax] % newsh != 0: return None
-    oldshape = [s for s in vshape]
-    vshape[ax] //= newsh
-    vshape.insert(ax+1, newsh)
-    if (mask := _reshape_mask(tuple(mask), tuple(oldshape), tuple(vshape))) is None: return None
+    if shape[ax] % newsh != 0: return None
+    oldshape = [s for s in shape]
+    shape[ax] //= newsh
+    shape.insert(ax+1, newsh)
+    if (mask := _reshape_mask(tuple(mask), tuple(oldshape), tuple(shape))) is None: return None
 
-  final =  View.create(tuple(vshape), tuple(strides), offset, tuple(mask))
+  final =  View.create(tuple(shape), tuple(strides), offset, tuple(mask))
   return final if not keep_shape else final.reshape(st.shape)
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
@@ -204,7 +230,6 @@ class ShapeTracker:
     return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort if x.op is Ops.RANGE]
 
   def simplify(self, *, keep_shape=True) -> ShapeTracker:
-    print(self)
     if len(self.views) == 0: return self
     for j in range(len(self.views)):
       if (new := collapse_st(ShapeTracker(self.views[j:]), keep_shape=keep_shape)) is not None:
