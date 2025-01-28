@@ -3,14 +3,15 @@ from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
+from typing import Any
 import ctypes
 import os
 
 class ResultContainer:
-    def __init__(self):
-        self.msg = None
-        self.status = None
-        self.value = None
+  def __init__(self, msg: str = "", status: int = 0, value: Any = None):
+    self.msg = msg
+    self.status = status
+    self.value = value
 
 instDesc = webgpu.WGPUInstanceDescriptor()
 instDesc.features.timedWaitAnyEnable = True
