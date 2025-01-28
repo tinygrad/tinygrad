@@ -491,8 +491,8 @@ class KernelUOp:
     self.x = x
 
 create_kernels = PatternMatcher([
-  (UPat((Ops.SINK, Ops.KERNEL), name="x"), lambda x: x.replace(src=tuple(UOp(Ops.KERNEL, src=s.src, arg=KernelUOp(s)) for s in x.src))
-   if any(s.op is not Ops.KERNEL for s in x.src) else None),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(UOp(Ops.KERNEL, src=s.src, arg=KernelUOp(s)) for s in x.src))
+    if any(s.op is not Ops.KERNEL for s in x.src) else None),
 ])
 
 @track_rewrites(named=True)
@@ -511,7 +511,11 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
 
   # create kernels
   # at this point, each kernel only has one output
-  graph_rewrite(tensor_map[big_sink], create_kernels)
+  children: dict[UOp, list[UOp]] = {}
+  for u in tensor_map[big_sink].toposort:
+    for s in u.src:
+      children.setdefault(s, []).append(u)
+  graph_rewrite(tensor_map[big_sink], create_kernels, ctx=children)
 
   # we group the rest of UOps into ScheduleItems
   rev_tensor_map: dict[UOp, list[UOp]] = {}
