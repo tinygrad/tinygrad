@@ -266,14 +266,9 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def flip(self, arg: tuple[bool, ...]) -> View:
-    # NOTE: this used to be stride, can probably be cleaned up now
-    mul = [-1 if x else 1 for x in arg]
-    strides = tuple([z*m for z,m in zip(self.strides, mul)])
-    new_shape = tuple([ceildiv(s, abs(m)) for s,m in zip(self.shape, mul)])
-    offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
-    mask = tuple([(ceildiv(mx if m > 0 else s-my, abs(m)), ceildiv(my if m > 0 else s-mx, abs(m))) \
-                  for (mx,my),s,m in zip(self.mask, self.shape, mul)]) if self.mask is not None else None
-    return View.create(new_shape, strides, self.offset + offset, mask)
+    offset = sum((s-1)*z for s,z,f in zip(self.shape, self.strides, arg) if f)
+    mask = tuple((s-my,s-mx) if f else (mx,my) for (mx,my),s,f in zip(self.mask, self.shape, arg)) if self.mask is not None else None
+    return View.create(self.shape, tuple(-z if f else z for z,f in zip(self.strides, arg)), self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
