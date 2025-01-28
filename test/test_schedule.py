@@ -2342,6 +2342,8 @@ class TestTensorUOpSpec(unittest.TestCase):
     t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views)
     create_schedule_with_vars(t)
 
+  # NOTE: changing symbolic CONST VIEWs is not allowed
+  @unittest.expectedFailure
   def test_symbolic_shape_ok(self):
     a = Tensor.ones(4)
     vi = UOp.variable("i", 1, 10).bind(4)
