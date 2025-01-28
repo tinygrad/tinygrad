@@ -125,13 +125,12 @@ class AM_SMU(AM_IP):
     return table_t.from_buffer(to_mv(self.adev.paddr2cpu(self.driver_table_paddr), ctypes.sizeof(table_t)))
   def read_metrics(self): return self.read_table(smu_v13_0_0.SmuMetricsExternal_t, smu_v13_0_0.TABLE_SMU_METRICS)
 
-  def _get_clocks(self, clck):
-    cnt = self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, clck << 16 | 0xff, poll=True, read_back_arg=True)&0x7fffffff
-    return [self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, clck << 16 | i, poll=True, read_back_arg=True)&0x7fffffff for i in range(0, cnt)]
-
   def set_clocks(self, level):
     if not hasattr(self, 'clcks'):
-      self.clcks = {clck: self._get_clocks(clck) for clck in [smu_v13_0_0.PPCLK_GFXCLK, smu_v13_0_0.PPCLK_UCLK, smu_v13_0_0.PPCLK_FCLK, smu_v13_0_0.PPCLK_SOCCLK]}
+      self.clcks = {}
+      for clck in [smu_v13_0_0.PPCLK_GFXCLK, smu_v13_0_0.PPCLK_UCLK, smu_v13_0_0.PPCLK_FCLK, smu_v13_0_0.PPCLK_SOCCLK]:
+        cnt = self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff
+        self.clcks[clck] = [self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
 
     for clck, vals in self.clcks.items():
       self._send_msg(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), poll=True)
