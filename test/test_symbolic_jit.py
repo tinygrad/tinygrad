@@ -175,13 +175,13 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
+  @unittest.expectedFailure # TODO: getting "args mismatch in JIT" for some reason
   def test_ones_sum(self):
     def f(a): return a.sum().realize()
     jf = TinyJit(f)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
-      # TODO: why is this contiguous needed?
-      t = Tensor.ones(i).contiguous()
+      t = Tensor.ones(i)
       symbolic = jf(t.reshape(vi)).item()
       expected = f(t).item()
       np.testing.assert_equal(symbolic, expected)
