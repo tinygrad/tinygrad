@@ -487,12 +487,37 @@ remove_movement_ops = merge_views+PatternMatcher([
 ])
 
 class KernelUOp:
-  def __init__(self, x):
-    self.x = x
+  def __init__(self, x): self.lst = tuple(x)
+  def __repr__(self): return str(tuple(x.op for x in self.lst))
+
+# this is basically append_to_block
+def append_to_kernel(ctx:dict[UOp, list[UOp]], x:UOp):
+  new_srcs = []
+  new_lst = []
+  for u in x.src:
+    # these ops never fuse
+    if u.op in {Ops.KERNEL, Ops.COPY, Ops.BUFFER}: pass
+    # ops with not in kernel children don't fuse
+    elif not all(child in x.arg.lst for child in ctx[u]): pass
+    # expands don't fuse
+    elif u.op is Ops.VIEW and u.src[0].st is not None and prod(u.src[0].shape) < prod(u.shape): pass
+    # don't fuse a reduce if we already have one
+    elif u.op is Ops.REDUCE_AXIS and any(c.op is Ops.REDUCE_AXIS for c in list(x.arg.lst)+new_lst): pass
+    else:
+      # fuse this op!
+      new_srcs.extend(u.src)
+      new_lst.append(u)
+      continue
+    # don't fuse this op
+    new_srcs.append(u)
+  # if no ops fused, return None
+  if len(new_lst) == 0: return None
+  return UOp(Ops.KERNEL, src=tuple(new_srcs), arg=KernelUOp(list(x.arg.lst)+new_lst))
 
 create_kernels = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(UOp(Ops.KERNEL, src=s.src, arg=KernelUOp(s)) for s in x.src))
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(UOp(Ops.KERNEL, src=s.src, arg=KernelUOp([s])) for s in x.src))
     if any(s.op is not Ops.KERNEL for s in x.src) else None),
+  (UPat(Ops.KERNEL, name="x"), append_to_kernel),
 ])
 
 @track_rewrites(named=True)
