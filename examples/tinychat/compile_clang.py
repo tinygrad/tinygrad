@@ -134,7 +134,7 @@ if __name__=="__main__":
   }}""" if bufs_to_save else ""}
 
   return {{
-    run: async ({",".join(name for name,_,_ in inputs)}) => {{
+    run: ({",".join(name for name,_,_ in inputs)}) => {{
       {"\n      ".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
       {"\n      ".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
       {"\n      ".join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}

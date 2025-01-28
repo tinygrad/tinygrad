@@ -6,7 +6,7 @@ const kernelsReady = (async () => {
 const q6k_to_f32_byteFactor = 1 / 210 * 256 * 4;
 const q6k_chunk_size = 430080; // compiled kernel input size; GCD of all Q6_K weight sizes
 
-self.addEventListener('message', async (event) => {
+async function decompress(event) {
   const [k, v] = event.data; // k, v pair from state_dict
   await kernelsReady;
   const gguf_shape_to_decomposer = {
@@ -24,7 +24,7 @@ self.addEventListener('message', async (event) => {
     const decompSetup = gguf_shape_to_decomposer[v.gguf_shape.join(",")];
     const decomp = await decompSetup();
     // the order of elements needs to be the same as the order of returned values from the exported (jitted) tinygrad function
-    const [scale, decomped_bytes] = await decomp.run(v.bytes);
+    const [scale, decomped_bytes] = decomp.run(v.bytes);
     v.dtype = "int8"
     v.bytes = decomped_bytes;
     v.size = decomped_bytes.length;
@@ -62,4 +62,34 @@ self.addEventListener('message', async (event) => {
   }
 
   self.postMessage(v, transferList);
-});
+}
+
+async function setupTransformer(event) {
+  await kernelsReady;
+  self.model = await self.transformer(event.data);
+  self.inputPtr = self.model.wasm._malloc(4);
+  self.outputPtr = self.model.wasm._malloc(4);
+  self.addEventListener("message", inference);
+  self.removeEventListener("message", setupTransformer);
+  self.postMessage("success");
+}
+
+function inference(event) {
+  const [tok, start_pos] = event.data;
+  const int32tok = new Int32Array([tok]);
+  const uint8tok = new Uint8Array(int32tok.buffer);
+  self.model.wasm.HEAPU8.set(uint8tok, self.inputPtr);
+  self.model.wasm._net(self.outputPtr, self.inputPtr, start_pos);
+  const uint8nextTok = self.model.wasm.HEAPU8.slice(self.outputPtr, self.outputPtr + 4);
+  const int32nextTok = new Int32Array(uint8nextTok.buffer);
+  self.postMessage(int32nextTok[0]);
+}
+
+async function setup(event) {
+  if (event.data === "decompress") {self.addEventListener("message", decompress);}
+  else if (event.data === "setup_transformer") {self.addEventListener("message", setupTransformer);}
+  else {throw new Error(`initial message must be 'decompress' or 'setup_transformer', but was ${event.data}`);}
+  self.removeEventListener("message", setup);
+  self.postMessage("success");
+}
+self.addEventListener('message', setup);

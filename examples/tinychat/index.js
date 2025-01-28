@@ -194,23 +194,27 @@ function releasePipeline(pipeline, pipelinePool) {
 
 function sendMessageToWorker(worker, message) {
   return new Promise((resolve, reject) => {
-    worker.addEventListener(
-      'message',
-      function handler(event) {
-        resolve(event.data);
-        worker.removeEventListener('message', handler);
-      }
-    );
+    const onMessage = (event) => {
+      resolve(event.data);
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+    };
 
-    worker.addEventListener(
-      'error',
-      function errorHandler(error) {
-        reject(error);
-        worker.removeEventListener('error', errorHandler);
-      }
-    );
+    const onError = (error) => {
+      reject(error);
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+    };
 
-    worker.postMessage(message, [message[1].bytes.buffer]); // message will be a [k, v] from Object.entries(state_dict)
+    worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onError);
+
+    if (message.header === "token") {worker.postMessage(message.data);}
+    else if (message.header === "setup") {worker.postMessage(message.data);}
+    // if message.data is a [k, v] from Object.entries(state_dict)
+    else if (message.header === "k_v") {worker.postMessage(message.data, [message.data[1].bytes.buffer]);}
+    // if message.data is the decompressed state_dict
+    else if (message.header === "state_dict") {worker.postMessage(message.data, Object.values(message.data).map(({ bytes }) => bytes.buffer));}
   });
 }
 
@@ -310,14 +314,16 @@ async function decompress(compressedBuffers, state_dict, device, progress) {
   else if (window.BACKEND == "WASM") {
 
     const num_decomposers = navigator.hardwareConcurrency - 1;
-    const pipelinePool = Array.from({ length: num_decomposers }, () => new Worker('worker.js'))
-      .map((worker) => {
-        return {
-          worker: worker,
-          pipeline: (k_v_pair) => {return sendMessageToWorker(worker, k_v_pair)},
-          busy: false
-        };
-      })
+    const workers = Array.from({ length: num_decomposers }, () => new Worker('worker.js'));
+    const promises = workers.map(async (worker) => {
+      await sendMessageToWorker(worker, {header: "setup", data: "decompress"}); // setup flag, worker can only do decompression now
+      return {
+        worker: worker,
+        pipeline: (k_v_pair) => sendMessageToWorker(worker, {header: "k_v", data: k_v_pair}),
+        busy: false
+      };
+    });
+    const pipelinePool = await Promise.all(promises);
 
     function scheduleDequantizeJob(k, v) {
       // k, v are from the model's state_dict
@@ -545,8 +551,13 @@ document.addEventListener("alpine:init", () => {
         }
         else if (window.BACKEND === "WASM") {
           await kernelsReady;
-          const t = await transformer(tensorData.metadata, this.progress.bind(this));
-          this.nets = {"transformer": t.run};
+          const modelWorker = new Worker("worker.js");
+          let msg = await sendMessageToWorker(modelWorker, {header: "setup", data: "setup_transformer"});
+          msg = await sendMessageToWorker(modelWorker, {header: "state_dict", data: tensorData.metadata});
+          //const t = await transformer(tensorData.metadata, this.progress.bind(this));
+          this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(modelWorker, {header: "token", data: [tok, start_pos]})};
+          tensorData.metadata = null;
+          const done = 1;
         }
         this.progress(100, 100, `Launching ${window.BACKEND} model:`);
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
@@ -701,29 +712,18 @@ document.addEventListener("alpine:init", () => {
       prefillToks = prefillToks.slice(startPos);
 
       for (const tok of prefillToks) {
-        if (window.BACKEND === "WebGPU") {
-          await this.nets["transformer"](new Float32Array([[tok]]), startPos);
-        } else {
-          const int32tok = new Int32Array([tok]);
-          const uint8tok = new Uint8Array(int32tok.buffer);
-          await this.nets["transformer"](uint8tok, startPos);
-        }
+        if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Float32Array([[tok]]), startPos);}
+        else {await this.nets["transformer"](tok, startPos);}
         startPos += 1;
       }
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
-        if (window.BACKEND === "WebGPU") {
-          var tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos);
-        } else {
-          const int32tok = new Int32Array([lastTok]);
-          const uint8tok = new Uint8Array(int32tok.buffer);
-          const out = await this.nets["transformer"](uint8tok, startPos);
-          var tok = new Int32Array(out[0].buffer)
-        }
+        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Float32Array([[lastTok]]), startPos); tok = tok[0];}
+        else {var tok = await this.nets["transformer"](tok, startPos);}
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
         startPos += 1;
-        lastTok = tok[0];
+        lastTok = tok;
         if (this.tokenizer.stop_tokens.has(lastTok)) break;
         yield new TextDecoder().decode(this.tokenizer.decode([lastTok]));
       }
