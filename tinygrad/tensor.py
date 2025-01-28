@@ -1714,6 +1714,25 @@ class Tensor(SimpleMathTrait):
     """
     return self.logical_not().any(axis, keepdim).logical_not()
 
+  def isclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08) -> Tensor:
+    """
+    Returns a new tensor with element-wise comparison of closeness to `other` within a tolerance.
+
+    The `rtol` and `atol` keyword arguments control the relative and absolute tolerance of the comparison.
+
+    Two `NaN` values are not close to each other.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.isclose(Tensor([1, 2, 3.1])).numpy())
+    ```
+    """
+    return ((self - other).abs() <= atol + rtol * other.abs()) * (self.isnan() | other.isnan()).logical_not()
+
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the mean value of the tensor along the specified axis or axes.
