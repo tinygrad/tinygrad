@@ -19,8 +19,8 @@ actions += [Opt(op=OptOps.GROUPTOP, axis=axis, arg=amt) for amt in [13,16,28,29,
 actions += [Opt(op=OptOps.GROUP, axis=axis, arg=amt) for amt in [0,4,8,16] for axis in range(3)]
 if getenv("BEAM_PADTO", 1): actions += [Opt(op=OptOps.PADTO, axis=axis, arg=amt) for amt in [32] for axis in range(7)]
 actions += [Opt(op=OptOps.LOCAL, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=6, arg=2)]
-actions += [Opt(op=OptOps.TC, axis=0, arg=0)]
-actions += [Opt(op=OptOps.TC, axis=axis, arg=getenv("TC_OPT", 2)) for axis in range(9)] # covers resnet kernels (3 global * 3 reduce)
+actions += [Opt(op=OptOps.TC, axis=0, arg=(-1, 0))]
+actions += [Opt(op=OptOps.TC, axis=axis, arg=(-1, getenv("TC_OPT", 2))) for axis in range(9)] # covers resnet kernels (3 global * 3 reduce)
 actions += [Opt(op=OptOps.SWAP, axis=axis_0, arg=axis_1) for axis_0 in range(5) for axis_1 in range(axis_0+1, 5)]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
@@ -103,7 +103,14 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
 # get dictionary of all possible actions
 def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
-  for i,a in enumerate(actions):
+  kernel_actions, tc_actions = [action for action in actions if action.op != OptOps.TC], []
+
+  if len(lin.applied_opts) == 0: # tensor core opts must be first
+    for tc_action in [action for action in actions if action.op == OptOps.TC]:
+      axis, tc_opt = tc_action.axis, cast(tuple, tc_action.arg)[1]
+      tc_actions += [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt)) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
+
+  for i,a in enumerate(kernel_actions + tc_actions):
     if a.axis is not None and a.op is not OptOps.TC:
       if ((ax:=a.real_axis(lin)) >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in actions): continue
     lin2 = lin.copy()
