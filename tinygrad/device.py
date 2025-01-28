@@ -2,9 +2,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, contextlib, sys, re, atexit, pickle, decimal, time, platform
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, colored, \
-                             Context, mv_address, cpu_time_execution
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
+                             cpu_time_execution, colored, Context
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
@@ -216,7 +216,8 @@ class _MallocAllocator(LRUAllocator):
 MallocAllocator = _MallocAllocator()
 
 class CPUProgram:
-  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == 'win32' else 'gcc_s'))
+  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
+  if sys.platform == 'win32': helper_handle.VirtualAlloc.restype = ctypes.c_void_p
   def __init__(self, name:str, lib:bytes):
     if sys.platform == 'win32':
       # python mmap module can't VirtualAlloc executable page on windows
