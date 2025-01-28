@@ -974,8 +974,8 @@ class TestLinearizerFailures(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(60001, 119999), strides=(0, 0), offset=0, mask=((0, 60001), (59999, 119999)), contiguous=False), View(shape=(60000, 60000), strides=(1, 120000), offset=0, mask=None, contiguous=False))), src=()),)),)),
           ast_const(dtypes.int, -1, st_src=(
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(60000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
-    for arg in [16,32]:
-      opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=arg), Opt(op=OptOps.UNROLL, axis=0, arg=0)]
+    for amt in [16,32]:
+      opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=amt), Opt(op=OptOps.UNROLL, axis=0, arg=0)]
       helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
   # END METAL=1 ./examples/beautiful_mnist.py failures
 
