@@ -290,14 +290,14 @@ class AMDev:
       ip.init()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
-    self.smu.set_clocks(perf=True)
+    self.smu.set_clocks(level=-1) # last level, max perf.
     self.gfx.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def fini(self):
     for ip in [self.sdma, self.gfx]: ip.fini()
-    self.smu.set_clocks(perf=False)
+    self.smu.set_clocks(level=0)
 
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
