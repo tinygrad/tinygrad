@@ -72,10 +72,10 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
     try: assert str(args[-1]) == str(good)
     except AssertionError:
       changed += 1
-      warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
       for x in args[:-1]: logging.info(x)
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
+      warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
   conn.commit()
   cur.close()
 
