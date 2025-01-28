@@ -92,8 +92,7 @@ class TestVerifyAST(unittest.TestCase):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg="CLANG"),), ShapeTracker.from_shape(())),))
     st = UOp.store(buf, ShapeTracker.from_shape(()).to_uop(), a.cast(dtypes.float))
-    # lowerer asserts because it does not remove ShapeTracker on CONST(VIEW(DEVICE))
-    with self.assertRaises(AssertionError): helper_test_verify_ast(st)
+    helper_test_verify_ast(st)
 
 if __name__ == '__main__':
   unittest.main()
