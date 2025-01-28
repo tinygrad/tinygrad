@@ -17,7 +17,9 @@ def st_to_highs(st, idxs) -> tuple:
   # add necessary auxiliary variables to highs_inst and return:
   # (linear expression for idx, [constrs for valid], [constrs whose disjunction gives invalid])
   # i.e. all the constrs in valid must be true to be valid, and one of the constrs in invalid must be true to be invalid
-  valid, invalid = [], []
+  mask = st.views[-1].mask or tuple((0,sh) for sh in st.views[-1].shape)
+  valid = [mask[k][0] <= idxs[k] <= mask[k][1]-1 for k in range(len(idxs))]
+  invalid = sum(([idxs[k] <= mask[k][0]-1, idxs[k] >= mask[k][1]] for k in range(len(idxs))), start=[])
   for j in range(len(st.views)-1, 0, -1):
     mask = st.views[j-1].mask or tuple((0,sh) for sh in st.views[j-1].shape)
     A = np.array([unravel(st.views[j-1].shape, st.views[j].strides[k]) for k in range(len(st.views[j].strides))]).T
@@ -80,13 +82,14 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
     a = min(solve_highs([constr] + [x==valid_start+denom*x_step, x>=valid_start], x) or prod(st.shape) for constr in invalid)
     b = solve_highs(valid + [x==valid_start+denom*x_step, x>=a], x)
     shape.append((b-valid_start)//denom if b is not None else prod(st.shape)//denom)
-    mask.append((valid_start//denom%shape[-1], a//denom%shape[-1]))
+    mask.append([valid_start//denom%shape[-1], a//denom%shape[-1]])
+    if mask[-1][1] == 0: mask[-1][1] = shape[-1]
     denom *= shape[-1]
     if prod(st.shape) % denom != 0: return None
   shape, mask = shape[::-1], mask[::-1]
   # new indexes based on the found shape
   new_in_idxs = [highs_inst.addVariable(0, shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(shape))]
-  new_in_constr = [sum(in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
+  new_in_constr = [sum(new_in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
   new_valid = [mask[k][0] <= new_in_idxs[k] <= mask[k][1]-1 for k in range(len(shape))]
   new_invalid = sum(([new_in_idxs[k] <= mask[k][0]-1, new_in_idxs[k] >= mask[k][1]] for k in range(len(shape))), start=[])
   # check all points in new mask are valid, and all valid points are in new mask
@@ -107,7 +110,7 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
     offset = out_idx_at_valid_start - sum(strides[j]*mask[j][0] for j in range(len(mask)))
     # look for necessary extra axes
     new_in_idxs = [highs_inst.addVariable(0, shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(shape))]
-    new_in_constr = [sum(in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
+    new_in_constr = [sum(new_in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
     test_idx = offset + sum(new_in_idxs[j]*strides[j] for j in range(len(shape)))
     x_gt, x_lt = solve_highs(new_in_constr + valid + [idx>=test_idx+1], x), solve_highs(new_in_constr + valid + [idx<=test_idx-1], x)
     if x_gt is None and x_lt is None: break
@@ -118,9 +121,9 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
     oldshape = [s for s in shape]
     shape[ax] //= newsh
     shape.insert(ax+1, newsh)
-    if (mask := _reshape_mask(tuple(mask), tuple(oldshape), tuple(shape))) is None: return None
+    if (mask := _reshape_mask(tuple((a,b) for a,b in mask), tuple(oldshape), tuple(shape))) is None: return None
 
-  final =  View.create(tuple(shape), tuple(strides), offset, tuple(mask))
+  final =  View.create(tuple(shape), tuple(strides), offset, tuple((a,b) for a,b in mask))
   return final if not keep_shape else final.reshape(st.shape)
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
