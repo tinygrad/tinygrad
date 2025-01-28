@@ -69,7 +69,7 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
       for x in args[:-1]: logging.info(x)
       continue
     # diff kernels
-    try: assert str(args[-1]) == str(good)
+    try: assert args[-1] == good
     except AssertionError:
       changed += 1
       for x in args[:-1]: logging.info(x)
