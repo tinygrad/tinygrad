@@ -219,17 +219,16 @@ class CPUProgram:
   helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
   if sys.platform == 'win32': helper_handle.VirtualAlloc.restype = ctypes.c_void_p
   def __init__(self, name:str, lib:bytes):
-    if sys.platform == 'win32':
-      # python mmap module can't VirtualAlloc executable page on windows
-      MEM_COMMIT = 0x00001000
+    if sys.platform == "win32":
       PAGE_EXECUTE_READWRITE = 0x40
-      mem = CPUProgram.helper_handle.VirtualAlloc(None, len(lib), MEM_COMMIT, PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(mem, lib, len(lib))
-      self.fxn = ctypes.CFUNCTYPE(None)(mem)
+      MEM_COMMIT =  0x1000
+      MEM_RESERVE = 0x2000
+      ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
+      ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(ptr, lib, len(lib))
+      self.fxn = ctypes.CFUNCTYPE(None)(ptr)
     else:
       from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
-      # NOTE: MAP_JIT is added to mmap module in python 3.13
-      MAP_JIT = 0x0800
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
       self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)

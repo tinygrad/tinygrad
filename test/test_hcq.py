@@ -160,7 +160,7 @@ class TestHCQ(unittest.TestCase):
     b = a + 1
     si = b.schedule()[-1]
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
-    for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, amt=3))
+    for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, arg=3))
 
     runner = CompiledRunner(k.to_program())
 
