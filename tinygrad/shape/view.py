@@ -212,7 +212,7 @@ class View:
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[View]:
     ret = View.create(self.shape)
     if self.mask: ret = ret.shrink(self.mask)
-    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
+    ret = ret.flip(tuple(x < 0 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
     return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -265,9 +265,9 @@ class View:
                        tuple(self.mask[a] for a in axis) if self.mask is not None else None)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def stride(self, mul: tuple[int, ...]) -> View:
-    # except for the negative case, you can build this from the others. invertible in the negative case
-    assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
+  def flip(self, arg: tuple[bool, ...]) -> View:
+    # NOTE: this used to be stride, can probably be cleaned up now
+    mul = [-1 if x else 1 for x in arg]
     strides = tuple([z*m for z,m in zip(self.strides, mul)])
     new_shape = tuple([ceildiv(s, abs(m)) for s,m in zip(self.shape, mul)])
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])

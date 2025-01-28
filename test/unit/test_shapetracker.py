@@ -44,7 +44,7 @@ class CheckingShapeTracker:
     return self
 
   def flip(self, axis):
-    self.st = self.st.stride(tuple(-1 if i in axis else 1 for i in range(len(self.shape))))
+    self.st = self.st.flip(tuple(i in axis for i in range(len(self.shape))))
     self.t = np.flip(self.t, axis)
     return self
 
@@ -59,7 +59,9 @@ class CheckingShapeTracker:
     return self
 
   def stride(self, arg):
-    self.st = self.st.stride(arg)
+    print(arg)
+    assert all(x in {1, -1} for x in arg)
+    self.st = self.st.flip([x == -1 for x in arg])
     self.t = self.t[tuple([slice(None, None, x) for x in arg])]
     return self
 
