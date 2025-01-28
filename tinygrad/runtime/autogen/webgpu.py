@@ -4,7 +4,7 @@
 # TARGET arch is: []
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
-# LONGDOUBLE_SIZE is: 8
+# LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util
 
@@ -120,10 +120,10 @@ class Union(ctypes.Union, AsDictMixin):
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
-if ctypes.sizeof(ctypes.c_longdouble) == 8:
+if ctypes.sizeof(ctypes.c_longdouble) == 16:
     c_long_double_t = ctypes.c_longdouble
 else:
-    c_long_double_t = ctypes.c_ubyte*8
+    c_long_double_t = ctypes.c_ubyte*16
 
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
@@ -146,6 +146,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 _libraries = {}
 _libraries['libwebgpu_dawn.so'] = ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))
+
 
 WGPUFlags = ctypes.c_uint64
 WGPUBool = ctypes.c_uint32
