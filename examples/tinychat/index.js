@@ -312,9 +312,10 @@ async function decompress(compressedBuffers, state_dict, device, progress) {
     await Promise.all(gpuJobs);
   } 
   else if (window.BACKEND == "WASM") {
+    delete state_dict["tok_embeddings.weight"]; // uses same data as output.weight
 
     const num_decomposers = navigator.hardwareConcurrency - 1;
-    const workers = Array.from({ length: num_decomposers }, () => new Worker('worker.js'));
+    const workers = Array.from({ length: num_decomposers }, () => new Worker(`./worker.js?version=${Date.now()}`));
     const promises = workers.map(async (worker) => {
       await sendMessageToWorker(worker, {header: "setup", data: "decompress"}); // setup flag, worker can only do decompression now
       return {
@@ -551,13 +552,10 @@ document.addEventListener("alpine:init", () => {
         }
         else if (window.BACKEND === "WASM") {
           await kernelsReady;
-          const modelWorker = new Worker("worker.js");
+          const modelWorker = new Worker(`./worker.js?version=${Date.now()}`);
           let msg = await sendMessageToWorker(modelWorker, {header: "setup", data: "setup_transformer"});
           msg = await sendMessageToWorker(modelWorker, {header: "state_dict", data: tensorData.metadata});
-          //const t = await transformer(tensorData.metadata, this.progress.bind(this));
           this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(modelWorker, {header: "token", data: [tok, start_pos]})};
-          tensorData.metadata = null;
-          const done = 1;
         }
         this.progress(100, 100, `Launching ${window.BACKEND} model:`);
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
