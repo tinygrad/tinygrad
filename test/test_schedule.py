@@ -2026,8 +2026,7 @@ class TestSwizzle(unittest.TestCase):
     self.assertEqual(swizzle_cnt(ret), 1)
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
-# TODO: we only need valid on ast consts if it's masked, can fold this early to UOp.const
-zero_pm = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat(Ops.CONST, arg=0), UPat.cvar()))
+zero_pm = UPat(Ops.CONST, arg=0)
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
     # start with non CONST Ops
@@ -2193,7 +2192,7 @@ class TestConst(unittest.TestCase):
     a = Tensor.ones((4,)).contiguous()
     sched = a.schedule()
     print(sched[0].ast)
-    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0)))),))
+    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.CONST)),))
     self.assertEqual(len(const_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [1, 1, 1, 1])

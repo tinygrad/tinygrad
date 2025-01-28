@@ -524,7 +524,6 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((4, 4)).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
 
-  @unittest.expectedFailure
   def test_padded_const(self):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
