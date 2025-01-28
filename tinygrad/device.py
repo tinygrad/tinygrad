@@ -226,11 +226,9 @@ class CPUProgram:
       PAGE_EXECUTE_READWRITE = 0x40
       MEM_COMMIT =  0x1000
       MEM_RESERVE = 0x2000
-      shellcode = bytearray(lib)
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
-      ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(shellcode)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-      buf = (ctypes.c_char * len(shellcode)).from_buffer(shellcode)
-      ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_uint64(ptr), buf, ctypes.c_int(len(shellcode)))
+      ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(ptr, lib, len(lib))
       self.fxn = ctypes.CFUNCTYPE(None)(ptr)
     else:
       from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
