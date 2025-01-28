@@ -1,4 +1,4 @@
-import struct, sys, tinygrad.runtime.autogen.libc as libc
+import struct, tinygrad.runtime.autogen.libc as libc
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, i2u
 
@@ -52,55 +52,9 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
   raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
 
-def coff_loader(data):
-  if len(data) < 20: raise ValueError("Invalid COFF file: Header too small.")
-  file_header = struct.unpack('<HHIIIHH', data[:20])
-  num_sections = file_header[1]
-  size_optional_header = file_header[5]
-  sections_offset = 20 + size_optional_header
-  symtab_ptr = file_header[3]
-  num_symbols = file_header[4]
-  strtab_start = None
-  strtab_size = None
-  if symtab_ptr != 0 and num_symbols != 0:
-    symtab_size = num_symbols * 18
-    strtab_start = symtab_ptr + symtab_size
-    if strtab_start + 4 <= len(data):
-      strtab_size = struct.unpack('<I', data[strtab_start:strtab_start+4])[0]
-  for i in range(num_sections):
-    section_start = sections_offset + i * 40
-    if section_start + 40 > len(data):
-      break
-    section_header = data[section_start:section_start+40]
-    fields = struct.unpack('<8sIIIIIIHHI', section_header)
-    name_bytes, _vsize, _vaddr, size_raw, ptr_raw = fields[:5]
-    name_str = name_bytes.decode('ascii', errors='ignore').split('\x00')[0]
-    if name_str.startswith('/') and strtab_start and strtab_size:
-      try:
-        offset = int(name_str[1:])
-        str_offset = strtab_start + 4 + offset
-        if str_offset >= len(data):
-          continue
-        end = str_offset
-        while end < len(data) and data[end] != 0:
-          end += 1
-        section_name = data[str_offset:end].decode('ascii', errors='ignore')
-      except ValueError:
-        continue
-    else:
-      section_name = name_str.strip('\x00')
-    if section_name == '.text':
-      if ptr_raw + size_raw > len(data):
-        raise ValueError(".text section data exceeds file bounds.")
-      return data[ptr_raw:ptr_raw + size_raw]
-  raise ValueError(".text section not found in COFF file.")
-
 def jit_loader(obj: bytes) -> bytes:
-  if sys.platform == "win32":
-    return coff_loader(obj)
-  else:
-    image, _, relocs = elf_loader(obj)
-    # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
-    for ploc,tgt,r_type,r_addend in relocs:
-      image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
-    return bytes(image)
+  image, _, relocs = elf_loader(obj)
+  # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
+  for ploc,tgt,r_type,r_addend in relocs:
+    image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
+  return bytes(image)
