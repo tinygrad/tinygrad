@@ -350,8 +350,9 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 
 ### RetinaNet
 
-def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, X:Tensor,
-                        Y_boxes:Tensor, Y_labels:Tensor, matches:Tensor, anchors:Tensor, seed:Optional[int]=None):
+def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, imgs:Tensor,
+                        boxes:Optional[Tensor] = None, labels:Optional[Tensor] = None, matches:Optional[Tensor] = None,
+                        anchors:Optional[Tensor] = None, img_ids:Optional[Tensor] = None, seed:Optional[int] = None):
   from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
   from examples.mlperf.helpers import box_iou, find_matches, generate_anchors
   import torch
@@ -363,8 +364,14 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
     tgt = prepare_target(ann, img_id, img.size[::-1])
 
     if val:
-      img, _ = resize(img)
+      assert img_ids is not None, "img_ids have to be passed in"
+
+      img = resize(img)[0]
+
+      img_ids[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = np.array(img_id).tobytes()
     else:
+      assert boxes is not None and labels is not None and matches is not None and anchors is not None, "boxes, labels, matches and anchors have to be passed in"
+
       if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -374,16 +381,14 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       match_quality_matrix = box_iou(tgt["boxes"], (anchor := np.concatenate(generate_anchors((800, 800)))))
       match_idxs = find_matches(match_quality_matrix, allow_low_quality_matches=True)
       clipped_match_idxs = np.clip(match_idxs, 0, None)
-      print(f'boxes before: {tgt["boxes"]}')
-      boxes, labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
-      print(f'boxes after: {tgt["boxes"]}')
+      clipped_boxes, clipped_labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
 
-      Y_boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = boxes.tobytes()
-      Y_labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = labels.tobytes()
+      boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = clipped_boxes.tobytes()
+      labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = clipped_labels.tobytes()
       matches[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = match_idxs.tobytes()
       anchors[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = anchor.tobytes()
 
-    X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+    imgs[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -406,11 +411,16 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
 
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
-  shm_x, X = _setup_shared_mem("retinanet_x", (batch_size * batch_count, 800, 800, 3), dtypes.float32)
-  shm_y_boxes, Y_boxes = _setup_shared_mem("retinanet_y_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
-  shm_y_labels, Y_labels = _setup_shared_mem("retinanet_y_labels", (batch_size * batch_count, 120087), dtypes.int64)
-  shm_matches, matches = _setup_shared_mem("retinanet_matches", (batch_size * batch_count, 120087), dtypes.int64)
-  shm_anchors, anchors = _setup_shared_mem("retinanet_anchors", (batch_size * batch_count, 120087, 4), dtypes.float64)
+  shm_imgs, imgs = _setup_shared_mem("retinanet_imgs", (batch_size * batch_count, 800, 800, 3), dtypes.float32)
+
+  boxes, labels, matches, anchors, img_ids = None, None, None, None, None
+  if val:
+    shm_img_ids, img_ids = _setup_shared_mem("retinanet_img_ids", (batch_size * batch_count,), dtypes.int64)
+  else:
+    shm_boxes, boxes = _setup_shared_mem("retinanet_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
+    shm_labels, labels = _setup_shared_mem("retinanet_labels", (batch_size * batch_count, 120087), dtypes.int64)
+    shm_matches, matches = _setup_shared_mem("retinanet_matches", (batch_size * batch_count, 120087), dtypes.int64)
+    shm_anchors, anchors = _setup_shared_mem("retinanet_anchors", (batch_size * batch_count, 120087, 4), dtypes.float64)
 
   shutdown = False
   class Cookie:
@@ -430,7 +440,12 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
 
   try:
     for _ in range(cpu_count()):
-      proc = Process(target=load_retinanet_data, args=(base_dir, val, queue_in, queue_out, X, Y_boxes, Y_labels, matches, anchors, seed))
+      proc = Process(
+        target=load_retinanet_data,
+        args=(base_dir, val, queue_in, queue_out, imgs),
+        kwargs={"boxes": boxes, "labels": labels, "matches": matches,
+                "anchors": anchors, "img_ids": img_ids, "seed": seed}
+      )
       proc.daemon = True
       proc.start()
       procs.append(proc)
@@ -447,11 +462,13 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       data_out_count[bc] = 0
 
       if val:
-        yield X[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+        yield (imgs[bc * batch_size:(bc + 1) * batch_size],
+               img_ids[bc * batch_size:(bc + 1) * batch_size],
+               Cookie(bc))
       else:
-        yield (X[bc * batch_size:(bc + 1) * batch_size],
-               Y_boxes[bc * batch_size:(bc + 1) * batch_size],
-               Y_labels[bc * batch_size:(bc + 1) * batch_size],
+        yield (imgs[bc * batch_size:(bc + 1) * batch_size],
+               boxes[bc * batch_size:(bc + 1) * batch_size],
+               labels[bc * batch_size:(bc + 1) * batch_size],
                matches[bc * batch_size:(bc + 1) * batch_size],
                anchors[bc * batch_size:(bc + 1) * batch_size],
                Cookie(bc))
@@ -468,17 +485,26 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
     # shutdown processes
     for proc in procs: proc.join()
 
-    shm_x.close()
-    shm_y_boxes.close()
-    shm_y_labels.close()
-    shm_matches.close()
-    shm_anchors.close()
+    shm_imgs.close()
+
+    if val:
+      shm_img_ids.close()
+    else:
+      shm_boxes.close()
+      shm_labels.close()
+      shm_matches.close()
+      shm_anchors.close()
+
     try:
-      shm_x.unlink()
-      shm_y_boxes.unlink()
-      shm_y_labels.unlink()
-      shm_matches.unlink()
-      shm_anchors.unlink()
+      shm_imgs.unlink()
+
+      if val:
+        shm_img_ids.unlink()
+      else:
+        shm_boxes.unlink()
+        shm_labels.unlink()
+        shm_matches.unlink()
+        shm_anchors.unlink()
     except FileNotFoundError:
       # happens with BENCHMARK set
       pass
@@ -507,7 +533,6 @@ if __name__ == "__main__":
     from extra.datasets.openimages import BASEDIR, download_dataset
     from pycocotools.coco import COCO
     dataset = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "validation" if val else "train"))
-    anchors = np.ones((120087, 4))
     with tqdm(total=len(dataset.imgs.keys())) as pbar:
       for x in batch_load_retinanet(dataset, val, base_dir):
         pbar.update(x[0].shape[0])
