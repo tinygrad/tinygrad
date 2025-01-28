@@ -88,11 +88,12 @@ class TestVerifyAST(unittest.TestCase):
     st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)
     with self.assertRaisesRegex(InvalidASTException, "swizzle"): helper_test_verify_ast(st)
 
-  def test_flat_const_always_valid(self):
+  def test_const_view_always_valid(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    a = UOp.const(dtypes.int, 0).cast(dtypes.float)
-    st = UOp.store(buf, ShapeTracker.from_shape(()).to_uop(), a)
-    helper_test_verify_ast(st)
+    a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg="CLANG"),), ShapeTracker.from_shape(())),))
+    st = UOp.store(buf, ShapeTracker.from_shape(()).to_uop(), a.cast(dtypes.float))
+    # lowerer asserts because it does not remove ShapeTracker on CONST(VIEW(DEVICE))
+    with self.assertRaises(AssertionError): helper_test_verify_ast(st)
 
 if __name__ == '__main__':
   unittest.main()

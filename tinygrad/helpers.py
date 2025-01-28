@@ -272,7 +272,7 @@ def cpu_objdump(lib, objdump_tool='objdump'):
 def capstone_flatdump(lib: bytes):
   import capstone
   match platform.machine():
-    case 'x86_64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    case 'x86_64' | 'AMD64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     case 'aarch64' | 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
     case machine: raise NotImplementedError(f"Capstone disassembly isn't supported for {machine}")
   for instr in cs.disasm(lib, 0):

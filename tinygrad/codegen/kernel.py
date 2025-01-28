@@ -32,7 +32,7 @@ def check(cond:bool, msg:str=""):
 class Opt:
   op: OptOps
   axis: Optional[int] = None
-  arg: Optional[int] = None
+  arg: Optional[int | tuple] = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
   def real_axis(self, k:Kernel):
     if self.axis is None: return -1
@@ -364,7 +364,8 @@ class Kernel:
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
-      amt = opt.arg if opt.arg != 0 else self.full_shape[axis]
+      check(isinstance(opt.arg, int), "arg should be int")
+      amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
       if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
     else: amt = -1
@@ -696,7 +697,8 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> 
   if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to VIEW
   elif uop.op is Ops.VIEW:
-    assert len(uop.src) == 0, f"can't swizzle in kernel yet {uop}"
+    # NOTE: we disallow VIEW in the middle of the AST, if it has a DEVICE source it's fine
+    assert len(uop.src) == 0 or uop.src[0].op is Ops.DEVICE, f"can't swizzle in kernel yet {uop}"
     st = uop.arg
   # everything else inherits shape
   else:
