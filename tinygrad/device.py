@@ -215,9 +215,12 @@ class _MallocAllocator(LRUAllocator):
 
 MallocAllocator = _MallocAllocator()
 
+# NOTE: MAP_JIT is added to mmap module in python 3.13
+MAP_JIT = 0x0800
+
+# CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
   helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
-  if sys.platform == 'win32': helper_handle.VirtualAlloc.restype = ctypes.c_void_p
   def __init__(self, name:str, lib:bytes):
     if sys.platform == "win32":
       PAGE_EXECUTE_READWRITE = 0x40
@@ -242,6 +245,7 @@ class CPUProgram:
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
       CPUProgram.helper_handle["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
   def __call__(self, *bufs, vals=(), wait=False):
