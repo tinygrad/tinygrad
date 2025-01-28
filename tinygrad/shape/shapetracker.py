@@ -45,6 +45,13 @@ def solve_highs(constrs, min_obj) -> Optional[int]:
 
 @functools.lru_cache(maxsize=None)
 def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
+  try:
+    return _collapse_st(st, keep_shape)
+  except RuntimeError:
+    print(f"highs timeout with {st}, {keep_shape=}")
+    return None
+
+def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   # Look for a view whose action is equiv. to st; this is complete
   if len(st.views) == 0: raise ValueError()
   if len(st.views) == 1: return st.views[0]
@@ -52,7 +59,7 @@ def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   if not all_int(flatten(((*v.shape, *v.strides, v.offset, *flatten(v.mask or ((0,),))) for v in st.views))):
 #    import pdb; pdb.set_trace()
     return None
-  highs_inst.clear(); highs_inst.setOptionValue("time_limit", 0.5); highs_inst.setOptionValue("log_to_console", False)
+  highs_inst.clear(); highs_inst.setOptionValue("time_limit", 1); highs_inst.setOptionValue("log_to_console", False)
   # presolve sometimes returns "infeasible" incorrectly
   highs_inst.setOptionValue("presolve", "off")
 
