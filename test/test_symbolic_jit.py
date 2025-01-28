@@ -175,7 +175,6 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
-  @unittest.expectedFailure # TODO: getting "args mismatch in JIT" for some reason
   def test_ones_sum(self):
     def f(a): return a.sum().realize()
     jf = TinyJit(f)

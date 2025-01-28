@@ -387,9 +387,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def valid(self, st:ShapeTracker):
     assert self.op in {Ops.CONST, Ops.DEFINE_VAR}, f"can only create VALID from a constant, got {self.op}"
-    assert any(v.mask is not None for v in st.views), f"can only create VALID for a masked ShapeTracker {st}"
     from tinygrad.shape.shapetracker import ShapeTracker
-    # NOTE: mask only exists on the VALID
+    # NOTE: only VALID has a masked ShapeTracker, the CONST operands are unmasked
     unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape).to_uop()
     return UOp(Ops.VALID, dtypes.bool, (st.to_uop(),)).where(self.replace(src=(unmasked_st,)), UOp.const(self.dtype, 0).replace(src=(unmasked_st,)))
   @staticmethod
@@ -1336,7 +1335,7 @@ merge_views = PatternMatcher([
 # push VIEW to parents
 view_left = merge_views+PatternMatcher([
   # VIEW(CONST) becomes VALID
-  (UPat(Ops.VIEW, name="vm", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),)), lambda vm,x: x.replace(src=()).valid(vm.st)),
+  (UPat(Ops.VIEW, name="vm", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),)), lambda vm,x: x.valid(vm.st)),
   # VIEW before elementwise/buffer ops
   (UPat(Ops.VIEW, name="vm", src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e"),)),
    lambda e,vm: e.replace(src=tuple(s if s.st is None else s.view(vm.st) if s is s.base else s.base.view(s.st+vm.st) for s in e.src))),
