@@ -64,6 +64,7 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   highs_inst.clear(); highs_inst.setOptionValue("time_limit", 1); highs_inst.setOptionValue("log_to_console", False)
   # presolve sometimes returns "infeasible" incorrectly
   highs_inst.setOptionValue("presolve", "off")
+  highs_inst.setOptionValue("mip_feasibility_tolerance", 1e-10)
 
 #  import pdb; pdb.set_trace()
 #  print(st)
