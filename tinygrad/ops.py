@@ -387,7 +387,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   def valid(self, st:ShapeTracker):
     assert self.op in {Ops.CONST, Ops.DEFINE_VAR}, f"can only create VALID from a constant, got {self.op}"
-    assert any(v.mask is not None for v in st.views), f"can only create VALID from an umasked ShapeTracker {st}"
+    assert any(v.mask is not None for v in st.views), f"can only create VALID for a masked ShapeTracker {st}"
     from tinygrad.shape.shapetracker import ShapeTracker
     # NOTE: mask only exists on the VALID
     unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st.shape)).expand(st.shape).to_uop()
