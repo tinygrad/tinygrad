@@ -39,8 +39,7 @@ def do_shrink(st):
   st.shrink(shrink)
 
 def do_flip(st):
-  c = random.randint(0, len(st.shape)-1)
-  flip = tuple(i==c for i in range(len(st.shape)))
+  flip = tuple(i for i in range(len(st.shape)) if random.random() < 0.5)
   if DEBUG >= 1: print("st.flip(", flip, ")")
   st.flip(flip)
 
