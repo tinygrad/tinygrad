@@ -666,7 +666,7 @@ jobs:
       - name: Run pytest (clang)
         shell: bash
         run: |
-          DEBUG=5 CLANG=1 python -m pytest -n=auto test/test_tiny.py --durations=20
+          DEBUG=5 CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
