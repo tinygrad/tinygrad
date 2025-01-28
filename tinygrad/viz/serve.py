@@ -19,8 +19,8 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB"
 # VIZ API
 
 class GraphRewriteMetadata(TypedDict):
-  loc: tuple[str, int]    # [path, lineno] calling graph_rewrite
-  match_count: int        # total match count in this context
+  loc: tuple[str, int]           # [path, lineno] calling graph_rewrite
+  match_count: int               # total match count in this context
 
 class GraphRewriteDetails(GraphRewriteMetadata):
   graphs: list[dict]             # JSON serialized UOp at every rewrite step
@@ -36,9 +36,10 @@ def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
   try: return fxn(*args, **kwargs)
   except Exception as e: return f"ERROR: {e}"
 
-def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
+def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   assert isinstance(x, UOp)
-  graph: dict[int, tuple[str, str, list[int], str, str]] = {}
+  # NOTE: this is [id, [label, src_ids, color]]
+  graph: dict[int, tuple[str, list[int], str]] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
     # always exclude DEVICE/CONST
@@ -56,7 +57,7 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, str, list[int], str, str]]:
       if x in excluded:
         if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
-    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x not in excluded], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+    graph[id(u)] = (label, [id(x) for x in u.src if x not in excluded], uops_colors.get(u.op, "#ffffff"))
   return graph
 
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:

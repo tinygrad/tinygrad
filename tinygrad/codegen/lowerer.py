@@ -5,7 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, prod, partition, flatten
+from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -123,7 +123,7 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
 
 def lower_const(x:UOp):
-  assert all(v.mask is None for v in x.st_arg.views), f"VIEW in CONST/DEFINE_VAR source must be unmasked, got {x.st_arg}"
+  assert all(v.mask is None for v in unwrap(x.st).views), f"VIEW in CONST/DEFINE_VAR source must be unmasked, got {x.st}"
   return x.replace(src=())
 
 pm_lowerer = PatternMatcher([
