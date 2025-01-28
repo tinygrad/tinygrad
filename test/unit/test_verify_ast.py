@@ -78,7 +78,7 @@ class TestVerifyAST(unittest.TestCase):
     verify_ast(ast:=a.schedule()[-1].ast)
     store_st = [u.st for u in ast.toposort if u.op is Ops.STORE][0]
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [u.st for u in ast.toposort if u.op is Ops.VALID][0]
+    const_st = [u.st for u in ast.toposort if u.op is Ops.CONST][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   def test_assert_swizzle(self):

@@ -42,7 +42,10 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   graph: dict[int, tuple[str, list[int], str]] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
-    if u.op in {Ops.CONST, Ops.DEVICE}: excluded.update((u,) + u.src)
+    # always exclude DEVICE/CONST
+    if u.op in {Ops.DEVICE, Ops.CONST}: excluded.add(u)
+    # only exclude CONST VIEW source if it has no other children
+    if u.op is Ops.CONST and len(u.src) != 0 and all((cr:=c()) is None or cr.op is Ops.CONST for c in u.src[0].children): excluded.update(u.src)
   for u in toposort:
     if u in excluded: continue
     argst = str(u.arg)
