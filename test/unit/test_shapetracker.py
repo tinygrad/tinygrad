@@ -574,20 +574,18 @@ class TestShapeTrackerFuzzFailures(unittest.TestCase):
     self.st.shrink(((1, 2), (1, 3), (1, 3)))
     self.st.reshape((1, 4))
     self.st.shrink(((0, 1), (1, 3)))
-    print(self.st.st)
     self.st = self.st.simplify()
-    print(self.st.st)
   def test_case_2(self):
-    self.st.flip( (0, 1) )
+    self.st.flip( (True, False, True) )
     self.st.reshape( (3, 9) )
     self.st.shrink( ((1, 2), (1, 5)) )
-    self.st.flip( (0, 1) )
+    self.st.flip( (True, True) )
   def test_case_3(self):
     self.st.shrink( ((0, 2), (0, 2), (0, 1)) )
     self.st.permute( (1, 0, 2) )
     self.st.reshape( (4,) )
     self.st.shrink( ((0, 3),) )
-    self.st.flip( (0,) )
+    self.st.flip( (True, False) )
   def test_case_4(self):
     self.st.reshape( (3, 3, 3, 1) )
     self.st.pad( ((0, 0), (0, 0), (0, 0), (1, 1)) )
@@ -709,13 +707,13 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.expand(tuple(new_shape)))
 
   def test_flip_0(self):
-    self.apply(lambda x: x.flip((0,)))
+    self.apply(lambda x: x.flip((True, False)))
 
   def test_flip_1(self):
-    self.apply(lambda x: x.flip((1,)))
+    self.apply(lambda x: x.flip((False, True)))
 
   def test_flip_01(self):
-    self.apply(lambda x: x.flip((0,1)))
+    self.apply(lambda x: x.flip((True, True)))
 
   def test_slice_0(self):
     self.apply(lambda x: x.shrink(((1, x.shape[0]), (0, x.shape[1]))))
@@ -742,12 +740,12 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.expand((2, 10)))
 
   def test_double_flip(self):
-    self.apply(lambda x: x.flip((0,)))
-    self.apply(lambda x: x.flip((1,)))
+    self.apply(lambda x: x.flip((True, False)))
+    self.apply(lambda x: x.flip((True, False)))
 
-  def test_flip(self): self.apply(lambda x: x.flip((0,)))
-  def test_flip2(self): self.apply(lambda x: x.flip((1,)))
-  def test_flip3(self): self.apply(lambda x: x.flip((0, 1)))
+  def test_flip(self): self.apply(lambda x: x.flip((True, False)))
+  def test_flip2(self): self.apply(lambda x: x.flip((False, True)))
+  def test_flip3(self): self.apply(lambda x: x.flip((True, True)))
 
   def test_reshape_then_permute(self):
     self.test_reshape()
