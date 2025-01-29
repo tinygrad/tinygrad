@@ -157,6 +157,10 @@ class View:
     if vm1.mask:
       if (new_vm1 := vm1.shrink(vm1.mask)) == vm1 or (merged := vm2 + new_vm1) is None: return None
       return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
+#    from tinygrad.shape.shapetracker import views_to_real_strides
+#    if None in (strides := views_to_real_strides((vm2, vm1))): return None
+#    return View.create(vm1.shape, strides, vm2.offset, vm1.mask)
+
     if not all_int(vm1.shape): return None
 
     # Project vm1's offset and strides on to vm2.
