@@ -138,20 +138,14 @@ def create_shader_module(device, source):
   return shader_module
 
 def create_bind_group_layout(device, entries):
-  webgpuEntries = []
-
-  for entry in entries:
-    bufferBindingLayout = webgpu.WGPUBufferBindingLayout()
-    bufferBindingLayout.type = entry["buffer"]["type"]
-    webgpuEntries.append(webgpu.WGPUBindGroupLayoutEntry(binding=entry["binding"], visibility=entry["visibility"], buffer=bufferBindingLayout))
+  webgpuEntries = [webgpu.WGPUBindGroupLayoutEntry(binding=entry["binding"],
+    visibility=entry["visibility"], buffer=webgpu.WGPUBufferBindingLayout(type=entry["buffer"]["type"])) for entry in entries]
 
   entries_array_type = webgpu.WGPUBindGroupLayoutEntry * len(webgpuEntries)
   entries_array = entries_array_type(*webgpuEntries)
-  desc = webgpu.WGPUBindGroupLayoutDescriptor()
-  desc.entryCount = len(webgpuEntries)
-  desc.entries = ctypes.cast(entries_array, ctypes.POINTER(webgpu.WGPUBindGroupLayoutEntry))
   webgpu.wgpuDevicePushErrorScope(device, webgpu.WGPUErrorFilter_Validation)
-  ret = webgpu.wgpuDeviceCreateBindGroupLayout(device, desc)
+  ret = webgpu.wgpuDeviceCreateBindGroupLayout(device, webgpu.WGPUBindGroupLayoutDescriptor(
+    entryCount=len(webgpuEntries), entries=ctypes.cast(entries_array, ctypes.POINTER(webgpu.WGPUBindGroupLayoutEntry))))
   layout_error = pop_error(device)
 
   if layout_error: raise RuntimeError(f"Error creating bind group layout: {layout_error}")
@@ -219,14 +213,10 @@ def supported_features(adapter):
   return [webgpu.WGPUFeatureName__enumvalues[supported_features.features[i]] for i in range(supported_features.featureCount)]
 
 def begin_compute_pass(command_encoder, writes = None):
-  desc = webgpu.WGPUComputePassDescriptor()
-  desc.nextInChain = None
+  desc = webgpu.WGPUComputePassDescriptor(nextInChain=None)
   if writes is not None:
-    timestamp_writes = webgpu.WGPUComputePassTimestampWrites()
-    timestamp_writes.querySet = writes["query_set"]
-    timestamp_writes.beginningOfPassWriteIndex = writes["beginning_of_pass_write_index"]
-    timestamp_writes.endOfPassWriteIndex = writes["end_of_pass_write_index"]
-    desc.timestampWrites = ctypes.pointer(timestamp_writes)
+    desc.timestampWrites = ctypes.pointer(webgpu.WGPUComputePassTimestampWrites(querySet=writes["query_set"],
+      beginningOfPassWriteIndex=writes["beginning_of_pass_write_index"], endOfPassWriteIndex=writes["end_of_pass_write_index"]))
   return webgpu.wgpuCommandEncoderBeginComputePass(command_encoder, desc)
 
 def submit(device, command_buffers):
