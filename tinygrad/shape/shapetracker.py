@@ -12,11 +12,14 @@ import numpy as np
 import highspy
 
 highs_inst = highspy.Highs()
+# time limit in seconds for each call of solver
+highs_inst.setOptionValue("time_limit", 2); highs_inst.setOptionValue("log_to_console", False)
+# presolve sometimes returns "infeasible" incorrectly
+highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("mip_feasibility_tolerance", 1e-10)
 
 def st_to_highs(st, idxs) -> tuple:
   # add necessary auxiliary variables to highs_inst and return:
-  # (linear expression for idx, [constrs for valid], [constrs whose disjunction gives invalid])
-  # i.e. all the constrs in valid must be true to be valid, and one of the constrs in invalid must be true to be invalid
+  # (highs_linear_expression for idx, [constrs whose conjunction when points are valid], [constrs whose disjunction when invalid])
   mask = st.views[-1].mask or tuple((0,sh) for sh in st.views[-1].shape)
   valid = [mask[k][0] <= idxs[k] <= mask[k][1]-1 for k in range(len(idxs))]
   invalid = sum(([idxs[k] <= mask[k][0]-1, idxs[k] >= mask[k][1]] for k in range(len(idxs))), start=[])
@@ -33,38 +36,42 @@ def st_to_highs(st, idxs) -> tuple:
   idx = np.array(st.views[0].strides)@idxs + st.views[0].offset
   return idx, valid, invalid
 
-def solve_highs(constrs, min_obj) -> Optional[int]:
-  # None if the constaints are infeasible, otherwise returns the value of the first variable (x)
+def solve_highs(constrs) -> Optional[int]:
+  # None if the constaints are infeasible, otherwise returns the value of the first variable (x); remove constrs from model when done
   cs = [highs_inst.addConstr(c) for c in constrs]
-  highs_inst.minimize(min_obj)
-  if highs_inst.getModelStatus() == highspy.HighsModelStatus.kTimeLimit: raise RuntimeError("highs timeout")
-  assert highs_inst.getModelStatus() in {highspy.HighsModelStatus.kOptimal, highspy.HighsModelStatus.kInfeasible}, \
-    "highs returned something other than Infeasible or Optimal"
-  if highs_inst.getModelStatus() == highspy.HighsModelStatus.kInfeasible: ret = None
-  else: ret = round(highs_inst.getSolution().col_value[0])
+  highs_inst.minimize(highspy.highs.highs_var(0, highs_inst))  # minimize first variable, x
+  status, sol = highs_inst.getModelStatus(), round(highs_inst.getSolution().col_value[0])
   for _ in range(len(cs)): highs_inst.removeConstr(cs[0].index)  # weird constr indexing behaviour
-  return ret
+
+  if status == highspy.HighsModelStatus.kTimeLimit:
+#    import pdb; pdb.set_trace()
+    raise RuntimeError("highs timeout")
+  elif status == highspy.HighsModelStatus.kInfeasible: return None
+  elif status == highspy.HighsModelStatus.kOptimal: return sol
+  raise Exception(f"highs returned {status}, expected Infeasible or Optimal or TimeLimit")
 
 @functools.lru_cache(maxsize=None)
 def collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   try:
     return _collapse_st(st, keep_shape)
   except RuntimeError:
-    print(f"highs timeout with {st}, {keep_shape=}")
+#    print(f"highs timeout with {st}, {keep_shape=}")
     return None
 
 def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   # Look for a view whose action is equiv. to st; this is complete
-  if len(st.views) == 0: raise ValueError()
+  assert len(st.views) > 0, "can't collapse empty st"
   if len(st.views) == 1: return st.views[0]
-  # TODO work symbolic offset into this
-  if not all_int(flatten(((*v.shape, *v.strides, v.offset, *flatten(v.mask or ((0,),))) for v in st.views))):
-#    import pdb; pdb.set_trace()
-    return None
-  highs_inst.clear(); highs_inst.setOptionValue("time_limit", 1); highs_inst.setOptionValue("log_to_console", False)
-  # presolve sometimes returns "infeasible" incorrectly
-  highs_inst.setOptionValue("presolve", "off")
-  highs_inst.setOptionValue("mip_feasibility_tolerance", 1e-10)
+  # View.__add__ is faster, try that first
+  ret = st.views[0]
+  for v in st.views[1:]:
+    ret = ret + v
+    if ret is None: break
+  if ret is not None: return ret
+
+  # TODO symbolic mask and offset might be possible with this?
+  if not all_int(flatten(((*v.shape, *v.strides, v.offset, *flatten(v.mask or ((0,),))) for v in st.views))): return None
+  highs_inst.clearModel();
 
 #  import pdb; pdb.set_trace()
 #  print(st)
@@ -73,20 +80,25 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   in_idxs = [highs_inst.addVariable(0, st.shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(st.shape))]
   highs_inst.addConstr(sum(in_idxs[k]*prod(st.shape[k+1:]) for k in range(len(st.shape))) == x)
   idx, valid, invalid = st_to_highs(st, in_idxs)
-  valid_start = solve_highs(valid, x)
+  valid_start = solve_highs(valid)
   if valid_start is None: return View.create(st.shape, (0,)*len(st.shape), 0, ((0,0),)*len(st.shape))
 
-  # find mask, TODO skip this if all points are valid
-  shape, mask, denom = [], [], 1
-  x_step = highs_inst.addVariable(-np.inf, np.inf, type=highspy.HighsVarType.kInteger)
-  while denom < prod(st.shape):
-    a = min(solve_highs([constr] + [x==valid_start+denom*x_step, x>=valid_start], x) or prod(st.shape) for constr in invalid)
-    b = solve_highs(valid + [x==valid_start+denom*x_step, x>=a], x)
-    shape.append((b-valid_start)//denom if b is not None else prod(st.shape)//denom)
-    mask.append([valid_start//denom%shape[-1], a//denom%shape[-1]])
-    if mask[-1][1] == 0: mask[-1][1] = shape[-1]
-    denom *= shape[-1]
-    if prod(st.shape) % denom != 0: return None
+  if not any(solve_highs([constr]) is not None for constr in invalid):
+    # all points valid
+    shape, mask = [prod(st.shape)], [[0, prod(st.shape)]]
+  else:
+    # find mask
+    shape, mask, denom = [], [], 1
+    x_step = highs_inst.addVariable(-np.inf, np.inf, type=highspy.HighsVarType.kInteger)
+    while denom < prod(st.shape):
+      a = min(solve_highs([constr] + [x==valid_start+denom*x_step, x>=valid_start]) or prod(st.shape) for constr in invalid)
+      b = solve_highs(valid + [x==valid_start+denom*x_step, x>=a])
+      shape.append((b-valid_start)//denom if b is not None else prod(st.shape)//denom)
+      mask.append([valid_start//denom%shape[-1], a//denom%shape[-1]])
+      if mask[-1][1] == 0: mask[-1][1] = shape[-1]
+      denom *= shape[-1]
+      if prod(st.shape) % denom != 0: return None
+
   shape, mask = shape[::-1], mask[::-1]
   # new indexes based on the found shape
   new_in_idxs = [highs_inst.addVariable(0, shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(shape))]
@@ -94,8 +106,8 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
   new_valid = [mask[k][0] <= new_in_idxs[k] <= mask[k][1]-1 for k in range(len(shape))]
   new_invalid = sum(([new_in_idxs[k] <= mask[k][0]-1, new_in_idxs[k] >= mask[k][1]] for k in range(len(shape))), start=[])
   # check all points in new mask are valid, and all valid points are in new mask
-  if any(solve_highs(new_in_constr + new_valid + [constr], x) is not None for constr in invalid): return None
-  if any(solve_highs(new_in_constr + valid + [constr], x) is not None for constr in new_invalid): return None
+  if any(solve_highs(new_in_constr + new_valid + [constr]) is not None for constr in invalid): return None
+  if any(solve_highs(new_in_constr + valid + [constr]) is not None for constr in new_invalid): return None
   
   # find strides
 #  import pdb; pdb.set_trace()
@@ -113,7 +125,7 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
     new_in_idxs = [highs_inst.addVariable(0, shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(shape))]
     new_in_constr = [sum(new_in_idxs[k]*prod(shape[k+1:]) for k in range(len(shape))) == x]
     test_idx = offset + sum(new_in_idxs[j]*strides[j] for j in range(len(shape)))
-    x_gt, x_lt = solve_highs(new_in_constr + valid + [idx>=test_idx+1], x), solve_highs(new_in_constr + valid + [idx<=test_idx-1], x)
+    x_gt, x_lt = solve_highs(new_in_constr + valid + [idx>=test_idx+1]), solve_highs(new_in_constr + valid + [idx<=test_idx-1])
     if x_gt is None and x_lt is None: break
     diff = [unravel(shape, min(x_gt or np.inf, x_lt or np.inf))[j] - unravel(shape,valid_start)[j] for j in range(len(shape))]
     if sum(d != 0 for d in diff) != 1: return None
@@ -124,7 +136,10 @@ def _collapse_st(st:ShapeTracker, keep_shape:bool=False) -> Optional[View]:
     shape.insert(ax+1, newsh)
     if (mask := _reshape_mask(tuple((a,b) for a,b in mask), tuple(oldshape), tuple(shape))) is None: return None
 
-  final =  View.create(tuple(shape), tuple(strides), offset, tuple((a,b) for a,b in mask))
+  final = View.create(tuple(shape), tuple(strides), offset, tuple((a,b) for a,b in mask))
+  if (not keep_shape) or final.reshape(st.shape) is not None: 
+    import pdb; pdb.set_trace()
+    print("found reduction")
   return final if not keep_shape else final.reshape(st.shape)
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
@@ -183,9 +198,6 @@ class ShapeTracker:
     if len(self.views) == 0: return st
     new_views = (merged,) if (merged := self.views[-1]+st.views[0]) is not None else (self.views[-1], st.views[0])
     return ShapeTracker(self.views[:-1] + new_views) + ShapeTracker(st.views[1:])
-#    ret = self
-#    for v in st.views: ret = ShapeTracker(ret.views[:-1])
-#    return ret
 
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[ShapeTracker]:
     inverted_views:list[View] = []
@@ -245,10 +257,6 @@ class ShapeTracker:
     for j in range(len(self.views)):
       if (new := collapse_st(ShapeTracker(self.views[j:]), keep_shape=keep_shape)) is not None:
         return ShapeTracker(self.views[:j]).simplify(keep_shape=False) + ShapeTracker((new,))  # guaranteed to return when j=-1
-    raise Exception()  # TODO get rid of this after testing that this works
-#    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-#      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-#    return self
 
   # *** under this line are the movement ops ***
 
