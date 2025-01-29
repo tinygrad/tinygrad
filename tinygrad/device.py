@@ -269,20 +269,20 @@ class CPUProgram:
     if platform.machine() == "arm64" and OSX: args = args[:8] + [ctypes.c_int64(a) if isinstance(a, int) else a for a in args[8:]]
     if not WIN:
       return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
-    else:
-      PAGE_READWRITE = 0x04
-      bufs_win = [ctypes.cast(self._mmap(len(buf), PAGE_READWRITE), ctypes.c_void_p) for buf in bufs]
-      for (buf, buf_win) in zip(bufs, bufs_win):
-        ctypes.memmove(buf_win, ctypes.addressof(ctypes.c_char.from_buffer(buf)), len(buf))
 
-      args_win = bufs_win + list(vals)
-      time = cpu_time_execution(lambda: self.fxn(*args_win), enable=wait)
+    PAGE_READWRITE = 0x04
+    bufs_win = [ctypes.cast(self._mmap(len(buf), PAGE_READWRITE), ctypes.c_void_p) for buf in bufs]
+    for (buf, buf_win) in zip(bufs, bufs_win):
+      ctypes.memmove(buf_win, ctypes.addressof(ctypes.c_char.from_buffer(buf)), len(buf))
 
-      for (buf, buf_win) in zip(bufs, bufs_win):
-        ctypes.memmove(ctypes.addressof(ctypes.c_char.from_buffer(buf)), buf_win, len(buf))
-        self._free(buf_win)
+    args_win = bufs_win + list(vals)
+    time = cpu_time_execution(lambda: self.fxn(*args_win), enable=wait)
 
-      return time
+    for (buf, buf_win) in zip(bufs, bufs_win):
+      ctypes.memmove(ctypes.addressof(ctypes.c_char.from_buffer(buf)), buf_win, len(buf))
+      self._free(buf_win)
+
+    return time
 
 # **************** for Compiled Devices ****************
 
