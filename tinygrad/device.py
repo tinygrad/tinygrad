@@ -220,21 +220,20 @@ MAP_JIT = 0x0800
 
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
+  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
+
   def _mmap(self, size, page_flag):
     MEM_COMMIT = 0x1000
     MEM_RESERVE = 0x2000
-    ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
-    mem = ctypes.windll.kernel32.VirtualAlloc(None, size, MEM_COMMIT | MEM_RESERVE, page_flag)
-    if not mem: raise ctypes.WinError(ctypes.windll.kernel32.GetLastError(), "Could not allocate memory")
-    return mem
+    CPUProgram.helper_handle.VirtualAlloc.restype = ctypes.c_uint64
+    return CPUProgram.helper_handle.VirtualAlloc(None, size, MEM_COMMIT | MEM_RESERVE, page_flag)
 
   def _free(self, ptr):
     MEM_RELEASE = 0x8000
-    ctypes.windll.kernel32.VirtualFree.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
-    ctypes.windll.kernel32.VirtualFree.restype = ctypes.c_void_p
-    ctypes.windll.kernel32.VirtualFree(ptr, 0, MEM_RELEASE)
+    CPUProgram.helper_handle.VirtualFree.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
+    CPUProgram.helper_handle.VirtualFree.restype = ctypes.c_void_p
+    CPUProgram.helper_handle.VirtualFree(ptr, 0, MEM_RELEASE)
 
-  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
   def __init__(self, name:str, lib:bytes):
     if WIN:
       PAGE_EXECUTE_READWRITE = 0x40
@@ -260,14 +259,14 @@ class CPUProgram:
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
   def __call__(self, *bufs, vals=(), wait=False):
-    args = list(bufs) + list(vals)
-    # NOTE: replace this by --target={host's triple}-elf in clang args once we only support macos sequoia and later.
-    # Apple relaxes abi requirement for stack arguments to always be at least 8 byte aligned on arm64
-    # https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms
-    # This hack is required because clang/llvm bug doesn't allow us to just use {host's triple}+'-elf' (relocation failures)
-    # The bug was fixed in https://github.com/llvm/llvm-project/commit/454cc36630296262cdb6360b60f90a64a97f7f1a but was only backported to xcode 16+
-    if platform.machine() == "arm64" and OSX: args = args[:8] + [ctypes.c_int64(a) if isinstance(a, int) else a for a in args[8:]]
     if not WIN:
+      args = list(bufs) + list(vals)
+      # NOTE: replace this by --target={host's triple}-elf in clang args once we only support macos sequoia and later.
+      # Apple relaxes abi requirement for stack arguments to always be at least 8 byte aligned on arm64
+      # https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms
+      # This hack is required because clang/llvm bug doesn't allow us to just use {host's triple}+'-elf' (relocation failures)
+      # The bug was fixed in https://github.com/llvm/llvm-project/commit/454cc36630296262cdb6360b60f90a64a97f7f1a but was only backported to xcode 16+
+      if platform.machine() == "arm64" and OSX: args = args[:8] + [ctypes.c_int64(a) if isinstance(a, int) else a for a in args[8:]]
       return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
 
     PAGE_READWRITE = 0x04
