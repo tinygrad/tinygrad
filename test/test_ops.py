@@ -352,12 +352,15 @@ class TestOps(unittest.TestCase):
   def test_cmp_le(self): self._test_cmp(lambda x,y: x<=y)
 
   def test_cmp_ne_backwards(self):
+    # new grad zeroes these out
+    """
     t1 = torch.ones(4, requires_grad=True)
     t2 = torch.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (t1 != t2).sum().backward)
     tt1 = Tensor.ones(4, requires_grad=True)
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 != tt2).sum().backward)
+    """
     tt = Tensor.randn(4, requires_grad=True)
     (tt*(tt != 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
@@ -365,12 +368,15 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
 
   def test_cmp_lt_backwards(self):
+    # new grad zeroes these out
+    """
     t1 = torch.ones(4, requires_grad=True)
     t2 = torch.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (t1 < t2).sum().backward)
     tt1 = Tensor.ones(4, requires_grad=True)
     tt2 = Tensor.ones(4, requires_grad=True)
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
+    """
     tt = Tensor.randn(4, requires_grad=True)
     (tt*(tt < 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)

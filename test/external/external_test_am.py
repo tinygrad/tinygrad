@@ -1,8 +1,11 @@
 import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
+from tinygrad.helpers import mv_address
 
 class FakeGMC:
-  def __init__(self): self.vm_base = 0x0
+  def __init__(self):
+    self.vm_base = 0x0
+    self.address_space_mask = (1 << 44) - 1
   def flush_tlb(self, *args, **kwargs): pass
 
 class FakePCIRegion:
@@ -13,12 +16,14 @@ class FakePCIDev:
 
 class FakeAM:
   def __init__(self):
-    self.is_booting = True
+    self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
     self.vram = memoryview(bytearray(4 << 30))
     self.gmc = FakeGMC()
     self.mm = AMMemoryManager(self, vram_size=4 << 30)
     self.is_booting = False
+  def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
+  def paddr2mc(self, paddr:int) -> int: return paddr
 
 #  * PTE format:
 #  * 63:59 reserved
@@ -69,7 +74,7 @@ class TestAMPageTable(unittest.TestCase):
       for tup in results:
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
-          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
           assert pte['paddr'] == va + _offset + i * _pte_covers, f"Expected paddr {pte['paddr']:#x} to be {va + _offset + i * _pte_covers:#x}"
           assert pte['valid'] == 1
 
@@ -78,7 +83,7 @@ class TestAMPageTable(unittest.TestCase):
       for tup in results:
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
-          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
           assert pte['paddr'] == 0
           assert pte['valid'] == 0
 
@@ -110,7 +115,7 @@ class TestAMPageTable(unittest.TestCase):
       for tup in ctx.next(0x100000):
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
-          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
           assert pte['paddr'] == 0xdead0000 + _offset + i * _pte_covers, f"paddr {pte['paddr']:#x} not {0xdead0000 + _offset + i * _pte_covers:#x}"
           assert pte['valid'] == 1
 
