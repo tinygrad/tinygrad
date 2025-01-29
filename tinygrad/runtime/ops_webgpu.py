@@ -3,6 +3,7 @@ from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
+from typing import List, Any
 import ctypes
 
 instDesc = webgpu.WGPUInstanceDescriptor()
@@ -25,7 +26,7 @@ def create_cb_info(cb_info_type, cb_type, cb):
   return cb_info_type(nextInChain=None, mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
 
 def request_adapter_sync(power_preference):
-  result = []
+  result: List[Any] = []
 
   def cb(status, adapter, msg, _):
     result[:] = status, adapter, from_wgpu_str(msg)
@@ -66,7 +67,7 @@ def request_device_sync(adapter, required_features):
   device_desc.requiredLimits = ctypes.cast(ctypes.pointer(limits),ctypes.POINTER(webgpu.struct_WGPURequiredLimits))
 
   # Request device
-  result = []
+  result: List[Any] = []
 
   def cb(status, device_impl, msg, _):
     result[:] = status, device_impl, from_wgpu_str(msg)
@@ -85,7 +86,7 @@ def write_buffer(device, buf, offset, src):
     webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, src_pointer, len(src))
 
 def map_buffer(buf, size):
-  result = []
+  result: List[Any] = []
 
   def cb(status, msg, u1, u2):
     result[:] = status, from_wgpu_str(msg)
@@ -197,7 +198,7 @@ def create_compute_pipeline(device, layout, compute):
   dawn_compute.module = compute["module"]
   dawn_compute.entryPoint = to_wgpu_str(compute["entry_point"])
   compute_desc.compute = dawn_compute
-  result = []
+  result: List[Any] = []
 
   def cb(status, compute_pipeline_impl, msg, u1, u2):
     result[:] = status, compute_pipeline_impl, from_wgpu_str(msg)
@@ -234,7 +235,7 @@ def submit(device, command_buffers):
   webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), cb_buffers_array)
 
 def sync(device):
-  result = []
+  result: List[Any] = []
 
   def cb(status, u1, u2):
     result[:] = [status]
@@ -246,7 +247,7 @@ def sync(device):
     raise RuntimeError(f"Submitted work failed: [{webgpu.WGPUQueueWorkDoneStatus__enumvalues[result[0]]}]")
 
 def pop_error(device):
-  result = []
+  result: List[Any] = []
 
   def cb(status, err_type, msg, i2):
     result[:] = [from_wgpu_str(msg)]
