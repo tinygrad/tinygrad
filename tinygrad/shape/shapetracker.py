@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal
 from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
 from tinygrad.shape.view import View, strides_for_shape, unravel, _reshape_mask
 from tinygrad.dtype import dtypes
@@ -13,9 +13,11 @@ import highspy
 
 highs_inst = highspy.Highs()
 # time limit in seconds for each call of solver
-highs_inst.setOptionValue("time_limit", 10); highs_inst.setOptionValue("log_to_console", False)
+highs_inst.setOptionValue("time_limit", 10)
+highs_inst.setOptionValue("log_to_console", False)
 # presolve sometimes returns "infeasible" incorrectly
-highs_inst.setOptionValue("presolve", "off"); highs_inst.setOptionValue("mip_feasibility_tolerance", 1e-10)
+highs_inst.setOptionValue("presolve", "off")
+highs_inst.setOptionValue("mip_feasibility_tolerance", 1e-10)
 
 def st_to_highs(st, idxs) -> tuple:
   # add necessary auxiliary variables to highs_inst and return:
@@ -45,18 +47,18 @@ def solve_highs(constrs, var, which: Literal["min", "max"]) -> Optional[int]:
   for _ in range(len(cs)): highs_inst.removeConstr(cs[0].index)  # weird constr indexing behaviour
 
   if status == highspy.HighsModelStatus.kTimeLimit:
-#    import pdb; pdb.set_trace()
     raise RuntimeError("highs timeout")
-  elif status == highspy.HighsModelStatus.kInfeasible: return None
+  if status == highspy.HighsModelStatus.kInfeasible: return None
   elif status == highspy.HighsModelStatus.kOptimal: return sol
   raise Exception(f"highs returned {status}, expected Infeasible or Optimal or TimeLimit")
 
 @functools.lru_cache(maxsize=None)
 def collapse_st(st:ShapeTracker, keep_shape:bool=True) -> Optional[View]:
+  if len(st.shape)==0: return st.views[-1]
   try:
     return _collapse_st_keep_shape(st) if keep_shape else _collapse_st_no_keep_shape(st)
   except RuntimeError:
-    print(f"highs timeout with {st}, {keep_shape=}")
+#    print(f"highs timeout with {st}, {keep_shape=}")
     return None
 
 def _collapse_st_keep_shape(st):
@@ -70,7 +72,7 @@ def _collapse_st_keep_shape(st):
   if ret is not None: return ret
 
   if not all_int(flatten(((*v.shape, *v.strides, v.offset, *flatten(v.mask or ((0,),))) for v in st.views))): return None
-  highs_inst.clearModel();
+  highs_inst.clearModel()
 
   in_idxs = [highs_inst.addVariable(0, st.shape[k]-1, type=highspy.HighsVarType.kInteger) for k in range(len(st.shape))]
   idx, valid, invalid = st_to_highs(st, in_idxs)
@@ -87,7 +89,7 @@ def _collapse_st_keep_shape(st):
   # check all points in new mask are valid, and all valid points are in new mask
   if any(feasible(new_valid + [constr]) for constr in invalid): return None
   if any(feasible(valid + [constr]) for constr in new_invalid): return None
-  
+
   # find strides
   origin = st.to_indexed_uops([m[0] for m in mask])[0].simplify().arg
   strides = []
@@ -103,7 +105,6 @@ def _collapse_st_keep_shape(st):
   return final
 
 def _collapse_st_no_keep_shape(st:ShapeTracker) -> Optional[View]:
-#  print("NO KEEP SHAPE")
   # Look for a view whose action is equiv. to st; this is complete
   assert len(st.views) > 0, "can't collapse empty st"
   if len(st.views) == 1: return st.views[0]
@@ -116,13 +117,7 @@ def _collapse_st_no_keep_shape(st:ShapeTracker) -> Optional[View]:
 
   # TODO symbolic mask and offset might be possible with this?
   if not all_int(flatten(((*v.shape, *v.strides, v.offset, *flatten(v.mask or ((0,),))) for v in st.views))): return None
-  highs_inst.clearModel();
-
-  # cutoff for speed; most hard cases are small shape anyway
-#  if prod(st.shape) > 1e6: return None
-
-#  import pdb; pdb.set_trace()
-#  print(st)
+  highs_inst.clearModel()
 
   x = highs_inst.addVariable(0, prod(st.shape)-1, type=highspy.HighsVarType.kInteger)
   def feasible(constrs): return True if solve_highs(constrs, x, "min") is not None else False
@@ -159,12 +154,9 @@ def _collapse_st_no_keep_shape(st:ShapeTracker) -> Optional[View]:
   if any(feasible(new_in_constr + new_valid + [constr]) for constr in invalid): return None
   if any(feasible(new_in_constr + valid + [constr]) for constr in new_invalid): return None
   for _ in range(len(new_in_idxs)): highs_inst.deleteVariable(new_in_idxs[0].index)
-  
+
   # find strides
-#  import pdb; pdb.set_trace()
   while True:
-    if len(shape) > 20:  # TODO remove
-      import pdb; pdb.set_trace()
     # get strides for current shape
     strides = []
     out_idx_at_valid_start = st.to_indexed_uops(unravel(st.shape, valid_start))[0].simplify().arg
@@ -182,7 +174,7 @@ def _collapse_st_no_keep_shape(st:ShapeTracker) -> Optional[View]:
     if sum(d != 0 for d in diff) != 1: return None
     ax, newsh = [d != 0 for d in diff].index(True), sum(diff)
     if shape[ax] % newsh != 0: return None
-    oldshape = [s for s in shape]
+    oldshape = list(shape)
     shape[ax] //= newsh
     shape.insert(ax+1, newsh)
     for _ in range(len(new_in_idxs)): highs_inst.deleteVariable(new_in_idxs[0].index)
@@ -307,6 +299,7 @@ class ShapeTracker:
     for j in range(len(self.views)):
       if (new := collapse_st(ShapeTracker(self.views[j:]), keep_shape=keep_shape)) is not None:
         return ShapeTracker(self.views[:j]).simplify(keep_shape=False) + ShapeTracker((new,))  # guaranteed to return when j=-1
+    raise Exception(f"{self}.simplify() didn't return")
 
   # *** under this line are the movement ops ***
 
