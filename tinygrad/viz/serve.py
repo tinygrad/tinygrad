@@ -128,7 +128,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       if "kernel" in (query:=parse_qs(url.query)):
-        getarg = lambda k,default=0: int(query[k][0]) if k in query else default
+        def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
         kidx, ridx = getarg("kernel"), getarg("idx")
         jret:Any = get_details(contexts[0][kidx], contexts[1][kidx][ridx], kernels[kidx][1][ridx], getarg("offset", 0), getarg("limit", 200))
       else: jret = kernels
