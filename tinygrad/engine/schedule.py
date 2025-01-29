@@ -29,11 +29,10 @@ tensor_uop_spec = PatternMatcher([
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
-  (UPat(Ops.DEFINE_VAR, src=(UPat(Ops.VIEW, arg=ShapeTracker.from_shape(()))), arg=None), lambda: True),
 
-  # Tensor const has a device and an unmasked ShapeTracker of stride 0 or a ShapeTracker with symbolic shape
+  # Tensor const has a device and an unmasked ShapeTracker of stride 0
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
-   lambda st: st.st.views[0].mask is None and ((len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides)) or not all_int(st.shape))),
+   lambda st: st.st.views[0].mask is None and len(st.st.views) == 1 and all(s == 0 for s in st.st.views[0].strides)),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -195,12 +194,12 @@ to_si = PatternMatcher([
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
+  # don't need DEVICE anymore
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
   # PRELOAD becomes LOAD
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  # CONST(VIEW) becomes VALID too, TODO: doesn't have to
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="x", src=(UPat(Ops.VIEW, name="st"),)), lambda x,st: x.replace(src=()).valid(st.st)),
 ])
 
 # LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
@@ -498,7 +497,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
     # NOTE: only the base tensors get a BUFFER UOp
     if v.is_realized and k is k.base: becomes_map[k] = v.view(unwrap(k.st))
     # otherwise if it simplified to a CONST the UOp just becomes that CONST
-    elif v.op is Ops.CONST: becomes_map[k] = v
+    elif v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # we group the rest of UOps into ScheduleItems
   rev_tensor_map: dict[UOp, list[UOp]] = {}
