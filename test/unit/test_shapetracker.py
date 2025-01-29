@@ -43,9 +43,9 @@ class CheckingShapeTracker:
     self.t = np.broadcast_to(self.t, new_shape)
     return self
 
-  def flip(self, axis):
-    self.st = self.st.flip(tuple(i in axis for i in range(len(self.shape))))
-    self.t = np.flip(self.t, axis)
+  def flip(self, arg):
+    self.st = self.st.flip(arg)
+    self.t = np.flip(self.t, tuple(i for i in range(len(arg)) if arg[i]))
     return self
 
   def shrink(self, arg):
