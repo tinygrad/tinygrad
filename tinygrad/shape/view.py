@@ -274,8 +274,6 @@ class View:
   def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    print(self, new_shape)
-
     assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
     # check for the same size
     if (self_all_int := all_int(self.shape)):
