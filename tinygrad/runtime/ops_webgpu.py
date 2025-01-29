@@ -110,7 +110,6 @@ def read_buffer(dev, buf):
   tmp_usage = webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead
   tmp_buffer = webgpu.wgpuDeviceCreateBuffer(dev, webgpu.WGPUBufferDescriptor(size=size, usage=tmp_usage, mappedAtCreation=False))
   copy_buffer_to_buffer(dev, buf, 0, tmp_buffer, 0, size)
-  sync(dev)
   map_buffer(tmp_buffer, size)
   ptr = webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size)
   void_ptr = ctypes.cast(ptr, ctypes.c_void_p)
@@ -224,18 +223,6 @@ def submit(device, command_buffers):
   cb_buffers_array = cb_buffers_array_type(*command_buffers)
   webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), cb_buffers_array)
 
-def sync(device):
-  result: List[Any] = []
-
-  def cb(status, u1, u2):
-    result[:] = [status]
-
-  cb_info = create_cb_info(webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2, cb)
-  wait(webgpu.wgpuQueueOnSubmittedWorkDone2(webgpu.wgpuDeviceGetQueue(device), cb_info))
-
-  if result[0] != webgpu.WGPUQueueWorkDoneStatus_Success:
-    raise RuntimeError(f"Submitted work failed: [{webgpu.WGPUQueueWorkDoneStatus__enumvalues[result[0]]}]")
-
 def pop_error(device):
   result: List[Any] = []
 
@@ -296,7 +283,6 @@ class WebGPUProgram:
 
     cmd_buf = webgpu.wgpuCommandEncoderFinish(command_encoder, webgpu.WGPUCommandBufferDescriptor())
     submit(self.dev, [cmd_buf])
-    sync(self.dev)
 
     if buf_patch:
       copy_buffer_to_buffer(self.dev, tmp_bufs[0], 0, bufs[0], 0, webgpu.wgpuBufferGetSize(bufs[0]))
