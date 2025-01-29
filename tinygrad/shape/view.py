@@ -23,7 +23,7 @@ def merge_dims(shape:tuple[int, ...], strides:tuple[int, ...], mask:Optional[tup
   # stride != 0 to stride == 0 starts a new merging block
   # ret = tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
-  assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask)), f"shape:{shape} strides:{strides} mask:{mask}"
+  assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
   ret = [(shape[0], strides[0], shape[0] if strides[0] != 0 else 0)]
   # merge this dim to next dim if size is 1
   merging = (mask[0][1] - mask[0][0] == 1) if mask is not None else shape[0] == 1
