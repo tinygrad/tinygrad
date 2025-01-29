@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context
+                             cpu_time_execution, colored, Context, round_up
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
@@ -207,7 +207,11 @@ class LRUAllocator(Allocator):
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
-    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, 16)
+  def _alloc_aligned(self, size:int, alignment:int):
+    buffer = (ctypes.c_uint8 * (size + alignment))()
+    offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
+    return (ctypes.c_uint8 * size).from_buffer(buffer, offset)
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
