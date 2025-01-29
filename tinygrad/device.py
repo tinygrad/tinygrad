@@ -271,15 +271,16 @@ class CPUProgram:
       return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
     else:
       PAGE_READWRITE = 0x04
-      args_win = [ctypes.cast(self._mmap(len(arg), PAGE_READWRITE), ctypes.c_void_p) for arg in args]
-      for (arg, arg_win) in zip(args, args_win):
-        ctypes.memmove(arg_win, ctypes.addressof(ctypes.c_char.from_buffer(arg)), len(arg))
+      bufs_win = [ctypes.cast(self._mmap(len(buf), PAGE_READWRITE), ctypes.c_void_p) for buf in bufs]
+      for (buf, buf_win) in zip(bufs, bufs_win):
+        ctypes.memmove(buf_win, ctypes.addressof(ctypes.c_char.from_buffer(buf)), len(buf))
 
+      args_win = bufs_win + list(vals)
       time = cpu_time_execution(lambda: self.fxn(*args_win), enable=wait)
 
-      for (arg, arg_win) in zip(args, args_win):
-        ctypes.memmove(ctypes.addressof(ctypes.c_char.from_buffer(arg)), arg_win, len(arg))
-        self._free(arg_win)
+      for (buf, buf_win) in zip(bufs, bufs_win):
+        ctypes.memmove(ctypes.addressof(ctypes.c_char.from_buffer(buf)), buf_win, len(buf))
+        self._free(buf_win)
 
       return time
 
