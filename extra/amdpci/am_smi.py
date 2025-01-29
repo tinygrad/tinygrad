@@ -10,9 +10,9 @@ AM_VERSION = 0xA0000002
 def bold(s): return f"\033[1m{s}\033[0m"
 
 def color_temp(temp):
-  if temp >= 87: return colored(f"{temp:>4}", "red")
-  elif temp >= 80: return colored(f"{temp:>4}", "yellow")
-  return f"{temp:>4}"
+  if temp >= 87: return colored(f"{temp:>3}", "red")
+  elif temp >= 80: return colored(f"{temp:>3}", "yellow")
+  return f"{temp:>3}"
 
 def color_voltage(voltage): return colored(f"{voltage/1000:>5.3f}V", "cyan")
 
@@ -113,8 +113,8 @@ class SMICtx:
     dev_content = []
     for dev, metrics in dev_metrics.items():
       device_line = [f"PCIe device: {bold(dev.pcibus)}"] + [""]
-      activity_line = [f"GFX Activity  {draw_bar(metrics.SmuMetrics.AverageGfxActivity / 100, 50)}"] \
-                    + [f"UCLK Activity {draw_bar(metrics.SmuMetrics.AverageUclkActivity / 100, 50)}"] + [""]
+      activity_line = [f"GFX Activity {draw_bar(metrics.SmuMetrics.AverageGfxActivity / 100, 50)}"] \
+                    + [f"MEM Activity {draw_bar(metrics.SmuMetrics.AverageUclkActivity / 100, 50)}"] + [""]
 
       # draw_metrics_table(metrics, dev)
       temps_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_TEMP_e__enumvalues.items()
@@ -124,23 +124,23 @@ class SMICtx:
       voltage_keys = [(k, name) for k, name in smu_v13_0_0.c__EA_SVI_PLANE_e__enumvalues.items() if k < smu_v13_0_0.SVI_PLANE_COUNT]
       power_table = ["=== Power ==="] \
                   + [f"Fan Speed: {metrics.SmuMetrics.AvgFanRpm} RPM"] \
-                  + [f"Fan Power: {metrics.SmuMetrics.AvgFanPwm} %"] \
-                  + [f"Power: {metrics.SmuMetrics.AverageSocketPower}W " +
+                  + [f"Fan Power: {metrics.SmuMetrics.AvgFanPwm}%"] \
+                  + [f"Power: {metrics.SmuMetrics.AverageSocketPower:>3}W " +
                        draw_bar(metrics.SmuMetrics.AverageSocketPower / metrics.SmuMetrics.dGPU_W_MAX, 16)] \
-                  + ["", "=== Voltages ==="] + [f"{name:<24}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys]
+                  + ["", "=== Voltages ==="] + [f"{name:<20}: {color_voltage(metrics.SmuMetrics.AvgVoltage[k])}" for k, name in voltage_keys]
 
       frequency_table = ["=== Frequencies ===",
-        f"GFXCLK Target : {metrics.SmuMetrics.AverageGfxclkFrequencyTarget} MHz",
-        f"GFXCLK PreDs  : {metrics.SmuMetrics.AverageGfxclkFrequencyPreDs} MHz",
-        f"GFXCLK PostDs : {metrics.SmuMetrics.AverageGfxclkFrequencyPostDs} MHz",
-        f"FCLK PreDs    : {metrics.SmuMetrics.AverageFclkFrequencyPreDs} MHz",
-        f"FCLK PostDs   : {metrics.SmuMetrics.AverageFclkFrequencyPostDs} MHz",
-        f"MCLK PreDs    : {metrics.SmuMetrics.AverageMemclkFrequencyPreDs} MHz",
-        f"MCLK PostDs   : {metrics.SmuMetrics.AverageMemclkFrequencyPostDs} MHz",
-        f"VCLK0         : {metrics.SmuMetrics.AverageVclk0Frequency} MHz",
-        f"DCLK0         : {metrics.SmuMetrics.AverageDclk0Frequency} MHz",
-        f"VCLK1         : {metrics.SmuMetrics.AverageVclk1Frequency} MHz",
-        f"DCLK1         : {metrics.SmuMetrics.AverageDclk1Frequency} MHz"]
+        f"GFXCLK Target : {metrics.SmuMetrics.AverageGfxclkFrequencyTarget:>4} MHz",
+        f"GFXCLK PreDs  : {metrics.SmuMetrics.AverageGfxclkFrequencyPreDs:>4} MHz",
+        f"GFXCLK PostDs : {metrics.SmuMetrics.AverageGfxclkFrequencyPostDs:>4} MHz",
+        f"FCLK PreDs    : {metrics.SmuMetrics.AverageFclkFrequencyPreDs:>4} MHz",
+        f"FCLK PostDs   : {metrics.SmuMetrics.AverageFclkFrequencyPostDs:>4} MHz",
+        f"MCLK PreDs    : {metrics.SmuMetrics.AverageMemclkFrequencyPreDs:>4} MHz",
+        f"MCLK PostDs   : {metrics.SmuMetrics.AverageMemclkFrequencyPostDs:>4} MHz",
+        f"VCLK0         : {metrics.SmuMetrics.AverageVclk0Frequency:>4} MHz",
+        f"DCLK0         : {metrics.SmuMetrics.AverageDclk0Frequency:>4} MHz",
+        f"VCLK1         : {metrics.SmuMetrics.AverageVclk1Frequency:>4} MHz",
+        f"DCLK1         : {metrics.SmuMetrics.AverageDclk1Frequency:>4} MHz"]
 
       dev_content.append(device_line + activity_line + same_line([temps_table, power_table, frequency_table]))
 
