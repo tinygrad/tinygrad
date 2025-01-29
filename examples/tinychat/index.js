@@ -1,7 +1,8 @@
 window.TINYCHAT_ROOT = "/";
 window.MODEL_BASE_URL= ".";
-//window.BACKEND = "WebGPU";
-window.BACKEND = "WASM";
+const queryParams = new URLSearchParams(window.location.search);
+const normalizedParams = Object.fromEntries([...queryParams].map(([key, value]) => [key.toUpperCase(), value.toUpperCase()]));
+window.BACKEND = (normalizedParams["BACKEND"] === "WASM") ? "WASM" : "WebGPU";
 
 const tiktokenReady = (async () => {
   const { init, get_encoding, Tiktoken, load } = await import('./tiktoken.js');
@@ -12,7 +13,8 @@ const tiktokenReady = (async () => {
 })();
 
 const kernelsReady = (async () => {
-  const exports = await import(`./net_clang.js?version=${Date.now()}`); // TODO: is cache-busting necessary
+  if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);} // TODO: is cache-busting necessary
+  else if (window.BACKEND === "WebGPU") {var exports = await import(`./net.js?version=${Date.now()}`);}
   Object.assign(self, exports);
 })();
 
@@ -279,9 +281,9 @@ async function decompress(compressedBuffers, state_dict, device, progress) {
     const gpuJobs = [];
     let freeSpace = inChunkSize;
 
-    // TODO: minimize memory overhead, consume each compressed buffer from end to end
+    delete state_dict["output.weight"]; // uses same data as tok_embeddings.weight, TODO: make consistent with wasm loading
     for (const [k, v] of Object.entries(state_dict)) {
-      const tensor = compressedBuffers[v.chunk].subarray(v.start_pos, v.start_pos + v.size);
+      const tensor = v.bytes;
 
       if (v.dtype === "Q6_K") {
         v.size = parseInt(v.size * byteFactor);
@@ -301,7 +303,7 @@ async function decompress(compressedBuffers, state_dict, device, progress) {
 
           if (freeSpace === 0) {gpuJobs.push(scheduleDequantizeJob());}
         }
-      } else {v.bytes = tensor;}
+      }
     }
 
     if (freeSpace < inChunkSize) {
@@ -516,7 +518,11 @@ document.addEventListener("alpine:init", () => {
         try {
           device = await getDevice();
           console.log("WebGPU device initialized");
-        } catch (error) {this.progress(0, 100, "Failed to launch WebGPU. Please check if WebGPU is enabled and reload the page. || Loading:"); console.log(error); return;}
+        } catch (error) {
+          this.progress(0, 100, "Failed to launch WebGPU. Loading WASM model instead...");
+          window.BACKEND = "WASM";
+          console.log(`error: ${error}\nFailed to launch WebGPU. Loading WASM model instead...`); // return;
+        }
       }
 
       try {
