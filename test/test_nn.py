@@ -551,7 +551,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_model(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
     layer = Conv2d(3, 5, kernel_size=3)
     layer.weight.shard_(devices, 3)
@@ -572,7 +572,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_dict(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
     layer = Conv2d(3, 5, kernel_size=3)
     state_dict = {
@@ -589,7 +589,7 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_model_dict_same_axis(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
     layer = Conv2d(3, 5, kernel_size=3)
     layer.weight.shard_(devices, 3)
@@ -610,7 +610,8 @@ class TestNN(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
   def test_load_state_dict_sharded_model_dict_different_axis(self):
-    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
+    devices5 = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5")
 
     layer = Conv2d(3, 5, kernel_size=3)
     layer.weight.shard_(devices, 3)
@@ -619,14 +620,14 @@ class TestNN(unittest.TestCase):
     # different shard axis
     state_dict = {
       'weight': Tensor.randn(5, 3, 3, 3).shard(devices, None),
-      'bias': Tensor.randn(5).shard(devices, 0),
+      'bias': Tensor.randn(5).shard(devices5, 0),
     }
     load_state_dict(layer, state_dict)
 
     # NOTE: model and state_dict shard differently, use the state_dict sharding  # TODO: revisit this?
     self.assertEqual(layer.weight.device, devices)
     self.assertEqual(layer.weight.lazydata.axis, None)
-    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.device, devices5)
     self.assertEqual(layer.bias.lazydata.axis, 0)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
