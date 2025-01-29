@@ -220,14 +220,14 @@ MAP_JIT = 0x0800
 
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
-  def _mmap(self, size, page_flag):    
+  def _mmap(self, size, page_flag):
     MEM_COMMIT = 0x1000
     MEM_RESERVE = 0x2000
     ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
     mem = ctypes.windll.kernel32.VirtualAlloc(None, size, MEM_COMMIT | MEM_RESERVE, page_flag)
     if not mem: raise ctypes.WinError(ctypes.windll.kernel32.GetLastError(), "Could not allocate memory")
     return mem
-  
+
   def _free(self, ptr):
     MEM_RELEASE = 0x8000
     ctypes.windll.kernel32.VirtualFree.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
