@@ -282,6 +282,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
     if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op.value, self.src[1].arg)
+    if self.op is Ops.RECIP: return self.src[0].tuplize + (self.op.value,)
     reverse_src = self.op is Ops.IDIV and self.src[1].op in (Ops.CONST, Ops.VCONST)
     return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in (self.src[::-1] if reverse_src else self.src)))
 
@@ -1249,7 +1250,7 @@ symbolic = symbolic_simple+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
-  ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
+  ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
