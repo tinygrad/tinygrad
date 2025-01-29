@@ -101,7 +101,7 @@ def _collapse_st_keep_shape(st):
   if gt or lt: return None
 
   final = View.create(tuple(st.shape), tuple(strides), offset, tuple((a,b) for a,b in mask))
-  print(f"found reduction {st} --> {final}")
+#  print(f"found reduction {st} --> {final}")
   return final
 
 def _collapse_st_no_keep_shape(st:ShapeTracker) -> Optional[View]:
@@ -181,7 +181,7 @@ def _collapse_st_no_keep_shape(st:ShapeTracker) -> Optional[View]:
     if (mask := _reshape_mask(tuple((a,b) for a,b in mask), tuple(oldshape), tuple(shape))) is None: return None
 
   final = View.create(tuple(shape), tuple(strides), offset, tuple((a,b) for a,b in mask))
-  print(f"found reduction {st} --> {final}")
+#  print(f"found reduction {st} --> {final}")
   return final
 
 def overflow(u: UOp): return u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int)
