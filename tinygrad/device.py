@@ -3,8 +3,8 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context
+from tinygrad.helpers import CI, OSX, WIN, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
+                             cpu_time_execution, colored, Context, round_up
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
@@ -207,6 +207,7 @@ class LRUAllocator(Allocator):
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
+    if WIN: size = round_up(size, 32)
     return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
@@ -222,7 +223,7 @@ MAP_JIT = 0x0800
 class CPUProgram:
   helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
   def __init__(self, name:str, lib:bytes):
-    if sys.platform == "win32":
+    if WIN:
       PAGE_EXECUTE_READWRITE = 0x40
       MEM_COMMIT =  0x1000
       MEM_RESERVE = 0x2000
