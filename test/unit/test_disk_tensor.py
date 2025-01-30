@@ -49,7 +49,7 @@ class TestRawDiskBuffer(unittest.TestCase):
       with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
         f.readinto(tst)
   def test_bitcasts_on_disk(self):
-    _, tmp = tempfile.mkstemp()
+    tmp = temp('bitcast')
     # ground truth = https://evanw.github.io/float-toy/
     t = Tensor.empty((128, 128), dtype=dtypes.uint8, device=f"disk:{tmp}") # uint8
     # all zeroes
@@ -79,6 +79,9 @@ class TestRawDiskBuffer(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       # should fail because backprop through bitcast is undefined
       Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
+
+    # close mmapped buffer before unlinking
+    del t
 
     pathlib.Path(tmp).unlink()
 
@@ -194,6 +197,9 @@ class TestSafetensors(unittest.TestCase):
       if v.dtype != dtypes.bfloat16:
         assert v.numpy().dtype == tensors[k].numpy().dtype
         np.testing.assert_allclose(v.numpy(), tensors[k].numpy())
+
+    # close mmapped buffer before overwriting.
+    del v, loaded
 
     # pytorch does not support U16, U32, and U64 dtypes.
     tensors = {
