@@ -179,8 +179,7 @@ class PTXRenderer(Renderer):
       if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         r[u] = r[u.src[0]]
         continue
-      if u.op is Ops.DEFINE_ACC and u.dtype == dtypes.bool: r[u.src[0]] = ssa("const", u.src[0])
-      elif u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
+      if u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
       elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
       elif u.op is Ops.LOAD:
         assert u.src[0].dtype == dtypes.int64, "load isn't int64"
