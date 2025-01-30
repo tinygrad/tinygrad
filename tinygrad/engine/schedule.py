@@ -555,8 +555,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
       src = []
       changed = False
       for s in u.src:
-        # TODO: how is a base op a VIEW?
-        if s.base.op in DONT_PLACE_IN_KERNEL or s.base.op is Ops.VIEW: src.append(s)
+        if s.base.op in DONT_PLACE_IN_KERNEL: src.append(s)
         else:
           changed = True
           # otherwise it becomes a kernel
