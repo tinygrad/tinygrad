@@ -275,7 +275,7 @@ if __name__=="__main__":
       if i > 1 and i % 20 == 1:
         exported_bufs.append(f"await new Promise(resolve => setTimeout(resolve, 0));") # prevent browser lag
         if step.show_progress: exported_bufs.append(f"progress({prog + int((buf_end_prog - prog) * i / len(bufs))}, 100, 'Launching WebGPU model:');")
-      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";")
+      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, state_dict['{weights[_key]}'].bytes)") + ";")
     exported_bufs = '\n   '.join(exported_bufs)
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
@@ -294,7 +294,7 @@ if __name__=="__main__":
     {kernel_code}
 
     return {{
-      "setup": async (device, safetensor, metadata{f", progress" if step.show_progress else ""}) => {{
+      "setup": async (device, state_dict{f", progress" if step.show_progress else ""}) => {{
 
         {exported_bufs}
 
@@ -333,8 +333,6 @@ if __name__=="__main__":
   partStartOffsets=[]
 
   prekernel = f"""
-  const getTensorBuffer = (safetensorParts, t) => {{return safetensorParts[t.chunk].subarray(t.start_pos, t.start_pos + t.size)}}
-
   const createEmptyBuf = (device, size) => {{
       return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
   }};

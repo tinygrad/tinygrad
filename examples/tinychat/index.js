@@ -444,50 +444,7 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   }
 
   await decompress(compressedBuffers, state_dict, device, progress);
-
-  // TODO: refactor WebGPU backend to only use state_dict instead of decompressedBuffers; probably can get rid of below stuff
-  if (window.BACKEND === "WebGPU") {
-    // FFD bin packing
-    const maxChunkSize = 1149173760; // byte size of float32 output.weight in llama-1B
-    const chunks = [];
-    const size_sorted_tensors = Object.entries(state_dict)
-      .map(([key, value]) => ({name: key, size: value.size}))
-      .sort((a, b) => b.size - a.size);
-    for (const t of size_sorted_tensors) {
-      let placed = false;
-      for (const chunk of chunks) {
-        const currentSum = chunk.reduce((sum, i) => sum + i.size, 0);
-        if (currentSum + t.size <= maxChunkSize) {
-          chunk.push(t);
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) chunks.push([t]);
-    }
-    progress(0.95, 1.0, "Decompressing model:");
-
-    const decompressedBuffers = [];
-    for (let i=0; i<chunks.length; i++) {
-      const chunk = chunks[i];
-      const chunkSize = chunk.reduce((sum, j) => sum + j.size, 0);
-      decompressedBuffers.push(new Uint8Array(chunkSize));
-      let cursor = 0;
-      for (let j=0; j<chunk.length; j++) {
-        const t = chunk[j];
-        decompressedBuffers[i].set(state_dict[t.name].bytes, cursor);
-        state_dict[t.name].bytes = null;
-        state_dict[t.name].chunk = i;
-        state_dict[t.name].start_pos = cursor;
-        cursor += t.size;
-        if (j % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0)); // prevent browser lag
-      }
-    }
-
-    progress(1.0, 1.0, "Decompressing model:");
-    return {chunks: decompressedBuffers, metadata: state_dict};
-  }
-  else if (window.BACKEND === "WASM") {return {metadata: state_dict};}
+  return state_dict;
 };
 
 document.addEventListener("alpine:init", () => {
@@ -526,7 +483,8 @@ document.addEventListener("alpine:init", () => {
       }
 
       try {
-        var tensorData = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
+        //var tensorData = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
+        var state_dict = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
       } catch (error) {this.progress(0, 100, "Error decompressing model"); console.log(error); return;}
 
       var p = 0;
@@ -547,20 +505,15 @@ document.addEventListener("alpine:init", () => {
 
       try {
         p = 40; this.progress(p, 100, `Launching ${window.BACKEND} model:`);
-        // TODO: clean this up
+        await kernelsReady;
         if (window.BACKEND === "WebGPU") {
-          let models = ["transformer"];
-          const args = (window.BACKEND === "WebGPU") ? [device, tensorData.chunks, tensorData.metadata] : [tensorData.metadata];
-          this.nets = await Promise.all([
-                  //transformer().setup(device, tensorData.chunks, tensorData.metadata, this.progress.bind(this)),
-                  transformer().setup(...[...args, this.progress.bind(this)]),
-              ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {}))
+          const model = await transformer().setup(device, state_dict, this.progress.bind(this));
+          this.nets = {"transformer": model};
         }
         else if (window.BACKEND === "WASM") {
-          await kernelsReady;
           const modelWorker = new Worker(`./worker.js?version=${Date.now()}`);
           let msg = await sendMessageToWorker(modelWorker, {header: "setup", data: "setup_transformer"});
-          msg = await sendMessageToWorker(modelWorker, {header: "state_dict", data: tensorData.metadata});
+          msg = await sendMessageToWorker(modelWorker, {header: "state_dict", data: state_dict});
           this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(modelWorker, {header: "token", data: [tok, start_pos]})};
         }
         this.progress(100, 100, `Launching ${window.BACKEND} model:`);
