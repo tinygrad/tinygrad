@@ -2226,7 +2226,7 @@ class TestConst(unittest.TestCase):
     self.assertEqual(len(sched), 1)
     run_schedule(sched)
     # add gets assigned to a new buffer
-    self.assertIsNot(add.lazydata.realized, b.lazydata.realized)
+    self.assertIsNot(add.lazydata.base.realized, b.lazydata.base.realized)
     self.assertListEqual(add.tolist(), [4, 2, 2, 2, 2, 4])
 
   # ** part 3: Tensor variable bindings

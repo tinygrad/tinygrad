@@ -102,7 +102,7 @@ print(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-assert out.realized is not None and out.realized.as_buffer().cast('I')[0] == 5
+assert out.is_realized and out.buffer.as_buffer().cast('I')[0] == 5
 
 
 print("******** fourth, the Tensor ***********")
