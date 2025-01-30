@@ -2272,7 +2272,7 @@ class TestCopyFolding(unittest.TestCase):
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
-    # NOTE: Tensor.empty always creates a VIEW(BUFFER) with ShapeTracker((4,)), we rewrite this to jsut a BUFFER
+    # NOTE: Tensor.empty(4) always creates a VIEW(BUFFER) with ShapeTracker((4,)), we simplify this to jsut a BUFFER
     # in the scheduler because buffer already has shape (4,)
     self.assertIs(b, a.base)
 
@@ -2464,7 +2464,10 @@ class TestUOpBecome(unittest.TestCase):
     b = Tensor.empty(4, 4)
     add = a+b
     check_schedule(add, 1)
+    # NOTE: realized base is always a flat buffer
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
+    # the Tensor UOp can optionally stack a VIEW on top of BUFFER
+    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(add.lazydata, {})
 
   def test_new_buffer_view(self):
     a = Tensor.empty(4, 4)
@@ -2482,8 +2485,6 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.MUL).match(b.lazydata, {}) # before scheduling it's a mul
     check_schedule(b, 0)
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
-    # NOTE: realized base is always a flat buffer
-    assert UPat(Ops.BUFFER).match(b.lazydata.base, {})
     self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
   def test_become_const_in_base(self):
