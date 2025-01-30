@@ -207,10 +207,11 @@ if __name__=="__main__":
     name: str = ""
     input: List[Tensor] = []
     forward: Any = None
+    show_progress: bool = False
 
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
-    Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward),
+    Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, show_progress=True),
     # TODO: output transformer pipeline doesn't work unless we manually fix the start_pos instantiation and usage throughout entire pipeline
     # TODO: Fix compiler to not have above issue
     Step(name = "q6k_to_f32", input = [Tensor.randn(3_144_960, dtype=dtypes.uint8)], forward = q6k_to_f32), # throws exceptions with all larger sizes tried
@@ -269,15 +270,31 @@ if __name__=="__main__":
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
     # TODO: don't duplicate output.weight and tok_embeddings.weight
     buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
-    exported_bufs =  '\n    '.join([f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+    exported_bufs, prog, buf_end_prog = [], 40, 80
+    for i, (name,(size,dtype,_key)) in enumerate(bufs.items()):
+      if i > 1 and i % 20 == 1:
+        exported_bufs.append(f"await new Promise(resolve => setTimeout(resolve, 0));") # prevent browser lag
+        if step.show_progress: exported_bufs.append(f"progress({prog + int((buf_end_prog - prog) * i / len(bufs))}, 100, 'Launching WebGPU model:');")
+      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";")
+    exported_bufs = '\n   '.join(exported_bufs)
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
+    pipelines = f"""
+        const piplines = [];
+        for (let i=0; i<kernels.length; i++) {{
+          const name = kernels[i];
+          const pipeline = await device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}});
+          piplines.push(pipeline);
+          if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0)); // prevent browser lag
+          if (i / kernels.length > 0.33) {{progress({buf_end_prog + int((100-buf_end_prog)/3)}, 100, "Launching WebGPU model:");}}
+          if (i / kernels.length > 0.66) {{progress({buf_end_prog + int((100-buf_end_prog)*2/3)}, 100, "Launching WebGPU model:");}}
+        }}""" if step.show_progress else f'const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));'
     return f"""\n    var {step.name} = function() {{
 
     {kernel_code}
 
     return {{
-      "setup": async (device, safetensor, metadata) => {{
+      "setup": async (device, safetensor, metadata{f", progress" if step.show_progress else ""}) => {{
 
         {exported_bufs}
 
@@ -285,7 +302,7 @@ if __name__=="__main__":
         const gpuReadBuffer = device.createBuffer({{ size: output0.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
 
         const kernels = [{kernel_names}];
-        const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
+        {pipelines}
 
         return async ({",".join([f'data{i}' for i,(k,v) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])}) => {{
             const commandEncoder = device.createCommandEncoder();
