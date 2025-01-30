@@ -544,6 +544,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
       children.setdefault(s, []).append(u)
 
   sink = tensor_map[big_sink]
+  kernels = {}
   while 1:
     sink = graph_rewrite(sink, create_kernels, ctx=children)
     # seed new kernels
@@ -559,7 +560,10 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
           changed = True
           # otherwise it becomes a kernel
           assert s.base.op is not Ops.VIEW
-          new_src = UOp(Ops.KERNEL, src=s.base.src, arg=KernelUOp([s.base]))
+          if s.base in kernels:
+            new_src = kernels[s.base]
+          else:
+            new_src = kernels[s.base] = UOp(Ops.KERNEL, src=s.base.src, arg=KernelUOp([s.base]))
           if s.op is Ops.VIEW: new_src = new_src.view(s.arg)
           src.append(new_src)
       if changed: rep[u] = u.replace(src=tuple(src))
