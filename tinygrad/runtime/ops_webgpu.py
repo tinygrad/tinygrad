@@ -10,11 +10,9 @@ instDesc = webgpu.WGPUInstanceDescriptor()
 instDesc.features.timedWaitAnyEnable = True
 instance = webgpu.wgpuCreateInstance(instDesc)
 
-def to_c_string(_str):
-  return ctypes.create_string_buffer(_str.encode('utf-8'))
+def to_c_string(_str): return ctypes.create_string_buffer(_str.encode('utf-8'))
 
-def from_wgpu_str(string_view):
-  return ctypes.string_at(string_view.data, string_view.length).decode("utf-8")
+def from_wgpu_str(string_view): return ctypes.string_at(string_view.data, string_view.length).decode("utf-8")
 
 def to_wgpu_str(_str):
   return webgpu.WGPUStringView(data=ctypes.cast(ctypes.pointer(to_c_string(_str)), ctypes.POINTER(ctypes.c_char)), length=len(_str))
@@ -22,8 +20,7 @@ def to_wgpu_str(_str):
 def wgpu_wait(future):
   assert webgpu.wgpuInstanceWaitAny(instance, 1, webgpu.WGPUFutureWaitInfo(future=future), 2**64-1) == webgpu.WGPUWaitStatus_Success, "Future failed"
 
-def create_cb_info(cb_info_type, cb_type, cb):
-  return cb_info_type(nextInChain=None, mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
+def create_cb_info(cb_info_type, cb_type, cb): return cb_info_type(nextInChain=None, mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
 
 def write_buffer(device, buf, offset, src):
     src = bytearray(src)
@@ -33,8 +30,7 @@ def write_buffer(device, buf, offset, src):
 def map_buffer(buf, size):
   result: List[Any] = []
 
-  def cb(status, msg, u1, u2):
-    result[:] = status, from_wgpu_str(msg)
+  def cb(status, msg, u1, u2): result[:] = status, from_wgpu_str(msg)
 
   cb_info = create_cb_info(webgpu.WGPUBufferMapCallbackInfo2, webgpu.WGPUBufferMapCallback2, cb)
   wgpu_wait(webgpu.wgpuBufferMapAsync2(buf, webgpu.WGPUMapMode_Read, 0, size, cb_info))
@@ -64,23 +60,6 @@ def read_buffer(dev, buf):
   webgpu.wgpuBufferDestroy(tmp_buffer)
   return memoryview(result).cast("B")
 
-def create_shader_module(device, source):
-  shader = webgpu.WGPUShaderModuleWGSLDescriptor()
-  shader.code = to_wgpu_str(source)
-  shader.chain.next = None
-  shader.chain.sType = webgpu.WGPUSType_ShaderSourceWGSL
-  module = webgpu.WGPUShaderModuleDescriptor()
-  module.nextInChain = ctypes.cast(ctypes.pointer(shader), ctypes.POINTER(webgpu.struct_WGPUChainedStruct))
-
-  # Check compiler error
-  webgpu.wgpuDevicePushErrorScope(device, webgpu.WGPUErrorFilter_Validation)
-  shader_module = webgpu.wgpuDeviceCreateShaderModule(device, module)
-  compiler_error = pop_error(device)
-
-  if compiler_error: raise RuntimeError(f"Shader compilation failed: {compiler_error}")
-
-  return shader_module
-
 def submit(device, command_buffers):
   cb_buffers_array_type = webgpu.WGPUCommandBuffer * len(command_buffers)
   cb_buffers_array = cb_buffers_array_type(*command_buffers)
@@ -89,8 +68,7 @@ def submit(device, command_buffers):
 def pop_error(device):
   result: List[Any] = []
 
-  def cb(status, err_type, msg, i2):
-    result[:] = [from_wgpu_str(msg)]
+  def cb(status, err_type, msg, i2): result[:] = [from_wgpu_str(msg)]
 
   cb_info = create_cb_info(webgpu.WGPUPopErrorScopeCallbackInfo, webgpu.WGPUPopErrorScopeCallback, cb)
   wgpu_wait(webgpu.wgpuDevicePopErrorScopeF(device, cb_info))
@@ -105,7 +83,23 @@ def create_uniform(wgpu_device, val):
 class WebGPUProgram:
   def __init__(self, dev, name:str, lib:bytes):
     (self.dev, self.timestamp_supported) = dev
-    self.name, self.lib, self.prg = name, lib, create_shader_module(self.dev, lib.decode())   # NOTE: this is the compiler
+
+    # Creating shader module
+    shader = webgpu.WGPUShaderModuleWGSLDescriptor()
+    shader.code = to_wgpu_str(lib.decode())
+    shader.chain.next = None
+    shader.chain.sType = webgpu.WGPUSType_ShaderSourceWGSL
+    module = webgpu.WGPUShaderModuleDescriptor()
+    module.nextInChain = ctypes.cast(ctypes.pointer(shader), ctypes.POINTER(webgpu.struct_WGPUChainedStruct))
+
+    # Check compiler error
+    webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
+    shader_module = webgpu.wgpuDeviceCreateShaderModule(self.dev, module)
+    compiler_error = pop_error(self.dev)
+
+    if compiler_error: raise RuntimeError(f"Shader compilation failed: {compiler_error}")
+
+    self.name, self.lib, self.prg = name, lib, shader_module
   def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
     wait = wait and self.timestamp_supported
     tmp_bufs = [*bufs]
@@ -162,8 +156,7 @@ class WebGPUProgram:
       compute=webgpu.WGPUComputeState(module=self.prg, entryPoint=to_wgpu_str(self.name)))
     pipeline_result: List[Any] = []
 
-    def cb(status, compute_pipeline_impl, msg, u1, u2):
-      pipeline_result[:] = status, compute_pipeline_impl, from_wgpu_str(msg)
+    def cb(status, compute_pipeline_impl, msg, u1, u2): pipeline_result[:] = status, compute_pipeline_impl, from_wgpu_str(msg)
 
     cb_info = create_cb_info(webgpu.WGPUCreateComputePipelineAsyncCallbackInfo2,  webgpu.WGPUCreateComputePipelineAsyncCallback2, cb)
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
