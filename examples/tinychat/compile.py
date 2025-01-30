@@ -6,7 +6,7 @@ from functools import partial
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
 from extra.models.llama import convert_from_gguf
 from extra.f16_decompress import u32_to_f16
-from examples.llama3 import build_transformer, Tokenizer
+from examples.llama3 import build_transformer, Tokenizer, Int8Linear
 from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata, gguf_load
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
@@ -185,8 +185,10 @@ if __name__=="__main__":
   dump_tiktoken_bpe(mergeable_ranks, bpe_path)
 
   Device.DEFAULT = "WEBGPU"
-  model = build_transformer(model_path, model_size=model_size, max_context=max_context, load_weights=False)
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context, load_weights=False)
   state_dict = safe_load(f32_fn)
+  for k,v in state_dict.items(): v.replace(v.to("WEBGPU").realize()) # will get "needs a renderer" exception if we don't do this
+  state_dict = Int8Linear.quantize(state_dict, "WEBGPU")
   load_state_dict(model, state_dict, consume=True)
 
   # TODO: make these variables tunable by client?
