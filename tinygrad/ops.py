@@ -110,8 +110,8 @@ class Ops(FastEnum):
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
-  VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto() # noqa: E702
+  VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
   REDUCE_AXIS = auto()
