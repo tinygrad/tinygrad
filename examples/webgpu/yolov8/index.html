@@ -107,6 +107,7 @@
         <div id="div-loading" class="loading-container">
             <p class="loading-text">Loading model</p>
             <span class="loader"></span>
+            <input id="file" style="display: none;" type="file" multiple>
         </div>
     </div>
     <script>
@@ -125,7 +126,15 @@
         offscreenCanvas.width = modelInputSize;
         offscreenCanvas.height = modelInputSize;
         const offscreenContext = offscreenCanvas.getContext('2d');
+        const file = document.getElementById("file");
 
+        file.addEventListener("change", e => {
+            const f = e.target.files[0];
+            if (f) {
+                const videoUrl = URL.createObjectURL(f);
+                video.src = videoUrl;
+            }
+        });
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { ideal: "environment" }}}).then(function (stream) {
@@ -134,7 +143,10 @@
                     canvas.width = video.clientWidth;
                     canvas.height = video.clientHeight;
                 }
-            });
+            }).catch(() => file.style.display = "block");
+        } else {
+            // firefox does not define getUserMedia if webcam is present
+            file.style.display = "block";
         }
 
         async function processFrame() {
@@ -175,7 +187,15 @@
             const offsetY = (modelInputSize - targetHeight) / 2;
             offscreenContext.clearRect(0, 0, modelInputSize, modelInputSize);
             offscreenContext.drawImage(video, offsetX, offsetY, targetWidth, targetHeight);
-            const boxes = await detectObjectsOnFrame(offscreenContext);
+            let boxes;
+            try {
+                boxes = await detectObjectsOnFrame(offscreenContext);
+            } catch (error) {
+                console.log(error);
+                wgpuError.style.display = "block";
+                loadingContainer.style.display = "none";
+                return;
+            }
             drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
@@ -186,7 +206,7 @@
             const ctx = document.querySelector("canvas").getContext("2d");
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineWidth = 3;
-            ctx.font = "30px serif";
+            ctx.font = "10px serif";
             const scaleX = canvas.width / targetWidth;
             const scaleY = canvas.height / targetHeight;
 
