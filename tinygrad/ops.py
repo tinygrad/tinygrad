@@ -169,7 +169,7 @@ class GroupOp:
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
-  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR}
+  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
@@ -286,6 +286,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MULTI:
       return ShapeTracker.from_shape(
         tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape)))
+    if self.op is Ops.BUFFER: return ShapeTracker.from_shape((self.size,))
     # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -499,7 +500,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+    return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 else self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
@@ -528,10 +529,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
-    if self.op is Ops.BUFFER: return self
+    if self.base.op is Ops.BUFFER: return self.base
     assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
     return self.src[0].buf_uop
-  def buf_uop_view(self) -> UOp: return self.buf_uop.view(unwrap(self.st))
   @property
   def buffer(self) -> Buffer:
     if self.op is Ops.VIEW:
@@ -544,9 +544,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
     return ret
   @property
-  def realized(self) -> Optional[Buffer]:
-    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return self.src[0].realized
-    return self.buffer if self.op is Ops.BUFFER else None
+  def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None

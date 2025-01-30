@@ -144,7 +144,7 @@ class AMPageTableTraverseContext:
     return False
 
   def level_up(self):
-    while self.pt_stack[-1][1] == 512 or self._try_free_pt():
+    while self._try_free_pt() or self.pt_stack[-1][1] == 512:
       _, pt_cnt, _ = self.pt_stack.pop()
       if pt_cnt == 512: self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
@@ -174,6 +174,8 @@ class AMMemoryManager:
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
+    if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
+
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True)
@@ -190,7 +192,7 @@ class AMMemoryManager:
     return AMMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
-    if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
+    if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
 
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, free_pts=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
