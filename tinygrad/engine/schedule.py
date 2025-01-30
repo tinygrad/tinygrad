@@ -90,7 +90,8 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # SINK is passthrough
   if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
   # skip creating buffers for CONST/BIND/DEVICE/BUFFER
-  if buf.base.is_realized or buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
+  if buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
+  if buf.base.op is Ops.BUFFER: return buf.view(unwrap(buf.st))
   # VIEW is passthrough
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
@@ -387,8 +388,8 @@ sym = symbolic_simple+PatternMatcher([
   # remove contiguous if we can just view the buffer
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
-  # double contiguous is one contiguous
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.CONTIGUOUS),)), lambda root: root.src[0]),
+  # contiguous/buffer is already contiguous
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER)),)), lambda root: root.src[0]),
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
