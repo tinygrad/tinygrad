@@ -16,7 +16,8 @@ sys.setrecursionlimit(10000)
 # **** Tensor UOp spec
 
 tensor_uop_spec = PatternMatcher([
-  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
+  (UPat(Ops.UNIQUE), lambda: True),
+  (UPat(Ops.DEVICE, dtypes.void, name="device"), lambda device: isinstance(device.arg, str)),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
    lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
 
@@ -395,6 +396,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
       if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
+  # remove UNIQUE from DEVICE
+  (UPat(Ops.DEVICE, src=(UPat(Ops.UNIQUE),), name="x"), lambda x: x.replace(src=())),
 ])
 
 # ** this decides which ops get realized

@@ -609,7 +609,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  @unittest.skip("these two Tensors are the same")
+  #@unittest.skip("these two Tensors are the same")
   def test_example_matmul(self):
     x = Tensor.eye(64, requires_grad=True)
     y = Tensor.eye(64, requires_grad=True)

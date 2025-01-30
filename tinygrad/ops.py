@@ -93,7 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); PRELOAD = auto(); UNIQUE = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -470,7 +470,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # Tensor const is CONST(VIEW(DEVICE)) -> RESHAPE -> EXPAND
     if op is Ops.CONST:
       assert isinstance(arg, get_args(ConstType)), f"trying to create CONST with {arg=}"
-      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),),
+      return UOp.const(dtype, unwrap(arg)).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, src=(UOp.unique(),), arg=device),),
                  ShapeTracker.from_shape(())),)).reshape((1,)*len(shape)).expand(shape)
     # Tensor variable binding is BIND(VAR(VIEW(DEVICE)), CONST(VIEW(DEVICE)))
     if op is Ops.BIND:
@@ -513,6 +513,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def permute(self, arg:tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def stride(self, arg:tuple[sint, ...]): return self._mop(Ops.STRIDE, arg)
+
+  # *** uop UNIQUE ***
+
+  # TODO: use this in Buffer
+  unique_num = itertools.count(0)
+  @staticmethod
+  def unique(): return UOp(Ops.UNIQUE, arg=next(UOp.unique_num))
 
   # *** uop Buffer stuff ***
 
