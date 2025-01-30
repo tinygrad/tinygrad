@@ -843,7 +843,6 @@ class TestOps(unittest.TestCase):
     self.assertAlmostEqual((b*x.sigmoid()*c*a).sum().gradient(x)[0].numpy(), 0.0)
     x = Tensor([-300.0])
     self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
-  @unittest.skip("fix sigmoid stability")
   def test_sigmoid_alt_extreme(self):
     def sigmoid(x:Tensor): return x.exp() / (1 + x.exp())
     x = Tensor([300.0])
