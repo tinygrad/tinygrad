@@ -1,4 +1,5 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
+# TODO: merge with compile_clang.py
 
 import os, sys, json, hashlib
 from functools import partial
@@ -14,6 +15,8 @@ from tinygrad.helpers import fetch, prod
 from typing import NamedTuple, Any, List, Literal
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 from tinygrad.helpers import flatten
+from tinygrad.ops import Ops
+from collections import OrderedDict
 
 # from nn.state.ggml_data_to_tensor
 def q_to_uint8(t: Tensor, b: int) -> Tensor:
@@ -224,6 +227,7 @@ if __name__=="__main__":
     for i in range(1,9): code = code.replace(f"binding({i})", f"binding({i-1})")
     return code
 
+  # TODO: refactor to merge with compile_clang.py
   def compile_step(model, step: Step):
     run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(run, special_names)
@@ -235,9 +239,36 @@ if __name__=="__main__":
     output_names = [name for _,name in special_names.items() if "output" in name]
     input_buf_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
     output_buf_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
-    kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-    exported_bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
-    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
+
+    # TODO: fix some of this stuff upstream
+    symbolic_vars = OrderedDict()
+    next_input_idx = max(int(name.split("input")[1]) for name in special_names.values() if "input" in name) + 1
+    for i, (_, args, global_size, _) in enumerate(statements):
+      for j, var in enumerate(args):
+        if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
+          if var not in symbolic_vars:
+            symbolic_vars[var] = f"input{next_input_idx}"
+            next_input_idx += 1
+            input_names.append(var.arg[0])
+            input_buf_types.append(dtype_to_js_type(var.dtype))
+            special_names[var.arg[0]] = symbolic_vars[var]
+            bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, var.arg[0])
+          statements[i][1][j] = symbolic_vars[var]
+      
+      for j, dim in enumerate(global_size):
+        if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2:
+          if {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
+            name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
+            name, val = name.arg[0], val.arg
+            # TODO: use something less tedious than repeated enumeration for input order canonicalization
+            input_idx = list(i for i, (k,v) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v) if v == special_names[name])[0]
+            global_size[j] = f"data{input_idx}[0] + {val}"
+
+    kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
+    # TODO: don't duplicate output.weight and tok_embeddings.weight
+    buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
+    exported_bufs =  '\n    '.join([f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
     return f"""\n    var {step.name} = function() {{
 
@@ -254,7 +285,7 @@ if __name__=="__main__":
         const kernels = [{kernel_names}];
         const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
-        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
+        return async ({",".join([f'data{i}' for i,(k,v) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])}) => {{
             const commandEncoder = device.createCommandEncoder();
 
             {input_writer}
@@ -283,13 +314,14 @@ if __name__=="__main__":
   partStartOffsets=[]
 
   prekernel = f"""
-    window.MODEL_BASE_URL= "{base_url}";
-
   const getTensorBuffer = (safetensorParts, t) => {{return safetensorParts[t.chunk].subarray(t.start_pos, t.start_pos + t.size)}}
 
   const createEmptyBuf = (device, size) => {{
       return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
   }};
+  const createUniformBuf = (device, size) => {{
+    return device.createBuffer({{size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST}})
+  }}
 
   const createWeightBuf = (device, size, data) => {{
     const buf = device.createBuffer({{ mappedAtCreation: true, size, usage: GPUBufferUsage.STORAGE }});
