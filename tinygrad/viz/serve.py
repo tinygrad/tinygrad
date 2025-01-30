@@ -42,7 +42,10 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   graph: dict[int, tuple[str, list[int], str]] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
-    if u.op in {Ops.CONST, Ops.DEVICE}: excluded.update((u,) + u.src)
+    # always exclude DEVICE/CONST
+    if u.op in {Ops.DEVICE, Ops.CONST}: excluded.add(u)
+    # only exclude CONST VIEW source if it has no other children
+    if u.op is Ops.CONST and len(u.src) != 0 and all((cr:=c()) is None or cr.op is Ops.CONST for c in u.src[0].children): excluded.update(u.src)
   for u in toposort:
     if u in excluded: continue
     argst = str(u.arg)
@@ -63,11 +66,11 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
-def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
+def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, offset=0, limit=200) -> GraphRewriteDetails:
   ret:GraphRewriteDetails = {"uops":[pcall(str, sink:=ctx.sink)], "graphs":[uop_to_json(sink)], "code_line":lines(ctx.loc[0])[ctx.loc[1]-1].strip(),
                              "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "diffs":[], "upats":[], "changed_nodes":[], **metadata}
   replaces: dict[UOp, UOp] = {}
-  for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches)):
+  for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches[offset:offset+limit])):
     replaces[u0] = u1
     new_sink = sink.substitute(replaces)
     ret["graphs"].append(new_sink_js:=uop_to_json(new_sink))
@@ -124,10 +127,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
-      query = parse_qs(url.query)
-      if (qkernel:=query.get("kernel")) is not None:
-        kidx, ridx = int(qkernel[0]), int(query["idx"][0])
-        jret:Any = get_details(contexts[0][kidx], contexts[1][kidx][ridx], kernels[int(qkernel[0])][1][int(query["idx"][0])])
+      if "kernel" in (query:=parse_qs(url.query)):
+        def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
+        kidx, ridx = getarg("kernel"), getarg("idx")
+        jret:Any = get_details(contexts[0][kidx], contexts[1][kidx][ridx], kernels[kidx][1][ridx], getarg("offset", 0), getarg("limit", 200))
       else: jret = kernels
       ret, content_type = json.dumps(jret).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"

@@ -78,7 +78,7 @@ class TestVerifyAST(unittest.TestCase):
     verify_ast(ast:=a.schedule()[-1].ast)
     store_st = [u.st for u in ast.toposort if u.op is Ops.STORE][0]
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [u.st for u in ast.toposort if u.op is Ops.VALID][0]
+    const_st = [u.st for u in ast.toposort if u.op is Ops.CONST][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   def test_assert_swizzle(self):
@@ -92,8 +92,7 @@ class TestVerifyAST(unittest.TestCase):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg="CLANG"),), ShapeTracker.from_shape(())),))
     st = UOp.store(buf, ShapeTracker.from_shape(()).to_uop(), a.cast(dtypes.float))
-    # lowerer asserts because it does not remove ShapeTracker on CONST(VIEW(DEVICE))
-    with self.assertRaises(AssertionError): helper_test_verify_ast(st)
+    helper_test_verify_ast(st)
 
 if __name__ == '__main__':
   unittest.main()

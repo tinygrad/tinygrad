@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any, Callable, cast
+from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -8,7 +8,6 @@ from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid,
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
-from tinygrad.device import is_dtype_supported
 
 # ***** float4/image store handling *****
 
@@ -120,13 +119,9 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
 # ***** optional patterns *****
 
-def bf16_bitcast_to_float(buf:UOp, idx:UOp, root:UOp):
-  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
-  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
-
 powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
-def get_late_rewrite_patterns(ops, force_transcendental=False, device: Optional[str]=None):
+def get_late_rewrite_patterns(ops, force_transcendental=False):
   pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
            ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
@@ -143,9 +138,6 @@ def get_late_rewrite_patterns(ops, force_transcendental=False, device: Optional[
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
-  if device is not None and not is_dtype_supported(dtypes.bfloat16, device):
-    pat += [(UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)),
-             bf16_bitcast_to_float),]
   return PatternMatcher(pat)
 
 # ***** threefry *****
@@ -163,10 +155,6 @@ def threefry2x32(x: UOp, key: UOp):
     xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
 
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
-
-# ***** other math rewrite ****
-
-def sigmoid_like(x:UOp, y:UOp): return (t:=(1/(x+1))) * (1-t) * y
 
 # ***** main rewriter *****
 
@@ -323,10 +311,11 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in {Ops.SINK, Ops.UNROLL} else (x,) for x in root.src)), root.arg)
       if any(x.op in {Ops.SINK, Ops.UNROLL} for x in root.src) else None),
-  # stable sigmoid
-  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), lambda x: sigmoid_like(x, x.const_like(1))),
-  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()*UPat.var("y")), sigmoid_like),
-  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()), lambda x: sigmoid_like(x, (x+1).reciprocal())),
+  ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
+  ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
+  (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")), lambda x,d: 1-d), # x*/(1+x) -> 1-1/(1+x)
+  (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")*UPat.var("y")), lambda x,y,d: y*(1-d)),
+  (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")+UPat.var("y")), lambda x,y,d: (1-d)+x*y),
 ])
 
 # *** uop expander ***
@@ -520,6 +509,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
     mulacc_unrolled)
 
   # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2,
-                                                                       opts.device if opts is not None else None)+pm_render+extra_matcher)
+  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
   return sink
