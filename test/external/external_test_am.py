@@ -139,5 +139,22 @@ class TestAMPageTable(unittest.TestCase):
     with self.assertRaises(AssertionError):
       mm0.unmap_range(0x10000, 0x3000)
 
+  def test_free_pt(self):
+    mm0 = self.d[0].mm
+
+    # offset from start
+    for off in [0, 0x3000, 0x10000]:
+      mm0.map_range(0x1000000 + off, (2 << 20)  - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000))
+      mm0.unmap_range(0x1000000 + off, (2 << 20) - off)
+      mm0.map_range(0x1000000, 2 << 20, paddrs=[(0x10000, 2 << 20)])
+      mm0.unmap_range(0x1000000, 2 << 20)
+
+    # offset from end
+    for off in [0x1000, 0x20000]:
+      mm0.map_range(0x1000000, (2 << 20) - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000))
+      mm0.unmap_range(0x1000000, (2 << 20) - off)
+      mm0.map_range(0x1000000, 2 << 20, paddrs=[(0x10000, 2 << 20)])
+      mm0.unmap_range(0x1000000, 2 << 20)
+
 if __name__ == "__main__":
   unittest.main()
