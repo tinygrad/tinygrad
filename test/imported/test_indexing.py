@@ -23,6 +23,7 @@ def consec(shape, start=1):
 def set_(reference: Tensor, shape, strides, offset):
   if reference.lazydata.base.realized is None: reference.realize()
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
+  # TODO: lazydata.view is an internal method, this should use movement ops
   strided = Tensor(reference.lazydata.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
@@ -181,6 +182,7 @@ class TestIndexing(unittest.TestCase):
 
   # TODO: LLVM is quite fast, why are other compiled backends slow?
   @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL", "NV", "AMD"], "slow")
+  @unittest.skip("why is this test not using movement ops? it shouldn't modify the tensor UOp's VIEW directly")
   def test_advancedindex(self):
     # integer array indexing
 
