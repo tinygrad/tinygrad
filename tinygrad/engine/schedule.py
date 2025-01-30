@@ -490,13 +490,15 @@ class KernelUOp:
   def __init__(self, x): self.lst = tuple(x)
   def __repr__(self): return str(tuple(x.op for x in self.lst))
 
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.COPY, Ops.BUFFER, Ops.CONST, Ops.DEVICE}
+
 # this is basically append_to_block
 def append_to_kernel(ctx:dict[UOp, list[UOp]], x:UOp):
   new_srcs = []
   new_lst = []
   for u in x.src:
     # these ops never fuse
-    if u.op in {Ops.KERNEL, Ops.COPY, Ops.BUFFER}: pass
+    if u.base.op in DONT_PLACE_IN_KERNEL: pass
     # ops with not in kernel children don't fuse
     elif not all(child in x.arg.lst for child in ctx[u]): pass
     # expands don't fuse
@@ -540,7 +542,29 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   for u in tensor_map[big_sink].toposort:
     for s in u.src:
       children.setdefault(s, []).append(u)
-  graph_rewrite(tensor_map[big_sink], create_kernels, ctx=children)
+
+  sink = tensor_map[big_sink]
+  while 1:
+    sink = graph_rewrite(sink, create_kernels, ctx=children)
+    # seed new kernels
+    rep = {}
+    for u in sink.toposort:
+      if u.op is not Ops.KERNEL: continue
+      src = []
+      changed = False
+      for s in u.src:
+        # TODO: how is a base op a VIEW?
+        if s.base.op in DONT_PLACE_IN_KERNEL or s.base.op is Ops.VIEW: src.append(s)
+        else:
+          changed = True
+          # otherwise it becomes a kernel
+          assert s.base.op is not Ops.VIEW
+          new_src = UOp(Ops.KERNEL, src=s.base.src, arg=KernelUOp([s.base]))
+          if s.op is Ops.VIEW: new_src = new_src.view(s.arg)
+          src.append(new_src)
+      if changed: rep[u] = u.replace(src=tuple(src))
+    if not len(rep): break
+    sink = sink.substitute(rep)
 
   # we group the rest of UOps into ScheduleItems
   rev_tensor_map: dict[UOp, list[UOp]] = {}
