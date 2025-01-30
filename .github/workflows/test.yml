@@ -228,7 +228,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.10/site-packages
-        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.10
+        key: linting-packages-v2-${{ hashFiles('**/setup.py') }}-3.10
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint bad-indentation and trailing-whitespace with pylint
