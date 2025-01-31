@@ -121,7 +121,7 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
-# *** this is the spec of shape in a single kernel ***
+# *** this is the UOp shape spec ***
 
 def verify_sink_dims(sink:UOp):
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort if x.op is not Ops.SINK and x.st is not None])]
