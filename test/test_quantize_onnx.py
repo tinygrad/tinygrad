@@ -39,7 +39,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     quantize_static(create_gemm_model("/tmp/test_in.onnx"), out_file,
                     FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False,
                     activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
-                    extra_options={"ActivationSymmetric": False})
+                    extra_options={"ActivationSymmetric": True})
     run_onnx_jit, _, _ = load_onnx_model(out_file)
     with Context(NOOPT=1):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
