@@ -205,8 +205,8 @@ to_si = PatternMatcher([
 ])
 
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
-  # substitute LOAD of fused STORE with just the value
-  sink = graph_rewrite(graph_rewrite(pre, view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
+  # apply swizzles (pushing views from the middle of the AST to BUFFER ops edges)
+  sink = graph_rewrite(graph_rewrite(pre, view_left), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
   ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
   # deal with ASSIGN
