@@ -11,29 +11,6 @@ from tinygrad.ops import Ops
 from collections import OrderedDict
 from examples.tinychat.compile import q6k_to_f32
 
-# from nn.state.ggml_data_to_tensor: TODO: move to namespace of nn.state so we can import?
-def q_to_uint8(t: Tensor, b: int) -> Tensor:
-  # TODO: rewrite with arange?
-  shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-  return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
-
-# TODO: refactor to merge with q6k_to_f32
-def q6k_to_f16(x: Tensor) -> Tensor:
-  blocks = x.reshape((-1, 210))
-  xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
-  scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
-  #d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
-  # TODO: parameterize function for returning fp16 or fp32, or cast fp32 back to fp16 downstream
-  d = blocks[:,-2:].bitcast(dtypes.float16).expand((-1, 256))
-  return (d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales).flatten()
-
-def q6k_to_int8(x: Tensor, shape: Tuple) -> Tuple:
-  #x = q6k_to_f16(x).reshape(shape)
-  x = q6k_to_f32(x).reshape(shape)
-  scale = x.abs().max(axis=1) / 127.0
-  int8_weight = (x.T/scale).T.cast(dtype=dtypes.int8)
-  return scale, int8_weight
-
 if __name__=="__main__":
   Device.DEFAULT = "CLANG"
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
@@ -58,11 +35,8 @@ if __name__=="__main__":
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
     Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, model=model),
-    #Step(name = "q6k_to_f16", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f16),
     Step(name = "q6k_to_f32", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f32),
   ]
-  quant_weight_shapes = ((2048, 2048), (2048, 512), (2048, 8192), (8192, 2048)) # these are shapes in gguf file, need to reverse
-  sub_steps += [Step(name = f"q6k_to_int8_{s1}_{s0}", input = [Tensor.randn((s1 * s0 * 210) // 256, dtype=dtypes.uint8), (s1, s0)], forward = q6k_to_int8) for s0, s1 in quant_weight_shapes]
 
   # TODO: refactor to move some corrected CLANG rendering to export_model.py
   def compile_step(step: Step):
@@ -109,12 +83,6 @@ if __name__=="__main__":
     convert = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{conv_map[x]}]" if x in bufs_to_save else x
     cprog += [f"  {name}({', '.join(map(convert, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     cprog = "\n".join(cprog)
-    # TODO: make tinygrad output wasm-compatible absolute value of fp16
-    # the rendered clang for absolute value of fp16 numbers, compiles/works fine with clang, but causes exceptions while instantiating wasm module in browser
-    # for example: __fp16 alu23 = (alu10*(((_Bool)(alu10))?((alu10<((__fp16)(0.0f)))?((__fp16)(-1.0f)):((__fp16)(1.0f))):((__fp16)(0.0f))));
-    pattern = re.compile(r'__fp16\s+(\w+)\s*=\s*\((\w+)\s*\*\s*\(\(\(_Bool\)\(\2\)\)\?\(\(\2<\(\(__fp16\)\(0\.0f\)\)\)\?\(\(__fp16\)\(-1\.0f\)\):\(\(__fp16\)\(1\.0f\)\)\):\(\(__fp16\)\(0\.0f\)\)\)\);')
-    replacement = r'__fp16 \1 = (__fp16)fabsf((float)\2);'
-    cprog = pattern.sub(replacement, cprog)
 
     with open(os.path.join(os.path.dirname(__file__), f"{step.name}.c"), "w") as text_file:
       text_file.write(cprog)
