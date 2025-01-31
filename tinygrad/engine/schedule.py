@@ -281,6 +281,14 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
     forced_realize = r in group
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
+    # can only fuse assign if no other assign_target is used in the kernel
+    if not forced_realize and any(x in ctx.assigns for x in group):
+      parents = deque((r, *group))
+      while parents and not forced_realize:
+        if (p_uop:=ctx.allbufs.get(p:=parents.pop())) is None: continue
+        if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
+        if p in ctx.realizes: continue
+        parents.extend([x.base.buf_uop for x in p_uop.src if x.base.is_realized or (x.base.op is Ops.VIEW and len(x.base.src) != 0)])
     if forced_realize or not group:
       tr = r
       if can_chase:
