@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
@@ -557,11 +557,29 @@ class USBTrackedMemoryView:
     (self.addr, self.size), self.usb = bar_info, usb
     self.elsz = elsz
 
-  def __getitem__(self, index):
-    print(hex(self.addr + index * self.elsz), self.size, index)
-    return self.usb.pcie_mem_req(self.addr + index * self.elsz, None, self.elsz)
-  def __setitem__(self, index, value): self.usb.pcie_mem_req(self.addr + index * self.elsz, value, self.elsz)
+  def _read(self, index):
+    val = 0
+    for off in range(max(1, self.elsz // 4)):
+      part = self.usb.pcie_mem_req(self.addr + index * self.elsz + off * 4, None, min(4, self.elsz))
+      val += part << (32 * off)
+    return val
+
+  def _write(self, index, value):
+    for off in range(max(1, self.elsz // 4)):
+      self.usb.pcie_mem_req(self.addr + index * self.elsz + off * 4, (value >> (32 * off)) & 0xFFFFFFFF, min(4, self.elsz))
+
+  def __getitem__(self, index): return self._read(index)
+  def __setitem__(self, index, value): return self._write(index, value)
   def cast(self, new_type, **kwargs): return self
+
+  def copyin(self, mv):
+    print("copyin", len(mv))
+    x = mv.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[self.elsz])
+    for i in range(len(x)): self._write(i, x[i])
+
+  def copyout(self, mv):
+    x = mv.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[self.elsz])
+    for i in range(len(x)): x[i] = self._read(i)
 
   @property
   def nbytes(self): return self.size
@@ -574,32 +592,36 @@ class USBIface(PCIIface):
 
   def __init__(self, dev, dev_id):
     self.dev = dev
-    self.usb = Asm236x("/dev/sg1")
+    self.usb = Asm236x("/dev/sg0")
 
     # setup pci switch
     self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
-    self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0x2000, size=2)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_SUBORDINATE_BUS, bus=0, dev=0, fn=0, value=3, size=1)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_SECONDARY_BUS, bus=0, dev=0, fn=0, value=1, size=1)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=0, dev=0, fn=0, value=0, size=1)
+
+    self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1000, size=2)
 
     self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x4000, size=2)
     self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0xffff, size=2)
 
     for bus in [1, 2]:
-      self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1, size=2)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
       self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
 
       self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
       self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
 
       self.usb.pcie_cfg_req(libpciaccess.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=3, size=1)
-      self.usb.pcie_cfg_req(libpciaccess.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=(2 if bus == 1 else 3), size=1)
-      self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=1, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=bus-1, size=1)
 
       self.usb.pcie_cfg_req(libpciaccess.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_BRIDGE_CTL_BUS_RESET, size=1)
       time.sleep(1)
       self.usb.pcie_cfg_req(libpciaccess.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_BRIDGE_CTL_PARITY|libpciaccess.PCI_BRIDGE_CTL_SERR, size=1)      
       self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_IO | libpciaccess.PCI_COMMAND_MEMORY | libpciaccess.PCI_COMMAND_MASTER, size=1)
 
-    bar_next_addr, bar_off, self.bars = [0x10000, 0x40000000], 0, {}
+    bar_next_addr, bar_off, self.bars = [0x10000000, 0x40000000], 0, {}
     for bar_id in range(4):
       bar_cfg = self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=3, dev=0, fn=0, size=4)
       if bar_cfg & libpciaccess.PCI_BASE_ADDRESS_SPACE == libpciaccess.PCI_BASE_ADDRESS_SPACE_MEMORY:
@@ -646,7 +668,7 @@ class USBIface(PCIIface):
     vram_bar = USBTrackedMemoryView(self.bars[0], self.usb, elsz=1)
     doorbell_bar = USBTrackedMemoryView(self.bars[1], self.usb, elsz=8)
     mmio_bar = USBTrackedMemoryView(self.bars[3], self.usb, elsz=4)
-    AMDev(None, vram_bar, doorbell_bar, mmio_bar)
+    AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
     # print(bars)
 
 class AMDDevice(HCQCompiled):
