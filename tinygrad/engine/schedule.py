@@ -494,6 +494,11 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(sink, break_sched, ctx)
+
+  # TODO: this should be the break between the "grouper" and the "linearizer"
+  # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
+  # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
+
   # create schedule items + map buffers to realized tensors
   prescheduled: list[ScheduleItem] = []
   for store_uops in store_groups:
