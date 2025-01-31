@@ -243,6 +243,8 @@ jobs:
       run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
+    - name: Delete TinyGrad Cache
+      run: rm -rf /home/runner/.cache/tinygrad/downloads
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
     - name: Fuzz Test symbolic
