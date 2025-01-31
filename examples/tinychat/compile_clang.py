@@ -45,7 +45,8 @@ if __name__=="__main__":
     state = get_state_dict(step.model)
     weightbuf_to_name = {id(x.lazydata.base.realized): name for name, x in state.items()}
     # this omits saving the random seeds, which therefore will be set in client by default to 0,0 (2x uint32)
-    bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weightbuf_to_name}
+    # also omits exporting kv caches, which will be zero initialized by wasm
+    bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weightbuf_to_name and "cache_kv" not in weightbuf_to_name[v[2]]}
     cprog = ["#include <tgmath.h>", "#include <stddef.h>"]
 
     # declare buffers that we'll load weights into from javascript

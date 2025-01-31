@@ -4,11 +4,11 @@
 # point below path at your emscripten installation location
 source ~/emsdk/emsdk_env.sh
 which emcc
-inputs=("transformer" "q6k_to_f32" "q6k_to_int8_2048_2048" "q6k_to_int8_512_2048" "q6k_to_int8_8192_2048" "q6k_to_int8_2048_8192")
+inputs=("transformer" "q6k_to_f32")
 # TODO: auto generate initial memories
-initial_memories=(4456448 196608 655360 262144 2228224 2228224)
+initial_memories=(71499776 196608)
 # TODO: tune max memories
-maximum_memories=(2500001792 65536000 65536000 65536000 65536000 65536000)
+maximum_memories=(2500001792 65536000)
 for i in "${!inputs[@]}"; do
   input="${inputs[i]}"
   initial_memory="${initial_memories[i]}"

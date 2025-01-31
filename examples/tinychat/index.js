@@ -216,7 +216,7 @@ function sendMessageToWorker(worker, message) {
     // if message.data is a [k, v] from Object.entries(state_dict)
     else if (message.header === "k_v") {worker.postMessage(message.data, [message.data[1].bytes.buffer]);}
     // if message.data is the decompressed state_dict
-    else if (message.header === "state_dict") {worker.postMessage(message.data, Object.values(message.data).map(({ bytes }) => bytes.buffer));}
+    else if (message.header === "state_dict") {worker.postMessage(message.data, Object.values(message.data).flatMap(({ bytes }) => bytes ? [bytes.buffer] : []));}
   });
 }
 
@@ -314,7 +314,8 @@ async function decompress(state_dict, device, progress) {
     await Promise.all(gpuJobs);
   } 
   else if (window.BACKEND == "WASM") {
-    delete state_dict["tok_embeddings.weight"]; // uses same data as output.weight
+    state_dict["output.weight"] = state_dict["tok_embeddings.weight"]; // buffer is the same; clang export code prioritized output.weight
+    delete state_dict["tok_embeddings.weight"];
 
     const num_decomposers = navigator.hardwareConcurrency - 1;
     const workers = Array.from({ length: num_decomposers }, () => new Worker(`./worker.js?version=${Date.now()}`));
