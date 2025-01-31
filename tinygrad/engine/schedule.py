@@ -204,12 +204,9 @@ to_si = PatternMatcher([
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
 ])
 
-# LOAD(BUFFER) -> the STORE value if it's we're doing the STORE in the same kernel
-multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
-
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
-  # remove movement ops + substitute LOAD of fused STORE with just the value
-  sink = graph_rewrite(graph_rewrite(pre, multioutput+view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
+  # substitute LOAD of fused STORE with just the value
+  sink = graph_rewrite(graph_rewrite(pre, view_left, store_bufs:={x.buf_uop:x.src[2] for x in pre.src}), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
   ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
   # deal with ASSIGN
@@ -266,20 +263,6 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
-def get_isolated_children(r:UOp, reduce_for_op:dict[UOp, UOp], children:defaultdict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp],
-                           realizes:dict[UOp, UOp], group:dict[UOp, None]) -> dict[UOp, None]:
-  rc_parents, cache = deque(group), set()
-  while rc_parents:
-    if (p:=uval(allbufs[rc_parents.pop()])) in cache: continue
-    cache.add(p)
-    # max one reduceop per kernel
-    if p.op is Ops.REDUCE_AXIS: return {}
-    rc_parents.extend(x.base.buf_uop for x in p.src if is_scheduled(x.base) and x.base.buf_uop is not r)
-  # search descendants of the reduceop that can cleanly group
-  descendants: dict[UOp, None] = {}
-  for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
-  return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
-
 def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
   """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
@@ -296,16 +279,8 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
-    if not forced_realize and len(group) > 1:
-      group = get_isolated_children(r, reduce_for_op, ctx.children, ctx.allbufs, ctx.realizes, group)
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x in ctx.assigns for x in group):
-      parents = deque((r, *group))
-      while parents and not forced_realize:
-        if (p_uop:=ctx.allbufs.get(p:=parents.pop())) is None: continue
-        if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
-        if p in ctx.realizes: continue
-        parents.extend([x.base.buf_uop for x in p_uop.src if x.base.is_realized or (x.base.op is Ops.VIEW and len(x.base.src) != 0)])
+    # can only have one output
+    if not forced_realize and len(group) > 1: forced_realize = True
     if forced_realize or not group:
       tr = r
       if can_chase:
