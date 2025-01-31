@@ -263,7 +263,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
-def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
+def group_realizes(ctx:ScheduleContext) -> list[UOp]:
   """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
@@ -320,10 +320,8 @@ def group_realizes(ctx:ScheduleContext) -> list[list[UOp]]:
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
-  # group BUFFER uops into kernels
-  output_groups: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  for ubuf in ctx.realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
-  return list(output_groups.values())
+  # return all the ones that realize
+  return list(ctx.realizes.keys())
 
 # **** Schedule creation and BFS toposort
 
@@ -492,7 +490,7 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
   # add realizes
   sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
   # group realizes into kernels
-  store_groups = group_realizes(ctx)
+  single_outputs = group_realizes(ctx)
   graph_rewrite(sink, break_sched, ctx)
 
   # TODO: this should be the break between the "grouper" and the "linearizer"
@@ -501,15 +499,14 @@ def create_schedule_with_vars(big_sink:UOp, skip_check:bool=not __debug__) -> tu
 
   # create schedule items + map buffers to realized tensors
   prescheduled: list[ScheduleItem] = []
-  for store_uops in store_groups:
-    small_sink = UOp.sink(*[ctx.realizes[u] for u in store_uops])
+  for buf_uop in single_outputs:
+    small_sink = UOp.sink(ctx.realizes[buf_uop])
     if not all(x.op is Ops.STORE for x in small_sink.src): raise RuntimeError(f"expected all realized BUFFERs to get a STORE {sink}")
     prescheduled.append(schedule_uop(small_sink, ctx))
     # can only schedule once
-    for buf_uop in store_uops:
-      for tensor_uop in ctx.tensor_uops[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
-      # increment refcount for this buffer
-      buf_uop.buffer.ref(1)
+    for tensor_uop in ctx.tensor_uops[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
+    # increment refcount for this buffer
+    buf_uop.buffer.ref(1)
 
   # add kernel children
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
