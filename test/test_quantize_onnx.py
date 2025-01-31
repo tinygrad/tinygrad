@@ -45,8 +45,8 @@ class TestQuantizeOnnx(unittest.TestCase):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
 
   def test_prequant(self):
-    X = Tensor.ones(1, 1024, dtype=dtypes.uint8).contiguous().realize()
-    W = Tensor.ones(1024, 1024, dtype=dtypes.uint8).contiguous().realize()
+    X = Tensor(np.random.uniform(0, 255, size=(1,1024)).astype(np.uint8))
+    W = Tensor(np.random.uniform(0, 255, size=(1024,1024)).astype(np.uint8))
     out = X@W
     out.realize()
 
