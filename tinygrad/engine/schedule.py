@@ -219,7 +219,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
       if x.op is Ops.PRELOAD:
         assign_preloads[x.buf_uop] = None
         # if this kernel also assigns to the buffer, we only allow either contiguous or masked views for the LOAD
-        if x.buf_uop in store_bufs and not (st:=x.st_arg).contiguous:
+        if x.buf_uop is pre.src[0].buf_uop and not (st:=x.st_arg).contiguous:
           # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
           if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: pass
           # if it has a single view and it's equal when you shrink a contig, it's fine
