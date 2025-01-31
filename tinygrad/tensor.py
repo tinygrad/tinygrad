@@ -2512,7 +2512,7 @@ class Tensor(MathTrait):
     """
     return self.log2()*math.log(2)
   def log2(self):
-    """   
+    """
     Computes the base-2 logarithm element-wise.
 
     See: https://en.wikipedia.org/wiki/Logarithm
@@ -2555,6 +2555,7 @@ class Tensor(MathTrait):
     ```
     """
     return (self>0).where(self, 0)
+
   def sigmoid(self):
     """
     Applies the Sigmoid function element-wise.
@@ -2566,6 +2567,7 @@ class Tensor(MathTrait):
     ```
     """
     return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
+
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
     """
     Applies the Hardsigmoid function element-wise.
@@ -2579,8 +2581,9 @@ class Tensor(MathTrait):
     ```
     """
     return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
+
   def sqrt(self):
-    """  
+    """
     Computes the square root of the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -2598,7 +2601,7 @@ class Tensor(MathTrait):
     """
     return self.reciprocal().sqrt()
   def sin(self):
-    """ 
+    """
     Computes the sine of the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -2624,6 +2627,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.sin() / self.cos()
+
   def asin(self):
     """
     Computes the inverse sine (arcsine) of the tensor element-wise.
@@ -2636,6 +2640,7 @@ class Tensor(MathTrait):
     coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
     x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
     return self.sign() * x
+
   def acos(self):
     """
     Computes the inverse cosine (arccosine) of the tensor element-wise.
@@ -2645,6 +2650,7 @@ class Tensor(MathTrait):
     ```
     """
     return math.pi / 2 - self.asin()
+
   def atan(self):
     """
     Computes the inverse tangent (arctan) of the tensor element-wise.
@@ -2654,7 +2660,9 @@ class Tensor(MathTrait):
     ```
     """
     return (self / (1 + self * self).sqrt()).asin()
+
   # ***** math functions *****
+
   def trunc(self: Tensor) -> Tensor:
     """
     Truncates the tensor element-wise.
@@ -2710,6 +2718,7 @@ class Tensor(MathTrait):
     ```
     """
     return self != self
+
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
     Linearly interpolates between `self` and `end` by `weight`.
@@ -2722,6 +2731,7 @@ class Tensor(MathTrait):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
+
   def square(self):
     """
     Squares the tensor element-wise.
@@ -2776,7 +2786,9 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
+
   # ***** activation functions *****
+
   def elu(self, alpha=1.0):
     """
     Applies the Exponential Linear Unit (ELU) function element-wise.
@@ -2789,6 +2801,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.relu() - alpha*(1-self.exp()).relu()
+
   def celu(self, alpha=1.0):
     """
     Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
@@ -2814,6 +2827,7 @@ class Tensor(MathTrait):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
+
   def swish(self):
     """
     See `.silu()`
@@ -2825,6 +2839,7 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sigmoid()
+
   def silu(self):
     """
     Applies the Sigmoid Linear Unit (SiLU) function element-wise.
@@ -2837,6 +2852,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.swish()   # The SiLU function is also known as the swish function.
+
   def relu6(self):
     """
     Applies the ReLU6 function element-wise.
@@ -2849,6 +2865,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.relu() - (self-6).relu()
+
   def hardswish(self):
     """
     Applies the Hardswish function element-wise.
@@ -2861,6 +2878,7 @@ class Tensor(MathTrait):
     ```
     """
     return self * (self+3).relu6() * (1/6)
+
   def tanh(self):
     """
     Applies the Hyperbolic Tangent (tanh) function element-wise.
