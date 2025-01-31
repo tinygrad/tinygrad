@@ -4,7 +4,7 @@ from onnx import helper, numpy_helper, TensorProto
 from examples.benchmark_onnx import load_onnx_model
 from tinygrad import Tensor, Context
 
-N = 256
+N = 1024
 
 def create_gemm_model(model_path, in_size=N, out_size=N):
   # Define input and output
