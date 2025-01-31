@@ -1,7 +1,7 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 # TODO: merge with compile_clang.py
 
-import os, sys, json, hashlib
+import os, sys, json, hashlib, math
 from functools import partial
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
 from extra.models.llama import convert_from_gguf
@@ -72,36 +72,50 @@ def clang_export_q6k_to_f32():
     # we still need to manually edit this file: 
     #   manually fixed type declarations, deleted buf_6 and buf_7, cast buf_0 to buf_6, cast buf_4 to buf_7
 
-def prepare_browser_gguf_chunks(model_path, model):
-  # split gguf file into browser-friendly chunks
+def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.weight": "tok_embeddings.weight"}):
+  # currently takes just token_embd.weight from gguf file, the rest from tinygrad model state_dict
+  # split weights into browser-friendly chunks
   # export metadata JSON with offsets -- depends on tinygrad gguf metadata parser below
-  chunk_size = 2**29 # 536_870_912
+  chunk_size = 48 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
 
   gguf_tensor = Tensor.empty(os.stat(model_path).st_size, dtype=dtypes.uint8, device=f"disk:{model_path}").to(Device.DEFAULT)
   kv_data, state_dict, t_infos, data_start = gguf_load(gguf_tensor)
+  t_infos = [x for x in t_infos if x[0] in gguf_cherrypick]
 
   # calculate byte size of each tensor
   for i, info in enumerate(t_infos[:-1]):
     size = t_infos[i+1][3] - t_infos[i][3]
     t_infos[i] = (size, info)
   assert (last_info_dtype:=t_infos[-1][2]) in (0, 14)
-  last_info_size = {0: 4, 14: 8*210/256}.get(last_info_dtype) * prod(t_infos[-1][1])
-  t_infos[-1] = (last_info_size, t_infos[-1])
+  last_info_size = {0: 4, 14: 210/256}.get(last_info_dtype) * prod(t_infos[-1][1])
+  t_infos[-1] = (int(last_info_size), t_infos[-1])
 
-  prerun_model = build_transformer(model_path, model_size=model_size, max_context=max_context, load_weights=False)
   # for llama, some model parameters used in inference are instantiated at runtime
   new_state_dict = get_state_dict(model)
-  new_weights = set(new_state_dict.keys()) - set(convert_from_gguf(state_dict, prerun_model).keys())
+  del new_state_dict['output.weight'] # same as token_embeddings.weight
+  new_weights = set(new_state_dict.keys()) - set(gguf_cherrypick.values())
   new_weights = {name: new_state_dict[name].contiguous().to("CLANG").realize() for name in new_weights}
+  empty_t_infos = [] # for cache_kv buffers which are just zeroes to start
+  tiny_to_gguf = {dtypes.float: 0, dtypes.float16: 1, dtypes.int8: 16, dtypes.int: 18}
   for k,v in new_weights.items():
-    next_start_pos = t_infos[-1][1][3] + t_infos[-1][0]
-    t_infos.append((v.lazydata.buffer.nbytes, (k, "not_from_gguf_file", {dtypes.float: 0, dtypes.int: 18}[v.dtype], next_start_pos)))
+    if "cache_kv" not in k:
+      t_infos.append((v.lazydata.buffer.nbytes, (k, "not_from_gguf_file", tiny_to_gguf[v.dtype], "not_from_gguf_file")))
+    elif "cache_kv" in k:
+      empty_t_infos.append((v.lazydata.buffer.nbytes, (k, "not_from_gguf_file", tiny_to_gguf[v.dtype], "not_from_gguf_file")))
+
+  split_t_infos = []
+  for size, info in t_infos:
+    if size <= chunk_size:
+      split_t_infos.append((size, info, ()))
+    else:
+      for i in range(0, size, chunk_size):
+        split_t_infos.append((min(chunk_size, size-i), (f"{info[0]}_part{math.ceil(i/chunk_size)}", *info[1:]), (i, min(i+chunk_size, size))))
 
   chunks = []
   # FFD bin packing
-  t_infos = sorted(t_infos, reverse=True)
-  for info in t_infos:
+  split_t_infos = sorted(split_t_infos, reverse=True)
+  for info in split_t_infos:
       placed = False
       for chunk in chunks:
         if sum(i[0] for i in chunk) + info[0] <= chunk_size:
@@ -111,27 +125,39 @@ def prepare_browser_gguf_chunks(model_path, model):
       if not placed:
         chunks.append([info])
 
-  gguf_dtypes = {0: "float32", 14: "Q6_K", 18: "int32"}
+  gguf_dtypes = {0: "float32", 1: "float16", 14: "Q6_K", 16: "int8", 18: "int32"}
   new_weights = {k: {"tensor": v} for k,v in new_weights.items()}
   with open(model_path, 'rb') as reader:
     for i, chunk in enumerate(chunks):
       cursor = 0
       with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "wb+") as writer:
-        for size, info in chunk:
-          weight_metadata = {"chunk": i, "start_pos": cursor, "size": size, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}
-          if (name:=info[0]) not in new_weights:
-            reader.seek(data_start + info[3])
+        for size, info, offsets in chunk:
+          name, part_num = (info[0], 0) if "_part" not in info[0] else (info[0].split("_part")[0], int(info[0].split("_part")[1]))
+          default = {"parts": {}, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}
+          weight_metadata = metadata.get(name, default) if name not in new_weights else new_weights[name].get("metadata", default)
+          weight_metadata["parts"][part_num] = {"chunk": i, "file_start_pos": cursor, "size": size}
+          if name not in new_weights:
+            chunk_offset = offsets[0] if offsets else 0
+            reader.seek(data_start + info[3] + chunk_offset)
             data = reader.read(size)
             metadata[name] = weight_metadata
           elif name in new_weights:
             data = bytes(new_weights[name]["tensor"].lazydata.buffer.as_buffer())
+            data = data if not offsets else data[offsets[0]:offsets[1]]
             new_weights[name]["metadata"] = weight_metadata
           writer.write(data)
           cursor += size
 
   metadata = convert_from_gguf(metadata, model)
-  for k,v in new_weights.items():
-    metadata[k] = v["metadata"]
+  del metadata['output.weight'] # convert_from_gguf duplicates token_embd.weight to output.weight
+  new_weights.update({info[0]: {"metadata": {"parts": {0: {"empty": True, "size": size}}, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}} for size, info in empty_t_infos})
+  metadata.update({k: v["metadata"] for k,v in new_weights.items()})
+  for k in metadata:
+    metadata[k]["parts"] = [part for part_num, part in sorted(metadata[k]["parts"].items(), key = lambda x: x[0])]
+    cursor = 0
+    for i, part in enumerate(metadata[k]["parts"]):
+      metadata[k]["parts"][i]["target_start_pos"] = cursor
+      cursor += part["size"]
 
   # compute hashes, which client app will check to determine whether to update with new weights and/or detect integrity issues
   state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
@@ -275,7 +301,7 @@ if __name__=="__main__":
       if i > 1 and i % 20 == 1:
         exported_bufs.append(f"await new Promise(resolve => setTimeout(resolve, 0));") # prevent browser lag
         if step.show_progress: exported_bufs.append(f"progress({prog + int((buf_end_prog - prog) * i / len(bufs))}, 100, 'Launching WebGPU model:');")
-      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, state_dict['{weights[_key]}'].bytes)") + ";")
+      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else (f"createWeightBuf(device, {size}, state_dict['{weights[_key]}'].bytes)" if "cache_kv" not in weights[_key] else f"createEmptyBuf(device, {size})") + ";"))
     exported_bufs = '\n   '.join(exported_bufs)
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
