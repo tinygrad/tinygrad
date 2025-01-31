@@ -524,7 +524,6 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((4, 4)).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
 
-  @unittest.expectedFailure
   def test_padded_const(self):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
@@ -538,16 +537,15 @@ class TestShapeSpec(unittest.TestCase):
     assert x.st.views[-1].mask is y.st.views[-1].mask is None
     assert all(s.shape == (3, 3) for s in valid_ternary.src)
 
-  # currently this is None, it shouldn't be
-  @unittest.expectedFailure
+  # NOTE: CONST ShapeTracker comes from its source
   def test_scalar_const(self):
-    a = UOp.const(dtypes.int, 0)
+    a = Tensor(0).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
 
-  @unittest.expectedFailure
   def test_scalar_var(self):
     vv = UOp.variable("a", 1, 4).bind(2)
-    self.assertEqual(vv.st, ShapeTracker.from_shape(()))
+    t = Tensor(vv).lazydata
+    self.assertEqual(t.st, ShapeTracker.from_shape(()))
 
   # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
 

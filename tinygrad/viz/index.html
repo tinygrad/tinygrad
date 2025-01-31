@@ -193,6 +193,13 @@
     border-radius: 8px;
     padding: 8px;
   }
+  .progress {
+    font-size: 20px;
+    z-index: 2;
+    align-self: center;
+    justify-content: center;
+    width: 100%;
+  }
   </style>
 </head>
 <body>
@@ -204,6 +211,7 @@
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
+    <p class="progress"></p>
     <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
@@ -347,7 +355,23 @@
         ret = cache[cacheKey];
       }
       else {
-        ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
+        const p = document.querySelector(".progress");
+        const limit = 100;
+        const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
+        p.style.display = pageCount == 1 ? "none" : "flex";
+        for (let i=0; i < pageCount; i++) {
+          p.innerText = `fetching data ${i+1}/${pageCount}`;
+          const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
+          if (i === 0) ret = chunk
+          else {
+            // TODO: this shouldn't exist after the viz api refactor
+            for (const [k,v] of Object.entries(chunk)) {
+              if (["uops", "graphs"].includes(k)) v.splice(0, 1);
+              if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
+            }
+          }
+        }
+        p.style.display = "none";
         cache[cacheKey] = ret;
       }
       renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);

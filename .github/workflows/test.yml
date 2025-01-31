@@ -648,7 +648,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-          key: windows-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+          key: windows-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
         shell: bash
         run: |
@@ -658,7 +658,7 @@ jobs:
             echo "LLVM=1" >> $GITHUB_ENV
           fi
       - name: Install dependencies
-        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source (llvm)
         shell: bash
         run: |
