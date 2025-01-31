@@ -1821,7 +1821,7 @@ class TestIndexing(unittest.TestCase):
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
     # this AST first needs to swizzle, but it doesn't have implicit movementops
-    with self.assertRaisesRegex(AssertionError, "swizzle"): verify_ast(sink)
+    self.assertEqual(swizzle_cnt(sink), 1)
     verify_ast(rsink)
 
   def test_no_reshape_reduceop(self):
