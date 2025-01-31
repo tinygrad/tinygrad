@@ -317,7 +317,9 @@ async function decompress(state_dict, device, progress) {
     state_dict["output.weight"] = state_dict["tok_embeddings.weight"]; // buffer is the same; clang export code prioritized output.weight
     delete state_dict["tok_embeddings.weight"];
 
-    const num_decomposers = navigator.hardwareConcurrency - 1;
+    // current source weights have everything int8 quantized or float32; only output.weight is decompressed from Q6_K. 
+    // we could make this faster with more workers, but only takes 2-3 sec
+    const num_decomposers = 1
     const workers = Array.from({ length: num_decomposers }, () => new Worker(`./worker.js?version=${Date.now()}`));
     const promises = workers.map(async (worker) => {
       await sendMessageToWorker(worker, {header: "setup", data: "decompress"}); // setup flag, worker can only do decompression now
