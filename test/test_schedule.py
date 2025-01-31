@@ -2350,9 +2350,9 @@ class TestTensorUOpSpec(unittest.TestCase):
     unsafe_push_views = PatternMatcher([
       (UPat.cvar("root").view(name="view"), lambda root,view: root.replace(src=tuple(x.view(view.st) for x in root.src))),
     ])
-    t = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_push_views)
+    a.lazydata = graph_rewrite(a.lazydata.sink(), remove_movement_ops+merge_views+unsafe_push_views)
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      create_schedule_with_vars(t)
+      a.schedule()
 
   def test_expanded_const_ok(self):
     a = Tensor.ones((4, 4))
@@ -2364,8 +2364,8 @@ class TestTensorUOpSpec(unittest.TestCase):
   def test_symbolic_shape_ok(self):
     a = Tensor.ones(4)
     vi = UOp.variable("i", 1, 10).bind(4)
-    t = graph_rewrite(a.reshape(vi).sum().lazydata, remove_movement_ops+merge_views)
-    create_schedule_with_vars(t)
+    a.lazydata = graph_rewrite(a.reshape(vi).sum().lazydata, remove_movement_ops+merge_views)
+    a.schedule()
 
 class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
