@@ -63,17 +63,16 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
-  # This will only work if retain_graph works.
-  def test_retain_graph(self):
+  def test_accumulate_gradients(self):
     x = Tensor(x_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
     m = Tensor(m_init)
     out = x.dot(W).relu()
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad,wgrad = x.grad, W.grad
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
     xgrad3,wgrad3 = x.grad, W.grad
