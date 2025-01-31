@@ -25,7 +25,7 @@ def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if x in s[-1].outputs else x for x in s[-1].bufs]
   return s[-1].ast, bufs
 
-def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0):
+def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, acc_dtype=dtype_out)
@@ -34,7 +34,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   run_schedule(sched)
   out = r.numpy()
   k = Kernel(realized_ast)
-  k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
+  k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
   k.linearize()
   assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
@@ -44,13 +44,14 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
-def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0, ensure_triggered:bool=True):
+def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
+                                         ensure_triggered:bool=True):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   r = a.matmul(b, acc_dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
   k = Kernel(realized_ast)
-  k.apply_tensor_cores(1, axis=axis, tc_opt=tc_opt)
+  k.apply_tensor_cores(1, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
   k.linearize()
   wmmas = len([uop for uop in k.uops if uop.op is Ops.WMMA])
   tcs = len([x for x in k.applied_opts if x.op is OptOps.TC])
@@ -121,6 +122,8 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn(4,).realize()
     helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1*-1], opts=[])
 
+  # shapeless CONST in AST is not supported
+  @unittest.expectedFailure
   def test_const_alu_indexing_one_const_fine(self):
     st = ShapeTracker.from_shape((4,)).to_uop()
     load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
@@ -1300,10 +1303,10 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_opt(a, [
       [Opt(OptOps.GROUP, 0, 32)],
       [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(op=OptOps.LOCAL, axis=0, amt=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0)],
-      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, amt=8), Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.UNROLL, axis=1, amt=4)], # noqa: E501
+      [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
+      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
+      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
+      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -1363,8 +1366,8 @@ class TestLinearizer(unittest.TestCase):
           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
           UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),))),)),)),)) # noqa: E501
     opt = [
-        Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=16),
-        Opt(op=OptOps.LOCAL, axis=1, amt=2), Opt(op=OptOps.UPCAST, axis=3, amt=2)
+        Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=16),
+        Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)
     ]
     k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is Ops.STORE][0]
@@ -1381,9 +1384,9 @@ class TestLinearizer(unittest.TestCase):
         UOp(Ops.LOAD, dtypes.float, src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1),
           UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),))),)),)),)) # noqa: E501
-    opt = [Opt(op=OptOps.LOCAL, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=1, amt=8),
-            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.LOCAL, axis=0, amt=8),
-            Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=0, amt=2)]
+    opt = [Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=1, arg=8),
+            Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8),
+            Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
@@ -1606,9 +1609,9 @@ class TestFloat4(unittest.TestCase):
 
     # TODO: fix this, expected might change but should be positive
     for expected, opts in [
-      ((7, 0), [Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=3), Opt(op=OptOps.UNROLL, axis=0, amt=4)]),
-      ((5, 0), [Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4)]),
-      ((2, 0), [Opt(op=OptOps.UNROLL, axis=0, amt=4)]),
+      ((7, 0), [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=3), Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
+      ((5, 0), [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
+      ((2, 0), [Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
     ]:
       k = Kernel(ast)
       for opt in opts: k.apply_opt(opt)
@@ -1637,8 +1640,8 @@ class TestFloat4(unittest.TestCase):
             UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 1, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),))),)),)),)),))  # noqa: E501
 
     for expected, opts in [
-      (1, [Opt(op=OptOps.UPCAST, axis=2, amt=4)]),
-      (4, [Opt(op=OptOps.UPCAST, axis=2, amt=4), Opt(op=OptOps.UPCAST, axis=0, amt=4)]),
+      (1, [Opt(op=OptOps.UPCAST, axis=2, arg=4)]),
+      (4, [Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]),
     ]:
       k = Kernel(ast)
       for opt in opts: k.apply_opt(opt)
@@ -1660,8 +1663,8 @@ class TestFloat4(unittest.TestCase):
                 UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1),
                 UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(256, 64, 3, 56, 2, 3, 56, 2), strides=(1806336, 28224, 3, 504, 0, 1, 9, 0), offset=0, mask=((0, 256), (0, 64), (0, 3), (0, 56), (0, 1), (0, 3), (0, 56), (0, 1)), contiguous=False), View(shape=(256, 64, 3, 115, 3, 115), strides=(7225344, 112896, 37632, 336, 112, 1), offset=0, mask=((0, 256), (0, 64), (0, 3), (0, 112), (0, 3), (0, 112)), contiguous=False), View(shape=(256, 64, 456, 456), strides=(7617600, 119025, 345, 1), offset=0, mask=((0, 256), (0, 64), (0, 345), (0, 345)), contiguous=False), View(shape=(1, 256, 1, 64, 4, 114, 4, 114), strides=(0, 13307904, 0, 207936, 51984, 456, 114, 1), offset=0, mask=None, contiguous=True)))),)),)),)),)),)),)) # noqa: E501
     for expected, opts in [
-      (16, [Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=2, amt=2), Opt(op=OptOps.LOCAL, axis=2, amt=3), Opt(op=OptOps.UPCAST, axis=3, amt=4)]),  # noqa: E501
-      (4, [Opt(op=OptOps.LOCAL, axis=1, amt=16), Opt(op=OptOps.UPCAST, axis=1, amt=0), Opt(op=OptOps.UPCAST, axis=2, amt=2)]),
+      (16, [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=2, arg=3), Opt(op=OptOps.UPCAST, axis=3, arg=4)]),  # noqa: E501
+      (4, [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=2)]),
     ]:
       k = Kernel(ast)
       for opt in opts: k.apply_opt(opt)
@@ -1694,7 +1697,6 @@ class TestHandCodedOpts(unittest.TestCase):
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
 
-  @unittest.expectedFailure # requires contiguous folding
   def test_masked_upcast_wino_full(self):
     with Context(WINO=1):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
@@ -1958,7 +1960,7 @@ class TestKernelOpts(unittest.TestCase):
               UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(1243, 256), strides=(1, 0), offset=0, mask=None, contiguous=False),))),)),)),)),)),)) # noqa: E501
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     with self.assertRaises(KernelOptError):
-      k.apply_opt(Opt(OptOps.TC, 0, 1))
+      k.apply_opt(Opt(OptOps.TC, 0, (-1, 1)))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_core_opts(self):

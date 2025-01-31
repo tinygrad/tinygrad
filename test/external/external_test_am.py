@@ -3,7 +3,9 @@ from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraver
 from tinygrad.helpers import mv_address
 
 class FakeGMC:
-  def __init__(self): self.vm_base = 0x0
+  def __init__(self):
+    self.vm_base = 0x0
+    self.address_space_mask = (1 << 44) - 1
   def flush_tlb(self, *args, **kwargs): pass
 
 class FakePCIRegion:
@@ -14,7 +16,7 @@ class FakePCIDev:
 
 class FakeAM:
   def __init__(self):
-    self.is_booting = True
+    self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
     self.vram = memoryview(bytearray(4 << 30))
     self.gmc = FakeGMC()
@@ -72,7 +74,7 @@ class TestAMPageTable(unittest.TestCase):
       for tup in results:
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
-          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
           assert pte['paddr'] == va + _offset + i * _pte_covers, f"Expected paddr {pte['paddr']:#x} to be {va + _offset + i * _pte_covers:#x}"
           assert pte['valid'] == 1
 
@@ -81,7 +83,7 @@ class TestAMPageTable(unittest.TestCase):
       for tup in results:
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
-          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
           assert pte['paddr'] == 0
           assert pte['valid'] == 0
 
@@ -113,7 +115,7 @@ class TestAMPageTable(unittest.TestCase):
       for tup in ctx.next(0x100000):
         _offset, _pt, _pte_idx, _n_ptes, _pte_covers = tup
         for i in range(_n_ptes):
-          pte = helper_read_entry_components(_pt.get_entry(_pte_idx + i))
+          pte = helper_read_entry_components(_pt.entries[_pte_idx + i])
           assert pte['paddr'] == 0xdead0000 + _offset + i * _pte_covers, f"paddr {pte['paddr']:#x} not {0xdead0000 + _offset + i * _pte_covers:#x}"
           assert pte['valid'] == 1
 
@@ -136,6 +138,23 @@ class TestAMPageTable(unittest.TestCase):
 
     with self.assertRaises(AssertionError):
       mm0.unmap_range(0x10000, 0x3000)
+
+  def test_free_pt(self):
+    mm0 = self.d[0].mm
+
+    # offset from start
+    for off in [0, 0x3000, 0x10000]:
+      mm0.map_range(0x1000000 + off, (2 << 20)  - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000))
+      mm0.unmap_range(0x1000000 + off, (2 << 20) - off)
+      mm0.map_range(0x1000000, 2 << 20, paddrs=[(0x10000, 2 << 20)])
+      mm0.unmap_range(0x1000000, 2 << 20)
+
+    # offset from end
+    for off in [0x1000, 0x20000]:
+      mm0.map_range(0x1000000, (2 << 20) - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000))
+      mm0.unmap_range(0x1000000, (2 << 20) - off)
+      mm0.map_range(0x1000000, 2 << 20, paddrs=[(0x10000, 2 << 20)])
+      mm0.unmap_range(0x1000000, 2 << 20)
 
 if __name__ == "__main__":
   unittest.main()

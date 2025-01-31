@@ -102,19 +102,16 @@ class AMFirmware:
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
-  def __init__(self, adev, paddr, lv): self.paddr, self.view, self.lv = paddr, to_mv(adev.paddr2cpu(paddr), 0x1000).cast('Q'), lv
+  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.entries, self.lv = adev, paddr, to_mv(adev.paddr2cpu(paddr), 0x1000).cast('Q'), lv
 
-  def set_table(self, entry_id, pte:AMPageTableEntry, valid=True):
-    self.view[entry_id] = (pte.paddr & 0x0000FFFFFFFFF000) | (am.AMDGPU_PTE_VALID if valid else 0)
+  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
+    assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
 
-  def set_page(self, entry_id, paddr, uncached=False, system=False, snooped=False, frag=0, valid=True):
-    f = (am.AMDGPU_PTE_VALID if valid else 0) | am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE \
-      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if self.lv != am.AMDGPU_VM_PTB else 0) \
+    f = (am.AMDGPU_PTE_VALID if valid else 0) | ((am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE) if not table else 0) \
+      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
       | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
-    self.view[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
-
-  def get_entry(self, entry_id): return self.view[entry_id]
+    self.entries[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -126,27 +123,28 @@ class AMPageTableTraverseContext:
 
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
-    if (entry:=pt.get_entry(pte_idx)) & am.AMDGPU_PTE_VALID:
-      assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
-      child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
-    else:
+    if (entry:=pt.entries[pte_idx]) & am.AMDGPU_PTE_VALID == 0:
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_table(pte_idx, child_page_table:=AMPageTableEntry(self.adev, self.adev.mm.palloc(0x1000, zero=True), lv=pt.lv+1))
+      pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
+      entry = pt.entries[pte_idx]
+
+    assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
+    child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
     return self.pt_stack[-1]
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.get_entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
+    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entries[i] & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
       self.adev.mm.pfree(pt.paddr)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
-      parent_pt.set_page(parent_pte_idx, 0x0, valid=False)
+      parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
       return True
     return False
 
   def level_up(self):
-    while self.pt_stack[-1][1] == 512 or self._try_free_pt():
+    while self._try_free_pt() or self.pt_stack[-1][1] == 512:
       _, pt_cnt, _ = self.pt_stack.pop()
       if pt_cnt == 512: self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
@@ -156,7 +154,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.get_entry(pte_idx)&am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -173,18 +171,20 @@ class AMMemoryManager:
     self.adev, self.vram_size = adev, vram_size
     self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
-    self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=True, boot=True), lv=am.AMDGPU_VM_PDB1)
+    self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
+    if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
+
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, create_pts=True)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
-        frag = 0 if pte_covers == 0x1000 else 0x9
         for pte_off in range(pte_cnt):
-          assert pt.get_entry(pte_idx + pte_off) & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.get_entry(pte_idx + pte_off):#x}"
-          pt.set_page(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, frag=frag, valid=True)
+          assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers,
+            uncached=uncached, system=system, snooped=snooped, frag=0 if pte_covers == 0x1000 else 0x9, valid=True)
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
@@ -192,13 +192,13 @@ class AMMemoryManager:
     return AMMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
-    if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
+    if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
 
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, free_pts=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.get_entry(pte_id) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.get_entry(pte_id):#x}"
-        pt.set_page(pte_id, paddr=0x0, valid=False)
+        assert pt.entries[pte_id] & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entries[pte_id]:#x}"
+        pt.set_entry(pte_id, paddr=0x0, valid=False)
 
   @staticmethod
   def alloc_vaddr(size:int, align=0x1000) -> int: return AMMemoryManager.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
@@ -233,8 +233,8 @@ class AMMemoryManager:
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, pcidev, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
-    self.pcidev, self.devfmt = pcidev, devfmt
+  def __init__(self, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+    self.devfmt = devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
@@ -258,8 +258,8 @@ class AMDev:
     # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
-    self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000001)) and (getenv("AM_RESET", 0) != 1)
+    self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000002)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -292,12 +292,14 @@ class AMDev:
       ip.init()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
+    self.smu.set_clocks(level=-1) # last level, max perf.
     self.gfx.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def fini(self):
     for ip in [self.sdma, self.gfx]: ip.fini()
+    self.smu.set_clocks(level=0)
 
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
