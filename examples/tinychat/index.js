@@ -505,9 +505,8 @@ document.addEventListener("alpine:init", () => {
       }
 
       try {
-        //var tensorData = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
         var state_dict = await getAndDecompressGGUFChunks(device, this.progress.bind(this));
-      } catch (error) {this.progress(0, 100, "Error decompressing model"); console.log(error); return;}
+      } catch (error) {this.progress(0, 100, `Error decompressing model: ${error}`); console.log(error); return;}
 
       var p = 0;
       try {
@@ -523,7 +522,7 @@ document.addEventListener("alpine:init", () => {
         const tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
         p = 30; this.progress(p, 100, "Loading tokenizer:");
-      } catch (error) {this.progress(p, 100, "Error launching tokenizer"); console.log(error); return;}
+      } catch (error) {this.progress(p, 100, `Error launching tokenizer: ${error}`); console.log(error); return;}
 
       try {
         p = 40; this.progress(p, 100, `Launching ${window.BACKEND} model:`);
@@ -540,7 +539,7 @@ document.addEventListener("alpine:init", () => {
         }
         this.progress(100, 100, `Launching ${window.BACKEND} model:`);
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
-      } catch (error) {this.progress(p, 100, "Error launching model"); console.log(error); return;}
+      } catch (error) {this.progress(p, 100, `Error launching model: ${error}`); console.log(error); return;}
     },
 
     // current state
