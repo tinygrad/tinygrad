@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, shape_spec, resolve, Variable, sint, \
-  graph_rewrite, track_rewrites, view_left
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
@@ -57,7 +57,8 @@ class Kernel:
     if ast.op is Ops.SINK: self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    type_verify(list(self.ast.toposort), shape_spec)
+    # verify AST matches the spec
+    if __debug__: type_verify(list(self.ast.toposort), shape_spec)
 
     self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
 
@@ -669,9 +670,9 @@ class Kernel:
       if getenv("RAWAST"): print(self.ast)
       print(modified_ast)
       print(self.applied_opts)
-    type_verify(list(modified_ast.toposort))
-    # TODO: sadly this is failing because of how group_for_reduces constructs UOps, there's probably a way to fix this
-    #type_verify(list(modified_ast.toposort), shape_spec)
+    # verify AST matches the spec
+    if __debug__: type_verify(list(modified_ast.toposort))
+    #if __debug__: type_verify(list(self.ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
