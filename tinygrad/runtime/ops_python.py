@@ -69,7 +69,7 @@ class PythonProgram:
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
           assert dtype.fmt is not None
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
-          buf = memoryview(bytearray(arg[1]*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
+          buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
           ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size

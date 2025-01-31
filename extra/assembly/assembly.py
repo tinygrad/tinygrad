@@ -105,7 +105,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == Ops.DEFINE_LOCAL:
-      lang.ins.append(AssemblyInstruction(Ops.DEFINE_LOCAL, None, [], args))
+      lang.ins.append(AssemblyInstruction(Ops.DEFINE_LOCAL, None, [], (args, dtype.size)))
       lang.ins.append(AssemblyInstruction(Ops.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
     elif uop == Ops.LOOP:
       if args[1] == "global":
