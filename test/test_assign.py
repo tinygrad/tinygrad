@@ -283,6 +283,7 @@ class TestAssign(unittest.TestCase):
       #assert ba1 == ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
+  @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
     a = Tensor.randn(32, 32).realize()
     b = Tensor.full((32, ), 1.).contiguous().realize()
@@ -321,6 +322,7 @@ class TestAssign(unittest.TestCase):
       b.assign(r + b.permute(1, 0))
       b.realize()
 
+  @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use(self):
     a = Tensor.randn(32, 32, 32).realize()
     b = Tensor.full((32, 32), 1.).contiguous().realize()
@@ -333,6 +335,7 @@ class TestAssign(unittest.TestCase):
       c.assign(r + b_perm)
       Tensor.realize(b, c)
 
+  @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use_possible(self):
     a = Tensor.randn(32, 32, 32, dtype=dtypes.int).realize()
     b = Tensor.arange(32 * 32).reshape(32, 32).realize()
