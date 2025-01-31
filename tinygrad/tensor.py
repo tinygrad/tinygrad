@@ -9,6 +9,7 @@ from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildi
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
@@ -59,7 +60,7 @@ def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
-  return ret.buf_uop_view()
+  return ret
 
 def get_shape(x) -> tuple[int, ...]:
   # NOTE: str is special because __getitem__ on a str is still a str
@@ -76,7 +77,7 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
-  return ret.buf_uop_view()
+  return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:Union[str, tuple[str, ...]], dtype:DType) -> list[list[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
@@ -246,6 +247,9 @@ class Tensor(SimpleMathTrait):
       # multi fixup
       _apply_map_to_tensors(get_multi_map(big_sink))
       big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
+
+    # verify Tensors match the spec
+    if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
 
     schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map)
@@ -449,7 +453,6 @@ class Tensor(SimpleMathTrait):
 
     r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
-    r.lazydata.buf_uop_view()
     return r
 
   @staticmethod
@@ -1006,7 +1009,7 @@ class Tensor(SimpleMathTrait):
     """
     axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
     if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
-    return self._apply_uop(UOp.stride, arg=tuple([-1 if i in axis_arg else 1 for i in range(len(self.shape))]))
+    return self._apply_uop(UOp.flip, arg=tuple([i in axis_arg for i in range(len(self.shape))]))
 
   def shrink(self, arg:tuple[Optional[tuple[sint, sint]], ...]) -> Tensor:
     """
