@@ -2,7 +2,7 @@ import numpy as np
 import onnx, unittest
 from onnx import helper, numpy_helper, TensorProto
 from examples.benchmark_onnx import load_onnx_model
-from tinygrad import Tensor, Context
+from tinygrad import Tensor, Context, dtypes
 
 N = 1024
 
@@ -43,6 +43,12 @@ class TestQuantizeOnnx(unittest.TestCase):
     run_onnx_jit, _, _ = load_onnx_model(out_file)
     with Context(NOOPT=1):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
+
+  def test_prequant(self):
+    X = Tensor.ones(1, 1024, dtype=dtypes.uint8).contiguous().realize()
+    W = Tensor.ones(1024, 1024, dtype=dtypes.uint8).contiguous().realize()
+    out = X@W
+    out.realize()
 
 if __name__ == "__main__":
   unittest.main()
