@@ -586,7 +586,6 @@ class TestShapeSpec(unittest.TestCase):
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
-  @unittest.expectedFailure
   def test_buffer_st(self):
     a = UOp.new_buffer(Device.DEFAULT, 10, dtypes.float)
     self.assertEqual(a.st, ShapeTracker.from_shape((10,)))
