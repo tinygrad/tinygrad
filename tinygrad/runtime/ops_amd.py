@@ -502,7 +502,7 @@ class PCIIface:
     return to_mv(fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
-    if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
+    if host or (uncached and cpu_access): # host or gtt-like memory.
       vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
 
@@ -564,7 +564,7 @@ class AMDDevice(HCQCompiled):
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
 
     if AMDDevice.signals_page is None:
-      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
+      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, uncached=True, cpu_access=True)
       AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
     else: self.dev_iface.map(AMDDevice.signals_page)
 
