@@ -220,7 +220,7 @@ function sendMessageToWorker(worker, message) {
   });
 }
 
-async function decompress(compressedBuffers, state_dict, device, progress) {
+async function decompress(state_dict, device, progress) {
   let totalLoaded = 0;
   let totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0);
   const numCheckpoints = 90;
@@ -416,7 +416,8 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   }
 
   const correctHashes = data.metadata.chunks.map(chunk => chunk.hash)
-  const compressedBuffers = await Promise.all(data.metadata.chunks.map(chunk => getPart(chunk.name, chunk.hash)));
+  // TODO: process one file at a time to minimize overhead
+  const files = await Promise.all(data.metadata.chunks.map(chunk => getPart(chunk.name, chunk.hash)));
 
   // delete unused cached buffers to free disk space -- if we update weights, user will otherwise have obsolete cached buffers
   const dbKeys = await getAllKeysFromDb(db);
@@ -424,26 +425,44 @@ const getAndDecompressGGUFChunks = async (device, progress) => {
   const notInCorrectHashes = dbKeys.filter(key => !correctHashesSet.has(key));
   for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
 
-  for (let i = 0; i < compressedBuffers.length; i++) {
-    compressedBuffers[i] = new Uint8Array(compressedBuffers[i]);
-    saveTensorToDb(db, correctHashes[i], compressedBuffers[i]);
-  }
+  // TODO: load each chunk directly to WebGPU buffers, for mobile
 
   // load state_dict with weights
   // split weights into one ArrayBuffer per weight, necessary for zero-copy hand-off of individual weights to separate workers
-  // copy out weights from one parent buffer at a time, then delete the parent buffer, to minimize memory overhead
-  const chunked_state_dict = Array.from({ length: compressedBuffers.length }, () => []);
-  Object.entries(state_dict).forEach(([k, v]) => {
-    chunked_state_dict[v.chunk].push([k, v]);
-  });
-  for (let i = 0; i < compressedBuffers.length; i++) {
-    for (const [k, v] of chunked_state_dict[i]) {
-      state_dict[k].bytes = compressedBuffers[i].slice(v.start_pos, v.start_pos + v.size);
+  // copy out weights from one file's buffer at a time, then delete the buffer, to minimize memory overhead
+  const parts_by_file = Array.from({ length: files.length }, () => []);
+  for (const [k,v] of Object.entries(state_dict)) {
+    for (const part of v.parts) {
+      if (part.empty) state_dict[k].empty = true; // assumes no other parts of this weight exist and are non-empty
+      else {
+        part.key = k;
+        part.dtype = v.dtype;
+        parts_by_file[part.chunk].push(part);
+      }
     }
-    compressedBuffers[i] = null;
   }
 
-  await decompress(compressedBuffers, state_dict, device, progress);
+  for (let i = 0; i < files.length; i++) {
+    files[i] = new Uint8Array(files[i]);
+    saveTensorToDb(db, correctHashes[i], files[i]);
+    for (const part of parts_by_file[i]) {
+      const whole_weight_size = state_dict[part.key].parts.reduce((sum, part) => sum + part.size, 0);
+      state_dict[part.key].size = whole_weight_size;
+      if (files[i].length === whole_weight_size) {
+        state_dict[part.key].bytes = files[i];
+        continue;
+      }
+      if (!state_dict[part.key].bytes) state_dict[part.key].bytes = new Uint8Array(whole_weight_size);
+      if (!part.empty) {
+        const target = state_dict[part.key].bytes;
+        const source = (files[i].length === part.size) ? files[i] : files[i].slice(part.file_start_pos, part.file_start_pos + part.size);
+        target.set(source, part.target_start_pos);
+      }
+    }
+    files[i] = null;
+  }
+
+  await decompress(state_dict, device, progress);
   return state_dict;
 };
 
