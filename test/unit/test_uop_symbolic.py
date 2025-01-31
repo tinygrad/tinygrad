@@ -140,6 +140,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_1(self):
     self.helper_test_variable(Variable("a", 0, 8)%1, 0, 0, "0")
 
+  def test_max_folds(self):
+    self.helper_test_variable(Variable("a", 0, 20).maximum(10).maximum(11), 11, 20, "max(a, 11)")
+
   def test_add_min_max(self):
     self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
 

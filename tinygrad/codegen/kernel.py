@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-  graph_rewrite, track_rewrites, view_left
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
@@ -57,11 +57,8 @@ class Kernel:
     if ast.op is Ops.SINK: self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: verify_ast(self.ast)
-    except AssertionError as e:
-      print("INVALID AST")
-      print(self.ast)
-      raise e
+    # verify AST matches the spec
+    if __debug__: type_verify(list(self.ast.toposort), shape_spec)
 
     self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
 
@@ -673,7 +670,10 @@ class Kernel:
       if getenv("RAWAST"): print(self.ast)
       print(modified_ast)
       print(self.applied_opts)
-    verify_ast(modified_ast)
+    # verify AST matches the spec after applying opts
+    if __debug__: type_verify(list(modified_ast.toposort))
+    # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
+    #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
@@ -693,39 +693,3 @@ class Kernel:
                         key=lambda x: (x.op, x.src[0].arg)))
     return ProgramSpec(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
-
-# the living definition of intermediate UOps
-
-def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> None:
-  if uop in sts: return
-  # restore globals from the two stage reduce
-  # this is because this LOAD has an implicit movement op
-  if uop.op is Ops.LOAD and uop.src[0].op is Ops.DEFINE_LOCAL:
-    _assert_valid_uop(local_reduce:=uop.src[2].src[2], uop.st_arg, sts)
-    sts[uop] = sts[local_reduce]
-    return
-  for x in uop.src: _assert_valid_uop(x, st, sts)
-  # only reduceuop is allowed to change shape, limited to turning n to 1
-  if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
-  # movementops are pushed to VIEW
-  elif uop.op is Ops.VIEW:
-    # NOTE: we disallow VIEW in the middle of the AST, if it has a DEVICE source it's fine
-    assert len(uop.src) == 0 or uop.src[0].op is Ops.DEVICE, f"can't swizzle in kernel yet {uop}"
-    st = uop.arg
-  # everything else inherits shape
-  else:
-    if len(src_sts:=[sts[x] for x in uop.src if x in sts]) == 0: return None
-    st = src_sts[0]
-    if not all_same(shapes:=[x.shape for x in src_sts]):
-      if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
-      raise AssertionError(f"found implicit expand {sizes} {shapes}")
-  sts[uop] = st
-
-def verify_ast(ast:UOp) -> None:
-  assert ast.op is Ops.SINK and all(x.op is Ops.STORE for x in ast.src), "must be SINK"
-  assert all_same([x.st_arg.size for x in ast.src]), "outputs must be exactly the same size"
-  sts: dict[UOp, ShapeTracker] = {}
-  for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
-  assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
-  type_verify(list(sts))
