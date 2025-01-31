@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -116,7 +116,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(SimpleMathTrait):
+class Tensor(MathTrait):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -2512,8 +2512,9 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.log2()*math.log(2)
+  
   def log2(self):
-    """
+    """   
     Computes the base-2 logarithm element-wise.
 
     See: https://en.wikipedia.org/wiki/Logarithm
@@ -2523,6 +2524,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
+
   def exp(self):
     """
     Computes the exponential function element-wise.
@@ -2534,6 +2536,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.mul(1/math.log(2)).exp2()
+  
   def exp2(self):
     """
     Computes the base-2 exponential function element-wise.
@@ -2545,6 +2548,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
+  
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2582,9 +2586,9 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
-
+  
   def sqrt(self):
-    """
+    """  
     Computes the square root of the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -2592,6 +2596,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
+  
   def rsqrt(self):
     """
     Computes the reciprocal of the square root of the tensor element-wise.
@@ -2601,15 +2606,17 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.reciprocal().sqrt()
+  
   def sin(self):
-    """
+    """ 
     Computes the sine of the tensor element-wise.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
     ```
-    """
+    """ 
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
+ 
   def cos(self):
     """
     Computes the cosine of the tensor element-wise.
@@ -2778,6 +2785,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self * self.sign()
+  
   def reciprocal(self):
     """
     Compute `1/x` element-wise.
@@ -2785,9 +2793,9 @@ class Tensor(SimpleMathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
-    """
+    """ 
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
-
+  
   # ***** activation functions *****
 
   def elu(self, alpha=1.0):
@@ -2802,7 +2810,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.relu() - alpha*(1-self.exp()).relu()
-
+  
   def celu(self, alpha=1.0):
     """
     Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
@@ -3258,7 +3266,7 @@ class Tensor(SimpleMathTrait):
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
-
+  
   def lshift(self, x:int):
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
@@ -3282,7 +3290,7 @@ class Tensor(SimpleMathTrait):
     """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
     return self.idiv(2 ** x)
-
+  
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Computes power of `self` with `x`.
@@ -3337,7 +3345,7 @@ class Tensor(SimpleMathTrait):
     # NOTE: the mid-point is for backward, revisit after new gradient API
     if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
     return (self<x).detach().where(x, self)
-
+  
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
     Computes element-wise minimum of `self` and `x`.
@@ -3351,7 +3359,7 @@ class Tensor(SimpleMathTrait):
     """
     t, x = self._broadcasted(x)
     return t._inverse().maximum(x._inverse())._inverse()
-
+  
   def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
     Return a tensor of elements selected from either `x` or `y`, depending on `self`.
