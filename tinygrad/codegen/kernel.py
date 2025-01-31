@@ -670,6 +670,8 @@ class Kernel:
       print(modified_ast)
       print(self.applied_opts)
     type_verify(list(modified_ast.toposort))
+    # TODO: sadly this is failing because of how group_for_reduces constructs UOps, there's probably a way to fix this
+    #type_verify(list(modified_ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
