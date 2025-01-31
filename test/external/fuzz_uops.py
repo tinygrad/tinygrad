@@ -3,8 +3,7 @@ from collections import defaultdict
 import numpy as np
 from dataclasses import replace
 from typing import DefaultDict, Dict, List, Tuple
-from tinygrad.ops import UOp, Ops
-from tinygrad.spec import print_uops
+from tinygrad.ops import UOp, print_uops, Ops
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored

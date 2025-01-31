@@ -678,6 +678,13 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   alu = python_alu[op](*operands)
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 
+# ***** uop helpers *****
+
+def print_uops(uops:list[UOp]):
+  for i,u in enumerate(uops):
+    formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
+
 # ***** pattern matcher *****
 
 def get_location() -> tuple[str, int]:

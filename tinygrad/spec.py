@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_int, prod
 
@@ -130,8 +130,3 @@ def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):
     if any(ret is False for ret in spec_ret) or all(ret is None for ret in spec_ret):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
-
-def print_uops(uops:list[UOp]):
-  for i,u in enumerate(uops):
-    formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")

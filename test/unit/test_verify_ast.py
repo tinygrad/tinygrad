@@ -4,8 +4,7 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import UOp, Ops
-from tinygrad.spec import print_uops
+from tinygrad.ops import UOp, Ops, print_uops
 from tinygrad.codegen.kernel import verify_ast
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
