@@ -2511,7 +2511,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.log2()*math.log(2)
-  
   def log2(self):
     """   
     Computes the base-2 logarithm element-wise.
@@ -2523,7 +2522,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
-
   def exp(self):
     """
     Computes the exponential function element-wise.
@@ -2547,7 +2545,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
-  
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2559,7 +2556,6 @@ class Tensor(MathTrait):
     ```
     """
     return (self>0).where(self, 0)
-
   def sigmoid(self):
     """
     Applies the Sigmoid function element-wise.
@@ -2571,7 +2567,6 @@ class Tensor(MathTrait):
     ```
     """
     return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
-
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
     """
     Applies the Hardsigmoid function element-wise.
@@ -2585,7 +2580,6 @@ class Tensor(MathTrait):
     ```
     """
     return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
-  
   def sqrt(self):
     """  
     Computes the square root of the tensor element-wise.
@@ -2595,7 +2589,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
-  
   def rsqrt(self):
     """
     Computes the reciprocal of the square root of the tensor element-wise.
@@ -2605,7 +2598,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.reciprocal().sqrt()
-  
   def sin(self):
     """ 
     Computes the sine of the tensor element-wise.
@@ -2615,7 +2607,6 @@ class Tensor(MathTrait):
     ```
     """ 
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
- 
   def cos(self):
     """
     Computes the cosine of the tensor element-wise.
@@ -2634,7 +2625,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.sin() / self.cos()
-
   def asin(self):
     """
     Computes the inverse sine (arcsine) of the tensor element-wise.
@@ -2647,7 +2637,6 @@ class Tensor(MathTrait):
     coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
     x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
     return self.sign() * x
-
   def acos(self):
     """
     Computes the inverse cosine (arccosine) of the tensor element-wise.
@@ -2657,7 +2646,6 @@ class Tensor(MathTrait):
     ```
     """
     return math.pi / 2 - self.asin()
-
   def atan(self):
     """
     Computes the inverse tangent (arctan) of the tensor element-wise.
@@ -2667,9 +2655,7 @@ class Tensor(MathTrait):
     ```
     """
     return (self / (1 + self * self).sqrt()).asin()
-
   # ***** math functions *****
-
   def trunc(self: Tensor) -> Tensor:
     """
     Truncates the tensor element-wise.
@@ -2725,7 +2711,6 @@ class Tensor(MathTrait):
     ```
     """
     return self != self
-
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
     Linearly interpolates between `self` and `end` by `weight`.
@@ -2738,7 +2723,6 @@ class Tensor(MathTrait):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
-
   def square(self):
     """
     Squares the tensor element-wise.
@@ -2784,7 +2768,6 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sign()
-  
   def reciprocal(self):
     """
     Compute `1/x` element-wise.
@@ -2796,7 +2779,6 @@ class Tensor(MathTrait):
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
   
   # ***** activation functions *****
-
   def elu(self, alpha=1.0):
     """
     Applies the Exponential Linear Unit (ELU) function element-wise.
@@ -2809,7 +2791,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.relu() - alpha*(1-self.exp()).relu()
-  
   def celu(self, alpha=1.0):
     """
     Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
@@ -2835,7 +2816,6 @@ class Tensor(MathTrait):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
-
   def swish(self):
     """
     See `.silu()`
@@ -2847,7 +2827,6 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sigmoid()
-
   def silu(self):
     """
     Applies the Sigmoid Linear Unit (SiLU) function element-wise.
@@ -2860,7 +2839,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.swish()   # The SiLU function is also known as the swish function.
-
   def relu6(self):
     """
     Applies the ReLU6 function element-wise.
@@ -2873,7 +2851,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.relu() - (self-6).relu()
-
   def hardswish(self):
     """
     Applies the Hardswish function element-wise.
@@ -2886,7 +2863,6 @@ class Tensor(MathTrait):
     ```
     """
     return self * (self+3).relu6() * (1/6)
-
   def tanh(self):
     """
     Applies the Hyperbolic Tangent (tanh) function element-wise.
@@ -3265,7 +3241,7 @@ class Tensor(MathTrait):
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
-  
+
   def lshift(self, x:int):
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
@@ -3289,7 +3265,7 @@ class Tensor(MathTrait):
     """
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
     return self.idiv(2 ** x)
-  
+
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Computes power of `self` with `x`.
@@ -3344,7 +3320,7 @@ class Tensor(MathTrait):
     # NOTE: the mid-point is for backward, revisit after new gradient API
     if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
     return (self<x).detach().where(x, self)
-  
+
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
     Computes element-wise minimum of `self` and `x`.
@@ -3358,7 +3334,7 @@ class Tensor(MathTrait):
     """
     t, x = self._broadcasted(x)
     return t._inverse().maximum(x._inverse())._inverse()
-  
+
   def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
     Return a tensor of elements selected from either `x` or `y`, depending on `self`.
