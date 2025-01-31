@@ -2533,7 +2533,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.mul(1/math.log(2)).exp2()
-  
   def exp2(self):
     """
     Computes the base-2 exponential function element-wise.
@@ -2605,7 +2604,7 @@ class Tensor(MathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
     ```
-    """ 
+    """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
   def cos(self):
     """
@@ -2775,9 +2774,8 @@ class Tensor(MathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
-    """ 
+    """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
-  
   # ***** activation functions *****
   def elu(self, alpha=1.0):
     """
