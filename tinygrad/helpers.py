@@ -322,7 +322,7 @@ class tqdm(Generic[T]):
     def HMS(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
     def SI(x): return (f"{x/1000**int(g:=math.log(x,1000)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
     prog_text = f'{SI(self.n)}{f"/{SI(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
-    est_text, unit_invert = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else '', self.n/elapsed > 0.1
+    est_text, unit_invert = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else '', self.n/elapsed > 1.0 or not self.n
     it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}" if unit_invert else f"{elapsed/self.n:5.2f}") if self.n else "?"
     suf = f'{prog_text} [{HMS(elapsed)}{est_text},' + f' {it_text}{self.unit+"/s" if unit_invert else "s/"+self.unit}]'
     sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
