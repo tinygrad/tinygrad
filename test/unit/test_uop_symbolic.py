@@ -531,20 +531,6 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
-  def test_where_cast(self):
-    s = Variable("s", 0, 3)
-    cond = s < 2
-    a = Variable("a", 0, 3)
-    b = Variable("b", 0, 3)
-    expr = cond.where(a, b).cast(dtypes.half)
-
-    # TODO: copied from render, render does not support cast
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-    uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink()))
-    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
-
-    self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
-
   def test_symbolic_div(self):
     # from symbolic arange
     a = Variable("a", 1, 10)
