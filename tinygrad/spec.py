@@ -6,7 +6,6 @@ from tinygrad.helpers import all_int, all_same, dedup, prod
 # *** this is the spec of a Tensor in UOp ***
 
 tensor_uop_spec = PatternMatcher([
-  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
    lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
 
@@ -44,13 +43,11 @@ tensor_uop_spec = PatternMatcher([
 
 # *** this is the spec of allowed UOps in a ScheduleItem ***
 
-si_spec = tensor_uop_spec+PatternMatcher([
+si_spec = PatternMatcher([
   # TODO: this should probably be COPY(DEVICE, DEFINE_GLOBAL), not LOAD
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE), UPat(Ops.LOAD))), lambda: True),
   (UPat(Ops.SINK, src=UPat(Ops.STORE), allow_any_len=True), lambda: True),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.LOAD),)), lambda: True),
-  # NOTE: buffer/bind isn't allowed in a ScheduleItem
-  (UPat((Ops.BUFFER, Ops.BIND)), lambda: False),
 ])
 
 # ***** uop type spec *****
@@ -58,6 +55,7 @@ si_spec = tensor_uop_spec+PatternMatcher([
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
+  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
