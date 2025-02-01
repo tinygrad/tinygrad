@@ -368,14 +368,8 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       torch.manual_seed(seed)
 
     if val:
-      assert img_ids is not None, "img_ids have to be passed in"
-
       img = resize(img)[0]
-
-      img_ids[idx].contiguous().realize().lazydata.base.realized.as_buffer(force_zero_copy=True)[:] = np.array(img_id).tobytes()
     else:
-      assert boxes is not None and labels is not None and matches is not None and anchors is not None, "boxes, labels, matches and anchors have to be passed in"
-
       img, tgt = random_horizontal_flip(img, tgt)
       img, tgt, _ = resize(img, tgt=tgt)
       match_quality_matrix = box_iou(tgt["boxes"], (anchor := np.concatenate(generate_anchors((800, 800)))))
@@ -397,7 +391,8 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
   def _enqueue_batch(bc):
     for idx in range(bc * batch_size, (bc+1) * batch_size):
       img = dataset.loadImgs(next(dataset_iter))[0]
-      ann = dataset.loadAnns(dataset.getAnnIds(img["id"]))
+      ann = dataset.loadAnns(dataset.getAnnIds((img_id:=img["id"])))
+      img_ids[idx] = img_id
       queue_in.put((idx, img, ann))
 
   def _setup_shared_mem(shm_name:str, size:Tuple[int, ...], dtype:dtypes) -> Tuple[shared_memory.SharedMemory, Tensor]:
@@ -413,11 +408,12 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
   procs, data_out_count = [], [0] * batch_count
 
   shm_imgs, imgs = _setup_shared_mem("retinanet_imgs", (batch_size * batch_count, 800, 800, 3), dtypes.float32)
-  shm_img_ids, img_ids = _setup_shared_mem("retinanet_img_ids", (batch_size * batch_count,), dtypes.int64)
   shm_boxes, boxes = _setup_shared_mem("retinanet_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
   shm_labels, labels = _setup_shared_mem("retinanet_labels", (batch_size * batch_count, 120087), dtypes.int64)
   shm_matches, matches = _setup_shared_mem("retinanet_matches", (batch_size * batch_count, 120087), dtypes.int64)
   shm_anchors, anchors = _setup_shared_mem("retinanet_anchors", (batch_size * batch_count, 120087, 4), dtypes.float64)
+
+  img_ids = [None] * (batch_size * batch_count)
 
   shutdown = False
   class Cookie:
@@ -482,7 +478,6 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
     for proc in procs: proc.join()
 
     shm_imgs.close()
-    shm_img_ids.close()
     shm_boxes.close()
     shm_labels.close()
     shm_matches.close()
@@ -490,7 +485,6 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
 
     try:
       shm_imgs.unlink()
-      shm_img_ids.unlink()
       shm_boxes.unlink()
       shm_labels.unlink()
       shm_matches.unlink()
