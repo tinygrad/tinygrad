@@ -50,9 +50,6 @@ backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
 backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 
-# TODO: input parsing for multiple optional inputs is wrong
-# backend_test.exclude('test_upsample_nearest_cpu')
-
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
   backend_test.exclude('float64')

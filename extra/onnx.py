@@ -314,7 +314,7 @@ def Not(x:Tensor): return x.logical_not()
 
 @OnnxOps.register_op()
 def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):
-    return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
+  return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 # ***** Unary Ops (activation) *****
 OnnxOps.register_tensor_ops("Relu", "Sigmoid", "Elu", "Celu", "Selu", "HardSwish", "Sinh", "Cosh", "Tanh", "Asinh", "Acosh", "Atanh", "Erf", "Mish",
