@@ -19,7 +19,7 @@ sys.setrecursionlimit(10000)
 class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
-  metadata: tuple[Metadata, ...]
+  metadata: tuple[Metadata, ...] = ()
   @property
   def outputs(self) -> tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -151,8 +151,6 @@ to_si = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), _append_buf),
   # simplify and unbind the final VIEWs
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  # don't need SINK on COPY or BUFFER_VIEW
-  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
@@ -169,7 +167,7 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
   return var
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
-def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> ScheduleItem:
+def kernel_to_si(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> ScheduleItem:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
@@ -196,6 +194,14 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> Sched
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, ast))
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)))
+
+def copy_to_si(copy:UOp, dest:UOp):
+  # NOTE: this should probably fail, it's keeping the buffer around, right?
+  return ScheduleItem(copy, (dest.buffer, copy.src[1].buf_uop.buffer))
+
+def view_to_si(view:UOp, dest:UOp):
+  buffers[dest] = (base:=view.src[0].buf_uop.buffer).view(view.size, view.dtype, unwrap(view.src[0].st).views[0].offset*base.dtype.itemsize)
+  return ScheduleItem(view, (dest.buffer, base))
 
 PROCESS_REPLAY_CAPTURE: dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -363,7 +369,6 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs)
 
 def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
   if isinstance(b.device, tuple) or not b.device.startswith("DISK"): return None
-  buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
 
 do_realize = PatternMatcher([
@@ -392,7 +397,7 @@ def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.tensor_uops[b][-1].metadata) is not None: ctx.ops_metadata[x] = m
   if b not in ctx.realizes: return x # collapse BUFFER
-  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
+  ctx.realizes[b] = x if x.op in {Ops.COPY, Ops.BUFFER_VIEW} else UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
@@ -452,12 +457,16 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   prescheduled: list[ScheduleItem] = []
   var_vals: dict[Variable, int] = {}
   for buf_uop,store in ctx.realizes.items():
-    assert store.op is Ops.STORE, f"expected a realized BUFFER to get a STORE {sink}"
-    prescheduled.append(schedule_uop(store.sink(), ctx, var_vals))
+    match store.op:
+      case Ops.COPY: si = copy_to_si(store, buf_uop)
+      case Ops.STORE: si = kernel_to_si(store.sink(), ctx, var_vals)
+      case Ops.BUFFER_VIEW: si = view_to_si(store, buf_uop)
+      case op: raise RuntimeError(f"cannot realize {op}")
+    prescheduled.append(si)
     # can only schedule once
     for tensor_uop in ctx.tensor_uops[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
-    # increment refcount for this buffer
-    buf_uop.buffer.ref(1)
+    # increment refcount for writable bufs
+    for out in si.outputs: out.ref(1)
 
   # add kernel children
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
