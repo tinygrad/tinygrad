@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import temp
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -387,6 +388,10 @@ class TestAssign(unittest.TestCase):
     oba2 = a.lazydata.base.output_buffer
     assert oba1 is None and oba2 is None
     np.testing.assert_allclose(a.numpy(), np.arange(N*N,dtype=np.int32).reshape((N,N)))
+
+  def test_disk_assignment(self):
+    a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
+    np.testing.assert_equal(a, np.ones(5))
 
 if __name__ == "__main__":
   unittest.main()
