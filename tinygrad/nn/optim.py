@@ -31,14 +31,16 @@ class Optimizer:
     Performs a single optimization step.
     """
     Tensor.realize(*self.schedule_step())
+
   def schedule_step(self) -> list[Tensor]:
     """
     Returns the tensors that need to be realized to perform a single optimization step.
     """
-    assert Tensor.training, (
+    if not Tensor.training: raise RuntimeError(
             f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
     return self.schedule_step_with_grads([unwrap(t.grad) for t in self.params])+self.params+self.buffers
+
   def schedule_step_with_grads(self, grads:list[Tensor]) -> list[Tensor]: raise NotImplementedError
 
 class OptimizerGroup(Optimizer):
