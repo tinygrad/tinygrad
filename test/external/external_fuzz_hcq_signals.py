@@ -20,11 +20,11 @@ def main():
 
     q = q_t()
     for d in wait_devs: q.wait(d.timeline_signal, d.timeline_value - 1)
-    q.signal(dev.timeline_signal, dev.timeline_value).submit(dev)
+    q.wait(dev.timeline_signal, dev.timeline_value - 1).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
     dev.timeline_value += 1
 
     if sync:=random.randint(0, 10) < 3: dev.synchronize()
-    if DEBUG >= 2: print(f"{i}: {dev.device_id} timeline {dev.timeline_value}, wait for {[d.device_id for d in wait_devs]}, {sync=}")
+    if DEBUG >= 2: print(f"{i}: {q_t.__name__} {dev.device_id} timeline {dev.timeline_value}, wait for {[d.device_id for d in wait_devs]}, {sync=}")
     elif i % 100 == 0: print(f"\rCompleted {i} iterations", end='')
 
 if __name__ == "__main__":
