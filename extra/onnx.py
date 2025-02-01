@@ -6,8 +6,7 @@ from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
-from onnx.helper import tensor_dtype_to_np_dtype
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
@@ -47,7 +46,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
     return Tensor(data, dtype=dtype).reshape(shape).realize()
   if onnx_tensor.HasField("raw_data"):
-    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
+    np_buffer = np.frombuffer(onnx_tensor.raw_data, dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
     if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
     return Tensor(np_buffer, dtype=dtype)
   return Tensor(None)
@@ -64,7 +63,6 @@ def type_parse(onnx_type: TypeProto):
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
-PYTHON_CONST = list[ConstType]|ConstType|bytes
 cache_misses = 0
 @functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor):
@@ -73,7 +71,7 @@ def _cached_to_python_const(t:Tensor):
   return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t:Any) -> PYTHON_CONST:
+def to_python_const(t:Any) -> list[ConstType]|ConstType|bytes:
   if not isinstance(t, Tensor): return t
   global cache_misses
   ret = _cached_to_python_const(t)
@@ -83,22 +81,22 @@ def to_python_const(t:Any) -> PYTHON_CONST:
   return ret
 
 # ***** onnx ops *****
-def normalize_domain(domain:str) -> Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"]:
+SupportedDomains = Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"]
+def normalize_domain(domain:str) -> SupportedDomains:
   match domain:
     case "": return "ai.onnx"
     case "ai.onnx.preview.training": return "ai.onnx.training"
     case "ai.onnx" | "ai.onnx.ml" | "ai.onnx.training" | "com.microsoft": return domain
     case _: raise NotImplementedError(f"{domain} is not supported")
 
-OpKey = tuple[str, str] # (Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"], op_type)
+OpKey = tuple[SupportedDomains, str]
 # https://github.com/onnx/onnx/blob/main/docs/Versioning.md#operator-versioning
-@dataclasses.dataclass
 class OnnxOp:
-  domain: str
-  op_type: str
-  since_version: int
-  fxn: Callable
-  def __post_init__(self): self.domain = normalize_domain(self.domain)
+  def __init__(self, domain: str, op_type: str, since_version: int, fxn: Callable):
+    self.domain = normalize_domain(domain)
+    self.op_type = op_type
+    self.since_version = since_version
+    self.fxn = fxn
   def __eq__(self, other:object):
     if not isinstance(other, OnnxOp): raise NotImplementedError
     return self.domain == self.domain and self.op_type == other.op_type and self.since_version == other.since_version
@@ -126,7 +124,7 @@ class _OnnxOps:
     # get best match by using the version that supports opset_version and is closest to opset_version
     key = (domain, op_type)
     if key in self.registry and (valid:=[op for op in self.registry[key] if op.since_version <= target_version]):
-      return max(valid, key=lambda opid: opid.since_version)
+      return max(valid, key=lambda op: op.since_version)
     return None
 
 OnnxOps = _OnnxOps()
@@ -702,7 +700,7 @@ def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|N
   return data * mask * (1/(1.0 - ratio)), mask
 
 # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
-@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=1)
+@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=6)
 def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
 
 # TODO: factor out common implementation for these normalizations
