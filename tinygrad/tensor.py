@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element, ConstLike
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -229,10 +229,6 @@ class Tensor(MathTrait):
     else: ret.lazydata = self.lazydata.alu(fxn_or_op, *[t.lazydata for t in x], **kwargs)
     return ret
   alu = _apply_uop  # type: ignore
-
-  def _apply_broadcasted_uop(self, fxn:Callable, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    lhs,rhs = self._broadcasted(x, reverse)
-    return lhs._apply_uop(fxn, rhs)
 
   # ***** data handlers ****
 
@@ -493,9 +489,9 @@ class Tensor(MathTrait):
 
   @staticmethod
   def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor):
-    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
-    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
+    x = (counts1.cast(dtypes.uint64) * 2**32) | counts0.cast(dtypes.uint64)
+    x = x.threefry((key[1]._broadcast_to(x.shape).cast(dtypes.uint64) * 2**32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
+    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
 
   @staticmethod
@@ -2482,7 +2478,7 @@ class Tensor(MathTrait):
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return self.cast(dtypes.bool)._apply_broadcasted_uop(UOp.ne, True)
+    return super().logical_not()
   def neg(self):
     """
     Negates the tensor element-wise.
@@ -2491,7 +2487,7 @@ class Tensor(MathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
     ```
     """
-    return self*-1 if self.dtype != dtypes.bool else self.logical_not()
+    return super().neg()
   def contiguous(self):
     """
     Returns a contiguous tensor.
@@ -2523,7 +2519,7 @@ class Tensor(MathTrait):
     print(Tensor([1., 2., 4., 8.]).log2().numpy())
     ```
     """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
+    return super().log2()
   def exp(self):
     """
     Computes the exponential function element-wise.
@@ -2545,7 +2541,7 @@ class Tensor(MathTrait):
     print(Tensor([0., 1., 2., 3.]).exp2().numpy())
     ```
     """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
+    return super().exp2()
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2592,7 +2588,7 @@ class Tensor(MathTrait):
     print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
     ```
     """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
+    return super().sqrt()
   def rsqrt(self):
     """
     Computes the reciprocal of the square root of the tensor element-wise.
@@ -2610,7 +2606,7 @@ class Tensor(MathTrait):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
     ```
     """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
+    return super().sin()
   def cos(self):
     """
     Computes the cosine of the tensor element-wise.
@@ -2787,7 +2783,7 @@ class Tensor(MathTrait):
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
     """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
+    return super().reciprocal()
 
   # ***** activation functions *****
 
@@ -3086,12 +3082,13 @@ class Tensor(MathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  def _opfix(self, y, match_dtype=True, _float=False, _bool=False, bitwise=False):
+  def _opfix(self, b:Tensor|ConstLike|None=None, match_dtype=True, _float=False, _bool=False, bitwise=False):
     if bitwise and self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    if y is None: return self.cast(least_upper_float(self.dtype)) if _float else self.cast(dtypes.bool) if _bool else self
-    x, y = (self.cast(least_upper_float(self.dtype)), y.cast(least_upper_cloat(y.dtype))) if _float else (self, y)
-    x, y = x._broadcast(y, match_dtype=match_dtype)
-    return x.cast(dtypes.bool), y.cast(dtpes.bool) if _bool else x, y
+    if b is None: return (self.cast(least_upper_float(self.dtype)) if _float else self.cast(dtypes.bool) if _bool else self), None
+
+    x, y = self._broadcasted(cast(Tensor|UOp|ConstType, b), match_dtype=match_dtype)
+    if _float: return (x.cast(least_upper_float(x.dtype)), y.cast(least_upper_float(y.dtype)))
+    return (x.cast(dtypes.bool), y.cast(dtypes.bool)) if _bool else (x, y)
 
   # TODO: tensor should stop checking if things are const
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
@@ -3116,7 +3113,7 @@ class Tensor(MathTrait):
     print(t.add(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-    return self._apply_broadcasted_uop(UOp.add, x, reverse)
+    return super().add(x, reverse)
 
   def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3136,8 +3133,7 @@ class Tensor(MathTrait):
     print(t.sub(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-    a, b = self._broadcasted(x, reverse)
-    return a + (-b)
+    return super().sub(x, reverse)
 
   def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3157,7 +3153,7 @@ class Tensor(MathTrait):
     print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
     ```
     """
-    return self._apply_broadcasted_uop(UOp.mul, x, reverse)
+    return super().mul(x, reverse)
 
   def idiv(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3170,7 +3166,7 @@ class Tensor(MathTrait):
     print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
-    return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
+    return super().idiv(x, reverse)
 
   def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3191,8 +3187,7 @@ class Tensor(MathTrait):
     print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
     ```
     """
-    numerator, denominator = self._broadcasted(x, reverse)
-    return numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    return super().div(x, reverse)
 
   def mod(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3220,8 +3215,7 @@ class Tensor(MathTrait):
     print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
     ```
     """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self._apply_broadcasted_uop(UOp.xor, x, reverse)
+    return super().xor(x, reverse)
 
   def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3235,8 +3229,7 @@ class Tensor(MathTrait):
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self._apply_broadcasted_uop(UOp.bitwise_and, x, reverse)
+    return super().bitwise_and(x, reverse)
 
   def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3250,8 +3243,7 @@ class Tensor(MathTrait):
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self._apply_broadcasted_uop(UOp.bitwise_or, x, reverse)
+    return super().bitwise_or(x, reverse)
 
   def bitwise_not(self) -> Tensor:
     """
@@ -3267,7 +3259,7 @@ class Tensor(MathTrait):
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
-  def lshift(self, x:int):
+  def lshift(self, x:int, reverse=False):
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
     Equivalent to `self << x`.
@@ -3276,10 +3268,9 @@ class Tensor(MathTrait):
     print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    return self.mul(2 ** x)
+    return super().lshift(x, reverse)
 
-  def rshift(self, x:int):
+  def rshift(self, x:int, reverse=False):
     """
     Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
     Equivalent to `self >> x`.
@@ -3288,8 +3279,7 @@ class Tensor(MathTrait):
     print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    return self.idiv(2 ** x)
+    return super().rshift(x, reverse)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3342,9 +3332,7 @@ class Tensor(MathTrait):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    # NOTE: the mid-point is for backward, revisit after new gradient API
-    if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
-    return (self<x).detach().where(x, self)
+    return super().maximum(x)
 
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
@@ -3357,8 +3345,7 @@ class Tensor(MathTrait):
     print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    t, x = self._broadcasted(x)
-    return t._inverse().maximum(x._inverse())._inverse()
+    return super().minimum(x)
 
   def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
@@ -3378,20 +3365,13 @@ class Tensor(MathTrait):
     print((cond > 0).where(cond, -float("inf")).numpy())
     ```
     """
-    if isinstance(x, Tensor): x, y = x._broadcasted(y)
-    elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    cond, x = self._broadcasted(x, match_dtype=False)
-    cond, y = cond._broadcasted(y, match_dtype=False)
-    return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
+    return super().where(x, y)
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
   # ***** op wrappers *****
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
-
-  def __lshift__(self, x) -> Tensor: return self.lshift(x)
-  def __rshift__(self, x) -> Tensor: return self.rshift(x)
 
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
@@ -3411,10 +3391,6 @@ class Tensor(MathTrait):
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
-
-  def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
-  def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
-  def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
