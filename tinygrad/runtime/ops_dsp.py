@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, Any, List
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump
@@ -65,6 +65,10 @@ class DSPProgram:
     self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
+class MockDSPProgram:
+  def __init__(self, name:str, lib:bytes): self.lib = lib
+  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False): raise NotImplementedError("TODO: $400 bounty to make this work")
+
 class DSPBuffer:
   def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
@@ -119,15 +123,18 @@ class DSPCompiler(ClangCompiler):
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
-    self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-    super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
+    try:
+      self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
+      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
 
-    fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
-    ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
+      fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
+      self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
+      ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
-    self.init_dsp()
-    RPCListener(self).start()
+      self.init_dsp()
+      RPCListener(self).start()
+    except FileNotFoundError:
+      super().__init__(device, MallocAllocator, DSPRenderer(), DSPCompiler(), MockDSPProgram)
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0

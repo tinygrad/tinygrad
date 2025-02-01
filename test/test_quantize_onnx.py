@@ -2,7 +2,7 @@ import numpy as np
 import onnx, unittest
 from onnx import helper, numpy_helper, TensorProto
 from examples.benchmark_onnx import load_onnx_model
-from tinygrad import Tensor, Context
+from tinygrad import Tensor, Context, dtypes
 
 N = 1024
 
@@ -45,9 +45,10 @@ class TestQuantizeOnnx(unittest.TestCase):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
 
   def test_prequant(self):
+    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     X = Tensor(np.random.uniform(0, 255, size=(1,1024)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(1024,1024)).astype(np.uint8))
-    out = X@W
+    out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     out.realize()
 
 if __name__ == "__main__":
