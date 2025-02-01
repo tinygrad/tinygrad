@@ -61,9 +61,7 @@ def read_buffer(dev, buf):
   return memoryview(result).cast("B")
 
 def submit(device, command_buffers):
-  cb_buffers_array_type = webgpu.WGPUCommandBuffer * len(command_buffers)
-  cb_buffers_array = cb_buffers_array_type(*command_buffers)
-  webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), cb_buffers_array)
+  webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), (webgpu.WGPUCommandBuffer * len(command_buffers))(*command_buffers))
 
 def pop_error(device):
   result: List[Any] = []
@@ -133,8 +131,7 @@ class WebGPUProgram:
     # Creating pipeline layout
     pipeline_layout_desc = webgpu.WGPUPipelineLayoutDescriptor()
     pipeline_layout_desc.bindGroupLayoutCount = len(bind_group_layouts)
-    bind_group_array_type = webgpu.WGPUBindGroupLayout * len(bind_group_layouts)
-    pipeline_layout_desc.bindGroupLayouts = bind_group_array_type(*bind_group_layouts)
+    pipeline_layout_desc.bindGroupLayouts = (webgpu.WGPUBindGroupLayout * len(bind_group_layouts))(*bind_group_layouts)
 
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     pipeline_layout = webgpu.wgpuDeviceCreatePipelineLayout(self.dev, pipeline_layout_desc)
@@ -255,10 +252,8 @@ class WebGpuDevice(Compiled):
     device_desc.nextInChain = ctypes.cast(ctypes.pointer(toggle_desc), ctypes.POINTER(webgpu.struct_WGPUChainedStruct))
 
     # Populate required features
-    feature_array_type = webgpu.WGPUFeatureName * len(required_features)
-    feature_array = feature_array_type(*required_features)
     device_desc.requiredFeatureCount = len(required_features)
-    device_desc.requiredFeatures = ctypes.cast(feature_array, ctypes.POINTER(webgpu.WGPUFeatureName))
+    device_desc.requiredFeatures = (webgpu.WGPUFeatureName * len(required_features))(*required_features)
 
     # Limits
     supported_limits = webgpu.WGPUSupportedLimits()
