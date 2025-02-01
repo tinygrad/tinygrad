@@ -2470,24 +2470,6 @@ class Tensor(MathTrait):
 
   # ***** unary ops *****
 
-  def logical_not(self):
-    """
-    Computes the logical NOT of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([False, True]).logical_not().numpy())
-    ```
-    """
-    return super().logical_not()
-  def neg(self):
-    """
-    Negates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
-    ```
-    """
-    return super().neg()
   def contiguous(self):
     """
     Returns a contiguous tensor.
@@ -2509,17 +2491,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.log2()*math.log(2)
-  def log2(self):
-    """
-    Computes the base-2 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log2().numpy())
-    ```
-    """
-    return super().log2()
   def exp(self):
     """
     Computes the exponential function element-wise.
@@ -2531,17 +2502,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.mul(1/math.log(2)).exp2()
-  def exp2(self):
-    """
-    Computes the base-2 exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp2().numpy())
-    ```
-    """
-    return super().exp2()
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2580,15 +2540,6 @@ class Tensor(MathTrait):
     """
     return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
 
-  def sqrt(self):
-    """
-    Computes the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
-    ```
-    """
-    return super().sqrt()
   def rsqrt(self):
     """
     Computes the reciprocal of the square root of the tensor element-wise.
@@ -2598,15 +2549,6 @@ class Tensor(MathTrait):
     ```
     """
     return self.reciprocal().sqrt()
-  def sin(self):
-    """
-    Computes the sine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
-    ```
-    """
-    return super().sin()
   def cos(self):
     """
     Computes the cosine of the tensor element-wise.
@@ -2775,15 +2717,6 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sign()
-  def reciprocal(self):
-    """
-    Compute `1/x` element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
-    ```
-    """
-    return super().reciprocal()
 
   # ***** activation functions *****
 
@@ -3095,100 +3028,6 @@ class Tensor(MathTrait):
     return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.base.op is Ops.CONST \
       and unwrap(x.lazydata.st).views[0].mask is None and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Adds `self` and `x`.
-    Equivalent to `self + x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return super().add(x, reverse)
-
-  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Subtracts `x` from `self`.
-    Equivalent to `self - x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sub(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return super().sub(x, reverse)
-
-  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Multiplies `self` and `x`.
-    Equivalent to `self * x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
-    ```
-    """
-    return super().mul(x, reverse)
-
-  def idiv(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self // x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division (truncate towards zero).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    return super().idiv(x, reverse)
-
-  def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self / x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-    `div` performs true division.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.div(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
-    ```
-    """
-    return super().div(x, reverse)
-
   def mod(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Mod `self` by `x`.
@@ -3201,49 +3040,6 @@ class Tensor(MathTrait):
     """
     a, b = self._broadcasted(x, reverse)
     return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
-
-  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Computes bitwise xor of `self` and `x`.
-    Equivalent to `self ^ x`.
-    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, -2, 3]).xor(Tensor([1, 0, 3])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
-    ```
-    """
-    return super().xor(x, reverse)
-
-  def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Compute the bit-wise AND of `self` and `x`.
-    Equivalent to `self & x`.
-    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([2, 5, 255]).bitwise_and(Tensor([3, 14, 16])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
-    ```
-    """
-    return super().bitwise_and(x, reverse)
-
-  def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    """
-    Compute the bit-wise OR of `self` and `x`.
-    Equivalent to `self | x`.
-    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([2, 5, 255]).bitwise_or(Tensor([4, 4, 4])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
-    ```
-    """
-    return super().bitwise_or(x, reverse)
 
   def bitwise_not(self) -> Tensor:
     """
@@ -3258,28 +3054,6 @@ class Tensor(MathTrait):
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
-
-  def lshift(self, x:int, reverse=False):
-    """
-    Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
-    Equivalent to `self << x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
-    ```
-    """
-    return super().lshift(x, reverse)
-
-  def rshift(self, x:int, reverse=False):
-    """
-    Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
-    Equivalent to `self >> x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
-    ```
-    """
-    return super().rshift(x, reverse)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3320,52 +3094,6 @@ class Tensor(MathTrait):
     # apply correct_sign inject_nan, and fix 0 ** 0 = 1
     ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
     return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
-
-  def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
-    """
-    Computes element-wise maximum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return super().maximum(x)
-
-  def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
-    """
-    Computes element-wise minimum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return super().minimum(x)
-
-  def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
-    """
-    Return a tensor of elements selected from either `x` or `y`, depending on `self`.
-    `output_i = x_i if self_i else y_i`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    cond = Tensor([[True, True, False], [True, False, False]])
-    print(cond.where(1, 3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    cond = Tensor.randn(2, 3)
-    print(cond.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print((cond > 0).where(cond, -float("inf")).numpy())
-    ```
-    """
-    return super().where(x, y)
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
