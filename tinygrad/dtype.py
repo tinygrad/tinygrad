@@ -3,10 +3,11 @@ from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
+from ml_dtypes import float8_e4m3, float8_e5m2
 
 ConstType = Union[float, int, bool]
 
-FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
+FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd', 'float8_e4m3', 'float8_e5m2']
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
@@ -122,8 +123,8 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 4, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 8, "long", 'q')
   uint64: Final[DType] = DType.new(8, 8, "unsigned long", 'Q')
-  fp8e4m3: Final[DType] = DType.new(9, 1, "fp8e4m3", None)
-  fp8e5m2: Final[DType] = DType.new(10, 1, "fp8e5m2", None)
+  fp8e4m3: Final[DType] = DType.new(9, 1, "fp8e4m3", 'float8_e4m3')
+  fp8e5m2: Final[DType] = DType.new(10, 1, "fp8e5m2", 'float8_e5m2')
   float16: Final[DType] = DType.new(11, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
@@ -191,4 +192,4 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
-  dtypes.int64: lambda x: ctypes.c_int64(x).value}
+  dtypes.int64: lambda x: ctypes.c_int64(x).value, dtypes.fp8e5m2: lambda x: float8_e5m2(x), dtypes.fp8e4m3: lambda x: float8_e4m3(x)}

@@ -10,6 +10,8 @@ from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
+from ml_dtypes import float8_e4m3
+import numpy as np
 
 def _load(m, i):
   if i is None: return 0.0
@@ -70,7 +72,7 @@ class PythonProgram:
           assert dtype.fmt is not None
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(arg[1]*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          ul[i] = [np.frombuffer(buf, dtype=dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -100,11 +102,23 @@ class PythonProgram:
               i = loop_ends[i] + 1
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
-        elif uop in {Ops.CAST, Ops.BITCAST}:
+        elif uop is Ops.BITCAST:
           assert dtp[0].fmt and dtype.fmt
-          pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-          if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+          if dtp[0] == dtypes.fp8e4m3:
+            unpack_format = str(warp_size) + dtype.fmt
+            ul[i] = list(struct.unpack(unpack_format, b''.join([float8_e4m3(z).tobytes() for z in inp[0]])))
+          elif dtype == dtypes.fp8e4m3:
+            pack_format = str(warp_size) + dtp[0].fmt
+            ul[i] = np.frombuffer(struct.pack(pack_format, *inp[0]), dtype=float8_e4m3).tolist()
+          else:
+            pack_format = str(warp_size) + dtp[0].fmt
+            unpack_format = str(warp_size) + dtype.fmt
+            ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+        elif uop is Ops.CAST:
+          assert dtp[0].fmt and dtype.fmt
+          pack_format = str(warp_size) + dtp[0].fmt
+          unpack_format = str(warp_size) + dtype.fmt
+          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]

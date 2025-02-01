@@ -62,6 +62,7 @@ setup(name='tinygrad',
             "capstone"
         ],
         'webgpu': ["wgpu"],
+        'ml_dtypes': ["ml_dtypes"],
         'docs': [
             "mkdocs",
             "mkdocs-material",
