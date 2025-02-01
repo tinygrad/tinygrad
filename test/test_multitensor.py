@@ -288,6 +288,9 @@ class TestMultiTensor(unittest.TestCase):
       optim.step()
       out.numpy()
 
+  def test_backprop_conv_wino(self):
+    with Context(WINO=1): self.test_backprop_conv()
+
   def test_backward_sum(self):
     x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
     w = Tensor([1.,2,3,4], requires_grad=True).shard(devices_2)
