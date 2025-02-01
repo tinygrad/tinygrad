@@ -127,7 +127,7 @@ class DSPDevice(Compiled):
     ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
     self.init_dsp()
-    RPCListner(self).start()
+    RPCListener(self).start()
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
@@ -165,7 +165,7 @@ class DSPDevice(Compiled):
     qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=self.shell_buf.va_addr, filelen=self.shell_buf.size, filefd=self.shell_buf.share_info.fd)
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=3, sc=rpc_sc(method=3, ins=0, outs=0))
 
-class RPCListner(threading.Thread):
+class RPCListener(threading.Thread):
   def __init__(self, device:DSPDevice):
     super().__init__()
     self.device, self.daemon = device, True
