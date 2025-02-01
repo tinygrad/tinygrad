@@ -3310,6 +3310,8 @@ class Tensor(SimpleMathTrait):
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
 
     base, exponent = self._broadcasted(x, reverse=reverse)
+    # TODO: int pow
+    if not base.is_floating_point(): raise RuntimeError("base needs to be float")
     # start with b ** e = exp(e * log(b))
     ret = base.abs().log().mul(exponent).exp()
     # correct sign of negative base with odd exponent (cos has a period of 2pi so we use it here to get the oddness of the exponent)
