@@ -17,14 +17,16 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-class SimpleMathTrait:
+class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
-  def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
+  def _opfix(self:T, b:ConstLike|T, _float=False, _bool=False, bitwise=False) -> tuple[T, T]: raise NotImplementedError
 
   # great functions you get!
-  def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
-  def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+  def const_like(self:T, b:ConstLike) -> T: return self._opfix(b)[1]
+  def _binop(self, op, x, reverse, **kwargs):
+    a, b = self._opfix(x, **kwargs)
+    return b.alu(op, a) if reverse else a.alu(op, b) 
   def logical_not(self): return self.ne(True)
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
@@ -36,8 +38,8 @@ class SimpleMathTrait:
   def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
-  def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
-  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
+  def sub(self, x, reverse=False): return x + (-self) if reverse else self + (-x)
+  def div(self, x, reverse=False): return x * self.reciprocal() if reverse else self * self._opfix(x)[1].reciprocal()
 
   def __neg__(self): return self.neg()
 
@@ -61,18 +63,16 @@ class SimpleMathTrait:
   def __rxor__(self, x): return self.xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
 
-  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
-  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
+  def __lt__(self, x): return self._binop(Ops.CMPLT, x)
+  def __gt__(self, x): return self._binop(Ops.CMPLT, x, True)
   def __ge__(self, x): return (self < x).logical_not()
   def __le__(self, x): return (self > x).logical_not()
 
-  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
+  def ne(self, x): return self._binop(Ops.CMPNE, x)
   def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):
-  # TODO: move to Tensor when new backward is done
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
@@ -80,7 +80,7 @@ class MathTrait(SimpleMathTrait):
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
-  def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
+  def maximum(self, x): return self._binop(Ops.MAX, x)
   def minimum(self, x): return -(-self).maximum(-x)
   def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)

@@ -116,7 +116,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(SimpleMathTrait):
+class Tensor(MathTrait):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -221,12 +221,14 @@ class Tensor(SimpleMathTrait):
   @property
   def dtype(self) -> DType: return self.lazydata.dtype
 
-  def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
+  def _apply_uop(self, fxn_or_op:Callable|Ops, *x:Tensor, **kwargs) -> Tensor:
     ret = Tensor.__new__(Tensor)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     ret.requires_grad, ret.grad = True if any(needs_input_grad) else None if None in needs_input_grad else False, None
-    ret.lazydata = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
+    if callable(fxn_or_op): ret.lazydata = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
+    else: ret.lazydata = self.lazydata.alu(*[t.lazydata for t in x], **kwargs)
     return ret
+  alu = _apply_uop  # type: ignore
 
   def _apply_broadcasted_uop(self, fxn:Callable, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     lhs,rhs = self._broadcasted(x, reverse)
@@ -3083,6 +3085,8 @@ class Tensor(SimpleMathTrait):
 
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
+
+  def _opfix(self, y, 
 
   # TODO: tensor should stop checking if things are const
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
