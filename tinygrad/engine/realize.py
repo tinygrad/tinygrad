@@ -3,6 +3,7 @@ import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
+from tinygrad.spec import type_verify, si_spec
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen.kernel import Kernel
@@ -145,7 +146,9 @@ si_lowerer = PatternMatcher([
       if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
 ])
-def lower_schedule_item(si:ScheduleItem) -> ExecItem: return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata)
+def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+  type_verify([si.ast], si_spec)
+  return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata)
 
 def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):

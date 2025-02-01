@@ -152,7 +152,7 @@ to_si = PatternMatcher([
   # simplify and unbind the final VIEWs
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   # don't need SINK on COPY or BUFFER_VIEW
-  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda x: x),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),

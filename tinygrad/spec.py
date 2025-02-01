@@ -42,6 +42,14 @@ tensor_uop_spec = PatternMatcher([
    lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
 ])
 
+# *** this is the spec of allowed UOps in a ScheduleItem ***
+
+si_spec = PatternMatcher([
+  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE), UPat(Ops.LOAD))), lambda: True),
+  (UPat(Ops.SINK, src=UPat(Ops.STORE), allow_any_len=True), lambda: True),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.LOAD),)), lambda: True),
+])
+
 # ***** uop type spec *****
 
 # this is the matcher for the final rendered UOps
