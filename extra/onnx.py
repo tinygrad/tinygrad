@@ -156,7 +156,7 @@ class OnnxRunner:
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
-    self.graph_values = {x.name:buffer_parse(x) for x in model.graph.initializer}
+    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
     self.variable_dims: dict[str, int] = {}
@@ -192,7 +192,7 @@ class OnnxRunner:
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for node in self.graph_nodes:
-      inps, opts = [self.graph_values.get(name) for name in node.inputs], node.opts
+      inps, opts = [self.graph_values[name] for name in node.inputs], node.opts
 
       # provide additional opts
       if node.op.op_type == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
