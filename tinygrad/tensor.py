@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -225,8 +225,8 @@ class Tensor(MathTrait):
     ret = Tensor.__new__(Tensor)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     ret.requires_grad, ret.grad = True if any(needs_input_grad) else None if None in needs_input_grad else False, None
-    if callable(fxn_or_op): ret.lazydata = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
-    else: ret.lazydata = self.lazydata.alu(*[t.lazydata for t in x], **kwargs)
+    if callable(fxn_or_op): ret.lazydata = fxn_or_op(*[t.lazydata for t in (self,)+x], **kwargs)
+    else: ret.lazydata = self.lazydata.alu(fxn_or_op, *[t.lazydata for t in x], **kwargs)
     return ret
   alu = _apply_uop  # type: ignore
 
@@ -3086,7 +3086,12 @@ class Tensor(MathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  def _opfix(self, y, 
+  def _opfix(self, y, match_dtype=True, _float=False, _bool=False, bitwise=False):
+    if bitwise and self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
+    if y is None: return self.cast(least_upper_float(self.dtype)) if _float else self.cast(dtypes.bool) if _bool else self
+    x, y = (self.cast(least_upper_float(self.dtype)), y.cast(least_upper_cloat(y.dtype))) if _float else (self, y)
+    x, y = x._broadcast(y, match_dtype=match_dtype)
+    return x.cast(dtypes.bool), y.cast(dtpes.bool) if _bool else x, y
 
   # TODO: tensor should stop checking if things are const
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:

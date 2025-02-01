@@ -20,11 +20,11 @@ class FastEnum(IntEnum):
 class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
-  def _opfix(self:T, b:ConstLike|T, _float=False, _bool=False, bitwise=False) -> tuple[T, T]: raise NotImplementedError
+  def _opfix(self:T, b:ConstLike|T|None=None, match_dtype=False, _float=False, _bool=False, bitwise=False) -> tuple[T, T]: raise NotImplementedError
 
   # great functions you get!
   def const_like(self:T, b:ConstLike) -> T: return self._opfix(b)[1]
-  def _binop(self, op, x, reverse, **kwargs):
+  def _binop(self, op, x, reverse=False, **kwargs):
     a, b = self._opfix(x, **kwargs)
     return b.alu(op, a) if reverse else a.alu(op, b) 
   def logical_not(self): return self.ne(True)
@@ -82,7 +82,7 @@ class MathTrait:
 
   def maximum(self, x): return self._binop(Ops.MAX, x)
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
+  def where(self, x, y): return self._opfix(x)[0]._opfix(y,_bool=True)[0].alu(Ops.WHERE, *self._opfix(x,match_dtype=False)[1]._opfix(y))
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
   def reciprocal(self): return self.alu(Ops.RECIP)
   def sqrt(self): return self.alu(Ops.SQRT)
@@ -355,11 +355,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def const_like(self, b:ConstLike):
+  def _opfix(self, b:ConstLike|UOp, **kwargs):
+    if isinstance(b, UOp): return self, b
     # constants can optionally have a DEVICE source
-    if self._device is None: return UOp.const(self.dtype, b)
-    if isinstance(self.device, tuple): return UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
-    return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
+    if self._device is None: return self, UOp.const(self.dtype, b)
+    if isinstance(self.device, tuple): return self, UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
+    return self, UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -749,7 +750,7 @@ class UPat(MathTrait):
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
 
-  def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
+  def _opfix(self, b:ConstLike|UPat, **kwargs): return (self, b) if isinstance(b, UPat) else (self, UPat.const(self.dtype, cast(ConstType, b)))
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
