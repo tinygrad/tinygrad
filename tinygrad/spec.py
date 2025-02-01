@@ -44,10 +44,13 @@ tensor_uop_spec = PatternMatcher([
 
 # *** this is the spec of allowed UOps in a ScheduleItem ***
 
-si_spec = PatternMatcher([
+si_spec = tensor_uop_spec+PatternMatcher([
+  # TODO: this should probably be COPY(DEVICE, DEFINE_GLOBAL), not LOAD
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE), UPat(Ops.LOAD))), lambda: True),
   (UPat(Ops.SINK, src=UPat(Ops.STORE), allow_any_len=True), lambda: True),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.LOAD),)), lambda: True),
+  # NOTE: buffer/bind isn't allowed in a ScheduleItem
+  (UPat((Ops.BUFFER, Ops.BIND)), lambda: False),
 ])
 
 # ***** uop type spec *****

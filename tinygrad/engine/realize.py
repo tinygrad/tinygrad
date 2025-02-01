@@ -147,7 +147,7 @@ si_lowerer = PatternMatcher([
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
 ])
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  type_verify([si.ast], si_spec)
+  type_verify(list(si.ast.toposort), si_spec)
   return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata)
 
 def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, None]:
