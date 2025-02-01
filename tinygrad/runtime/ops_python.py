@@ -10,7 +10,6 @@ from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
-from ml_dtypes import float8_e4m3
 import numpy as np
 
 def _load(m, i):

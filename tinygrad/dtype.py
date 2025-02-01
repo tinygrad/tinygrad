@@ -3,7 +3,8 @@ from typing import Final, Optional, ClassVar, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
-from ml_dtypes import float8_e4m3, float8_e5m2
+try: from ml_dtypes import float8_e4m3, float8_e5m2
+except ImportError: float8_e4m3 = float8_e5m2 = None
 
 ConstType = Union[float, int, bool]
 
