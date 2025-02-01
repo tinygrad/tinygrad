@@ -1,7 +1,7 @@
 from typing import cast
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_int, prod
+from tinygrad.helpers import all_int, all_same, dedup, prod
 
 # *** this is the spec of a Tensor in UOp ***
 
@@ -61,7 +61,7 @@ spec = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
-  (UPat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
+  (UPat(Ops.CONST, name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
   # early LOAD has a <buf, shapetracker, store?>
   (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW))), lambda: True),
@@ -119,6 +119,19 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
+])
+
+# *** this is the UOp shape spec ***
+
+def verify_sink_dims(sink:UOp):
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sink.toposort if x.op is not Ops.SINK and x.st is not None])]
+  return all_same([x.st_arg.size for x in sink.src]) and all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims)
+
+shape_spec = PatternMatcher([
+  # shapes must have either 1 or n in each dimension
+  (UPat(Ops.SINK, src=UPat(Ops.STORE), allow_any_len=True, name="sink"), verify_sink_dims),
+  # all parent UOps must have the same shape
+  (UPat(set(Ops)-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])
 
 # ***** uop helpers *****
