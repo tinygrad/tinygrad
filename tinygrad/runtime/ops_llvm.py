@@ -2,7 +2,6 @@ import ctypes, platform, sys
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import getenv, capstone_flatdump
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.runtime.support.llvm import LLVM_VER
 import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.runtime.support.elf import jit_loader
 
@@ -28,7 +27,7 @@ class LLVMCompiler(Compiler):
     else:
       self.passes = b'default<O0>'
     self.target_machine, self.opt = target_machine, opt
-    super().__init__(f"compile_llvm_{LLVM_VER}_jit{'_opt' if opt else ''}")
+    super().__init__(f"compile_llvm_jit{'_opt' if opt else ''}")
 
   def __del__(self):
     llvm.LLVMDisposePassBuilderOptions(self.pbo)
