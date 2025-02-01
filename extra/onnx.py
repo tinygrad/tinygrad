@@ -1,6 +1,6 @@
-from typing import Callable, Any, Sequence, cast, Literal, Callable
-import functools, dataclasses, functools, io, math, inspect, collections
-from tinygrad.tensor import Tensor, _broadcast_shape, ConstType, ReductionStr
+from typing import Any, Sequence, cast, Literal, Callable
+import dataclasses, functools, io, math, inspect, collections
+from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
@@ -83,52 +83,58 @@ def to_python_const(t:Any) -> PYTHON_CONST:
   return ret
 
 # ***** onnx ops *****
-# NOTE: empty domain name ("") means domain is "ai.onnx", aka "main"
-DOMAIN = Literal["", "ai.onnx.ml", "ai.onnx.training", "ai.onnx.preview.training", "com.microsoft"]
+def normalize_domain(domain:str) -> Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"]:
+  match domain:
+    case "": return "ai.onnx"
+    case "ai.onnx.preview.training": return "ai.onnx.training"
+    case "ai.onnx" | "ai.onnx.ml" | "ai.onnx.training" | "com.microsoft": return domain
+    case _: raise NotImplementedError(f"{domain} is not supported")
 
-@dataclasses.dataclass(frozen=True)
-class OpKey:
-  domain: DOMAIN
-  op: str
-
-# TODO maybe add python consts here too for more info
-@dataclasses.dataclass(frozen=True)
-class OpValue:
-  min_opset_version: int
-  fxn: Callable[..., tuple[Any, ...]]
+OpKey = tuple[str, str] # (Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"], op_type)
+# https://github.com/onnx/onnx/blob/main/docs/Versioning.md#operator-versioning
+@dataclasses.dataclass
+class OnnxOp:
+  domain: str
+  op_type: str
+  since_version: int
+  fxn: Callable
+  def __post_init__(self): self.domain = normalize_domain(self.domain)
+  def __eq__(self, other:object):
+    if not isinstance(other, OnnxOp): raise NotImplementedError
+    return self.domain == self.domain and self.op_type == other.op_type and self.since_version == other.since_version
+  def __call__(self, *inps, **opts): return self.fxn(*inps, **opts)
+  def __repr__(self): return f"{self.domain}.{self.op_type}:{self.since_version}"
+  @property
+  def key(self) -> OpKey: return (self.domain, self.op_type)
 
 class _OnnxOps:
-  def __init__(self): self.registry: collections.defaultdict[OpKey, list[OpValue]] = collections.defaultdict(list) # {OpKey: {min_vers: fxn}}
-  def _register(self, fxn: Callable, domain: DOMAIN, op: str | None, python_consts: tuple[str, ...], min_opset_version: int):
-    if op is None: op = fxn.__name__
-    opkey = OpKey(domain, op)
-    assert min_opset_version not in self.registry[opkey], f"{opkey=} for {min_opset_version=} is already registered"
+  def __init__(self): self.registry: collections.defaultdict[OpKey, list[OnnxOp]] = collections.defaultdict(list)
+  def _register(self, fxn: Callable, domain: str, op_type: str | None, python_consts: tuple[str, ...], since_version: int):
+    if op_type is None: op_type = fxn.__name__
     const_indices = [i for i,name in enumerate(inspect.signature(fxn).parameters.keys()) if name in python_consts]
     def to_python_wrapped(*inps, **opts): return fxn(*(to_python_const(inp) if i in const_indices else inp for i,inp in enumerate(inps)), **opts)
-    self.registry[opkey].append(OpValue(min_opset_version, to_python_wrapped))
+    onnx_op = OnnxOp(domain, op_type, since_version, to_python_wrapped)
+    assert onnx_op not in self.registry[onnx_op.key], f"duplicated op {onnx_op}"
+    self.registry[onnx_op.key].append(onnx_op)
     return to_python_wrapped
-  def register_op(self, domain:DOMAIN|list[DOMAIN]="", op:str|None = None, python_consts:tuple[str, ...] = (), min_opset_version:int = 1):
-    def decorator(fxn): return self._register(fxn, domain, op, python_consts, min_opset_version)
+  def register_op(self, domain: str="ai.onnx", op:str|None=None, python_consts:tuple[str, ...]=(), since_version:int=1):
+    def decorator(fxn): return self._register(fxn, domain, op, python_consts, since_version)
     return decorator
-  def register_tensor_ops(self, *ops:str, domain:DOMAIN|list[DOMAIN]="", python_consts:tuple[str, ...]=(), min_opset_version:int=1):
-    for op in ops: self._register(getattr(Tensor, op.lower()), domain, op, python_consts, min_opset_version)
-  def collect_ops(self, keys:set[OpKey], domain_versions:dict[DOMAIN, int]) -> dict[OpKey, OpValue]: # {OpKey: {best_match_vers: fxn}}
-    implemented, unimplemented = {}, {}
-    for key in keys:
-      opset_version = domain_versions[key.domain]
-      if key in self.registry and (valid:=[opval for opval in self.registry[key] if opval.min_opset_version <= opset_version]):
-        # get best match by using the version that supports opset_version and is closest to opset_version
-        implemented[key] = max(valid, key=lambda opval: opval.min_opset_version)
-      else: unimplemented[key] = opset_version
-    if unimplemented: raise NotImplementedError(f"{unimplemented=}")
-    return implemented
+  def register_tensor_ops(self, *ops:str, domain:str="ai.onnx", python_consts:tuple[str, ...]=(), since_version:int=1):
+    for op in ops: self._register(getattr(Tensor, op.lower()), domain, op, python_consts, since_version)
+  def match(self, domain, op_type, target_version) -> OnnxOp | None:
+    # get best match by using the version that supports opset_version and is closest to opset_version
+    key = (domain, op_type)
+    if key in self.registry and (valid:=[op for op in self.registry[key] if op.since_version <= target_version]):
+      return max(valid, key=lambda opid: opid.since_version)
+    return None
 
 OnnxOps = _OnnxOps()
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
-  shape: tuple[str|int]  # str is for variable dims
+  shape: tuple[str|int] # str is for variable dims
   dtype: DType
   is_optional: bool
   is_sequence: bool
@@ -136,11 +142,10 @@ class OnnxValue:
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
   num: int
-  opkey: OpKey
-  opval: OpValue
-  inputs: tuple[str]     # str is for names
-  outputs: tuple[str]    # str is for names
+  inputs: tuple[str] # str is for names
+  outputs: tuple[str] # str is for names
   opts: dict[str, Any]
+  op: OnnxOp
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
@@ -156,9 +161,15 @@ class OnnxRunner:
     self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
     self.variable_dims: dict[str, int] = {}
 
-    ops = OnnxOps.collect_ops(set(OpKey(n.domain, n.op_type) for n in model.graph.node), {opset.domain:opset.version for opset in model.opset_import})
-    self.graph_nodes = [OnnxNode(num, opkey:=OpKey(n.domain, n.op_type), ops[opkey], tuple(n.input), tuple(n.output),
-                                 {x.name: attribute_parse(x) for x in n.attribute}) for num,n in enumerate(model.graph.node)]
+    imported_version_map = {opset.domain:opset.version for opset in model.opset_import}
+    self.graph_nodes: list[OnnxNode] = []
+    unimplemented: list[str] = []
+    for num,n in enumerate(model.graph.node):
+      domain, version = normalize_domain(n.domain), imported_version_map[n.domain]
+      if op := OnnxOps.match(domain, n.op_type, version):
+        self.graph_nodes.append(OnnxNode(num, tuple(n.input), tuple(n.output), {x.name: attribute_parse(x) for x in n.attribute}, op))
+      else: unimplemented.append(f"{domain}.{n.op_type}:{version}")
+    if unimplemented: raise NotImplementedError(f"unimplemented ops: {set(unimplemented)}")
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -184,13 +195,13 @@ class OnnxRunner:
       inps, opts = [self.graph_values.get(name) for name in node.inputs], node.opts
 
       # provide additional opts
-      if node.opkey.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if node.opkey.op == "Gradient": opts['intermediate_tensors'] = self.graph_values
+      if node.op.op_type == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
+      if node.op.op_type == "Gradient": opts['intermediate_tensors'] = self.graph_values
 
       # run op
-      if debug >= 1: print(f"{node.num}: op '{node.opkey.op}_{node.opval.min_opset_version}' domain '{node.opkey.domain or 'ai.onnx'}'\n\topt {opts}")
+      if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
-      ret = node.opval.fxn(*inps, **opts)
+      ret = node.op(*inps, **opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
@@ -254,11 +265,21 @@ def _qlinearop_float(op, inputs:list[Tensor], zero_points:list[Tensor], scales:l
   out_quantized = (out / out_scale).round() + out_zero_point
   return _clamp_cast(out_quantized, out_zero_point.dtype)
 
+def _onnx_training(input_group_size):
+  def __decorator(func):
+    def ___wrapper(R:Tensor, T:int, *inputs:Tensor, **kwargs):
+      R = R.detach()
+      groups = len(inputs) // input_group_size
+      ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
+      return tuple(flatten(zip(*ret)))
+    return ___wrapper
+  return __decorator
+
 # ***** Property Ops *****
 @OnnxOps.register_op(python_consts=("start", "limit", "delta"))
 def Range(start:float|int, limit:float|int, delta:float|int): return Tensor.arange(start=start, stop=limit, step=delta)
 
-@OnnxOps.register_op(python_consts=("encoded_stream"))
+@OnnxOps.register_op(python_consts=("encoded_stream",))
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   try: import PIL.Image
   except ImportError as e: raise ImportError("Pillow must be installed for the ImageDecoder operator") from e
@@ -268,7 +289,7 @@ def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
-@OnnxOps.register_op(python_consts=("encoded_stream"))
+@OnnxOps.register_op(python_consts=("encoded_stream",))
 def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
   # TODO: see if this can just use Tensor
   ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype is not None else x.dtype)
@@ -343,10 +364,10 @@ def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
 @OnnxOps.register_op()
 def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
 
-@OnnxOps.register_op(op="Softmax", min_opset_version=1)
+@OnnxOps.register_op(op="Softmax", since_version=1)
 def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
 
-@OnnxOps.register_op(op="Softmax", min_opset_version=13)
+@OnnxOps.register_op(op="Softmax", since_version=13)
 def Softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
 
 @OnnxOps.register_op()
@@ -674,14 +695,14 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # d
 
 # ***** Neural Network Ops *****
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
-@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), min_opset_version=7)
+@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=7)
 def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
   if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   mask = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
 # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
-@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), min_opset_version=1)
+@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=1)
 def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
 
 # TODO: factor out common implementation for these normalizations
@@ -941,16 +962,6 @@ def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_p
 # ***** Training Ops *****
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
 # NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
-def _onnx_training(input_group_size):
-  def __decorator(func):
-    def ___wrapper(R:Tensor, T:int, *inputs:Tensor, **kwargs):
-      R = R.detach()
-      groups = len(inputs) // input_group_size
-      ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
-      return tuple(flatten(zip(*ret)))
-    return ___wrapper
-  return __decorator
-
 @OnnxOps.register_op(domain="ai.onnx.preview.training", op="Adagrad", python_consts=("T",))
 @_onnx_training(3)
 def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:float=0.0, norm_coefficient:float=0.0):
