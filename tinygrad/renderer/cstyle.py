@@ -1,5 +1,5 @@
 from typing import Optional, Union, Literal, Callable, cast
-import os, math
+import os, math, sys
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
@@ -179,7 +179,8 @@ class ClangRenderer(CStyleLanguage):
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
                                swizzle=(None, ((),(4,5,6,7,0,1,2,3))), opts=("u0","u0","u0","u0","u1","u1","u1","u1"))
                                for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
-
+  if sys.platform == 'win32':
+    kernel_prefix = "__attribute__((ms_abi)) "
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
 

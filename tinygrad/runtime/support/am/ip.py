@@ -1,4 +1,4 @@
-import ctypes, time
+import ctypes, time, contextlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -24,6 +24,9 @@ class AM_GMC(AM_IP):
     # VM aperture
     self.vm_base = self.adev.mm.va_allocator.base
     self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
+
+    # GFX11 has 44-bit address space
+    self.address_space_mask = (1 << 44) - 1
 
     self.memscratch_paddr = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
     self.dummy_page_paddr = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
@@ -99,30 +102,52 @@ class AM_GMC(AM_IP):
       if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
 
 class AM_SMU(AM_IP):
-  def init(self):
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
+  def __init__(self, adev):
+    super().__init__(adev)
+    self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=not self.adev.partial_boot, boot=True)
 
-    for clck in [0x00000C94, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]:
-      self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
-      self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
+  def init(self):
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
+
+  def is_smu_alive(self):
+    with contextlib.suppress(RuntimeError): self._send_msg(smu_v13_0_0.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
     time.sleep(0.5) # 500ms
 
-  def _smu_cmn_poll_stat(self): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1)
+  def read_table(self, table_t, cmd):
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_TransferTableSmu2Dram, cmd, poll=True)
+    return table_t.from_buffer(to_mv(self.adev.paddr2cpu(self.driver_table_paddr), ctypes.sizeof(table_t)))
+  def read_metrics(self): return self.read_table(smu_v13_0_0.SmuMetricsExternal_t, smu_v13_0_0.TABLE_SMU_METRICS)
+
+  def set_clocks(self, level):
+    if not hasattr(self, 'clcks'):
+      self.clcks = {}
+      for clck in [smu_v13_0_0.PPCLK_GFXCLK, smu_v13_0_0.PPCLK_UCLK, smu_v13_0_0.PPCLK_FCLK, smu_v13_0_0.PPCLK_SOCCLK]:
+        cnt = self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff
+        self.clcks[clck] = [self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
+
+    for clck, vals in self.clcks.items():
+      self._send_msg(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), poll=True)
+      self._send_msg(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]), poll=True)
+
+  def _smu_cmn_poll_stat(self, timeout=10000): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1, timeout=timeout)
   def _smu_cmn_send_msg(self, msg, param=0):
     self.adev.mmMP1_SMN_C2PMSG_90.write(0) # resp reg
     self.adev.mmMP1_SMN_C2PMSG_82.write(param)
     self.adev.mmMP1_SMN_C2PMSG_66.write(msg)
 
-  def _smu_cmn_send_smc_msg_with_param(self, msg, param, poll=True, read_back_arg=False):
-    if poll: self._smu_cmn_poll_stat()
+  def _send_msg(self, msg, param, poll=True, read_back_arg=False, timeout=10000): # 10s
+    if poll: self._smu_cmn_poll_stat(timeout=timeout)
 
     self._smu_cmn_send_msg(msg, param)
-    self._smu_cmn_poll_stat()
-    return self.adev.rreg(self.adev.mmMP1_SMN_C2PMSG_82) if read_back_arg else None
+    self._smu_cmn_poll_stat(timeout=timeout)
+    return self.adev.mmMP1_SMN_C2PMSG_82.read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
   def init(self):
@@ -233,8 +258,9 @@ class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
     self.ring_size = 512 << 10
-    self.rings = [(self.adev.mm.palloc(self.ring_size, boot=True), self.adev.mm.palloc(0x1000, boot=True), "", 0),
-      (self.adev.mm.palloc(self.ring_size, boot=True), self.adev.mm.palloc(0x1000, boot=True), "_RING1", 1)]
+    def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=not self.adev.partial_boot, boot=True),
+                                    self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True))
+    self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
 
   def interrupt_handler(self):
     _, rwptr_vm, suf, _ = self.rings[0]
@@ -311,6 +337,9 @@ class AM_PSP(AM_IP):
     self.ring_size = 0x10000
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True)
 
+    self.max_tmr_size = 0x1300000
+    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
+
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
     sos_components_load_order = [
@@ -319,8 +348,9 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
-    for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
-    while not self.is_sos_alive(): time.sleep(0.01)
+    if not self.is_sos_alive():
+      for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
+      while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
     self._tmr_init()
@@ -354,9 +384,16 @@ class AM_PSP(AM_IP):
     # Load TOC and calculate TMR size
     self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
     self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
-    self.tmr_paddr = self.adev.mm.palloc(self.tmr_size, align=am.PSP_TMR_ALIGNMENT, boot=True)
+    assert self.tmr_size <= self.max_tmr_size
 
   def _ring_create(self):
+    # If the ring is already created, destroy it
+    if self.adev.regMP0_SMN_C2PMSG_71.read() != 0:
+      self.adev.regMP0_SMN_C2PMSG_64.write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+
+      # There might be handshake issue with hardware which needs delay
+      time.sleep(0.02)
+
     # Wait until the sOS is ready
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x80000000, value=0x80000000)
 

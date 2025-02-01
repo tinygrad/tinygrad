@@ -619,6 +619,55 @@ jobs:
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
 
+  wintests:
+    strategy:
+      fail-fast: false
+    name: Tests on Windows (llvm+clang)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
+          key: windows-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        shell: bash
+        run: |
+          if [ "${{ matrix.backend }}" = "clang" ]; then
+            echo "CLANG=1" >> $GITHUB_ENV
+          elif [ "${{ matrix.backend }}" = "llvm" ]; then
+            echo "LLVM=1" >> $GITHUB_ENV
+          fi
+      - name: Install dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT and print some source (llvm)
+        shell: bash
+        run: |
+          PYTHONPATH=${{ github.workspace }} LLVM=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (clang)
+        shell: bash
+        run: |
+          PYTHONPATH=${{ github.workspace }} CLANG=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} CLANG=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (llvm)
+        shell: bash
+        run: |
+          DEBUG=5 LLVM=1 python -m pytest -n=auto test/test_tiny.py --durations=20
+      - name: Run pytest (clang)
+        shell: bash
+        run: |
+          DEBUG=5 CLANG=1 python -m pytest -n=auto test/test_tiny.py --durations=20
+
   #testunicorn:
   #  name: ARM64 unicorn Test
   #  runs-on: ubuntu-latest
