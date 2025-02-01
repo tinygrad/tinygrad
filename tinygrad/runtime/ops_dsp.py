@@ -1,12 +1,11 @@
 from __future__ import annotations
 from typing import Tuple, Any, List
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv
-from tinygrad.runtime.ops_clang import ClangCompiler
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -91,10 +90,23 @@ class DSPAllocator(Allocator):
   def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
   def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
 
-class DSPDevice(Compiled):
-  def __init__(self, device:str=""):
-    self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
+class ClangCompiler(Compiler):
+  def __init__(self, cachekey="compile_clang", args:list[str]|None=None, objdump_tool='objdump'):
+    self.args = ['-march=native'] if args is None else args
+    self.objdump_tool = objdump_tool
+    super().__init__(cachekey)
 
+  def compile(self, src:str) -> bytes:
+    # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
+    with tempfile.NamedTemporaryFile(delete=True) as output_file:
+      subprocess.check_output(['clang', '-shared', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
+      return pathlib.Path(output_file.name).read_bytes()
+
+  def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
+
+class DSPCompiler(ClangCompiler):
+  def __init__(self):
     # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
     sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
     sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
@@ -103,8 +115,12 @@ class DSPDevice(Compiled):
       self.link_ld.flush()
 
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
-    super().__init__(device, DSPAllocator(self), DSPRenderer(),
-                     ClangCompiler("compile_dsp", args=compiler_args, objdump_tool='llvm-objdump'), functools.partial(DSPProgram, self))
+    return super().__init__("compile_dsp", args=compiler_args, objdump_tool='llvm-objdump')
+
+class DSPDevice(Compiled):
+  def __init__(self, device:str=""):
+    self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
+    super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
     self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))

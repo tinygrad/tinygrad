@@ -2,7 +2,7 @@ import numpy as np
 import onnx, unittest
 from onnx import helper, numpy_helper, TensorProto
 from examples.benchmark_onnx import load_onnx_model
-from tinygrad import Tensor, Context, dtypes
+from tinygrad import Tensor, Context
 
 N = 1024
 
