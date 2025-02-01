@@ -95,6 +95,10 @@ backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
 
+# no support for int pow
+backend_test.exclude('test_pow_types_int32_int32_cpu')
+backend_test.exclude('test_pow_types_int64_int64_cpu')
+
 # no support for fmod
 backend_test.exclude('test_mod_int64_fmod_cpu')
 backend_test.exclude('test_mod_mixed_sign_float16_cpu')
