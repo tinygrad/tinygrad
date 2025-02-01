@@ -85,7 +85,9 @@ class MathTrait:
   def minimum(self, x): return (of:=self._opfix(x))[0].neg().maximum(-of[1]).neg()
   def where(self, x, y):
     x, y = x._opfix(y) if isinstance(x, MathTrait) else y._opfix(x)[::-1] if isinstance(y, MathTrait) else (x, y)
-    return self._opfix(x)[0]._opfix(y,_bool=True)[0].alu(Ops.WHERE, *self._opfix(x,match_dtype=False)[1]._opfix(y))
+    cond, x = self._opfix(x, match_dtype=False)
+    cond, y = cond._opfix(y, match_dtype=False)
+    return cond._opfix(_bool=True)[0].alu(Ops.WHERE, *x._opfix(y))
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
   def reciprocal(self): return self._opfix(_float=True)[0].alu(Ops.RECIP)
   def sqrt(self): return self._opfix(_float=True)[0].alu(Ops.SQRT)
