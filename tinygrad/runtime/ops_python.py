@@ -10,7 +10,6 @@ from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
-import numpy as np
 
 def _load(m, i):
   if i is None: return 0.0
@@ -103,6 +102,7 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
           assert dtp[0].fmt and dtype.fmt
+          if dtp[0] in dtypes.fp8s or dtype in dtypes.fp8s: import numpy as np
           packed = struct.pack(str(warp_size) + dtp[0].fmt, *inp[0]) if dtp[0] not in dtypes.fp8s else b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
           ul[i] = list(struct.unpack(str(warp_size) + dtype.fmt, packed)) if dtype not in dtypes.fp8s else np.frombuffer(packed, dtype=truncate.get(dtype, lambda dt: dt)).tolist()
         elif uop is Ops.CAST:
