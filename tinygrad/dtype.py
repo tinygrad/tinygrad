@@ -146,6 +146,7 @@ class dtypes:
   default_int: ClassVar[DType] = int32
 
   floats = (fp8e4m3, fp8e5m2, float16, bfloat16, float32, float64)
+  fp8s = (fp8e4m3, fp8e5m2)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
@@ -192,4 +193,4 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
-  dtypes.int64: lambda x: ctypes.c_int64(x).value, dtypes.fp8e5m2: lambda x: float8_e5m2(x), dtypes.fp8e4m3: lambda x: float8_e4m3(x)}
+  dtypes.int64: lambda x: ctypes.c_int64(x).value, dtypes.fp8e5m2: float8_e5m2, dtypes.fp8e4m3: float8_e4m3}

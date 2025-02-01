@@ -104,20 +104,10 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
           assert dtp[0].fmt and dtype.fmt
-          if dtp[0] == dtypes.fp8e4m3:
-            unpack_format = str(warp_size) + dtype.fmt
-            ul[i] = list(struct.unpack(unpack_format, b''.join([float8_e4m3(z).tobytes() for z in inp[0]])))
-          elif dtype == dtypes.fp8e4m3:
-            pack_format = str(warp_size) + dtp[0].fmt
-            ul[i] = np.frombuffer(struct.pack(pack_format, *inp[0]), dtype=float8_e4m3).tolist()
-          else:
-            pack_format = str(warp_size) + dtp[0].fmt
-            unpack_format = str(warp_size) + dtype.fmt
-            ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+          packed = struct.pack(str(warp_size) + dtp[0].fmt, *inp[0]) if dtp[0] not in dtypes.fp8s else b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
+          ul[i] = list(struct.unpack(str(warp_size) + dtype.fmt, packed)) if dtype not in dtypes.fp8s else np.frombuffer(packed, dtype=truncate.get(dtype, lambda dt: dt)).tolist()
         elif uop is Ops.CAST:
           assert dtp[0].fmt and dtype.fmt
-          pack_format = str(warp_size) + dtp[0].fmt
-          unpack_format = str(warp_size) + dtype.fmt
           ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
