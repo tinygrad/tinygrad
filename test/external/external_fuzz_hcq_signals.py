@@ -6,14 +6,15 @@ def main():
   seed = getenv("SEED", 1337)
   n_gpus = getenv("GPUS", 3)
   iters = getenv("ITERS", 10000000)
+  only_compute = bool(getenv("ONLY_COMPUTE", 0))
 
-  print(f"{n_gpus} GPUs for {iters} iterations")
+  print(f"{n_gpus} GPUs for {iters} iterations, {only_compute=}, seed {seed}")
   devs = tuple([Device[f"{Device.DEFAULT}:{x}"] for x in range(n_gpus)])
 
   for i in range(iters):
     dev = random.choice(devs)
-    q_t = random.choice([dev.hw_copy_queue_t, dev.hw_compute_queue_t])
-    
+    q_t = random.choice([dev.hw_copy_queue_t, dev.hw_compute_queue_t] if not only_compute else [dev.hw_compute_queue_t])
+
     deps_sigs = random.randint(0, len(devs))
     wait_devs = random.sample(devs, deps_sigs)
 
