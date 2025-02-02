@@ -32,7 +32,7 @@ class ProcessReplayWarning(Warning): pass
 
 def recreate_sched(ast:UOp) -> UOp:
   # NOTE: process replay isn't meant to actually schedule anything
-  return schedule_uop(ast, ScheduleContext(tensor_uops=defaultdict(list))).ast
+  return schedule_uop(ast, ScheduleContext(tensor_uops=defaultdict(list)), {}).ast
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
@@ -41,12 +41,13 @@ def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) ->
 
 # *** diff a "good" recreation against the generated version
 
-def diff(offset:int, name:str, fxn:Callable) -> tuple[int, int]|bool:
-  if early_stop.is_set(): return True
+def diff(offset:int, name:str, fxn:Callable) -> None:
+  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
+  if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{name}_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
-  additions, deletions, changed = 0, 0, 0
+  changed = 0
   for row in cur.fetchall():
     if changed > MAX_DIFF_PCT:
       warnings.warn(f"detected changes in over {MAX_DIFF_PCT}% of {name}s. skipping further diff generation.")
@@ -60,7 +61,8 @@ def diff(offset:int, name:str, fxn:Callable) -> tuple[int, int]|bool:
       continue
     # try recreate
     try:
-      with Context(**{k:v.value for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
+      ctx_vars = {k:v.value for k,v in args[-2].items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+      with Context(**ctx_vars): good = fxn(*args[:-2])
       if good is None: continue
     except Exception as e:
       changed += 1
@@ -68,19 +70,16 @@ def diff(offset:int, name:str, fxn:Callable) -> tuple[int, int]|bool:
       for x in args[:-1]: logging.info(x)
       continue
     # diff kernels
-    try: assert args[-1] == good
+    try: assert str(args[-1]) == str(good)
     except AssertionError:
       changed += 1
-      logging.info("PROCESS REPLAY DETECTED CHANGE")
-      for x in args[:-1]: logging.info(x)
+      if ctx_vars: logging.info(ctx_vars)
+      for x in args[:-2]: logging.info(x)
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
-      additions += len([x for x in changes if x.startswith("+")])
-      deletions += len([x for x in changes if x.startswith("-")])
       logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
-      if ASSERT_DIFF: return additions, deletions
+      warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
   conn.commit()
   cur.close()
-  return additions, deletions
 
 # *** generic runner for executing fxn across all rows of a table in parallel
 
@@ -95,16 +94,10 @@ def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
   cur.close()
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    ret: list[tuple[int, int]|bool] = list(tqdm(pool.imap_unordered(functools.partial(diff, name=name, fxn=fxn), inputs), total=len(inputs)))
+    list(tqdm(pool.imap_unordered(functools.partial(diff, name=name, fxn=fxn), inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()
-    changed = [bool(x[0] or x[1]) if isinstance(x, tuple) else x for x in ret]
-    insertion, deletions = [x[0] for x in ret if isinstance(x, tuple)], [x[1] for x in ret if isinstance(x, tuple)]
-    logging.info(f"{sum(changed)} kernels changed")
-    if sum(insertion) != 0: logging.info(colored(f"{sum(insertion)} insertions(+)", "green"))
-    if sum(deletions) != 0: logging.info(colored(f"{sum(deletions)} deletions(-)", "red"))
-    if any(changed): warnings.warn("process replay detected changes", ProcessReplayWarning)
 
 # *** main loop
 
@@ -113,7 +106,7 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
-  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
+  print(f"running process replay with {ASSERT_DIFF=}")
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
     try: _pmap(name, fxn)

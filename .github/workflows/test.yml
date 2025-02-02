@@ -90,6 +90,11 @@ jobs:
           /opt/rocm/lib64
         EOF
         sudo ldconfig
+    - name: Install packages (llvm)
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends llvm-14-dev
     - name: Compile EfficientNet to C and test it
       run: |
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
@@ -127,6 +132,11 @@ jobs:
         ./autogen_stubs.sh io_uring
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+    - name: Verify LLVM autogen
+      run: |
+        cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
+        ./autogen_stubs.sh llvm
+        diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
 
   uops:
     name: uops tests
@@ -195,7 +205,7 @@ jobs:
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
-      run: DEBUG=2 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_max_pool2d or test_max_pool2d_simple or test_max_pool2d_bigger_stride or test_avg_pool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal or test_slice_fancy_indexing_dim_inject_none or test_slice_fancy_indexing_list_indices or test_slice_fancy_indexing_no_dim_collapse or test_slice_fancy_indexing_tuple_indices or test_slice_fancy_indexing_list_with_tensors or test_slice_fancy_indexing_dim_collapse_int or test_interpolate_bilinear or test_interpolate_bilinear_corners_aligned)" --durations=20
+      run: DEBUG=2 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_max_pool2d or test_max_pool2d_simple or test_max_pool2d_bigger_stride or test_avg_pool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal or test_slice_fancy_indexing_dim_inject_none or test_slice_fancy_indexing_list_indices or test_slice_fancy_indexing_no_dim_collapse or test_slice_fancy_indexing_tuple_indices or test_slice_fancy_indexing_list_with_tensors or test_slice_fancy_indexing_dim_collapse_int or test_interpolate_bilinear or test_interpolate_bilinear_corners_aligned or test_scaled_dot_product_attention or test_cummax)" --durations=20
     - name: Test uops with Python emulator
       run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
     - name: Test symbolic with Python emulator
@@ -546,7 +556,7 @@ jobs:
           EOF
           sudo ldconfig
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
@@ -622,10 +632,7 @@ jobs:
   wintests:
     strategy:
       fail-fast: false
-      matrix:
-        backend: [llvm]
-
-    name: Tests on Windows (${{ matrix.backend }})
+    name: Tests on Windows (llvm+clang)
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -641,21 +648,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-          key: windows-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-      - name: Install dependencies
-        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Check Device.DEFAULT and print some source
-        env:
-          DEBUG: 5
-          LLVM: 1
-          PYTHONPATH: ${{ github.workspace }}
+          key: windows-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        shell: bash
         run: |
-          python3 test/test_ops.py TestOps.test_add
-      - name: Run pytest
-        env:
-          DEBUG: 5
-          LLVM: 1
-        run: python -m pytest -n=auto test/test_tiny.py --durations=20
+          if [ "${{ matrix.backend }}" = "clang" ]; then
+            echo "CLANG=1" >> $GITHUB_ENV
+          elif [ "${{ matrix.backend }}" = "llvm" ]; then
+            echo "LLVM=1" >> $GITHUB_ENV
+          fi
+      - name: Install dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT and print some source (llvm)
+        shell: bash
+        run: |
+          PYTHONPATH=${{ github.workspace }} LLVM=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (clang)
+        shell: bash
+        run: |
+          PYTHONPATH=${{ github.workspace }} CLANG=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} CLANG=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (llvm)
+        shell: bash
+        run: |
+          LLVM=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+      - name: Run pytest (clang)
+        shell: bash
+        run: |
+          CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

@@ -193,6 +193,13 @@
     border-radius: 8px;
     padding: 8px;
   }
+  .progress {
+    font-size: 20px;
+    z-index: 2;
+    align-self: center;
+    justify-content: center;
+    width: 100%;
+  }
   </style>
 </head>
 <body>
@@ -204,6 +211,7 @@
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
+    <p class="progress"></p>
     <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
@@ -247,8 +255,8 @@
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
     for (const [k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[4]};` });
-      for (const src of u[2]) {
+      g.setNode(k, {label: u[0], style: `fill: ${u[2]};` });
+      for (const src of u[1]) {
         g.setEdge(src, k, {curve: d3.curveBasis})
       }
       if (additions.includes(parseInt(k))) {
@@ -307,8 +315,7 @@
       if (i === currentKernel) {
         requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
-      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerText: key ?? "UNPARENTED",
-        style: "cursor: pointer;"});
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerText: key, style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
@@ -348,7 +355,23 @@
         ret = cache[cacheKey];
       }
       else {
-        ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
+        const p = document.querySelector(".progress");
+        const limit = 100;
+        const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
+        p.style.display = pageCount == 1 ? "none" : "flex";
+        for (let i=0; i < pageCount; i++) {
+          p.innerText = `fetching data ${i+1}/${pageCount}`;
+          const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
+          if (i === 0) ret = chunk
+          else {
+            // TODO: this shouldn't exist after the viz api refactor
+            for (const [k,v] of Object.entries(chunk)) {
+              if (["uops", "graphs"].includes(k)) v.splice(0, 1);
+              if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
+            }
+          }
+        }
+        p.style.display = "none";
         cache[cacheKey] = ret;
       }
       renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
