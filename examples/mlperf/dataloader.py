@@ -386,17 +386,17 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
   queue_out.put(None)
 
 def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, shuffle:bool=True, seed:Optional[int]=None):
-  def _enqueue_batch(bc, boxes:Optional[List[Dict]] = None, labels:Optional[List[Dict]] = None):
+  def _enqueue_batch(bc):
     from extra.datasets.openimages import prepare_target
     for idx in range(bc * batch_size, (bc+1) * batch_size):
       img = dataset.loadImgs(next(dataset_iter))[0]
       ann = dataset.loadAnns(dataset.getAnnIds(img_id:=img["id"]))
       tgt = prepare_target(ann, img_id, (img["height"], img["width"]))
 
-      if boxes is not None:
+      if isinstance(boxes, list):
         boxes[idx] = tgt["boxes"]
 
-      if labels is not None:
+      if isinstance(labels, list):
         labels[idx] = tgt["labels"]
 
       queue_in.put((idx, img, tgt))
@@ -452,7 +452,7 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       procs.append(proc)
 
     for bc in range(batch_count):
-      _enqueue_batch(bc, boxes=boxes if isinstance(boxes, list) else None, labels=labels if isinstance(labels, list) else None)
+      _enqueue_batch(bc)
 
     for _ in range(len(image_ids) // batch_size):
       while True:
