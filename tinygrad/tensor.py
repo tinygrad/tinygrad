@@ -358,7 +358,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     import numpy as np
-    if self.dtype.base in [dtypes.bfloat16]: return self.float().numpy()
+    if self.dtype.base in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]: return self.float().numpy()
     assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)

@@ -59,10 +59,10 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone"
+            "capstone",
+            "ml_dtypes"
         ],
         'webgpu': ["wgpu"],
-        'fp8s': ["ml_dtypes", "numpy"],
         'docs': [
             "mkdocs",
             "mkdocs-material",
