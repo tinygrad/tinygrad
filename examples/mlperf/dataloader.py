@@ -1,5 +1,5 @@
 import os, random, pickle, queue
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -353,15 +353,13 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue,
                         imgs:Tensor, boxes:Tensor, labels:Tensor, matches:Optional[Tensor] = None,
                         anchors:Optional[Tensor] = None, seed:Optional[int] = None):
-  from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
+  from extra.datasets.openimages import image_load, random_horizontal_flip, resize
   from examples.mlperf.helpers import box_iou, find_matches, generate_anchors
   import torch
 
   while (data:=queue_in.get()) is not None:
-    idx, img, ann = data
-    img_id = img["id"]
+    idx, img, tgt = data
     img = image_load(base_dir, img["subset"], img["file_name"])
-    tgt = prepare_target(ann, img_id, img.size[::-1])
 
     if seed is not None:
       np.random.seed(seed)
@@ -388,11 +386,20 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
   queue_out.put(None)
 
 def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, shuffle:bool=True, seed:Optional[int]=None):
-  def _enqueue_batch(bc):
+  def _enqueue_batch(bc, boxes:Optional[List[Dict]] = None, labels:Optional[List[Dict]] = None):
+    from extra.datasets.openimages import prepare_target
     for idx in range(bc * batch_size, (bc+1) * batch_size):
       img = dataset.loadImgs(next(dataset_iter))[0]
-      ann = dataset.loadAnns(dataset.getAnnIds(img["id"]))
-      queue_in.put((idx, img, ann))
+      ann = dataset.loadAnns(dataset.getAnnIds(img_id:=img["id"]))
+      tgt = prepare_target(ann, img_id, (img["height"], img["width"]))
+
+      if boxes is not None:
+        boxes[idx] = tgt["boxes"]
+
+      if labels is not None:
+        labels[idx] = tgt["labels"]
+
+      queue_in.put((idx, img, tgt))
 
   def _setup_shared_mem(shm_name:str, size:Tuple[int, ...], dtype:dtypes) -> Tuple[shared_memory.SharedMemory, Tensor]:
     if os.path.exists(f"/dev/shm/{shm_name}"): os.unlink(f"/dev/shm/{shm_name}")
@@ -445,7 +452,7 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       procs.append(proc)
 
     for bc in range(batch_count):
-      _enqueue_batch(bc)
+      _enqueue_batch(bc, boxes=boxes if isinstance(boxes, list) else None, labels=labels if isinstance(labels, list) else None)
 
     for _ in range(len(image_ids) // batch_size):
       while True:
@@ -458,6 +465,8 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       if val:
         yield (imgs[bc * batch_size:(bc + 1) * batch_size],
                image_ids[bc * batch_size:(bc + 1) * batch_size],
+               boxes[bc * batch_size:(bc + 1) * batch_size],
+               labels[bc * batch_size:(bc + 1) * batch_size],
                Cookie(bc))
       else:
         yield (imgs[bc * batch_size:(bc + 1) * batch_size],
