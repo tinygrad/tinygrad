@@ -151,8 +151,13 @@ to_si = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), _append_buf),
   # simplify and unbind the final VIEWs
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  # don't need SINK on COPY or BUFFER_VIEW
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda x: x),
+  # TODO: remove this after KERNEL refactor
+  # COPY in schedule is COPY(DEVICE, DEFINE_GLOBAL)
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.COPY, name="copy", src=(UPat.var("device"), UPat.load(UPat.var("glbl"), UPat())))),)),
+   lambda copy,device,glbl: copy.replace(src=(device, glbl))),
+  # subbuffer in schedule is BUFFER_VIEW(DEFINE_GLOBAL)
+  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.BUFFER_VIEW, name="view", src=(UPat.load(UPat.var("glbl"), UPat()),))),)),
+   lambda view,glbl: view.replace(src=(glbl,))),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
