@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.rewriter import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.dtype import DType
 
@@ -63,17 +63,16 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
-  # This will only work if retain_graph works.
-  def test_retain_graph(self):
+  def test_accumulate_gradients(self):
     x = Tensor(x_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
     m = Tensor(m_init)
     out = x.dot(W).relu()
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad,wgrad = x.grad, W.grad
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
     xgrad3,wgrad3 = x.grad, W.grad
@@ -652,19 +651,26 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_clone(self):
     a = Tensor.rand(16, 16).realize()
-    self.assertIsNot(a.lazydata, a.clone().lazydata)
-    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+    b = a.clone()
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
     a = Tensor.rand(16, 16).mul(5.0).add(5.0)
-    self.assertIsNot(a.lazydata, a.clone().lazydata)
-    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+    b = a.clone()
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
   def test_clone_with_shrink(self):
-    a = Tensor.empty(16, 16)
-    self.assertIsNot(a.lazydata, a.clone().lazydata)
+    a = Tensor.rand(16, 16)
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
-    b = a.shrink(((2, 10), None))
-    self.assertIsNot(b.lazydata, b.clone().lazydata)
+  def test_clone_with_shrink_realized(self):
+    a = Tensor.rand(16, 16).realize()
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
   def test_clone_with_grad(self):
     a = Tensor.rand(16, 16, requires_grad=True)
@@ -763,8 +769,8 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
   def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True).realize()
+    y = Tensor.rand(3, requires_grad=True).realize()
     out = (x.relu() * y.sigmoid()).sum()
     self.assertEqual(out.lazydata.metadata.name, "sum")
     out.backward()

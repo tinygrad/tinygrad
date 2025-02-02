@@ -63,7 +63,7 @@ class TestTiny(unittest.TestCase):
   # *** BEAM (for Kernel speed) ***
 
   def test_beam(self):
-    with Context(BEAM=1): self.test_plus()
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_plus()
 
   # *** symbolic (to allow less recompilation) ***
 
@@ -107,7 +107,7 @@ class TestTiny(unittest.TestCase):
     with Context(IMAGE=2): self.test_gemm(out_dtype=dtypes.imagef((4, 1, 4)))
 
   def test_beam_image(self):
-    with Context(BEAM=1): self.test_image()
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_image()
 
 if __name__ == '__main__':
   unittest.main()
