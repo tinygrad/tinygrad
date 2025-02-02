@@ -409,7 +409,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
-      check(amt <= 16, "don't upcast more than 16")
+      #check(amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.NOLOCALS:

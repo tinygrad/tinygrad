@@ -2,7 +2,7 @@ import numpy as np
 import onnx, unittest
 from onnx import helper, numpy_helper, TensorProto
 from examples.benchmark_onnx import load_onnx_model
-from tinygrad import Tensor, Context, dtypes
+from tinygrad import Tensor, Context, dtypes, Device
 
 N = 1024
 
@@ -49,7 +49,15 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(1,1024)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(1024,1024)).astype(np.uint8))
     out = X.cast(dtypes.int) @ W.cast(dtypes.int)
-    out.realize()
+    si = out.schedule()[-1]
+    from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+    from tinygrad.engine.realize import CompiledRunner, ExecItem
+    k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
+    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    for opt in opts: k.apply_opt(opt)
+    prg = k.to_program()
+    ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
+    for _ in range(3): ei.run(wait=True)
 
 if __name__ == "__main__":
   unittest.main()
