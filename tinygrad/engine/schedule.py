@@ -1,4 +1,4 @@
-import sys, atexit, functools, pickle, heapq
+import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
@@ -423,41 +423,37 @@ remove_movement_ops = merge_views+PatternMatcher([
 # **** schedule creation and toposort
 
 def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
-  # reconstruct schedule items
-  def track_back_assign_to_buffer(x:UOp) -> Buffer:
-    if x.op is Ops.ASSIGN: return track_back_assign_to_buffer(x.src[0])
+  # if a kernel depends on a buffer, and that buffer is later assigned to, made the assign depends on the kernel's assign
+  kernel_assigns: list[UOp] = []
+  for x in sched_sink.toposort:
+    if x.op is Ops.ASSIGN:
+      kernel_assigns.append(x)
+  replacements = {}
+  for x in sched_sink.toposort:
+    if x.op is Ops.ASSIGN:
+      assigned_to = x.src[0]
+      new_srcs = []
+      for ka in kernel_assigns:
+        k = ka.src[1]
+        if k not in x.src and any(y is assigned_to for y in k.src):
+          print("HERE")
+          new_srcs.append(ka)
+      if len(new_srcs): replacements[x] = x.replace(src=x.src+tuple(new_srcs))
+  new_sched_sink = sched_sink.substitute(replacements)
+
+  # display
+  graph_rewrite(new_sched_sink, PatternMatcher([]))
+
+  # final toposort
+  def track_back_assign(x:UOp) -> UOp:
+    if x.op is Ops.ASSIGN: return track_back_assign(x.src[0])
     assert x.op is Ops.BUFFER, f"op is {x.op}"
-    return x.buffer
-
-  # get children
-  children: dict[UOp, list[UOp]] = {}
-  in_degree: dict[UOp, int] = {}
-  for u in sched_sink.toposort:
-    in_degree[u] = len(u.src)
-    for s in u.src:
-      children.setdefault(s, []).append(u)
-
-  # place ASSIGN last
-  def get_priority(u:UOp): return 10 if u.op is Ops.ASSIGN else 0
-
-  queue: list[tuple[int, int, UOp]] = []
-  cnt = 0
-  for u,v in in_degree.items():
-    if v == 0:
-      heapq.heappush(queue, (get_priority(u), cnt, u))
-      cnt += 1
-
-  # real place
+    return x
   new_schedule = []
-  while queue:
-    _, _, x = queue.pop(0)
-    if x.op is Ops.KERNEL: new_schedule.append(ScheduleItem(x.arg.ast, tuple(track_back_assign_to_buffer(y) for y in x.src), ()))
-    if x in children:
-      for u in children[x]:
-        in_degree[u] -= 1
-        if in_degree[u] == 0:
-          heapq.heappush(queue, (get_priority(u), cnt, u))
-          cnt += 1
+  for x in new_sched_sink.toposort:
+    if x.op is Ops.ASSIGN:
+      k = x.src[1]
+      new_schedule.append(ScheduleItem(k.arg.ast, tuple(track_back_assign(y).buffer for y in k.src), ()))
   return new_schedule
 
 @track_rewrites(named=True)
@@ -549,5 +545,4 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   sched_sink = UOp.sink(*sinks)
 
   # display sched_sink
-  graph_rewrite(sched_sink, PatternMatcher([]))
   return linearize_schedule(sched_sink), var_vals, becomes_map
