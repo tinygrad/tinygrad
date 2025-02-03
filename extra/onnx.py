@@ -123,7 +123,7 @@ class OnnxRunner:
     self.opset_version = model.opset_import[0].version
     self.variable_dims: dict[str, int] = {}
 
-    self.onnx_ops = get_onnx_ops()
+    self.onnx_ops = OnnxOps
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -792,3 +792,4 @@ def get_onnx_ops():
     **{name:obj for name,obj in locals().items() if isinstance(obj, dict)},
   }
 
+OnnxOps = get_onnx_ops()
