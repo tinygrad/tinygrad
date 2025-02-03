@@ -238,22 +238,9 @@ class WebGpuDevice(Compiled):
     if timestamp_supported: required_features.append(webgpu.WGPUFeatureName_TimestampQuery)
 
     assert adapter_result[1] is not None, "adapter should not be none"
-    device_desc = webgpu.WGPUDeviceDescriptor()
 
-    # Disable "timestamp_quantization" for nanosecond precision: https://developer.chrome.com/blog/new-in-webgpu-120
-    toggle_desc = webgpu.WGPUDawnTogglesDescriptor()
-    toggle_desc.chain.sType = webgpu.WGPUSType_DawnTogglesDescriptor
-    toggle_desc.enabledToggleCount = 1
-    unsafe_apis = ctypes.cast(ctypes.pointer(to_c_string("allow_unsafe_apis")), ctypes.POINTER(ctypes.c_char))
-    toggle_desc.enabledToggles =  ctypes.pointer(unsafe_apis)
-    toggle_desc.disabledToggleCount = 1
-    ts_quant = ctypes.cast(ctypes.pointer(to_c_string("timestamp_quantization")), ctypes.POINTER(ctypes.c_char))
-    toggle_desc.disabledToggles = ctypes.pointer(ts_quant)
-    device_desc.nextInChain = ctypes.cast(ctypes.pointer(toggle_desc), ctypes.POINTER(webgpu.struct_WGPUChainedStruct))
-
-    # Populate required features
-    device_desc.requiredFeatureCount = len(required_features)
-    device_desc.requiredFeatures = (webgpu.WGPUFeatureName * len(required_features))(*required_features)
+    device_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount = len(required_features),
+      requiredFeatures = (webgpu.WGPUFeatureName * len(required_features))(*required_features))
 
     # Limits
     supported_limits = webgpu.WGPUSupportedLimits()

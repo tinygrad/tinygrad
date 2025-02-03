@@ -14,6 +14,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
 class TestTimeLinearizer(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WebGPU timestamps are low precision, tm is 0")
   def test_reasonable_time(self):
     a = Tensor([1,2,3,4]).realize()
     si = (a+1).schedule()[0]
