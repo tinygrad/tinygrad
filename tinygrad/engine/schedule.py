@@ -423,11 +423,10 @@ remove_movement_ops = merge_views+PatternMatcher([
 # **** schedule creation and toposort
 
 def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
-  # if a kernel depends on a buffer, and that buffer is later assigned to, made the assign depends on the kernel's assign
+  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depends on the kernel's assign
   kernel_assigns: list[UOp] = []
   for x in sched_sink.toposort:
-    if x.op is Ops.ASSIGN:
-      kernel_assigns.append(x)
+    if x.op is Ops.ASSIGN: kernel_assigns.append(x)
   replacements = {}
   for x in sched_sink.toposort:
     if x.op is Ops.ASSIGN:
@@ -435,10 +434,10 @@ def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
       new_srcs = []
       for ka in kernel_assigns:
         k = ka.src[1]
-        if k not in x.src and any(y is assigned_to for y in k.src):
-          print("HERE")
-          new_srcs.append(ka)
-      if len(new_srcs): replacements[x] = x.replace(src=x.src+tuple(new_srcs))
+        if k not in x.src and any(y is assigned_to for y in k.src): new_srcs.append(ka)
+      if len(new_srcs):
+        assert x not in replacements
+        replacements[x] = x.replace(src=x.src+tuple(new_srcs))
   new_sched_sink = sched_sink.substitute(replacements)
 
   # display
@@ -544,5 +543,5 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if len(sinks) == 0: return [], var_vals, becomes_map
   sched_sink = UOp.sink(*sinks)
 
-  # display sched_sink
+  # new linearize schedule
   return linearize_schedule(sched_sink), var_vals, becomes_map
