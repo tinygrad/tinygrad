@@ -11,6 +11,7 @@ from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 if getenv("EMULATE_CUDA_SM89"):
+  from typing import Type
   import numpy as np
   from ml_dtypes import float8_e4m3, float8_e5m2
   truncate.update({dtypes.fp8e4m3: float8_e4m3, dtypes.fp8e5m2: float8_e5m2})
@@ -71,11 +72,12 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          assert (dtype.fmt is not None or dtype in dtypes.fp8s) and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
           if dtype.base in dtypes.fp8s: ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size
-          else: ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          else: 
+            assert dtype.fmt is not None and isinstance(dtype, PtrDType)
+            ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -107,10 +109,11 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
           assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
-          if dtp[0] not in dtypes.fp8s: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
-          else: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
-          if dtype not in dtypes.fp8s: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
-          else: ul[i] = np.frombuffer(packed, dtype=truncate.get(dtype, lambda dt: dt)).tolist()
+          if dtp[0] in dtypes.fp8s: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
+          else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
+          if dtype == dtypes.fp8e4m3: ul[i] = np.frombuffer(packed, dtype=float8_e4m3).tolist()
+          elif dtype == dtypes.fp8e5m2: ul[i] = np.frombuffer(packed, dtype=float8_e5m2).tolist()
+          else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
         elif uop is Ops.CAST:
           ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
