@@ -493,7 +493,13 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for buf_uop in realize_map: inv_buffers[buf_uop.buffer] = buf_uop
   for si in schedule:
     assert len(si.outputs) == 1
-    inv_buffers[si.outputs[0]] = inv_buffers[si.outputs[0]].assign(UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.inputs), arg=Kernel(si.ast)))
+    if si.ast.op is Ops.SINK:
+      kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.inputs), arg=Kernel(si.ast))
+    elif si.ast.op is Ops.COPY:
+      kernel = UOp(Ops.COPY, src=tuple(inv_buffers[y] for y in si.inputs))
+    else:
+      raise RuntimeError(f"unknown op {si.ast.op}")
+    inv_buffers[si.outputs[0]] = inv_buffers[si.outputs[0]].assign(kernel)
 
   sinks = []
   for buf_uop,store in realize_map.items():
