@@ -71,6 +71,7 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
+          assert (dtype.fmt is not None or dtype in dtypes.fp8s) and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
           if dtype.base in dtypes.fp8s: ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size
@@ -105,9 +106,10 @@ class PythonProgram:
               continue
         elif uop is Ops.VECTORIZE: ul[i] = inp
         elif uop is Ops.BITCAST:
-          if dtp[0] not in dtypes.fp8s: packed = struct.pack(str(warp_size) + dtp[0].fmt, *inp[0])
+          assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
+          if dtp[0] not in dtypes.fp8s: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
           else: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
-          if dtype not in dtypes.fp8s: ul[i] = list(struct.unpack(str(warp_size) + dtype.fmt, packed))
+          if dtype not in dtypes.fp8s: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
           else: ul[i] = np.frombuffer(packed, dtype=truncate.get(dtype, lambda dt: dt)).tolist()
         elif uop is Ops.CAST:
           ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
