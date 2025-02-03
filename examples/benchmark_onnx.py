@@ -1,6 +1,5 @@
 import sys, onnx, time
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, fetch
-from tinygrad.tensor import _from_np_dtype
 from extra.onnx import OnnxRunner
 
 def load_onnx_model(fn):
@@ -18,19 +17,25 @@ def load_onnx_model(fn):
   run_onnx_jit = TinyJit(lambda **kwargs: next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())), prune=True)
   return run_onnx_jit, input_shapes, input_types
 
+def get_new_inputs(input_shapes):
+  #from tinygrad.tensor import _from_np_dtype
+  #return {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
+  import numpy as np
+  return {k:Tensor(np.random.uniform(size=shp).astype(input_types[k]) * 8).realize() for k,shp in sorted(input_shapes.items())}
+
 if __name__ == "__main__":
   run_onnx_jit, input_shapes, input_types = load_onnx_model(sys.argv[1])
   print("loaded model")
 
   for i in range(3):
-    new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
+    new_inputs = get_new_inputs(input_shapes)
     GlobalCounters.reset()
     print(f"run {i}")
     run_onnx_jit(**new_inputs)
 
   # run 20 times
   for _ in range(20):
-    new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
+    new_inputs = get_new_inputs(input_shapes)
     GlobalCounters.reset()
     st = time.perf_counter()
     out = run_onnx_jit(**new_inputs)
