@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Any, List
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time, struct
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
@@ -107,19 +107,16 @@ class MockDSPProgram:
     dsp_lib.close()
     os.chmod(dsp_lib.name, 0o0777)
 
-    docker_cmd = [
-      "docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
-      "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)
-    ]
+    docker_cmd = ["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
+                  "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)]
 
-    inp = b''.join([bytes(x) for x in bufs])
+    inp = b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals])
     start = time.perf_counter()
     proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
     elapsed = time.perf_counter() - start
-    out = proc.stdout
     offset = 0
     for x in bufs:
-      x[:] = out[offset:offset+len(x)]
+      x[:] = proc.stdout[offset:offset+len(x)]
       offset += len(x)
     return elapsed
 
@@ -142,28 +139,21 @@ class DSPBuffer:
   def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
-class MockShareInfo:
-  def __init__(self): self.fd = -1
-
 class DSPAllocator(Allocator):
   def __init__(self, dev:DSPDevice):
     self.dev = dev
     super().__init__()
 
   def _alloc(self, size:int, options:BufferSpec):
-    if self.dev.ion_fd is not None:
-      b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-      share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
-    else:
-      share_info = MockShareInfo()
-    va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (mmap.MAP_ANON if share_info.fd == -1 else 0), share_info.fd, 0)
+    b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
+    share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
+    va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferSpec):
     libc.munmap(opaque.va_addr, opaque.size)
-    if opaque.share_info.fd != -1:
-      os.close(opaque.share_info.fd)
-      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
+    os.close(opaque.share_info.fd)
+    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
@@ -195,7 +185,7 @@ class DSPCompiler(ClangCompiler):
       self.link_ld.flush()
     compiler_args = ["-static" if static else "-shared", "--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",
                      "-mhvx=v65", "-mhvx-length=128b"] + ([] if static else [f"-T{self.link_ld.name}"])
-    return super().__init__(None, args=compiler_args, objdump_tool='llvm-objdump')
+    return super().__init__("compile_dsp" if not static else None, args=compiler_args, objdump_tool='llvm-objdump')
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -210,7 +200,6 @@ class DSPDevice(Compiled):
       self.init_dsp()
       RPCListener(self).start()
     except FileNotFoundError:
-      self.ion_fd = None
       super().__init__(device, MallocAllocator, MockDSPRenderer(), DSPCompiler(static=True), MockDSPProgram)
 
   def open_lib(self, lib):
