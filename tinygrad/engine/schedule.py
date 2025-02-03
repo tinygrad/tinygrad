@@ -444,37 +444,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     if (b:=buffer_map.get(v)) is not None: buf_tensors.setdefault(b, []).append(k)
   realize_map = group_realizes(sink, ctx:=ScheduleContext(buf_tensors))
 
-  # inverse buffers
-  inv_buffers = {v:k for k,v in buffers.items()}
-  for k in realize_map: inv_buffers[k.buffer] = k
-
-  # construct schedule sink
-  var_vals: dict[Variable, int] = {}
-  scheduled = {buf_uop:schedule_uop(store.sink(), ctx, var_vals) for buf_uop,store in realize_map.items()}
-  kernels = {}
-
-  for v in scheduled.values():
-    print(v.ast.op, [id(x) for x in v.outputs], [id(x) for x in v.inputs])
-
-  assert len(ctx.preloads) == 0
-
-  def to_kernel(x:UOp) -> UOp:
-    #print(x.op)
-    #if x.op is Ops.BUFFER and x.buffer.is_allocated(): return x
-    if (k:=kernels.get(x, None)) is not None: return k
-    if x not in scheduled: return x
-    si = scheduled[x]
-    kernels[x] = ret = UOp(Ops.KERNEL, src=tuple(to_kernel(inv_buffers[y]) for y in si.inputs), arg=Kernel(si.ast))
-    return ret
-
-  sinks = []
-  for buf_uop,store in realize_map.items():
-    if any(x in big_sink.src for x in buf_tensors[buf_uop]):
-      sinks.append(to_kernel(buf_uop))
-
-  sched_sink = UOp.sink(*sinks)
-  graph_rewrite(sched_sink, PatternMatcher([]))
-
   # TODO: this should be the break between the "grouper" and the "linearizer"
   # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
   # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
@@ -484,7 +453,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   var_vals: dict[Variable, int] = {}
   for buf_uop,store in realize_map.items():
     assert store.op is Ops.STORE, f"expected a realized BUFFER to get a STORE {sink}"
-    prescheduled.append(scheduled[buf_uop])
+    prescheduled.append(schedule_uop(store.sink(), ctx, var_vals))
     # can only schedule once
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     # increment refcount for this buffer
@@ -517,4 +486,20 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # confirm everything was scheduled correctly
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
+
+  # *** construct schedule sink ***
+  # inverse buffers (to start)
+  inv_buffers = {v:k for k,v in buffers.items()}
+  for buf_uop in realize_map: inv_buffers[buf_uop.buffer] = buf_uop
+  for si in schedule:
+    assert len(si.outputs) == 1
+    inv_buffers[si.outputs[0]] = inv_buffers[si.outputs[0]].assign(UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.inputs), arg=Kernel(si.ast)))
+
+  sinks = []
+  for buf_uop,store in realize_map.items():
+    if any(x in big_sink.src for x in buf_tensors[buf_uop]):
+      sinks.append(inv_buffers[buf_uop.buffer])
+  sched_sink = UOp.sink(*sinks)
+  graph_rewrite(sched_sink, PatternMatcher([]))
+
   return schedule, var_vals, becomes_map
