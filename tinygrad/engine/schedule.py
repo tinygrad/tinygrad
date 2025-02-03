@@ -1,4 +1,4 @@
-import sys, atexit, functools, pickle
+import sys, atexit, functools, pickle, heapq
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
@@ -422,6 +422,44 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 # **** schedule creation and toposort
 
+def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
+  # reconstruct schedule items
+  def track_back_assign_to_buffer(x:UOp) -> Buffer:
+    if x.op is Ops.ASSIGN: return track_back_assign_to_buffer(x.src[0])
+    assert x.op is Ops.BUFFER, f"op is {x.op}"
+    return x.buffer
+
+  # get children
+  children: dict[UOp, list[UOp]] = {}
+  in_degree: dict[UOp, int] = {}
+  for u in sched_sink.toposort:
+    in_degree[u] = len(u.src)
+    for s in u.src:
+      children.setdefault(s, []).append(u)
+
+  # place ASSIGN last
+  def get_priority(u:UOp): return 10 if u.op is Ops.ASSIGN else 0
+
+  queue: list[tuple[int, int, UOp]] = []
+  cnt = 0
+  for u,v in in_degree.items():
+    if v == 0:
+      heapq.heappush(queue, (get_priority(u), cnt, u))
+      cnt += 1
+
+  # real place
+  new_schedule = []
+  while queue:
+    _, _, x = queue.pop(0)
+    if x.op is Ops.KERNEL: new_schedule.append(ScheduleItem(x.arg.ast, tuple(track_back_assign_to_buffer(y) for y in x.src), ()))
+    if x in children:
+      for u in children[x]:
+        in_degree[u] -= 1
+        if in_degree[u] == 0:
+          heapq.heappush(queue, (get_priority(u), cnt, u))
+          cnt += 1
+  return new_schedule
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
@@ -510,14 +548,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if len(sinks) == 0: return [], var_vals, becomes_map
   sched_sink = UOp.sink(*sinks)
 
-  # reconstruct schedule items
+  # display sched_sink
   graph_rewrite(sched_sink, PatternMatcher([]))
-  def track_back_assign_to_buffer(x:UOp) -> Buffer:
-    if x.op is Ops.ASSIGN: return track_back_assign_to_buffer(x.src[0])
-    assert x.op is Ops.BUFFER, f"op is {x.op}"
-    return x.buffer
-  new_schedule = []
-  for x in sched_sink.toposort:
-    if x.op is Ops.KERNEL:
-      new_schedule.append(ScheduleItem(x.arg.ast, tuple(track_back_assign_to_buffer(y) for y in x.src), ()))
-  return new_schedule, var_vals, becomes_map
+  return linearize_schedule(sched_sink), var_vals, becomes_map
