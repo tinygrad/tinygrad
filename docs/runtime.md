@@ -11,4 +11,4 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | [CUDA](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cuda.py) | Utilizes CUDA for acceleration on NVIDIA GPUs | NVIDIA GPU with CUDA support |
 | [GPU (OpenCL)](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_gpu.py) | Accelerates computations using OpenCL on GPUs | OpenCL 2.0 compatible device |
 | [CLANG (C Code)](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_clang.py) | Runs on CPU using the clang compiler | `clang` compiler in system `PATH` |
-| [LLVM](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_llvm.py) | Runs on CPU using the LLVM compiler infrastructure | `llvmlite` package installed |
+| [LLVM (LLVM IR)](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_llvm.py) | Runs on CPU using the LLVM compiler infrastructure | llvm libraries installed and findable |
