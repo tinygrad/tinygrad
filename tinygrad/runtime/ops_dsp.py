@@ -11,7 +11,7 @@ from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 class DSPRenderer(ClangRenderer):
-  static = False
+  emulate = False
   device = "DSP"
   supports_float4 = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
@@ -23,16 +23,16 @@ class DSPRenderer(ClangRenderer):
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
-    if self.static:
+    if self.emulate:
       # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
       msrc = ['''static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
-  long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" : "=r" (retval)
-    : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "i" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
-static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
-static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
-static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
-static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
-  return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}''', 'void _start(void) {']
+          long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" : "=r" (retval)
+            : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "i" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
+        static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
+        static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
+        static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
+        static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
+          return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}''', 'void _start(void) {']
       for i,b in enumerate(bufs):
         if isinstance(b[1][0], PtrDType):
           sz = b[1][0].size*b[1][0].itemsize
@@ -54,14 +54,15 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
       msrc += ['if ((sc>>24) != 2) return 0;']
       msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
       msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-      msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+      msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};'
+               for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
       msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
       msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
       msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
       msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
       msrc += ["return 0; }"]
     return ret + '\n' + '\n'.join(msrc)
-class MockDSPRenderer(DSPRenderer): static = True
+class MockDSPRenderer(DSPRenderer): emulate = True
 
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib
@@ -147,24 +148,19 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
-class DSPCompiler(ClangCompiler):
-  def __init__(self, static=False):
-    # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
-    sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
-    sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
-    with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
-      self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
-      self.link_ld.flush()
-    compiler_args = ["-static" if static else "-shared", "--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",
-                     "-mhvx=v65", "-mhvx-length=128b"] + ([] if static else [f"-T{self.link_ld.name}"])
-    return super().__init__("compile_dsp" if not static else None, args=compiler_args, objdump_tool='llvm-objdump')
-
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
+    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     try:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
-
+      # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
+      sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
+      sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
+      with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
+        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+        self.link_ld.flush()
+      super().__init__(device, DSPAllocator(self), DSPRenderer(),
+        ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump'), functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
@@ -172,7 +168,7 @@ class DSPDevice(Compiled):
       self.init_dsp()
       RPCListener(self).start()
     except FileNotFoundError:
-      super().__init__(device, MallocAllocator, MockDSPRenderer(), DSPCompiler(static=True), MockDSPProgram)
+      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
