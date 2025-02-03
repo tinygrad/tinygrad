@@ -74,9 +74,7 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
     ret = UOp.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    if dtype == dtypes.fp8e4m3:
-      data = b''.join([truncate_function(xi).tobytes() for xi in fully_flatten(x)])
-    else: data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
+    data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
@@ -164,7 +162,8 @@ class Tensor(SimpleMathTrait):
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if dtype in [dtypes.bfloat16]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
+      if dtype in [dtypes.bfloat16, dtypes.fp8e4m3, dtypes.fp8e5m2]:
+        data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
       else: data = _frompy(data, dtype)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
