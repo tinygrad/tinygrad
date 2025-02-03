@@ -591,7 +591,8 @@ class AMDDevice(HCQCompiled):
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
     # Scratch setup
-    self.scratch, self.max_private_segment_size = None, 0
+    # self.scratch, self.max_private_segment_size = None, 0
+    self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
     atexit.register(self.device_fini)
@@ -609,7 +610,7 @@ class AMDDevice(HCQCompiled):
     # <gfx103 requires alignment of 1024, >=gfx11 requires 256
     wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= 110000 else 1024)
 
-    self.scratch, ok = self.allocator._realloc(self.scratch, (self.max_cu_id + 1) * self.dev_iface.props['max_slots_scratch_cu'] * wave_scratch_len)
+    self.scratch, ok = self._realloc(getattr(self, 'scratch', None), (self.max_cu_id+1)*self.dev_iface.props['max_slots_scratch_cu']*wave_scratch_len)
     if ok:
       engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
       waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)

@@ -378,6 +378,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal.value = 0
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
+  def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None) -> tuple[HCQBuffer, bool]:
+    if oldbuf is not None: self.allocator.free(oldbuf, oldbuf.size, options=options)
+    try: buf, realloced = self.allocator.alloc(new_size, options=options), True
+    except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
+    return buf, realloced
+
 class HCQBuffer:
   def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:HCQBuffer|None=None):
     self.va_addr, self.size, self.texture_info, self.meta, self._base = va_addr, size, texture_info, meta, _base
@@ -401,12 +407,6 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
     return HCQBuffer(va_addr=buf.va_addr + offset, size=size, texture_info=buf.texture_info, meta=buf.meta, _base=buf._base or buf)
 
 class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
-  def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None) -> tuple[HCQBuffer, bool]:
-    if oldbuf is not None: self.free(oldbuf, oldbuf.size, options=options)
-    try: buf, realloced = self.alloc(new_size, options=options), True
-    except MemoryError: buf, realloced = self.alloc(oldbuf.size or new_size, options=options), False
-    return buf, realloced
-
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.device}", enabled=PROFILE):
