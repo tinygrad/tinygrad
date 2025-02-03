@@ -33,13 +33,73 @@ class DSPRenderer(ClangRenderer):
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
     msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += ['return 0;']
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += ["return 0; }"]
     return ret + '\n' + '\n'.join(msrc)
+
+# https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
+wrap_src = '''
+#define SYS_exit 93
+#define SYS_read 63
+#define SYS_write 64
+#define SYS_mmap2 222
+int read(int fd, void* buf, int len) {{
+  register unsigned long __a0 asm("r0") = (unsigned long)fd;
+  register unsigned long __a1 asm("r1") = (unsigned long)buf;
+  register unsigned long __a2 asm("r2") = (unsigned long)len;
+  int retval;
+  __asm__ volatile("R0 = #0; R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_read) : "r6");
+  return retval;
+}}
+int write(int fd, void* buf, int len) {{
+  register unsigned long __a0 asm("r0") = (unsigned long)fd;
+  register unsigned long __a1 asm("r1") = (unsigned long)buf;
+  register unsigned long __a2 asm("r2") = (unsigned long)len;
+  int retval;
+  __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_write) : "r6");
+  return retval;
+}}
+void *mmap(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
+  register unsigned long __a0 asm("r0") = (unsigned long)addr;
+  register unsigned long __a1 asm("r1") = (unsigned long)length;
+  register unsigned long __a2 asm("r2") = (unsigned long)prot;
+  register unsigned long __a3 asm("r3") = (unsigned long)flags;
+  register unsigned long __a4 asm("r4") = (unsigned long)fd;
+  register unsigned long __a5 asm("r5") = (unsigned long)offset;
+  void* retval;
+  __asm__ volatile("R6 = #%7; trap0(#1); %0 = R0" : "=r" (retval) :
+    "r" (__a0), "r" (__a1), "r" (__a2), "r" (__a3), "r" (__a4), "r" (__a5), "i" (SYS_mmap2) : "r6");
+  return retval;
+}}
+int exit(int ret) {{
+	register unsigned long __a0 asm("r0") = (unsigned long)ret;
+  int retval;
+  __asm__ volatile("R6 = #%2; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "i" (SYS_exit) : "r6");
+  return retval;
+}}
+'''
+
+class MockDSPRenderer(DSPRenderer):
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+    ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    more = ['void _start(void) {']
+    for i,b in enumerate(bufs):
+      if isinstance(b[1][0], PtrDType):
+        sz = b[1][0].size*b[1][0].itemsize
+        more.append(f"void *buf{i} = mmap(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
+      else:
+        more.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
+    more.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
+    for i,b in enumerate(bufs):
+      if isinstance(b[1][0], PtrDType): more.append(f"write(1, buf{i}, {sz});")
+    more.append('exit(0); }')
+    bigret = ret + '\n' + wrap_src + '\n' + '\n'.join(more)
+    bigret = bigret.replace("__attribute__((noinline)) ", "")
+    print(bigret)
+    return bigret
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
 def rpc_prep_args(ins=None, outs=None, in_fds=None):
@@ -52,64 +112,29 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   for i, mv in enumerate(ins + outs): pra[i].buf.pv, pra[i].buf.len = mv_address(mv) if mv.nbytes > 0 else 0, mv.nbytes
   return pra, fds, attrs, (ins, outs)
 
-# https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
-wrap_src = '''
-#define SYS_exit 93
-#define SYS_read 63
-#define SYS_write 64
-#define SYS_mmap2 222
-int read(int fd, void* buf, int len) {{
-	register unsigned long __a0 asm("r0") = (unsigned long)fd;
-	register unsigned long __a1 asm("r1") = (unsigned long)buf;
-	register unsigned long __a2 asm("r2") = (unsigned long)len;
-  int retval;
-  __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_read));
-  return retval;
-}}
-int write(int fd, void* buf, int len) {{
-	register unsigned long __a0 asm("r0") = (unsigned long)fd;
-	register unsigned long __a1 asm("r1") = (unsigned long)buf;
-	register unsigned long __a2 asm("r2") = (unsigned long)len;
-  int retval;
-  __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_write));
-  return retval;
-}}
-void *mmap(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
-	register unsigned long __a0 asm("r0") = (unsigned long)addr;
-	register unsigned long __a1 asm("r1") = (unsigned long)length;
-	register unsigned long __a2 asm("r2") = (unsigned long)prot;
-	register unsigned long __a3 asm("r3") = (unsigned long)flags;
-	register unsigned long __a4 asm("r4") = (unsigned long)fd;
-	register unsigned long __a5 asm("r5") = (unsigned long)offset;
-  void* retval;
-  __asm__ volatile("R6 = #%7; trap0(#1); %0 = R0" : "=r" (retval) :
-    "r" (__a0), "r" (__a1), "r" (__a2), "r" (__a3), "r" (__a4), "r" (__a5), "i" (SYS_mmap2));
-  return retval;
-}}
-int exit(int ret) {{
-	register unsigned long __a0 asm("r0") = (unsigned long)ret;
-  int retval;
-  __asm__ volatile("R6 = #%2; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "i" (SYS_exit));
-  return retval;
-}}
-int HAP_power_set(void *a, void *b) {{ return 0; }}
-void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset) {{
-  return mmap(0, len, prot, flags, fd, offset);
-}}
-unsigned long long HAP_perf_get_time_us() {{ return 0; }}
-int HAP_munmap(void *addr, int len) {{ return 0; }}
-void _start(void) {{
-  unsigned int sc = 0;
-  int pralen = 0;
-  char pra[65536];
-  read(0, &sc, 4);
-  read(0, &pralen, 4);
-  read(0, pra, pralen);
-  entry(0, sc, (remote_arg *)pra);
-  write(1, "test\\n", 5);
-  exit(0);
-}}
-'''
+class MockDSPProgram:
+  def __init__(self, name:str, lib:bytes): self.lib = lib
+  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+    dsp_lib = tempfile.NamedTemporaryFile(suffix=".out", delete=False)
+    dsp_lib.write(self.lib)
+    dsp_lib.close()
+    os.chmod(dsp_lib.name, 0o0777)
+
+    docker_cmd = [
+      "docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
+      "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(dsp_lib.name)
+    ]
+
+    inp = b''.join([bytes(x) for x in bufs])
+    start = time.perf_counter()
+    proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
+    elapsed = time.perf_counter() - start
+    out = proc.stdout
+    offset = 0
+    for x in bufs:
+      x[0:len(x)] = out[offset:offset+len(x)]
+      offset += len(x)
+    return elapsed
 
 class DSPProgram:
   def __init__(self, dev:DSPDevice, name:str, lib:bytes):
@@ -123,30 +148,8 @@ class DSPProgram:
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
     sc = rpc_sc(method=2, ins=2, outs=1, fds=len(bufs))
-    if self.dev.ion_fd is not None:
-      self.dev.exec_lib(self.lib, sc, pra, fds, attrs)
-      return timer[0] / 1e6
-    else:
-      dsp_lib = tempfile.NamedTemporaryFile(suffix=".out", delete=False)
-      dsp_lib.write(self.lib)
-      dsp_lib.close()
-      os.chmod(dsp_lib.name, 0o0777)
-
-      docker_cmd = [
-        "docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
-        "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(dsp_lib.name)
-      ]
-      print(docker_cmd)
-
-      inp = bytes(pra)
-      inp = b''.join([struct.pack("II", sc, len(inp)), inp])
-
-      start = time.perf_counter()
-      proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
-      elapsed = time.perf_counter() - start
-      out = proc.stdout
-      print(out)
-      return elapsed
+    self.dev.exec_lib(self.lib, sc, pra, fds, attrs)
+    return timer[0] / 1e6
 
 class DSPBuffer:
   def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
@@ -196,8 +199,7 @@ class ClangCompiler(Compiler):
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
 class DSPCompiler(ClangCompiler):
-  def __init__(self, emulate=False):
-    self.emulate = emulate
+  def __init__(self):
     # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
     sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
     sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
@@ -207,14 +209,6 @@ class DSPCompiler(ClangCompiler):
 
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
     return super().__init__(None, args=compiler_args, objdump_tool='llvm-objdump')
-
-  def compile(self, src:str) -> bytes:
-    if not self.emulate: return super().compile(src)
-    # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(["clang", "--target=hexagon", "-O2", "-ffreestanding", "-fuse-ld=lld", "-mcpu=hexagonv65", "-static", '-x', 'c',
-                               "-nostdlib", "-fPIC", "-", "-o", str(output_file.name)], input=(src+wrap_src).encode('utf-8'))
-      return pathlib.Path(output_file.name).read_bytes()
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -230,7 +224,14 @@ class DSPDevice(Compiled):
       RPCListener(self).start()
     except FileNotFoundError:
       self.ion_fd = None
-      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(emulate=True), functools.partial(DSPProgram, self))
+      # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
+      sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
+      sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
+      with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
+        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+        self.link_ld.flush()
+      compiler_args = ["-static", "--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
+      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, compiler_args, objdump_tool='llvm-objdump'), MockDSPProgram)
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
