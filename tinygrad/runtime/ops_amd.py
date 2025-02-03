@@ -591,7 +591,6 @@ class AMDDevice(HCQCompiled):
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
     # Scratch setup
-    # self.scratch, self.max_private_segment_size = None, 0
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
