@@ -572,7 +572,7 @@ class AMDDevice(HCQCompiled):
     else: self.dev_iface.map(AMDDevice.signals_page)
 
     # Scratch setup
-    self.scratch_buf = None
+    self.scratch, self.max_private_segment_size = None, 0
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
     self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
     self.has_scratch_base_registers = self.target >= 110000
@@ -580,9 +580,9 @@ class AMDDevice(HCQCompiled):
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
     vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
-    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (max_cu_id + 1), mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * (max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
-    debug_memory_size = round_up((max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
+    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
+    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
@@ -611,7 +611,7 @@ class AMDDevice(HCQCompiled):
       engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
       waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
       # >=gfx11 wavesize is per SE
-      wavesize = self.scratch_len // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
+      wavesize = self.scratch.size // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
       self.tmpring_size = waves << 12 | wavesize
 
   def invalidate_caches(self):
