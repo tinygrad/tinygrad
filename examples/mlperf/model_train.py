@@ -1,6 +1,5 @@
 import os, time, math, functools, random
 from pathlib import Path
-from typing import Tuple, Dict
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
@@ -344,6 +343,7 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
+  from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
   from examples.mlperf.initializers import FrozenBatchNorm2d
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
@@ -352,11 +352,11 @@ def train_retinanet():
   from extra.lr_scheduler import LambdaLR
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
-  from tinygrad.helpers import get_child
+  from tinygrad.helpers import get_child, colored
   
   import numpy as np
 
-  config = {}
+  config, target_metric = {}, 0.34
 
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASE_DIR = getenv("BASE_DIR", BASEDIR)
@@ -374,9 +374,13 @@ def train_retinanet():
           layer:Tensor = get_child(backbone, loaded_key)
           layer.requires_grad = False
 
-  def _data_get(it):
-    x, y_bboxes, y_labels, matches, anchors, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), y_bboxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+  def _data_get(it, val=False):
+    if val:
+      x, img_ids, img_sizes, cookie = next(it)
+      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, cookie
+
+    x, y_boxes, y_labels, matches, anchors, cookie = next(it)
+    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
   
   def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
     def _lr_lambda(e):
@@ -401,7 +405,6 @@ def train_retinanet():
   
   @TinyJit
   def _eval_step(model, x, **kwargs):
-    # TODO: Consider returning loss here as well
     out = model(normalize(x, GPUS), **kwargs)
     return out.realize()
 
@@ -468,79 +471,89 @@ def train_retinanet():
 
   for e in range(start_epoch, EPOCHS):
     # ** training loop **
-    with Tensor.train():
-      train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
-      it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-      i, proc = 0, _data_get(it)
+    train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
+    it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+    i, proc = 0, _data_get(it)
 
-      prev_cookies = []
-      st = time.perf_counter()
+    prev_cookies = []
+    st = time.perf_counter()
 
-      while proc is not None:
-        GlobalCounters.reset()
+    while proc is not None:
+      GlobalCounters.reset()
 
-        x, y_bboxes, y_labels, matches, anchors, proc = proc
-        loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
+      x, y_bboxes, y_labels, matches, anchors, proc = proc
+      loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
 
-        pt = time.perf_counter()
+      pt = time.perf_counter()
 
-        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
-        try:
-          next_proc = _data_get(it)
-        except StopIteration:
-          next_proc = None
-      
-        dt = time.perf_counter()
+      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+      try:
+        next_proc = _data_get(it)
+      except StopIteration:
+        next_proc = None
 
-        device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-        loss = loss.item()
+      dt = time.perf_counter()
 
-        cl = time.perf_counter()
-        if BENCHMARK: step_times.append(cl - st)
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.item()
 
-        tqdm.write(
-          f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-          f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {losses['classification_loss'].item():5.4f} classification loss, {losses['regression_loss'].item():5.4f} regression loss, "
-          f"{optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
-        )
+      cl = time.perf_counter()
+      if BENCHMARK: step_times.append(cl - st)
 
-        if WANDB:
-          wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/classification_loss": losses["classification_loss"].item(), "train/regression_loss": losses["regression_loss"].item(),
-                    "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {losses['classification_loss'].item():5.4f} classification loss, {losses['regression_loss'].item():5.4f} regression loss, "
+        f"{optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
 
-        st = cl
-        prev_cookies.append(proc)
-        proc, next_proc = next_proc, None  # return old cookie
-        i += 1
+      if WANDB:
+        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/classification_loss": losses["classification_loss"].item(), "train/regression_loss": losses["regression_loss"].item(),
+                  "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
 
-        if i == BENCHMARK:
-          assert not math.isnan(loss)
-          median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
-          estimated_total_minutes = int(median_step_time * steps_in_train_epoch * EPOCHS / 60)
-          print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
-          print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
-                f"epoch global_mem: {steps_in_train_epoch * GlobalCounters.global_mem:_}")
-          return
+      st = cl
+      prev_cookies.append(proc)
+      proc, next_proc = next_proc, None  # return old cookie
+      i += 1
+
+      if i == BENCHMARK:
+        assert not math.isnan(loss)
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_minutes = int(median_step_time * steps_in_train_epoch * EPOCHS / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {steps_in_train_epoch * GlobalCounters.global_mem:_}")
+        return
       
     # ** eval loop **
-    with Tensor.train(mode=False):
-      val_dataloader = batch_load_retinanet(val_dataset, True, Path(BASE_DIR), batch_size=BS, seed=SEED)
-      it = iter(tqdm(val_dataloader, total=steps_in_val_epoch, desc=f"epoch {e}", disable=BENCHMARK))
-      i, proc = 0, _data_get(it)
+    with Tensor.train(mode=False), Tensor.test():
+      val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=BS, shuffle=False, seed=SEED)
+      it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
+      i, proc = 0, _data_get(it, val=val)
 
       eval_times, prev_cookies = [], []
+      val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)
 
       while proc is not None:
         GlobalCounters.reset()
         st = time.time()
 
-        out, proc = _eval_step(model, proc[0]), proc[1]
-        out = model.postprocess_detections(out)
+        out, img_ids, img_sizes, proc = _eval_step(model, (x:=proc[0])).numpy(), proc[1], proc[2], proc[3]
+        out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
+        coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
+          for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
+
+        with redirect_stdout(None):
+          coco_val.cocoDt = val_dataset.loadRes(coco_results)
+          coco_val.params.imgIds = img_ids
+          coco_val.evaluate()
+
+        val_img_ids.extend(img_ids)
+        val_imgs.append(np.array(coco_val.evalImgs).reshape(ncats, narea, len(img_ids)))
 
         if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
         try:
-          next_proc = _data_get(it)
+          next_proc = _data_get(it, val=val)
         except StopIteration:
           next_proc = None
 
@@ -551,14 +564,33 @@ def train_retinanet():
         et = time.time()
         eval_times.append(et - st)
 
-    if getenv("CKPT"):
-      if not os.path.exists(ckpt_dir := Path(getenv("CKPT_DIR", "./ckpts"))): os.mkdir(ckpt_dir)
-      if WANDB and wandb.run is not None:
-        fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe")
-      else:
-        fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe")
-      print(f"saving ckpt to {fn}")
-      safe_save(get_training_state(model, optim, lr_scheduler), fn)
+      total_fw_time = sum(eval_times) / len(eval_times)
+
+      tqdm.write(f"eval time: {total_fw_time:.2f}")
+
+      if WANDB:
+        wandb.log({"eval/forward_time": total_fw_time, "epoch": e + 1})
+
+      coco_val.params.imgIds = val_img_ids
+      coco_val._paramsEval.imgIds = val_img_ids
+      coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
+      coco_val.accumulate()
+      coco_val.summarize()
+
+      if getenv("CKPT"):
+        if not os.path.exists(ckpt_dir := Path(getenv("CKPT_DIR", "./ckpts"))): os.mkdir(ckpt_dir)
+        if WANDB and wandb.run is not None:
+          fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}_seed{SEED}.safe")
+        else:
+          fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_e{e}_seed{SEED}.safe")
+
+        print(f"saving ckpt to {fn}")
+        if (val_metric:=coco_val.stats[0]) >= target_metric:
+          safe_save(get_state_dict(model), fn)
+          print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}"))
+          break
+        else:
+          safe_save(get_training_state(model, optim, lr_scheduler), fn)
 
 def train_unet3d():
   """
