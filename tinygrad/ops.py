@@ -20,23 +20,23 @@ class FastEnum(IntEnum):
 class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
-  def _opfix(self:T, b:ConstLike|T|None=None, match_dtype=True, _float=False, _bool=False, bitwise=False) -> tuple[T, T]: raise NotImplementedError
+  def _opfix(self:T, b:ConstLike|T, match_dtype=True) -> tuple[T, T]: raise NotImplementedError
+  def _boolcast(self): return self  # overridden in Tensor, not in UOp/UPat
 
   # great functions you get!
-  def ufix(self, b): return self._opfix(b)[1]
-  const_like = ufix
-  def _binop(self, op, x, reverse=False, **kwargs):
-    a, b = self._opfix(x, **kwargs)
+  def const_like(self, b): return self._opfix(b)[1]
+  def _binop(self, op, x, reverse=False):
+    a, b = self._opfix(x)
     return b.alu(op, a) if reverse else a.alu(op, b)
-  def logical_not(self): return self._opfix(_bool=True)[0].ne(True)
+  def logical_not(self): return self._boolcast().ne(True)
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
   def add(self, x, reverse=False): return self._binop(Ops.ADD, x, reverse)
   def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
-  def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse, bitwise=True)
-  def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse, bitwise=True)
-  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse, bitwise=True)
+  def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
+  def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
+  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return (of:=self._opfix(x))[1] + (-of[0]) if reverse else (of:=self._opfix(x))[0] + (-of[1])
@@ -74,8 +74,8 @@ class MathTrait:
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse, bitwise=True)
-  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse, bitwise=True)
+  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
+  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
   def __rshift__(self, x): return self.rshift(x)
   def __rlshift__(self, x): return self.lshift(x, True)
@@ -87,13 +87,13 @@ class MathTrait:
     x, y = x._opfix(y) if isinstance(x, MathTrait) else y._opfix(x)[::-1] if isinstance(y, MathTrait) else (x, y)
     cond, x = self._opfix(x, match_dtype=False)
     cond, y = cond._opfix(y, match_dtype=False)
-    return cond._opfix(_bool=True)[0].alu(Ops.WHERE, *x._opfix(y))
+    return cond._boolcast().alu(Ops.WHERE, *x._opfix(y))
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
-  def reciprocal(self): return self._opfix(_float=True)[0].alu(Ops.RECIP)
-  def sqrt(self): return self._opfix(_float=True)[0].alu(Ops.SQRT)
-  def sin(self): return self._opfix(_float=True)[0].alu(Ops.SIN)
-  def log2(self): return self._opfix(_float=True)[0].alu(Ops.LOG2)
-  def exp2(self): return self._opfix(_float=True)[0].alu(Ops.EXP2)
+  def reciprocal(self): return self.alu(Ops.RECIP)
+  def sqrt(self): return self.alu(Ops.SQRT)
+  def sin(self): return self.alu(Ops.SIN)
+  def log2(self): return self.alu(Ops.LOG2)
+  def exp2(self): return self.alu(Ops.EXP2)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
@@ -360,8 +360,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def _opfix(self, b:ConstLike|UOp|None=None, **kwargs):  # type: ignore
-    if isinstance(b, UOp|None): return self, b
+  def _opfix(self, b:ConstLike|UOp, match_dtype=True):
+    if isinstance(b, UOp): return self, b
     # constants can optionally have a DEVICE source
     if self._device is None: return self, UOp.const(self.dtype, b)
     if isinstance(self.device, tuple): return self, UOp.multi(*[UOp.metaop(Ops.CONST, self.shape, self.dtype, d, b) for d in self.device], axis=None)
@@ -755,8 +755,8 @@ class UPat(MathTrait):
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
 
-  def _opfix(self, b:ConstLike|UPat|None=None, **kwargs):  # type: ignore
-    return (self, b) if isinstance(b, UPat|None) else (self, UPat.const(self.dtype, cast(ConstType, b)))
+  def _opfix(self, b:ConstLike|UPat, match_dtype=True):
+    return (self, b) if isinstance(b, UPat) else (self, UPat.const(self.dtype, cast(ConstType, b)))
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)

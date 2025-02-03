@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element, ConstLike
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -228,7 +228,12 @@ class Tensor(MathTrait):
     if callable(fxn_or_op): ret.lazydata = fxn_or_op(*[t.lazydata for t in (self,)+x], **kwargs)
     else: ret.lazydata = self.lazydata.alu(fxn_or_op, *[t.lazydata for t in x], **kwargs)
     return ret
-  alu = _apply_uop  # type: ignore
+
+  def alu(self, op:Ops, *src:Tensor) -> Tensor:
+    if op in {Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR}:
+      if any(t.dtype != dtypes.bool and not dtypes.is_int(t.dtype) for t in (self,)+src): raise RuntimeError(f"{self.dtype} is not supported")
+    elif op in {Ops.RECIP, Ops.SQRT, Ops.SIN, Ops.LOG2, Ops.EXP2}: return self.cast(least_upper_float(self.dtype))._apply_uop(op)
+    return self._apply_uop(op, *src)
 
   # ***** data handlers ****
 
@@ -3063,7 +3068,7 @@ class Tensor(MathTrait):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     return self.reshape(shape)._apply_uop(UOp.expand, arg=new_shape)
 
-  def _broadcasted(self, y:Union[Tensor, UOp, ConstType], reverse:bool=False, match_dtype:bool=True) -> tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, UOp, ConstType], match_dtype:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
@@ -3077,18 +3082,12 @@ class Tensor(MathTrait):
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
       x, y = x.cast(output_dtype), y.cast(output_dtype)
 
-    if reverse: x, y = y, x
-
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  def _opfix(self, b:Tensor|ConstLike|None=None, match_dtype=True, _float=False, _bool=False, bitwise=False):
-    if bitwise and self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    if b is None: return (self.cast(least_upper_float(self.dtype)) if _float else self.cast(dtypes.bool) if _bool else self), None
-
-    x, y = self._broadcasted(cast(Tensor|UOp|ConstType, b), match_dtype=match_dtype)
-    if _float: return (x.cast(least_upper_float(x.dtype)), y.cast(least_upper_float(y.dtype)))
-    return (x.cast(dtypes.bool), y.cast(dtypes.bool)) if _bool else (x, y)
+  # for MathTrait
+  _opfix = _broadcasted  # type: ignore
+  def _boolcast(self): return self.cast(dtypes.bool)
 
   # TODO: tensor should stop checking if things are const
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
@@ -3199,7 +3198,7 @@ class Tensor(MathTrait):
     print(Tensor([-4, 7, 5, 4, -7, 8]).mod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
-    a, b = self._broadcasted(x, reverse)
+    a, b = self._broadcasted(x)[::-1] if reverse else self._broadcasted(x)
     return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -3308,7 +3307,7 @@ class Tensor(MathTrait):
     # positive const ** self
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
 
-    base, exponent = self._broadcasted(x, reverse=reverse)
+    base, exponent = self._broadcasted(x)[::-1] if reverse else self._broadcasted(x)
     # start with b ** e = exp(e * log(b))
     ret = base.abs().log().mul(exponent).exp()
     # correct sign of negative base with odd exponent (cos has a period of 2pi so we use it here to get the oddness of the exponent)
