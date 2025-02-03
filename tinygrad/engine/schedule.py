@@ -505,11 +505,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.bufs), arg=Kernel(si.ast))
     for out in si.outputs: inv_buffers[out] = inv_buffers[out].assign(kernel)
 
-  sinks = []
-  big_sink_base = [x.base for x in big_sink.src]
-  for buf_uop,store in realize_map.items():
-    if any(x.base in big_sink_base for x in buf_tensors[buf_uop]):
-      sinks.append(inv_buffers[buf_uop.buffer])
+  # TODO: we don't need all of these
+  sinks = [inv_buffers[buf_uop.buffer] for buf_uop in realize_map]
   if len(sinks) == 0: return [], var_vals, becomes_map
   sched_sink = UOp.sink(*sinks)
 
