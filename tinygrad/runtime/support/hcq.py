@@ -381,7 +381,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None) -> tuple[HCQBuffer, bool]:
     if oldbuf is not None: self.allocator.free(oldbuf, oldbuf.size, options=options)
     try: buf, realloced = self.allocator.alloc(new_size, options=options), True
-    except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
+    except MemoryError: buf, realloced = (self.allocator.alloc(oldbuf.size, options=options) if oldbuf is not None else None), False
     return buf, realloced
 
 class HCQBuffer:
