@@ -11,6 +11,7 @@ from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 class DSPRenderer(ClangRenderer):
+  static = False
   device = "DSP"
   supports_float4 = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
@@ -22,71 +23,64 @@ class DSPRenderer(ClangRenderer):
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
-    msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
-                 short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
-            'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
-            'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-            'unsigned long long HAP_perf_get_time_us(void);', 'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
-            'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
-            'HAP_power_set((void*)handle, (void*)&req);']
-    msrc += ['if ((sc>>24) != 2) return 0;']
-    msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
-    msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += ["return 0; }"]
-    return ret + '\n' + '\n'.join(msrc)
-
-# https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
-wrap_src = '''
-#define SYS_exit 93
-#define SYS_read 63
-#define SYS_write 64
-#define SYS_mmap2 222
-static int read(int fd, void* buf, int len) {{
-  int retval;
-  __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r6 = #%4; trap0(#1); %0 = r0" :
-    "=r" (retval) : "r" (fd), "r" (buf), "r" (len), "i" (SYS_read) : "r0", "r1", "r2", "r6");
-  return retval;
-}}
-static int write(int fd, void* buf, int len) {{
-  int retval;
-  __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r6 = #%4; trap0(#1); %0 = r0" :
-    "=r" (retval) : "r" (fd), "r" (buf), "r" (len), "i" (SYS_write) : "r0", "r1", "r2", "r6");
-  return retval;
-}}
+    if self.static:
+      # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
+      msrc = ['''static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
+  long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" : "=r" (retval)
+    : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "i" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
+static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
+static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
+static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
 static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
-  void *retval;
-  __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" :
-    "=r" (retval) : "r" (addr), "r" (length), "r" (prot), "r" (flags), "r" (fd), "r" (offset), "i" (SYS_mmap2) :
-    "r0", "r1", "r2", "r3", "r4", "r5", "r6");
-  return retval;
-}}
-static int exit(int ret) {{
-  int retval;
-  __asm__ volatile("r0 = %1; r6 = #%2; trap0(#1); %0 = r0" : "=r" (retval) : "r" (ret), "i" (SYS_exit) : "r0", "r6");
-  return retval;
-}}
-'''
+  return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}''', 'void _start(void) {']
+      for i,b in enumerate(bufs):
+        if isinstance(b[1][0], PtrDType):
+          sz = b[1][0].size*b[1][0].itemsize
+          msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
+        else:
+          msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
+      msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
+      for i,b in enumerate(bufs):
+        if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
+      msrc.append('exit(0); }')
+    else:
+      msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
+                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
+              'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
+              'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
+              'unsigned long long HAP_perf_get_time_us(void);', 'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+              'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
+              'HAP_power_set((void*)handle, (void*)&req);']
+      msrc += ['if ((sc>>24) != 2) return 0;']
+      msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
+      msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+      msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+      msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
+      msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+      msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
+      msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+      msrc += ["return 0; }"]
+    return ret + '\n' + '\n'.join(msrc)
+class MockDSPRenderer(DSPRenderer): static = True
 
-class MockDSPRenderer(DSPRenderer):
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
-    ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
-    more = ['void _start(void) {']
-    for i,b in enumerate(bufs):
-      if isinstance(b[1][0], PtrDType):
-        sz = b[1][0].size*b[1][0].itemsize
-        more.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
-      else:
-        more.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
-    more.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
-    for i,b in enumerate(bufs):
-      if isinstance(b[1][0], PtrDType): more.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
-    more.append('exit(0); }')
-    return ret.split("struct dcvs_v2_req ")[0] + '\n' + wrap_src + '\n' + '\n'.join(more)
+class MockDSPProgram:
+  def __init__(self, name:str, lib:bytes): self.lib = lib
+  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+    dsp_lib = tempfile.NamedTemporaryFile(suffix=".out", delete=False)
+    dsp_lib.write(self.lib)
+    dsp_lib.close()
+    os.chmod(dsp_lib.name, 0o0777)
+    # NOTE: this timing includes a docker launch
+    start = time.perf_counter()
+    proc = subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
+                           "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)],
+                          input=b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
+    elapsed = time.perf_counter() - start
+    offset = 0
+    for x in bufs:
+      x[:] = proc.stdout[offset:offset+len(x)]
+      offset += len(x)
+    return elapsed
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
 def rpc_prep_args(ins=None, outs=None, in_fds=None):
@@ -99,27 +93,6 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   for i, mv in enumerate(ins + outs): pra[i].buf.pv, pra[i].buf.len = mv_address(mv) if mv.nbytes > 0 else 0, mv.nbytes
   return pra, fds, attrs, (ins, outs)
 
-class MockDSPProgram:
-  def __init__(self, name:str, lib:bytes): self.lib = lib
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    dsp_lib = tempfile.NamedTemporaryFile(suffix=".out", delete=False)
-    dsp_lib.write(self.lib)
-    dsp_lib.close()
-    os.chmod(dsp_lib.name, 0o0777)
-
-    docker_cmd = ["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
-                  "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)]
-
-    inp = b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals])
-    start = time.perf_counter()
-    proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
-    elapsed = time.perf_counter() - start
-    offset = 0
-    for x in bufs:
-      x[:] = proc.stdout[offset:offset+len(x)]
-      offset += len(x)
-    return elapsed
-
 class DSPProgram:
   def __init__(self, dev:DSPDevice, name:str, lib:bytes):
     self.dev, self.lib = dev, lib
@@ -131,8 +104,7 @@ class DSPProgram:
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
-    sc = rpc_sc(method=2, ins=2, outs=1, fds=len(bufs))
-    self.dev.exec_lib(self.lib, sc, pra, fds, attrs)
+    self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
