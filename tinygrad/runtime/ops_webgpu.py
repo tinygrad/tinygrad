@@ -3,12 +3,9 @@ from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
-from typing import List, Any
 import ctypes
 
-instDesc = webgpu.WGPUInstanceDescriptor()
-instDesc.features.timedWaitAnyEnable = True
-instance = webgpu.wgpuCreateInstance(instDesc)
+instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable = True)))
 
 def to_c_string(_str): return ctypes.create_string_buffer(_str.encode('utf-8'))
 
@@ -23,12 +20,12 @@ def wgpu_wait(future):
 def create_cb_info(cb_info_type, cb_type, cb): return cb_info_type(nextInChain=None, mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
 
 def write_buffer(device, buf, offset, src):
-    src = bytearray(src)
-    src_pointer = (ctypes.c_uint8 * len(src)).from_buffer(src)
-    webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, src_pointer, len(src))
+  src = bytearray(src)
+  src_pointer = (ctypes.c_uint8 * len(src)).from_buffer(src)
+  webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, src_pointer, len(src))
 
 def map_buffer(buf, size):
-  result: List[Any] = []
+  result = []
 
   def cb(status, msg, u1, u2): result[:] = status, from_wgpu_str(msg)
 
@@ -54,8 +51,7 @@ def read_buffer(dev, buf):
   map_buffer(tmp_buffer, size)
   ptr = webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size)
   void_ptr = ctypes.cast(ptr, ctypes.c_void_p)
-  byte_array = (ctypes.c_uint8 * size).from_address(void_ptr.value)
-  result = bytearray(byte_array)
+  result = bytearray((ctypes.c_uint8 * size).from_address(void_ptr.value))
   webgpu.wgpuBufferUnmap(tmp_buffer)
   webgpu.wgpuBufferDestroy(tmp_buffer)
   return memoryview(result).cast("B")
@@ -64,7 +60,7 @@ def submit(device, command_buffers):
   webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), (webgpu.WGPUCommandBuffer * len(command_buffers))(*command_buffers))
 
 def pop_error(device):
-  result: List[Any] = []
+  result = []
 
   def cb(status, err_type, msg, i2): result[:] = [from_wgpu_str(msg)]
 
@@ -93,9 +89,8 @@ class WebGPUProgram:
     # Check compiler error
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     shader_module = webgpu.wgpuDeviceCreateShaderModule(self.dev, module)
-    compiler_error = pop_error(self.dev)
 
-    if compiler_error: raise RuntimeError(f"Shader compilation failed: {compiler_error}")
+    if err := pop_error(self.dev): raise RuntimeError(f"Shader compilation failed: {err}")
 
     self.name, self.lib, self.prg = name, lib, shader_module
   def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
@@ -124,9 +119,8 @@ class WebGPUProgram:
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     bind_group_layouts = [webgpu.wgpuDeviceCreateBindGroupLayout(self.dev, webgpu.WGPUBindGroupLayoutDescriptor(
       entryCount=len(binding_layouts), entries=ctypes.cast(bl_arr_type(*binding_layouts), ctypes.POINTER(webgpu.WGPUBindGroupLayoutEntry))))]
-    bind_group_layout_error = pop_error(self.dev)
 
-    if bind_group_layout_error: raise RuntimeError(f"Error creating bind group layout: {bind_group_layout_error}")
+    if bg_layout_err := pop_error(self.dev): raise RuntimeError(f"Error creating bind group layout: {bg_layout_err}")
 
     # Creating pipeline layout
     pipeline_layout_desc = webgpu.WGPUPipelineLayoutDescriptor()
@@ -135,33 +129,30 @@ class WebGPUProgram:
 
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     pipeline_layout = webgpu.wgpuDeviceCreatePipelineLayout(self.dev, pipeline_layout_desc)
-    pipeline_layout_error = pop_error(self.dev)
 
-    if pipeline_layout_error: raise RuntimeError(f"Error creating pipeline layout: {pipeline_layout_error}")
+    if pipe_err := pop_error(self.dev): raise RuntimeError(f"Error creating pipeline layout: {pipe_err}")
 
     # Creating bind group
     bg_arr_type = webgpu.WGPUBindGroupEntry * len(bindings)
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_group_layouts[0], entryCount=len(bindings), entries=bg_arr_type(*bindings))
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     bind_group = webgpu.wgpuDeviceCreateBindGroup(self.dev, bind_group_desc)
-    bind_group_error = pop_error(self.dev)
 
-    if bind_group_error: raise RuntimeError(f"Error creating bind group: {bind_group_error}")
+    if bind_err := pop_error(self.dev): raise RuntimeError(f"Error creating bind group: {bind_err}")
 
     # Creating compute pipeline
     compute_desc = webgpu.WGPUComputePipelineDescriptor(layout=pipeline_layout,
       compute=webgpu.WGPUComputeState(module=self.prg, entryPoint=to_wgpu_str(self.name)))
-    pipeline_result: List[Any] = []
+    pipeline_result = []
 
     def cb(status, compute_pipeline_impl, msg, u1, u2): pipeline_result[:] = status, compute_pipeline_impl, from_wgpu_str(msg)
 
     cb_info = create_cb_info(webgpu.WGPUCreateComputePipelineAsyncCallbackInfo2,  webgpu.WGPUCreateComputePipelineAsyncCallback2, cb)
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     wgpu_wait(webgpu.wgpuDeviceCreateComputePipelineAsync2(self.dev, compute_desc, cb_info))
-    pipeline_error = pop_error(self.dev)
 
     if pipeline_result[0] != webgpu.WGPUCreatePipelineAsyncStatus_Success:
-      raise RuntimeError(f"{webgpu.WGPUCreatePipelineAsyncStatus__enumvalues[pipeline_result[0]]}: {pipeline_result[2]}, {pipeline_error}")
+      raise RuntimeError(f"{webgpu.WGPUCreatePipelineAsyncStatus__enumvalues[pipeline_result[0]]}: {pipeline_result[2]}, {pop_error(self.dev)}")
 
     command_encoder = webgpu.wgpuDeviceCreateCommandEncoder(self.dev, webgpu.WGPUCommandEncoderDescriptor())
     comp_pass_desc = webgpu.WGPUComputePassDescriptor(nextInChain=None)
@@ -217,7 +208,7 @@ class WebGpuAllocator(Allocator):
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     # Requesting an adapter
-    adapter_result: List[Any] = []
+    adapter_result = []
 
     def adapter_cb(status, adapter, msg, _): adapter_result[:] = status, adapter, from_wgpu_str(msg)
 
@@ -249,7 +240,7 @@ class WebGpuDevice(Compiled):
     device_desc.requiredLimits = ctypes.cast(ctypes.pointer(limits),ctypes.POINTER(webgpu.struct_WGPURequiredLimits))
 
     # Requesting a device
-    device_result: List[Any] = []
+    device_result = []
 
     def dev_cb(status, device_impl, msg, _): device_result[:] = status, device_impl, from_wgpu_str(msg)
 
