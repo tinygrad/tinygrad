@@ -493,19 +493,25 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for buf_uop in realize_map: inv_buffers[buf_uop.buffer] = buf_uop
   for si in schedule:
     assert len(si.outputs) == 1
-    if si.ast.op is Ops.SINK:
-      kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.outputs+si.inputs), arg=Kernel(si.ast))
-    elif si.ast.op is Ops.COPY:
-      kernel = UOp(Ops.COPY, src=tuple(inv_buffers[y] for y in si.outputs+si.inputs))
-    else:
-      raise RuntimeError(f"unknown op {si.ast.op}")
+    # TODO: handle COPY?
+    kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.bufs), arg=Kernel(si.ast))
     for out in si.outputs: inv_buffers[out] = inv_buffers[out].assign(kernel)
 
   sinks = []
   for buf_uop,store in realize_map.items():
     if any(x in big_sink.src for x in buf_tensors[buf_uop]):
       sinks.append(inv_buffers[buf_uop.buffer])
+  if len(sinks) == 0: return [], var_vals, becomes_map
   sched_sink = UOp.sink(*sinks)
-  graph_rewrite(sched_sink, PatternMatcher([]))
 
-  return schedule, var_vals, becomes_map
+  # reconstruct schedule items
+  graph_rewrite(sched_sink, PatternMatcher([]))
+  def track_back_assign_to_buffer(x):
+    if x.op is Ops.ASSIGN: return track_back_assign_to_buffer(x.src[0])
+    assert x.op is Ops.BUFFER, f"op is {x.op}"
+    return x.buffer
+  new_schedule = []
+  for x in sched_sink.toposort:
+    if x.op is Ops.KERNEL:
+      new_schedule.append(ScheduleItem(x.arg.ast, tuple(track_back_assign_to_buffer(y) for y in x.src), ()))
+  return new_schedule, var_vals, becomes_map
