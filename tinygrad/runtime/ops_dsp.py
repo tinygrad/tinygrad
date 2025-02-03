@@ -33,6 +33,7 @@ class DSPRenderer(ClangRenderer):
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
     msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
     msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ['return 0;']
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
@@ -52,19 +53,11 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
-wrap_src = f'''
+wrap_src = '''
 #define SYS_exit 93
 #define SYS_read 63
 #define SYS_write 64
 #define SYS_mmap2 222
-void HAP_power_set() {{}}
-void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset) {{
-
-}}
-unsigned long long HAP_perf_get_time_us() {{ return 0; }}
-int HAP_munmap(void *addr, int len) {{
-
-}}
 int read(int fd, void* buf, int len) {{
 	register unsigned long __a0 asm("r0") = (unsigned long)fd;
 	register unsigned long __a1 asm("r1") = (unsigned long)buf;
@@ -81,17 +74,38 @@ int write(int fd, void* buf, int len) {{
   __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_write));
   return retval;
 }}
+void *mmap(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
+	register unsigned long __a0 asm("r0") = (unsigned long)addr;
+	register unsigned long __a1 asm("r1") = (unsigned long)length;
+	register unsigned long __a2 asm("r2") = (unsigned long)prot;
+	register unsigned long __a3 asm("r3") = (unsigned long)flags;
+	register unsigned long __a4 asm("r4") = (unsigned long)fd;
+	register unsigned long __a5 asm("r5") = (unsigned long)offset;
+  void* retval;
+  __asm__ volatile("R6 = #%7; trap0(#1); %0 = R0" : "=r" (retval) :
+    "r" (__a0), "r" (__a1), "r" (__a2), "r" (__a3), "r" (__a4), "r" (__a5), "i" (SYS_mmap2));
+  return retval;
+}}
 int exit(int ret) {{
 	register unsigned long __a0 asm("r0") = (unsigned long)ret;
   int retval;
   __asm__ volatile("R6 = #%2; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "i" (SYS_exit));
   return retval;
 }}
+int HAP_power_set(void *a, void *b) {{ return 0; }}
+void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset) {{
+  return mmap(0, len, prot, flags, fd, offset);
+}}
+unsigned long long HAP_perf_get_time_us() {{ return 0; }}
+int HAP_munmap(void *addr, int len) {{ return 0; }}
 void _start(void) {{
-  int buflen = 0;
-  char buf[65536];
-  read(0, &buflen, 4);
-  read(0, buf, buflen);
+  unsigned int sc = 0;
+  int pralen = 0;
+  char pra[65536];
+  read(0, &sc, 4);
+  read(0, &pralen, 4);
+  read(0, pra, pralen);
+  entry(0, sc, (remote_arg *)pra);
   write(1, "test\\n", 5);
   exit(0);
 }}
@@ -108,33 +122,24 @@ class DSPProgram:
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
+    sc = rpc_sc(method=2, ins=2, outs=1, fds=len(bufs))
     if self.dev.ion_fd is not None:
-      self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
+      self.dev.exec_lib(self.lib, sc, pra, fds, attrs)
       return timer[0] / 1e6
     else:
-      # Write the DSP binary to a temp file.
-      dsp_lib = tempfile.NamedTemporaryFile(suffix=".so", delete=False)
+      dsp_lib = tempfile.NamedTemporaryFile(suffix=".out", delete=False)
       dsp_lib.write(self.lib)
       dsp_lib.close()
+      os.chmod(dsp_lib.name, 0o0777)
 
-      # Write and compile the wrapper for Hexagon.
-      wrap_src_file = tempfile.NamedTemporaryFile(suffix=".c", delete=False)
-      wrap_src_file.write(wrap_src.encode())
-      wrap_src_file.close()
-      wrap_exe = wrap_src_file.name + ".out"
-      subprocess.check_output(["clang", "--target=hexagon", "-O2", "-ffreestanding", "-fuse-ld=lld", "-mcpu=hexagonv65",
-                              "-nostdlib", "-fPIC", "-o", wrap_exe, wrap_src_file.name, dsp_lib.name])
-      # Run QEMU-hexagon via Docker (mounting the temp dir so the wrapper is visible).
-      mount_dir = os.path.abspath(os.path.dirname(wrap_exe))
-      #print(mount_dir, os.path.basename(wrap_exe))
       docker_cmd = [
-        "docker", "run", "--rm", "-v", f"{mount_dir}:/work", "-w", "/work",
-        "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(wrap_exe)
+        "docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
+        "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(dsp_lib.name)
       ]
-      #proc = subprocess.run(docker_cmd, check=True)
+      print(docker_cmd)
 
-      inp = struct.pack("I", len(pra)) + pra
-      print(len(inp), type(inp))
+      inp = bytes(pra)
+      inp = b''.join([struct.pack("II", sc, len(inp)), inp])
 
       start = time.perf_counter()
       proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
@@ -190,133 +195,9 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
-class MockDSPProgram:
-  def __init__(self, name: str, lib: bytes): self.name, self.lib = name, lib
-  def __call__(self, *bufs, vals=(), wait=False):
-    # Write the DSP binary to a temp file.
-    dsp_lib = tempfile.NamedTemporaryFile(suffix=".so", delete=False)
-    dsp_lib.write(self.lib)
-    dsp_lib.close()
-
-    # Pack input: [#ptrs][for each: size, data] then [#ints][each int]
-    inp = struct.pack("i", len(bufs))
-    for b in bufs:
-      size = b.size if hasattr(b, "size") else ctypes.sizeof(b)
-      addr = b.va_addr if hasattr(b, "va_addr") else ctypes.addressof(b)
-      inp += struct.pack("i", size) + ctypes.string_at(addr, size)
-    inp += struct.pack("i", len(vals))
-    for v in vals: inp += struct.pack("i", v)
-
-    # Generate call: splay out all pointer and int args.
-    nptr, nint = len(bufs), len(vals)
-    args = [f"ptrs[{i}]" for i in range(nptr)] + [f"(void*)(long)ints[{i}]" for i in range(nint)]
-    call_expr = "kernel(" + ", ".join(args) + ");"
-
-    # Generate the wrapper source with the call expression inserted.
-    wrap_src = f'''
-/* Minimal Hexagon Linux wrapper with direct syscalls and no malloc */
-#define SYS_exit 93
-#define SYS_read 63
-#define SYS_write 64
-#define SYS_mmap2 222
-void HAP_power_set() {{}}
-void HAP_mmap() {{}}
-void HAP_perf_get_time_us() {{}}
-void HAP_munmap() {{}}
-int kernel_exit(int ret)
-{{
-	register unsigned long __a0 asm("r0") = (unsigned long)ret;
-	int retval;
-	__asm__ volatile(
-		"	R6 = #%2;	trap0(#1); %0 = R0"
-		: "=r" (retval)
-		: "r" (__a0), "i" (SYS_exit)
-	);
-	return retval;
-}}
-static inline long my_read(int fd, void *buf, unsigned int count) {{
-  //return sys_call(SYS_read, fd, (long)buf, count);
-}}
-static inline long my_write(int fd, const void *buf, unsigned int count) {{
-  //return sys_call(SYS_write, fd, (long)buf, count);
-}}
-static char __heap[65536];
-static unsigned int __heap_idx = 0;
-void *my_malloc(unsigned int size) {{
-  void *ptr = __heap + __heap_idx;
-  __heap_idx += (size + 7) & ~7;
-  return ptr;
-}}
-void my_free(void *ptr) {{
-  /* no-op */
-}}
-extern void my_kernel();
-typedef void (*kf)();
-void _start(void) {{
-  kernel_exit(0);
-  //my_write(1, "hello\\n", 6);
-  return;
-  int np, ni, i;
-  my_read(0, &np, sizeof(int));
-  void **ptrs = my_malloc(np * sizeof(void*));
-  int *ps = my_malloc(np * sizeof(int));
-  for(i = 0; i < np; i++) {{
-    my_read(0, &ps[i], sizeof(int));
-    ptrs[i] = my_malloc(ps[i]);
-    my_read(0, ptrs[i], ps[i]);
-  }}
-  my_read(0, &ni, sizeof(int));
-  int *ints = my_malloc(ni * sizeof(int));
-  my_read(0, ints, ni * sizeof(int));
-  //{call_expr}
-  for(i = 0; i < np; i++) {{
-    my_write(1, ptrs[i], ps[i]);
-  }}
-}}
-'''
-    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
-                                       outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
-
-    # Write and compile the wrapper for Hexagon.
-    wrap_src_file = tempfile.NamedTemporaryFile(suffix=".c", delete=False)
-    wrap_src_file.write(wrap_src.encode())
-    wrap_src_file.close()
-    wrap_exe = wrap_src_file.name + ".out"
-    subprocess.check_output(["clang", "--target=hexagon", "-O2", "-ffreestanding", "-fuse-ld=lld", "-mcpu=hexagonv65",
-                             "-nostdlib", "-fPIC", "-o", wrap_exe, wrap_src_file.name, dsp_lib.name])
-    # Run QEMU-hexagon via Docker (mounting the temp dir so the wrapper is visible).
-    mount_dir = os.path.abspath(os.path.dirname(wrap_exe))
-    print(mount_dir, os.path.basename(wrap_exe))
-    docker_cmd = [
-      "docker", "run", "--rm",
-      "-v", f"{mount_dir}:/work", "-w", "/work",
-      "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(wrap_exe)
-    ]
-    proc = subprocess.run(docker_cmd, check=True)
-    print("here")
-
-    start = time.perf_counter()
-    proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
-    elapsed = time.perf_counter() - start
-    out = proc.stdout
-    print(out)
-
-    # Copy returned pointer data back.
-    off = 0
-    for b in bufs:
-      size = b.size if hasattr(b, "size") else ctypes.sizeof(b)
-      addr = b.va_addr if hasattr(b, "va_addr") else ctypes.addressof(b)
-      ctypes.memmove(addr, out[off:off+size], size)
-      off += size
-
-    # Cleanup.
-    os.remove(dsp_lib.name)
-    os.remove(wrap_src_file.name)
-    os.remove(wrap_exe)
-    return elapsed
-
 class DSPCompiler(ClangCompiler):
-  def __init__(self):
+  def __init__(self, emulate=False):
+    self.emulate = emulate
     # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
     sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
     sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
@@ -325,7 +206,15 @@ class DSPCompiler(ClangCompiler):
       self.link_ld.flush()
 
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
-    return super().__init__("compile_dsp", args=compiler_args, objdump_tool='llvm-objdump')
+    return super().__init__(None, args=compiler_args, objdump_tool='llvm-objdump')
+
+  def compile(self, src:str) -> bytes:
+    if not self.emulate: return super().compile(src)
+    # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
+    with tempfile.NamedTemporaryFile(delete=True) as output_file:
+      subprocess.check_output(["clang", "--target=hexagon", "-O2", "-ffreestanding", "-fuse-ld=lld", "-mcpu=hexagonv65", "-static", '-x', 'c',
+                               "-nostdlib", "-fPIC", "-", "-o", str(output_file.name)], input=(src+wrap_src).encode('utf-8'))
+      return pathlib.Path(output_file.name).read_bytes()
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -341,7 +230,7 @@ class DSPDevice(Compiled):
       RPCListener(self).start()
     except FileNotFoundError:
       self.ion_fd = None
-      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
+      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(emulate=True), functools.partial(DSPProgram, self))
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
