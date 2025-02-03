@@ -617,6 +617,7 @@ class AMDDevice(HCQCompiled):
       # >=gfx11 wavesize is per SE
       wavesize = self.scratch.size // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
       self.tmpring_size = waves << 12 | wavesize
+      self.max_private_segment_size = required
 
   def invalidate_caches(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
