@@ -16,7 +16,7 @@ sys.setrecursionlimit(10000)
 # TODO: use the real kernel class
 class Kernel:
   def __init__(self, ast): self.ast = ast
-  def __repr__(self): return f"<Kernel with {len(list(self.ast.toposort))} ops>"
+  def __repr__(self): return f"<Kernel with {len(list(self.ast.toposort))} ops {self.ast.op}>"
 
 # **** ScheduleItem return type
 
@@ -487,26 +487,35 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
-  # *** construct schedule sink ***
+  # *** schedule sink test ***
+
   # inverse buffers (to start)
-  inv_buffers = {v:k for k,v in buffers.items()}
-  for buf_uop in realize_map: inv_buffers[buf_uop.buffer] = buf_uop
+  inv_buffers: dict[Buffer, UOp] = {}
+  for uop,buf in buffers.items():
+    assert buf not in inv_buffers
+    inv_buffers[buf] = uop
+  for buf_uop in realize_map:
+    assert buf_uop.buffer not in inv_buffers or inv_buffers[buf_uop.buffer] == buf_uop
+    inv_buffers[buf_uop.buffer] = buf_uop
+
+  # construct schedule sink
   for si in schedule:
     assert len(si.outputs) == 1
-    # TODO: handle COPY?
+    # NOTE: currently COPY is just treated like a normal KERNEL
     kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.bufs), arg=Kernel(si.ast))
     for out in si.outputs: inv_buffers[out] = inv_buffers[out].assign(kernel)
 
   sinks = []
+  big_sink_base = [x.base for x in big_sink.src]
   for buf_uop,store in realize_map.items():
-    if any(x in big_sink.src for x in buf_tensors[buf_uop]):
+    if any(x.base in big_sink_base for x in buf_tensors[buf_uop]):
       sinks.append(inv_buffers[buf_uop.buffer])
   if len(sinks) == 0: return [], var_vals, becomes_map
   sched_sink = UOp.sink(*sinks)
 
   # reconstruct schedule items
   graph_rewrite(sched_sink, PatternMatcher([]))
-  def track_back_assign_to_buffer(x):
+  def track_back_assign_to_buffer(x:UOp) -> Buffer:
     if x.op is Ops.ASSIGN: return track_back_assign_to_buffer(x.src[0])
     assert x.op is Ops.BUFFER, f"op is {x.op}"
     return x.buffer
