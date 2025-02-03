@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import Tuple, Any, List
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time, struct
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -46,38 +46,28 @@ wrap_src = '''
 #define SYS_read 63
 #define SYS_write 64
 #define SYS_mmap2 222
-int read(int fd, void* buf, int len) {{
-  register unsigned long __a0 asm("r0") = (unsigned long)fd;
-  register unsigned long __a1 asm("r1") = (unsigned long)buf;
-  register unsigned long __a2 asm("r2") = (unsigned long)len;
+static int read(int fd, void* buf, int len) {{
   int retval;
-  __asm__ volatile("R0 = #0; R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_read) : "r6");
+  __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r6 = #%4; trap0(#1); %0 = r0" :
+    "=r" (retval) : "r" (fd), "r" (buf), "r" (len), "i" (SYS_read) : "r0", "r1", "r2", "r6");
   return retval;
 }}
-int write(int fd, void* buf, int len) {{
-  register unsigned long __a0 asm("r0") = (unsigned long)fd;
-  register unsigned long __a1 asm("r1") = (unsigned long)buf;
-  register unsigned long __a2 asm("r2") = (unsigned long)len;
+static int write(int fd, void* buf, int len) {{
   int retval;
-  __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_write) : "r6");
+  __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r6 = #%4; trap0(#1); %0 = r0" :
+    "=r" (retval) : "r" (fd), "r" (buf), "r" (len), "i" (SYS_write) : "r0", "r1", "r2", "r6");
   return retval;
 }}
-void *mmap(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
-  register unsigned long __a0 asm("r0") = (unsigned long)addr;
-  register unsigned long __a1 asm("r1") = (unsigned long)length;
-  register unsigned long __a2 asm("r2") = (unsigned long)prot;
-  register unsigned long __a3 asm("r3") = (unsigned long)flags;
-  register unsigned long __a4 asm("r4") = (unsigned long)fd;
-  register unsigned long __a5 asm("r5") = (unsigned long)offset;
-  void* retval;
-  __asm__ volatile("R6 = #%7; trap0(#1); %0 = R0" : "=r" (retval) :
-    "r" (__a0), "r" (__a1), "r" (__a2), "r" (__a3), "r" (__a4), "r" (__a5), "i" (SYS_mmap2) : "r6");
+static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
+  void *retval;
+  __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" :
+    "=r" (retval) : "r" (addr), "r" (length), "r" (prot), "r" (flags), "r" (fd), "r" (offset), "i" (SYS_mmap2) :
+    "r0", "r1", "r2", "r3", "r4", "r5", "r6");
   return retval;
 }}
-int exit(int ret) {{
-	register unsigned long __a0 asm("r0") = (unsigned long)ret;
+static int exit(int ret) {{
   int retval;
-  __asm__ volatile("R6 = #%2; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "i" (SYS_exit) : "r6");
+  __asm__ volatile("r0 = %1; r6 = #%2; trap0(#1); %0 = r0" : "=r" (retval) : "r" (ret), "i" (SYS_exit) : "r0", "r6");
   return retval;
 }}
 '''
@@ -89,17 +79,14 @@ class MockDSPRenderer(DSPRenderer):
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType):
         sz = b[1][0].size*b[1][0].itemsize
-        more.append(f"void *buf{i} = mmap(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
+        more.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
       else:
         more.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
     more.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
     for i,b in enumerate(bufs):
-      if isinstance(b[1][0], PtrDType): more.append(f"write(1, buf{i}, {sz});")
+      if isinstance(b[1][0], PtrDType): more.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
     more.append('exit(0); }')
-    bigret = ret + '\n' + wrap_src + '\n' + '\n'.join(more)
-    bigret = bigret.replace("__attribute__((noinline)) ", "")
-    print(bigret)
-    return bigret
+    return ret.split("struct dcvs_v2_req ")[0] + '\n' + wrap_src + '\n' + '\n'.join(more)
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
 def rpc_prep_args(ins=None, outs=None, in_fds=None):
@@ -122,7 +109,7 @@ class MockDSPProgram:
 
     docker_cmd = [
       "docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
-      "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(dsp_lib.name)
+      "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)
     ]
 
     inp = b''.join([bytes(x) for x in bufs])
@@ -132,7 +119,7 @@ class MockDSPProgram:
     out = proc.stdout
     offset = 0
     for x in bufs:
-      x[0:len(x)] = out[offset:offset+len(x)]
+      x[:] = out[offset:offset+len(x)]
       offset += len(x)
     return elapsed
 
@@ -185,29 +172,29 @@ class DSPAllocator(Allocator):
 
 class ClangCompiler(Compiler):
   def __init__(self, cachekey="compile_clang", args:list[str]|None=None, objdump_tool='objdump'):
-    self.args = ['-march=native'] if args is None else args
+    self.args = ['-shared', '-march=native'] if args is None else args
     self.objdump_tool = objdump_tool
     super().__init__(cachekey)
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-shared', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+      subprocess.check_output(['clang', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
 class DSPCompiler(ClangCompiler):
-  def __init__(self):
+  def __init__(self, static=False):
     # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
     sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
     sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
     with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
       self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
       self.link_ld.flush()
-
-    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
+    compiler_args = ["-static" if static else "-shared", "--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",
+                     "-mhvx=v65", "-mhvx-length=128b"] + ([] if static else [f"-T{self.link_ld.name}"])
     return super().__init__(None, args=compiler_args, objdump_tool='llvm-objdump')
 
 class DSPDevice(Compiled):
@@ -224,14 +211,7 @@ class DSPDevice(Compiled):
       RPCListener(self).start()
     except FileNotFoundError:
       self.ion_fd = None
-      # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
-      sections = ['hash', 'text', 'rela.plt', 'got', 'got.plt', 'dynamic', 'dynsym', 'dynstr', 'plt', 'data', 'bss']
-      sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
-      with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
-        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
-        self.link_ld.flush()
-      compiler_args = ["-static", "--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
-      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, compiler_args, objdump_tool='llvm-objdump'), MockDSPProgram)
+      super().__init__(device, MallocAllocator, MockDSPRenderer(), DSPCompiler(static=True), MockDSPProgram)
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
