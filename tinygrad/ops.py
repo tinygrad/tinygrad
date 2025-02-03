@@ -28,6 +28,19 @@ class MathTrait:
   def _binop(self, op, x, reverse=False, **kwargs):
     a, b = self._opfix(x, **kwargs)
     return b.alu(op, a) if reverse else a.alu(op, b)
+  def logical_not(self): return self._opfix(_bool=True)[0].ne(True)
+  def neg(self):
+    if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
+    return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
+  def add(self, x, reverse=False): return self._binop(Ops.ADD, x, reverse)
+  def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
+  def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse, bitwise=True)
+  def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse, bitwise=True)
+  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse, bitwise=True)
+  def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
+  def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
+  def sub(self, x, reverse=False): return (of:=self._opfix(x))[1] + (-of[0]) if reverse else (of:=self._opfix(x))[0] + (-of[1])
+  def div(self, x, reverse=False): return (of:=self._opfix(x))[1]*of[0].reciprocal() if reverse else (of:=self._opfix(x))[0]*of[1].reciprocal()
 
   def __neg__(self): return self.neg()
 
@@ -40,8 +53,6 @@ class MathTrait:
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
-  def __lshift__(self, x): return self.lshift(x)
-  def __rshift__(self, x): return self.rshift(x)
 
   def __radd__(self, x): return self.add(x, True)
   def __rsub__(self, x): return self.sub(x, True)
@@ -52,304 +63,37 @@ class MathTrait:
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
-  def __rlshift__(self, x): return self.lshift(x, True)
-  def __rrshift__(self, x): return self.rshift(x, True)
 
   def __lt__(self, x): return self._binop(Ops.CMPLT, x)
   def __gt__(self, x): return self._binop(Ops.CMPLT, x, True)
   def __ge__(self, x): return (self < x).logical_not()
   def __le__(self, x): return (self > x).logical_not()
 
+  def ne(self, x): return self._binop(Ops.CMPNE, x)
+  def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-  def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
-  def ne(self, x): return self._binop(Ops.CMPNE, x)
-  def eq(self, x): return self.ne(x).logical_not()
-  def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
+  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse, bitwise=True)
+  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse, bitwise=True)
+  def __lshift__(self, x): return self.lshift(x)
+  def __rshift__(self, x): return self.rshift(x)
+  def __rlshift__(self, x): return self.lshift(x, True)
+  def __rrshift__(self, x): return self.rshift(x, True)
 
-  def logical_not(self):
-    """
-    Computes the logical NOT of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([False, True]).logical_not().numpy())
-    ```
-    """
-    return self._opfix(_bool=True)[0].ne(True)
-
-  def neg(self):
-    """
-    Negates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
-    ```
-    """
-    if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
-    return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
-
-  def add(self, x, reverse=False):
-    """
-    Adds `self` and `x`.
-    Equivalent to `self + x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.add(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return self._binop(Ops.ADD, x, reverse)
-
-  def mul(self, x, reverse=False):
-    """
-    Multiplies `self` and `x`.
-    Equivalent to `self * x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
-    ```
-    """
-    return self._binop(Ops.MUL, x, reverse)
-
-  def bitwise_and(self, x, reverse=False):
-    """
-    Compute the bit-wise AND of `self` and `x`.
-    Equivalent to `self & x`.
-    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([2, 5, 255]).bitwise_and(Tensor([3, 14, 16])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
-    ```
-    """
-    return self._binop(Ops.AND, x, reverse, bitwise=True)
-
-  def bitwise_or(self, x, reverse=False):
-    """
-    Compute the bit-wise OR of `self` and `x`.
-    Equivalent to `self | x`.
-    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([2, 5, 255]).bitwise_or(Tensor([4, 4, 4])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
-    ```
-    """
-    return self._binop(Ops.OR, x, reverse, bitwise=True)
-
-  def xor(self, x, reverse=False):
-    """
-    Computes bitwise xor of `self` and `x`.
-    Equivalent to `self ^ x`.
-    Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, -2, 3]).xor(Tensor([1, 0, 3])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
-    ```
-    """
-    return self._binop(Ops.XOR, x, reverse, bitwise=True)
-
-  def idiv(self, x, reverse=False):
-    """
-    Divides `self` by `x`.
-    Equivalent to `self // x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division (truncate towards zero).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    return self._binop(Ops.IDIV, x, reverse)
-
-  def sub(self, x, reverse=False):
-    """
-    Subtracts `x` from `self`.
-    Equivalent to `self - x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sub(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    return (of:=self._opfix(x))[1] + (-of[0]) if reverse else (of:=self._opfix(x))[0] + (-of[1])
-
-  def div(self, x, reverse=False):
-    """
-    Divides `self` by `x`.
-    Equivalent to `self / x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-    `div` performs true division.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.div(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
-    ```
-    """
-    return (of:=self._opfix(x))[1]*of[0].reciprocal() if reverse else (of:=self._opfix(x))[0]*of[1].reciprocal()
-
-  def lshift(self, x, reverse=False):
-    """
-    Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
-    Equivalent to `self << x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
-    ```
-    """
-    return self._binop(Ops.SHL, x, reverse, bitwise=True)
-
-  def rshift(self, x, reverse=False):
-    """
-    Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
-    Equivalent to `self >> x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
-    ```
-    """
-    return self._binop(Ops.SHR, x, reverse, bitwise=True)
-
-  def maximum(self, x):
-    """
-    Computes element-wise maximum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return self._binop(Ops.MAX, x)
-
-  def minimum(self, x):
-    """
-    Computes element-wise minimum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return (of:=self._opfix(x))[0].neg().maximum(-of[1]).neg()
-
+  def maximum(self, x): return self._binop(Ops.MAX, x)
+  def minimum(self, x): return (of:=self._opfix(x))[0].neg().maximum(-of[1]).neg()
   def where(self, x, y):
-    """
-    Return a tensor of elements selected from either `x` or `y`, depending on `self`.
-    `output_i = x_i if self_i else y_i`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    cond = Tensor([[True, True, False], [True, False, False]])
-    print(cond.where(1, 3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    cond = Tensor.randn(2, 3)
-    print(cond.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print((cond > 0).where(cond, -float("inf")).numpy())
-    ```
-    """
     x, y = x._opfix(y) if isinstance(x, MathTrait) else y._opfix(x)[::-1] if isinstance(y, MathTrait) else (x, y)
     cond, x = self._opfix(x, match_dtype=False)
     cond, y = cond._opfix(y, match_dtype=False)
     return cond._opfix(_bool=True)[0].alu(Ops.WHERE, *x._opfix(y))
-
-  def reciprocal(self):
-    """
-    Compute `1/x` element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
-    ```
-    """
-    return self._opfix(_float=True)[0].alu(Ops.RECIP)
-
-  def sqrt(self):
-    """
-    Computes the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
-    ```
-    """
-    return self._opfix(_float=True)[0].alu(Ops.SQRT)
-
-  def sin(self):
-    """
-    Computes the sine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
-    ```
-    """
-    return self._opfix(_float=True)[0].alu(Ops.SIN)
-
-  def log2(self):
-    """
-    Computes the base-2 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log2().numpy())
-    ```
-    """
-    return self._opfix(_float=True)[0].alu(Ops.LOG2)
-
-  def exp2(self):
-    """
-    Computes the base-2 exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp2().numpy())
-    ```
-    """
-    return self._opfix(_float=True)[0].alu(Ops.EXP2)
+  def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
+  def reciprocal(self): return self._opfix(_float=True)[0].alu(Ops.RECIP)
+  def sqrt(self): return self._opfix(_float=True)[0].alu(Ops.SQRT)
+  def sin(self): return self._opfix(_float=True)[0].alu(Ops.SIN)
+  def log2(self): return self._opfix(_float=True)[0].alu(Ops.LOG2)
+  def exp2(self): return self._opfix(_float=True)[0].alu(Ops.EXP2)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
