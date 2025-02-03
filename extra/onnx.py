@@ -1,4 +1,4 @@
-from typing import Any, Sequence, cast, Literal, Callable
+from typing import Any, Sequence, cast, Literal, Callable, get_args
 import dataclasses, functools, io, math, inspect, collections
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
@@ -83,20 +83,20 @@ def to_python_const(t:Any) -> list[ConstType]|ConstType|bytes:
 # ***** onnx ops *****
 SupportedDomains = Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"]
 def normalize_domain(domain:str) -> SupportedDomains:
-  match domain:
-    case "": return "ai.onnx"
-    case "ai.onnx.preview.training": return "ai.onnx.training"
-    case "ai.onnx" | "ai.onnx.ml" | "ai.onnx.training" | "com.microsoft": return domain
-    case _: raise NotImplementedError(f"{domain} is not supported")
+  if domain in get_args(SupportedDomains): return domain
+  _SPECIAL_DOMAIN_MAPPINGS = {"": "ai.onnx", "ai.onnx.preview.training": "ai.onnx.training"}
+  if domain in _SPECIAL_DOMAIN_MAPPINGS: return _SPECIAL_DOMAIN_MAPPINGS[domain]
+  raise NotImplementedError(f"{domain} is not supported")
 
 OpKey = tuple[SupportedDomains, str]
 # https://github.com/onnx/onnx/blob/main/docs/Versioning.md#operator-versioning
+@dataclasses.dataclass
 class OnnxOp:
-  def __init__(self, domain: str, op_type: str, since_version: int, fxn: Callable):
-    self.domain = normalize_domain(domain)
-    self.op_type = op_type
-    self.since_version = since_version
-    self.fxn = fxn
+  domain: str
+  op_type: str
+  since_version: int
+  fxn: Callable
+  def __post_init__(self): self.domain = normalize_domain(self.domain)
   def __eq__(self, other:object):
     if not isinstance(other, OnnxOp): raise NotImplementedError
     return self.domain == self.domain and self.op_type == other.op_type and self.since_version == other.since_version
@@ -109,13 +109,13 @@ class _OnnxOps:
   def __init__(self): self.registry: collections.defaultdict[OpKey, list[OnnxOp]] = collections.defaultdict(list)
   def _register(self, fxn: Callable, domain: str, op_type: str | None, python_consts: tuple[str, ...], since_version: int):
     if op_type is None: op_type = fxn.__name__
-    const_indices = [i for i,name in enumerate(inspect.signature(fxn).parameters.keys()) if name in python_consts]
+    const_indices = [idx for idx,name in enumerate(inspect.signature(fxn).parameters) if name in python_consts]
     def to_python_wrapped(*inps, **opts): return fxn(*(to_python_const(inp) if i in const_indices else inp for i,inp in enumerate(inps)), **opts)
     onnx_op = OnnxOp(domain, op_type, since_version, to_python_wrapped)
     assert onnx_op not in self.registry[onnx_op.key], f"duplicated op {onnx_op}"
     self.registry[onnx_op.key].append(onnx_op)
     return to_python_wrapped
-  def register_op(self, domain: str="ai.onnx", op:str|None=None, python_consts:tuple[str, ...]=(), since_version:int=1):
+  def register_op(self, domain:str="ai.onnx", op:str|None=None, python_consts:tuple[str, ...]=(), since_version:int=1):
     def decorator(fxn): return self._register(fxn, domain, op, python_consts, since_version)
     return decorator
   def register_tensor_ops(self, *ops:str, domain:str="ai.onnx", python_consts:tuple[str, ...]=(), since_version:int=1):
