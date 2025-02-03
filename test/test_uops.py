@@ -7,7 +7,8 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
+from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
+from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
@@ -311,7 +312,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(local=True), (), ('smem', 16))
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, local=True), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
@@ -321,7 +322,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
   def test_local_packed(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(local=True), (), ('smem', 16))
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, local=True), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
@@ -330,7 +331,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(local=True), (), ('smem', 16))
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, local=True), (), 'smem')
     st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
     st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
@@ -586,7 +587,6 @@ class TestShapeSpec(unittest.TestCase):
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
-  @unittest.expectedFailure
   def test_buffer_st(self):
     a = UOp.new_buffer(Device.DEFAULT, 10, dtypes.float)
     self.assertEqual(a.st, ShapeTracker.from_shape((10,)))

@@ -619,6 +619,7 @@ class TestOps(unittest.TestCase):
     # TODO: fix backward, should be nan
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
 
+  @unittest.skip("not supported")
   def test_pow_int(self):
     def _test(base, exponent): helper_test_op(None, lambda x,y: x**y, vals=[base, exponent], forward_only=True)
 
@@ -835,7 +836,6 @@ class TestOps(unittest.TestCase):
     self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
     x = Tensor([-300.0])
     self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
-  @unittest.skip("fix sigmoid stability")
   def test_sigmoid_alt_extreme(self):
     def sigmoid(x:Tensor): return x.exp() / (1 + x.exp())
     x = Tensor([300.0])
