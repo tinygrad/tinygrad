@@ -282,7 +282,7 @@ class Tensor(MathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CLANG", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.realized.copyin(x._data())
+      self.contiguous().realize().lazydata.base.realized.ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
@@ -3308,6 +3308,8 @@ class Tensor(MathTrait):
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
 
     base, exponent = self._broadcasted(x)[::-1] if reverse else self._broadcasted(x)
+    # TODO: int pow
+    if not base.is_floating_point(): raise RuntimeError("base needs to be float")
     # start with b ** e = exp(e * log(b))
     ret = base.abs().log().mul(exponent).exp()
     # correct sign of negative base with odd exponent (cos has a period of 2pi so we use it here to get the oddness of the exponent)

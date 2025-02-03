@@ -1,24 +1,8 @@
-import platform, tempfile, pathlib, subprocess, sys
-from tinygrad.helpers import cpu_objdump, capstone_flatdump
+import platform, subprocess, sys
+from tinygrad.helpers import capstone_flatdump
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
-
-# Used by ops_dsp.py
-class ClangCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang", args:list[str]|None=None, objdump_tool='objdump'):
-    self.args = ['-march=native'] if args is None else args
-    self.objdump_tool = objdump_tool
-    super().__init__(cachekey)
-
-  def compile(self, src:str) -> bytes:
-    # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-shared', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
-                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
-      return pathlib.Path(output_file.name).read_bytes()
-
-  def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
