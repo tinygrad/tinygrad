@@ -3,6 +3,7 @@ from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
+from typing import List, Any
 import ctypes
 
 instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable = True)))
@@ -25,7 +26,7 @@ def write_buffer(device, buf, offset, src):
   webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, src_pointer, len(src))
 
 def map_buffer(buf, size):
-  result = []
+  result: List[Any] = []
 
   def cb(status, msg, u1, u2): result[:] = status, from_wgpu_str(msg)
 
@@ -60,7 +61,7 @@ def submit(device, command_buffers):
   webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), (webgpu.WGPUCommandBuffer * len(command_buffers))(*command_buffers))
 
 def pop_error(device):
-  result = []
+  result: List[Any] = []
 
   def cb(status, err_type, msg, i2): result[:] = [from_wgpu_str(msg)]
 
@@ -79,10 +80,8 @@ class WebGPUProgram:
     (self.dev, self.timestamp_supported) = dev
 
     # Creating shader module
-    shader = webgpu.WGPUShaderModuleWGSLDescriptor()
-    shader.code = to_wgpu_str(lib.decode())
-    shader.chain.next = None
-    shader.chain.sType = webgpu.WGPUSType_ShaderSourceWGSL
+    shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(lib.decode()),
+      chain=webgpu.WGPUChainedStruct(sType=webgpu.WGPUSType_ShaderSourceWGSL))
     module = webgpu.WGPUShaderModuleDescriptor()
     module.nextInChain = ctypes.cast(ctypes.pointer(shader), ctypes.POINTER(webgpu.struct_WGPUChainedStruct))
 
@@ -143,7 +142,7 @@ class WebGPUProgram:
     # Creating compute pipeline
     compute_desc = webgpu.WGPUComputePipelineDescriptor(layout=pipeline_layout,
       compute=webgpu.WGPUComputeState(module=self.prg, entryPoint=to_wgpu_str(self.name)))
-    pipeline_result = []
+    pipeline_result: List[Any] = []
 
     def cb(status, compute_pipeline_impl, msg, u1, u2): pipeline_result[:] = status, compute_pipeline_impl, from_wgpu_str(msg)
 
@@ -208,7 +207,7 @@ class WebGpuAllocator(Allocator):
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     # Requesting an adapter
-    adapter_result = []
+    adapter_result: List[Any] = []
 
     def adapter_cb(status, adapter, msg, _): adapter_result[:] = status, adapter, from_wgpu_str(msg)
 
@@ -240,7 +239,7 @@ class WebGpuDevice(Compiled):
     device_desc.requiredLimits = ctypes.cast(ctypes.pointer(limits),ctypes.POINTER(webgpu.struct_WGPURequiredLimits))
 
     # Requesting a device
-    device_result = []
+    device_result: List[Any] = []
 
     def dev_cb(status, device_impl, msg, _): device_result[:] = status, device_impl, from_wgpu_str(msg)
 
