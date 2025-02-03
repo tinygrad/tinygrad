@@ -111,11 +111,11 @@ limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
-    self.is_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in model.graph.node)
+    self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
-    self.graph_values = {x.name:buffer_parse(x) for x in model.graph.initializer}
+    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
     self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
@@ -157,7 +157,7 @@ class OnnxRunner:
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for node in self.graph_nodes:
-      inps = [to_python_const(self.graph_values.get(name), node.op, i) for i,name in enumerate(node.inputs)]
+      inps = [to_python_const(self.graph_values[name], node.op, i) for i,name in enumerate(node.inputs)]
       opts = node.opts
 
       # provide additional opts
