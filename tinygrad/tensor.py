@@ -2475,7 +2475,7 @@ class Tensor(MathTrait):
 
   # ***** unary ops *****
 
-  def logical_not(self):
+  def logical_not(self):  # pylint: disable=useless-parent-delegation
     """
     Computes the logical NOT of the tensor element-wise.
 
@@ -2484,7 +2484,7 @@ class Tensor(MathTrait):
     ```
     """
     return super().logical_not()
-  def neg(self):
+  def neg(self):  # pylint: disable=useless-parent-delegation
     """
     Negates the tensor element-wise.
 
@@ -2514,7 +2514,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.log2()*math.log(2)
-  def log2(self):
+  def log2(self):  # pylint: disable=useless-parent-delegation
     """
     Computes the base-2 logarithm element-wise.
 
@@ -2536,7 +2536,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.mul(1/math.log(2)).exp2()
-  def exp2(self):
+  def exp2(self):  # pylint: disable=useless-parent-delegation
     """
     Computes the base-2 exponential function element-wise.
 
@@ -2585,7 +2585,7 @@ class Tensor(MathTrait):
     """
     return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
 
-  def sqrt(self):
+  def sqrt(self):  # pylint: disable=useless-parent-delegation
     """
     Computes the square root of the tensor element-wise.
 
@@ -2603,7 +2603,7 @@ class Tensor(MathTrait):
     ```
     """
     return self.reciprocal().sqrt()
-  def sin(self):
+  def sin(self):  # pylint: disable=useless-parent-delegation
     """
     Computes the sine of the tensor element-wise.
 
@@ -2780,7 +2780,7 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sign()
-  def reciprocal(self):
+  def reciprocal(self):  # pylint: disable=useless-parent-delegation
     """
     Compute `1/x` element-wise.
 
@@ -3094,7 +3094,7 @@ class Tensor(MathTrait):
     return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.base.op is Ops.CONST \
       and unwrap(x.lazydata.st).views[0].mask is None and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Adds `self` and `x`.
     Equivalent to `self + x`.
@@ -3114,7 +3114,7 @@ class Tensor(MathTrait):
     """
     return super().add(x, reverse)
 
-  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Subtracts `x` from `self`.
     Equivalent to `self - x`.
@@ -3134,7 +3134,7 @@ class Tensor(MathTrait):
     """
     return super().sub(x, reverse)
 
-  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def mul(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Multiplies `self` and `x`.
     Equivalent to `self * x`.
@@ -3154,7 +3154,7 @@ class Tensor(MathTrait):
     """
     return super().mul(x, reverse)
 
-  def idiv(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def idiv(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Divides `self` by `x`.
     Equivalent to `self // x`.
@@ -3167,7 +3167,7 @@ class Tensor(MathTrait):
     """
     return super().idiv(x, reverse)
 
-  def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
@@ -3201,7 +3201,7 @@ class Tensor(MathTrait):
     a, b = self._broadcasted(x)[::-1] if reverse else self._broadcasted(x)
     return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
 
-  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Computes bitwise xor of `self` and `x`.
     Equivalent to `self ^ x`.
@@ -3216,7 +3216,7 @@ class Tensor(MathTrait):
     """
     return super().xor(x, reverse)
 
-  def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Compute the bit-wise AND of `self` and `x`.
     Equivalent to `self & x`.
@@ -3230,7 +3230,7 @@ class Tensor(MathTrait):
     """
     return super().bitwise_and(x, reverse)
 
-  def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Compute the bit-wise OR of `self` and `x`.
     Equivalent to `self | x`.
@@ -3258,7 +3258,7 @@ class Tensor(MathTrait):
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
-  def lshift(self, x:int, reverse=False):
+  def lshift(self, x:int, reverse=False):  # pylint: disable=useless-parent-delegation
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
     Equivalent to `self << x`.
@@ -3269,7 +3269,7 @@ class Tensor(MathTrait):
     """
     return super().lshift(x, reverse)
 
-  def rshift(self, x:int, reverse=False):
+  def rshift(self, x:int, reverse=False):  # pylint: disable=useless-parent-delegation
     """
     Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
     Equivalent to `self >> x`.
@@ -3322,7 +3322,7 @@ class Tensor(MathTrait):
     ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
     return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
-  def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
+  def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Computes element-wise maximum of `self` and `x`.
 
@@ -3335,7 +3335,7 @@ class Tensor(MathTrait):
     """
     return super().maximum(x)
 
-  def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
+  def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:  # pylint: disable=useless-parent-delegation
     """
     Computes element-wise minimum of `self` and `x`.
 
@@ -3348,7 +3348,7 @@ class Tensor(MathTrait):
     """
     return super().minimum(x)
 
-  def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
+  def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):  # pylint: disable=useless-parent-delegation
     """
     Return a tensor of elements selected from either `x` or `y`, depending on `self`.
     `output_i = x_i if self_i else y_i`.
