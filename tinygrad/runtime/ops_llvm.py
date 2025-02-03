@@ -17,7 +17,7 @@ class LLVMCompiler(Compiler):
     triple = ({'AArch64': 'aarch64', 'X86': 'x86_64'}[host_arch]+'-none-unknown-elf').encode()
 
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    target_machine = llvm.LLVMCreateTargetMachine(target, triple, b'', b'+reserve-x18' if host_arch == 'arm64' else b'',
+    target_machine = llvm.LLVMCreateTargetMachine(target, triple, b'', b'+reserve-x18' if platform.machine() == 'arm64' else b'',
                                                   llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
