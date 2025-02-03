@@ -11,7 +11,6 @@ from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 if getenv("EMULATE_CUDA_SM89"):
-  from typing import Type
   import numpy as np
   from ml_dtypes import float8_e4m3, float8_e5m2
   truncate.update({dtypes.fp8e4m3: float8_e4m3, dtypes.fp8e5m2: float8_e5m2})
@@ -75,7 +74,7 @@ class PythonProgram:
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
           if dtype.base in dtypes.fp8s: ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size
-          else: 
+          else:
             assert dtype.fmt is not None and isinstance(dtype, PtrDType)
             ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
