@@ -15,8 +15,8 @@ sys.setrecursionlimit(10000)
 
 # TODO: use the real kernel class
 class Kernel:
-  def __init__(self, ast): self.ast = ast
-  def __repr__(self): return f"<Kernel with {len(list(self.ast.toposort))} ops {self.ast.op}>"
+  def __init__(self, ast, metadata): self.ast, self.metadata = ast, metadata
+  def __repr__(self): return f"<Kernel {len(list(self.ast.toposort))} {self.ast.op} {self.metadata}>"
 
 # **** ScheduleItem return type
 
@@ -441,7 +441,7 @@ def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
   new_sched_sink = sched_sink.substitute(replacements)
 
   # display
-  graph_rewrite(new_sched_sink, PatternMatcher([]))
+  if getenv("VIZ"): graph_rewrite(new_sched_sink, PatternMatcher([]))
 
   # final toposort
   def track_back_assign(x:UOp) -> UOp:
@@ -452,7 +452,7 @@ def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
   for x in new_sched_sink.toposort:
     if x.op is Ops.ASSIGN:
       k = x.src[1]
-      new_schedule.append(ScheduleItem(k.arg.ast, tuple(track_back_assign(y).buffer for y in k.src), ()))
+      new_schedule.append(ScheduleItem(k.arg.ast, tuple(track_back_assign(y).buffer for y in k.src), k.arg.metadata))
   return new_schedule
 
 @track_rewrites(named=True)
@@ -476,10 +476,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for k,v in tensor_map.items():
     if (b:=buffer_map.get(v)) is not None: buf_tensors.setdefault(b, []).append(k)
   realize_map = group_realizes(sink, ctx:=ScheduleContext(buf_tensors))
-
-  # TODO: this should be the break between the "grouper" and the "linearizer"
-  # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
-  # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
 
   # create schedule items + map buffers to realized tensors
   prescheduled: list[ScheduleItem] = []
@@ -520,11 +516,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
 
-  # *** schedule sink test ***
+  # *** schedule sink ***
+  # TODO: construct this in a more direct way without running BFS twice
 
   # inverse buffers (to start)
   inv_buffers: dict[Buffer, UOp] = {}
-  for uop,buf in buffers.items():
+  for uop,buf in buffers.items():  # TODO: don't access this!
     assert buf not in inv_buffers
     inv_buffers[buf] = uop
   for buf_uop in realize_map:
@@ -535,7 +532,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for si in schedule:
     assert len(si.outputs) == 1
     # NOTE: currently COPY is just treated like a normal KERNEL
-    kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.bufs), arg=Kernel(si.ast))
+    kernel = UOp(Ops.KERNEL, src=tuple(inv_buffers[y] for y in si.bufs), arg=Kernel(si.ast, si.metadata))
     for out in si.outputs: inv_buffers[out] = inv_buffers[out].assign(kernel)
 
   # TODO: we don't need all of these
