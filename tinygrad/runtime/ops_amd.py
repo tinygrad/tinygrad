@@ -571,8 +571,6 @@ class AMDDevice(HCQCompiled):
       AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
     else: self.dev_iface.map(AMDDevice.signals_page)
 
-    # Scratch setup
-    self.scratch, self.max_private_segment_size = None, 0
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
     self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
     self.has_scratch_base_registers = self.target >= 110000
@@ -591,6 +589,11 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
+
+    # Scratch setup
+    self.scratch, self.max_private_segment_size = None, 0
+    self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
+
     atexit.register(self.device_fini)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
