@@ -35,8 +35,7 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  tensor_uops: dict[UOp, list[UOp]] = field(default_factory=dict)    # this maps BUFFER uops of this schedule to the tensor uop
-  var_vals: dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
+  tensor_uops: dict[UOp, list[UOp]]                                  # this maps BUFFER uops of this schedule to the tensor uop
   assigns: set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
@@ -46,16 +45,16 @@ class ScheduleContext:
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
-def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, cache:dict[UOp, UOp]) -> UOp:
+def add_buffers(buf:UOp, buffer_map:dict[UOp, UOp], cache:dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # SINK is passthrough
-  if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
+  if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, buffer_map, cache) for x in buf.src))
   # skip creating buffers for CONST/BIND/DEVICE/BUFFER
   if buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
   if buf.base.op is Ops.BUFFER: return buf.view(unwrap(buf.st))
   # VIEW is passthrough
   if buf is not buf.base:
-    cache[buf] = ret = add_buffers(buf.base, tensor_map, ctx, cache).view(unwrap(buf.st))
+    cache[buf] = ret = add_buffers(buf.base, buffer_map, cache).view(unwrap(buf.st))
     return ret
   # make things that can't be images not images
   dtype = buf.dtype
@@ -65,9 +64,9 @@ def add_buffers(buf:UOp, tensor_map:dict[UOp, list[UOp]], ctx:ScheduleContext, c
   # ASSIGN already has a target buffer, otherwise we create a new one
   assert isinstance(buf.device, str), f"buf device is str, not {buf.device}"
   buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-  op = buf.replace(dtype=dtype, src=tuple(add_buffers(x, tensor_map, ctx, cache) for x in buf.src))
-  # track the underlying tensor uop for this buffer
-  ctx.tensor_uops[buf_uop] = tensor_map[buf]
+  op = buf.replace(dtype=dtype, src=tuple(add_buffers(x, buffer_map, cache) for x in buf.src))
+  # track the buffer uop for the simplified uop
+  buffer_map[buf] = buf_uop
   # (early) bufferize
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
   return ret
@@ -165,11 +164,16 @@ to_si = PatternMatcher([
   (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
 ])
 
-def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
-  # apply swizzles (pushing views from the middle of the AST to BUFFER ops edges)
-  sink = graph_rewrite(graph_rewrite(pre, view_left), view_right)
+def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
+  ctx[var.replace(src=())] = val.arg
+  return var
+unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
+
+def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> ScheduleItem:
+  # unbind_vars + push views to edges
+  sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(ctx.var_vals))
+  ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(var_vals))
   # deal with ASSIGN
   if len(ctx.assigns) != 0:
     assign_preloads = ctx.preloads[si_ctx.bufs[0].buffer]
@@ -199,7 +203,57 @@ if CAPTURE_PROCESS_REPLAY:
   def save_process_replay() -> None:
     for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
-# **** Schedule grouping
+# **** UOp realization
+
+class UPatScheduled(UPat):
+  def __init__(self, *args, **kwargs):
+    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
+
+def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
+
+def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+  st = unwrap(view.st)
+  # fold simple pads
+  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
+    return None if can_pad(src, ctx.realizes, set()) else realize(ctx, b, src)
+  # early realize before expand
+  if resolve(prod(src.shape) < prod(st.shape)) and not getenv("DONT_REALIZE_EXPAND"): return realize(ctx, b, src)
+  # otherwise safety check pads
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
+
+def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs) -> UOp|None:
+  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(x.base).op is Ops.COPY: return None
+  del ctx.realizes[b]
+  return x.view(unwrap(view.st))
+
+def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
+  if isinstance(b.device, tuple) or not b.device.startswith("DISK"): return None
+  buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
+
+do_realize = PatternMatcher([
+  # always realize SINK parents
+  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
+  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
+  # realize before expand or unsafe pad ops
+  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
+  # don't realize image to image casts
+  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="x"),), dtype=dtypes.float),)),
+   fold_img_cast),
+  # realize before COPY or BUFFER_VIEW
+  (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
+  (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
+])
+
+def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
+  ctx.allbufs[buf_uop] = view
+  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  for x in op.base.src:
+    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2 and u.src[0].op is Ops.BUFFER
 def uval(u:UOp) -> UOp:
@@ -224,8 +278,9 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
-def group_realizes(ctx:ScheduleContext) -> None:
-  """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
+def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
+  # start by adding uops that always realize
+  sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
@@ -276,10 +331,28 @@ def group_realizes(ctx:ScheduleContext) -> None:
   for reduceop in double_reduces:
     top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
     if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
+  graph_rewrite(sink, break_sched, ctx)
+  return ctx.realizes
 
-# **** Schedule creation and BFS toposort
+# break the SINK into stores
 
-# ** this is schedule level const folding
+def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
+  # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
+  return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
+
+def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
+  if (m:=ctx.tensor_uops[b][-1].metadata) is not None: ctx.ops_metadata[x] = m
+  if b not in ctx.realizes: return x # collapse BUFFER
+  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
+  return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
+
+break_sched = PatternMatcher([
+  # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),
+])
+
+# **** schedule simplifier
 
 def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
   if not all_int(x.shape): return None
@@ -334,86 +407,6 @@ sym = symbolic_simple+PatternMatcher([
       if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
-# ** this decides which ops get realized
-
-class UPatScheduled(UPat):
-  def __init__(self, *args, **kwargs):
-    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
-
-def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
-
-def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
-  st = unwrap(view.st)
-  # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx.realizes, set()) else realize(ctx, b, src)
-  # early realize before expand
-  if resolve(prod(src.shape) < prod(st.shape)) and not getenv("DONT_REALIZE_EXPAND"): return realize(ctx, b, src)
-  # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
-
-def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs) -> UOp|None:
-  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(x.base).op is Ops.COPY: return None
-  del ctx.realizes[b]
-  return x.view(unwrap(view.st))
-
-def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
-  if isinstance(b.device, tuple) or not b.device.startswith("DISK"): return None
-  buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
-  return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
-
-do_realize = PatternMatcher([
-  # always realize SINK parents
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
-  # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
-  # don't realize image to image casts
-  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="x"),), dtype=dtypes.float),)),
-   fold_img_cast),
-  # realize before COPY or BUFFER_VIEW
-  (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
-  (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
-])
-
-# **** rewrite VIEW into LOAD/STORE or fuse the underlying UOp
-
-def unbind_variable(ctx:ScheduleContext, bind:UOp, var:UOp, val:UOp):
-  assert isinstance(val.const_arg, int), f"expected BIND value to be int {val}"
-  ctx.var_vals[var.replace(src=())] = val.const_arg
-  return var
-
-def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
-  # NOTE: if we're assigning to the BUFFER too, PRELOAD tells toposort to place this load before the ASSIGN
-  return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
-
-def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
-  if (m:=ctx.tensor_uops[b][-1].metadata) is not None: ctx.ops_metadata[x] = m
-  if b not in ctx.realizes: return x # collapse BUFFER
-  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
-  return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
-
-break_sched = PatternMatcher([
-  (UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.var("val"))), unbind_variable),
-  # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), load_realized),
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),
-])
-
-# **** Schedule context builder
-
-def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
-  ctx.allbufs[buf_uop] = view
-  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
-  for x in op.base.src:
-    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
-create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
-
-# **** movement ops
-
 remove_movement_ops = merge_views+PatternMatcher([
   # NOTE: movement ops are always applied to base
   (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov: x.view(unwrap(mov.st))),
@@ -421,6 +414,8 @@ remove_movement_ops = merge_views+PatternMatcher([
   (UPat(Ops.VIEW, name="view"),
    lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
 ])
+
+# **** schedule creation and toposort
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
@@ -436,15 +431,13 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     elif v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # we group the rest of UOps into ScheduleItems
-  rev_tensor_map: dict[UOp, list[UOp]] = {}
-  for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
-  # add BUFFER uops
-  sink = add_buffers(tensor_map[big_sink], rev_tensor_map, ctx:=ScheduleContext(), cache={})
-  # add realizes
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
-  # group realizes into kernels
-  group_realizes(ctx)
-  graph_rewrite(sink, break_sched, ctx)
+  buffer_map: dict[UOp, UOp] = {}
+  sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
+  # get realizes
+  buf_tensors: dict[UOp, list[UOp]] = {}
+  for k,v in tensor_map.items():
+    if (b:=buffer_map.get(v)) is not None: buf_tensors.setdefault(b, []).append(k)
+  realize_map = group_realizes(sink, ctx:=ScheduleContext(buf_tensors))
 
   # TODO: this should be the break between the "grouper" and the "linearizer"
   # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
@@ -452,11 +445,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # create schedule items + map buffers to realized tensors
   prescheduled: list[ScheduleItem] = []
-  for buf_uop,store in ctx.realizes.items():
+  var_vals: dict[Variable, int] = {}
+  for buf_uop,store in realize_map.items():
     assert store.op is Ops.STORE, f"expected a realized BUFFER to get a STORE {sink}"
-    prescheduled.append(schedule_uop(store.sink(), ctx))
+    prescheduled.append(schedule_uop(store.sink(), ctx, var_vals))
     # can only schedule once
-    for tensor_uop in ctx.tensor_uops[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
+    for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     # increment refcount for this buffer
     buf_uop.buffer.ref(1)
 
@@ -487,4 +481,4 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # confirm everything was scheduled correctly
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-  return schedule, ctx.var_vals, becomes_map
+  return schedule, var_vals, becomes_map

@@ -32,7 +32,7 @@ class ProcessReplayWarning(Warning): pass
 
 def recreate_sched(ast:UOp) -> UOp:
   # NOTE: process replay isn't meant to actually schedule anything
-  return schedule_uop(ast, ScheduleContext(tensor_uops=defaultdict(list))).ast
+  return schedule_uop(ast, ScheduleContext(tensor_uops=defaultdict(list)), {}).ast
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
@@ -61,7 +61,8 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
       continue
     # try recreate
     try:
-      with Context(**{k:v.value for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
+      ctx_vars = {k:v.value for k,v in args[-2].items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+      with Context(**ctx_vars): good = fxn(*args[:-2])
       if good is None: continue
     except Exception as e:
       changed += 1
@@ -72,7 +73,8 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
     try: assert str(args[-1]) == str(good)
     except AssertionError:
       changed += 1
-      for x in args[:-1]: logging.info(x)
+      if ctx_vars: logging.info(ctx_vars)
+      for x in args[:-2]: logging.info(x)
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
       warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
