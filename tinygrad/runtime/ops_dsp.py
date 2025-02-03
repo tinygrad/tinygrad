@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Tuple, Any, List
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump
@@ -51,6 +51,52 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   for i, mv in enumerate(ins + outs): pra[i].buf.pv, pra[i].buf.len = mv_address(mv) if mv.nbytes > 0 else 0, mv.nbytes
   return pra, fds, attrs, (ins, outs)
 
+# https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
+wrap_src = f'''
+#define SYS_exit 93
+#define SYS_read 63
+#define SYS_write 64
+#define SYS_mmap2 222
+void HAP_power_set() {{}}
+void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset) {{
+
+}}
+unsigned long long HAP_perf_get_time_us() {{ return 0; }}
+int HAP_munmap(void *addr, int len) {{
+
+}}
+int read(int fd, void* buf, int len) {{
+	register unsigned long __a0 asm("r0") = (unsigned long)fd;
+	register unsigned long __a1 asm("r1") = (unsigned long)buf;
+	register unsigned long __a2 asm("r2") = (unsigned long)len;
+  int retval;
+  __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_read));
+  return retval;
+}}
+int write(int fd, void* buf, int len) {{
+	register unsigned long __a0 asm("r0") = (unsigned long)fd;
+	register unsigned long __a1 asm("r1") = (unsigned long)buf;
+	register unsigned long __a2 asm("r2") = (unsigned long)len;
+  int retval;
+  __asm__ volatile("R6 = #%4; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "r" (__a1), "r" (__a2), "i" (SYS_write));
+  return retval;
+}}
+int exit(int ret) {{
+	register unsigned long __a0 asm("r0") = (unsigned long)ret;
+  int retval;
+  __asm__ volatile("R6 = #%2; trap0(#1); %0 = R0" : "=r" (retval) : "r" (__a0), "i" (SYS_exit));
+  return retval;
+}}
+void _start(void) {{
+  int buflen = 0;
+  char buf[65536];
+  read(0, &buflen, 4);
+  read(0, buf, buflen);
+  write(1, "test\\n", 5);
+  exit(0);
+}}
+'''
+
 class DSPProgram:
   def __init__(self, dev:DSPDevice, name:str, lib:bytes):
     self.dev, self.lib = dev, lib
@@ -62,12 +108,47 @@ class DSPProgram:
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
-    self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
-    return timer[0] / 1e6
+    if self.dev.ion_fd is not None:
+      self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
+      return timer[0] / 1e6
+    else:
+      # Write the DSP binary to a temp file.
+      dsp_lib = tempfile.NamedTemporaryFile(suffix=".so", delete=False)
+      dsp_lib.write(self.lib)
+      dsp_lib.close()
+
+      # Write and compile the wrapper for Hexagon.
+      wrap_src_file = tempfile.NamedTemporaryFile(suffix=".c", delete=False)
+      wrap_src_file.write(wrap_src.encode())
+      wrap_src_file.close()
+      wrap_exe = wrap_src_file.name + ".out"
+      subprocess.check_output(["clang", "--target=hexagon", "-O2", "-ffreestanding", "-fuse-ld=lld", "-mcpu=hexagonv65",
+                              "-nostdlib", "-fPIC", "-o", wrap_exe, wrap_src_file.name, dsp_lib.name])
+      # Run QEMU-hexagon via Docker (mounting the temp dir so the wrapper is visible).
+      mount_dir = os.path.abspath(os.path.dirname(wrap_exe))
+      #print(mount_dir, os.path.basename(wrap_exe))
+      docker_cmd = [
+        "docker", "run", "--rm", "-v", f"{mount_dir}:/work", "-w", "/work",
+        "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(wrap_exe)
+      ]
+      #proc = subprocess.run(docker_cmd, check=True)
+
+      inp = struct.pack("I", len(pra)) + pra
+      print(len(inp), type(inp))
+
+      start = time.perf_counter()
+      proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
+      elapsed = time.perf_counter() - start
+      out = proc.stdout
+      print(out)
+      return elapsed
 
 class DSPBuffer:
   def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
+
+class MockShareInfo:
+  def __init__(self): self.fd = -1
 
 class DSPAllocator(Allocator):
   def __init__(self, dev:DSPDevice):
@@ -75,15 +156,19 @@ class DSPAllocator(Allocator):
     super().__init__()
 
   def _alloc(self, size:int, options:BufferSpec):
-    b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-    share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
-    va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
+    if self.dev.ion_fd is not None:
+      b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
+      share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
+    else:
+      share_info = MockShareInfo()
+    va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (mmap.MAP_ANON if share_info.fd == -1 else 0), share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferSpec):
     libc.munmap(opaque.va_addr, opaque.size)
-    os.close(opaque.share_info.fd)
-    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
+    if opaque.share_info.fd != -1:
+      os.close(opaque.share_info.fd)
+      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
@@ -105,6 +190,131 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
+class MockDSPProgram:
+  def __init__(self, name: str, lib: bytes): self.name, self.lib = name, lib
+  def __call__(self, *bufs, vals=(), wait=False):
+    # Write the DSP binary to a temp file.
+    dsp_lib = tempfile.NamedTemporaryFile(suffix=".so", delete=False)
+    dsp_lib.write(self.lib)
+    dsp_lib.close()
+
+    # Pack input: [#ptrs][for each: size, data] then [#ints][each int]
+    inp = struct.pack("i", len(bufs))
+    for b in bufs:
+      size = b.size if hasattr(b, "size") else ctypes.sizeof(b)
+      addr = b.va_addr if hasattr(b, "va_addr") else ctypes.addressof(b)
+      inp += struct.pack("i", size) + ctypes.string_at(addr, size)
+    inp += struct.pack("i", len(vals))
+    for v in vals: inp += struct.pack("i", v)
+
+    # Generate call: splay out all pointer and int args.
+    nptr, nint = len(bufs), len(vals)
+    args = [f"ptrs[{i}]" for i in range(nptr)] + [f"(void*)(long)ints[{i}]" for i in range(nint)]
+    call_expr = "kernel(" + ", ".join(args) + ");"
+
+    # Generate the wrapper source with the call expression inserted.
+    wrap_src = f'''
+/* Minimal Hexagon Linux wrapper with direct syscalls and no malloc */
+#define SYS_exit 93
+#define SYS_read 63
+#define SYS_write 64
+#define SYS_mmap2 222
+void HAP_power_set() {{}}
+void HAP_mmap() {{}}
+void HAP_perf_get_time_us() {{}}
+void HAP_munmap() {{}}
+int kernel_exit(int ret)
+{{
+	register unsigned long __a0 asm("r0") = (unsigned long)ret;
+	int retval;
+	__asm__ volatile(
+		"	R6 = #%2;	trap0(#1); %0 = R0"
+		: "=r" (retval)
+		: "r" (__a0), "i" (SYS_exit)
+	);
+	return retval;
+}}
+static inline long my_read(int fd, void *buf, unsigned int count) {{
+  //return sys_call(SYS_read, fd, (long)buf, count);
+}}
+static inline long my_write(int fd, const void *buf, unsigned int count) {{
+  //return sys_call(SYS_write, fd, (long)buf, count);
+}}
+static char __heap[65536];
+static unsigned int __heap_idx = 0;
+void *my_malloc(unsigned int size) {{
+  void *ptr = __heap + __heap_idx;
+  __heap_idx += (size + 7) & ~7;
+  return ptr;
+}}
+void my_free(void *ptr) {{
+  /* no-op */
+}}
+extern void my_kernel();
+typedef void (*kf)();
+void _start(void) {{
+  kernel_exit(0);
+  //my_write(1, "hello\\n", 6);
+  return;
+  int np, ni, i;
+  my_read(0, &np, sizeof(int));
+  void **ptrs = my_malloc(np * sizeof(void*));
+  int *ps = my_malloc(np * sizeof(int));
+  for(i = 0; i < np; i++) {{
+    my_read(0, &ps[i], sizeof(int));
+    ptrs[i] = my_malloc(ps[i]);
+    my_read(0, ptrs[i], ps[i]);
+  }}
+  my_read(0, &ni, sizeof(int));
+  int *ints = my_malloc(ni * sizeof(int));
+  my_read(0, ints, ni * sizeof(int));
+  //{call_expr}
+  for(i = 0; i < np; i++) {{
+    my_write(1, ptrs[i], ps[i]);
+  }}
+}}
+'''
+    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
+                                       outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
+
+    # Write and compile the wrapper for Hexagon.
+    wrap_src_file = tempfile.NamedTemporaryFile(suffix=".c", delete=False)
+    wrap_src_file.write(wrap_src.encode())
+    wrap_src_file.close()
+    wrap_exe = wrap_src_file.name + ".out"
+    subprocess.check_output(["clang", "--target=hexagon", "-O2", "-ffreestanding", "-fuse-ld=lld", "-mcpu=hexagonv65",
+                             "-nostdlib", "-fPIC", "-o", wrap_exe, wrap_src_file.name, dsp_lib.name])
+    # Run QEMU-hexagon via Docker (mounting the temp dir so the wrapper is visible).
+    mount_dir = os.path.abspath(os.path.dirname(wrap_exe))
+    print(mount_dir, os.path.basename(wrap_exe))
+    docker_cmd = [
+      "docker", "run", "--rm",
+      "-v", f"{mount_dir}:/work", "-w", "/work",
+      "qemu-hexagon", "-c", "qemu-hexagon -strace /work/"+os.path.basename(wrap_exe)
+    ]
+    proc = subprocess.run(docker_cmd, check=True)
+    print("here")
+
+    start = time.perf_counter()
+    proc = subprocess.run(docker_cmd, input=inp, stdout=subprocess.PIPE, check=True)
+    elapsed = time.perf_counter() - start
+    out = proc.stdout
+    print(out)
+
+    # Copy returned pointer data back.
+    off = 0
+    for b in bufs:
+      size = b.size if hasattr(b, "size") else ctypes.sizeof(b)
+      addr = b.va_addr if hasattr(b, "va_addr") else ctypes.addressof(b)
+      ctypes.memmove(addr, out[off:off+size], size)
+      off += size
+
+    # Cleanup.
+    os.remove(dsp_lib.name)
+    os.remove(wrap_src_file.name)
+    os.remove(wrap_exe)
+    return elapsed
+
 class DSPCompiler(ClangCompiler):
   def __init__(self):
     # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -119,15 +329,19 @@ class DSPCompiler(ClangCompiler):
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
-    self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-    super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
+    try:
+      self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
+      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
 
-    fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
-    ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
+      fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
+      self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
+      ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
-    self.init_dsp()
-    RPCListener(self).start()
+      self.init_dsp()
+      RPCListener(self).start()
+    except FileNotFoundError:
+      self.ion_fd = None
+      super().__init__(device, DSPAllocator(self), DSPRenderer(), DSPCompiler(), functools.partial(DSPProgram, self))
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
