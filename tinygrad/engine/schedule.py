@@ -1,4 +1,4 @@
-import sys, atexit, functools, pickle
+import sys, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
@@ -396,16 +396,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> Sched
           # otherwise, it's not fine
           else: raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                                    +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  # capture process replay
-  if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, ContextVar._cache, ast))
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)))
-
-PROCESS_REPLAY_CAPTURE: dict[str, bytes] = {}
-if CAPTURE_PROCESS_REPLAY:
-  @atexit.register
-  def save_process_replay() -> None:
-    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
 # **** schedule creation and toposort
 
@@ -473,4 +464,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # confirm everything was scheduled correctly
   if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
+  # capture process replay
+  if CAPTURE_PROCESS_REPLAY:
+    with Context(PICKLE_BUFFERS=0):
+      diskcache_put("schedule_process_replay", str(big_sink.key), (big_sink, ContextVar._cache, [x.ast for x in schedule]))
   return schedule, var_vals, becomes_map
