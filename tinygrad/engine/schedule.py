@@ -410,9 +410,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
   # get realizes
   buf_tensors: dict[UOp, list[UOp]] = {}
+  ops_metadata: dict[UOp, Metadata] = {}
   for k,v in tensor_map.items():
-    if (b:=buffer_map.get(v)) is not None: buf_tensors.setdefault(b, []).append(k)
-  ops_metadata = {k:v[-1].metadata for k,v in buf_tensors.items()}
+    if (b:=buffer_map.get(v)) is not None:
+      buf_tensors.setdefault(b, []).append(k)
+      ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
 
   # TODO: this should be the break between the "grouper" and the "linearizer"
