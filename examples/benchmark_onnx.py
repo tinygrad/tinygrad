@@ -8,7 +8,7 @@ def load_onnx_model(fn):
   run_onnx = OnnxRunner(onnx_model)
 
   # find preinitted tensors and ignore them
-  initted_tensors = {inp.name for inp in onnx_model.graph.initializer}
+  initted_tensors = {inp.name:None for inp in onnx_model.graph.initializer}
   expected_inputs = [inp for inp in onnx_model.graph.input if inp.name not in initted_tensors]
 
   # get real inputs
@@ -40,7 +40,6 @@ if __name__ == "__main__":
     st = time.perf_counter()
     out = run_onnx_jit(**new_inputs)
     mt = time.perf_counter()
-    out[0].realize(*out[1:])
-    tiny_out = tuple(o.numpy() for o in out)
+    val = out.numpy()
     et = time.perf_counter()
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
