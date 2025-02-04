@@ -370,8 +370,16 @@ jobs:
         python-version: 3.12
     - name: Install Dependencies
       run: pip install --user -e '.'
-    - name: Build QEMU Docker
-      run: cd extra/dsp; docker build -t qemu-hexagon .
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Build QEMU Docker with cache
+      uses: docker/build-push-action@v4
+      with:
+        file: extra/dsp/Dockerfile
+        push: false
+        tags: qemu-hexagon:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
     - name: Run test_tiny on DSP
       run: DSP=1 python -m pytest -n=auto test/test_tiny.py --durations=20
 
