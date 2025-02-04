@@ -377,6 +377,7 @@ jobs:
       with:
         file: extra/dsp/Dockerfile
         push: false
+        load: true
         tags: qemu-hexagon:latest
         cache-from: type=gha
         cache-to: type=gha,mode=min
