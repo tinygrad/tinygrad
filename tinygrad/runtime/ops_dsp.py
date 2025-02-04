@@ -23,7 +23,7 @@ class DSPRenderer(ClangRenderer):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
     msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
-                short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
+               short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
             'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
             'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
             'unsigned long long HAP_perf_get_time_us(void);', 'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
@@ -255,16 +255,16 @@ class MockDSPRenderer(DSPRenderer):
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
-    dsp_lib = tempfile.NamedTemporaryFile(suffix=".out", delete=False)
-    dsp_lib.write(self.lib)
-    dsp_lib.close()
-    os.chmod(dsp_lib.name, 0o0777)
-    # NOTE: this timing includes a docker launch
-    start = time.perf_counter()
-    proc = subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
-                           "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)],
-                          input=b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
-    elapsed = time.perf_counter() - start
+    with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
+      dsp_lib.write(self.lib)
+      dsp_lib.flush()
+      os.chmod(dsp_lib.name, 0o0777)
+      # NOTE: this timing includes a docker launch
+      start = time.perf_counter()
+      proc = subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
+                            "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)],
+                            input=b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
+      elapsed = time.perf_counter() - start
     offset = 0
     for x in bufs:
       x[:] = proc.stdout[offset:offset+len(x)]
