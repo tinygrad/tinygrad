@@ -76,7 +76,10 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
   # currently takes just token_embd.weight from gguf file, the rest from tinygrad model state_dict
   # split weights into browser-friendly chunks
   # export metadata JSON with offsets -- depends on tinygrad gguf metadata parser below
-  chunk_size = 48 * 1024 * 1024 # small chunks based on iphone browser constraints
+
+  # It really simplifies the client code to require that our chunks are divisible by these factors
+  decomp_factor_product = 210 * 1 * 1 # include all relevant chunk sizes for decompression as factors; here we only need to reverse Q6_K quantization
+  chunk_size = decomp_factor_product * ((47 * 1024 * 1024) // decomp_factor_product) # small chunks based on iphone browser constraints
   metadata = {}
 
   gguf_tensor = Tensor.empty(os.stat(model_path).st_size, dtype=dtypes.uint8, device=f"disk:{model_path}").to(Device.DEFAULT)
@@ -112,33 +115,33 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
       for i in range(0, size, chunk_size):
         split_t_infos.append((min(chunk_size, size-i), (f"{info[0]}_part{math.ceil(i/chunk_size)}", *info[1:]), (i, min(i+chunk_size, size))))
 
-  chunks = []
+  files = []
   # FFD bin packing
   split_t_infos = sorted(split_t_infos, reverse=True)
   for info in split_t_infos:
       placed = False
-      for chunk in chunks:
-        if sum(i[0] for i in chunk) + info[0] <= chunk_size:
-          chunk.append(info)
+      for file in files:
+        if sum(i[0] for i in file) + info[0] <= chunk_size:
+          file.append(info)
           placed = True
           break
       if not placed:
-        chunks.append([info])
+        files.append([info])
 
   gguf_dtypes = {0: "float32", 1: "float16", 14: "Q6_K", 16: "int8", 18: "int32"}
   new_weights = {k: {"tensor": v} for k,v in new_weights.items()}
   with open(model_path, 'rb') as reader:
-    for i, chunk in enumerate(chunks):
+    for i, file in enumerate(files):
       cursor = 0
       with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "wb+") as writer:
-        for size, info, offsets in chunk:
+        for size, info, offsets in file:
           name, part_num = (info[0], 0) if "_part" not in info[0] else (info[0].split("_part")[0], int(info[0].split("_part")[1]))
           default = {"parts": {}, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}
           weight_metadata = metadata.get(name, default) if name not in new_weights else new_weights[name].get("metadata", default)
-          weight_metadata["parts"][part_num] = {"chunk": i, "file_start_pos": cursor, "size": size}
+          weight_metadata["parts"][part_num] = {"file": i, "file_start_pos": cursor, "size": size}
           if name not in new_weights:
-            chunk_offset = offsets[0] if offsets else 0
-            reader.seek(data_start + info[3] + chunk_offset)
+            file_offset = offsets[0] if offsets else 0
+            reader.seek(data_start + info[3] + file_offset)
             data = reader.read(size)
             metadata[name] = weight_metadata
           elif name in new_weights:
@@ -161,10 +164,10 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
 
   # compute hashes, which client app will check to determine whether to update with new weights and/or detect integrity issues
   state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
-  metadata = {"state_dict": metadata, "state_dict_hash": state_dict_hash, "chunks": []}
-  for i in range(len(chunks)):
+  metadata = {"state_dict": metadata, "state_dict_hash": state_dict_hash, "files": []}
+  for i in range(len(files)):
     with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "rb") as reader:
-      metadata["chunks"].append({"name": f'net_part{i}.gguf.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
+      metadata["files"].append({"name": f'net_part{i}.gguf.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
   metadata_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"metadata": metadata, "metadata_hash": metadata_hash}
 
@@ -301,7 +304,7 @@ if __name__=="__main__":
       if i > 1 and i % 20 == 1:
         exported_bufs.append(f"await new Promise(resolve => setTimeout(resolve, 0));") # prevent browser lag
         if step.show_progress: exported_bufs.append(f"progress({prog + int((buf_end_prog - prog) * i / len(bufs))}, 100, 'Launching WebGPU model:');")
-      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else (f"createWeightBuf(device, {size}, state_dict['{weights[_key]}'].bytes)" if "cache_kv" not in weights[_key] else f"createEmptyBuf(device, {size})") + ";"))
+      exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else (f"createWeightBuf(device, {size}, state_dict['{weights[_key]}'])" if "cache_kv" not in weights[_key] else f"createEmptyBuf(device, {size})") + ";"))
     exported_bufs = '\n   '.join(exported_bufs)
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
@@ -320,7 +323,7 @@ if __name__=="__main__":
     {kernel_code}
 
     return {{
-      "setup": async (device, state_dict{f", progress" if step.show_progress else ""}) => {{
+      "setup": async (device{", state_dict" if state else ""}{f", progress" if step.show_progress else ""}) => {{
 
         {exported_bufs}
 
@@ -368,8 +371,7 @@ if __name__=="__main__":
 
   const createWeightBuf = (device, size, data) => {{
     const buf = device.createBuffer({{ mappedAtCreation: true, size, usage: GPUBufferUsage.STORAGE }});
-    new Uint8Array(buf.getMappedRange()).set(data);
-    buf.unmap();
+    data.bytes = buf;
     return buf;
   }};
 
