@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG
+from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG, dedup
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
@@ -177,16 +177,18 @@ class GroupOp:
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
+  All = set(Ops)
+
 # some BUFFER ops can be processed with only a view
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:set[UOp]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:dict[UOp, None]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
-  visisted.add(u)
+  visisted[u] = None
   return all(can_pad(x.base, edges, visisted) for x in u.src)
 
 # With True as the default, this matches the old symbolic behavior
@@ -436,10 +438,21 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
     return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
 
-  @property
-  def axis(self):
-    assert self.op is Ops.MULTI
-    return self.arg[0]
+  @functools.cached_property
+  def axis(self) -> Optional[int]:
+    if self.op is Ops.MULTI: return self.arg[0]
+    # NOTE: they all have to share an axis, we always choose [-1]
+    if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
+    src_axis = self.src[0].axis
+    if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
+    if self.op is Ops.RESHAPE:
+      if src_axis is None: return None
+      arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))
+      # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+      # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
+      return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+    if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
+    return src_axis
 
   @property
   def real(self):

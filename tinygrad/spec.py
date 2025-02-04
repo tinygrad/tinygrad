@@ -131,7 +131,7 @@ shape_spec = PatternMatcher([
   # shapes must have either 1 or n in each dimension
   (UPat(Ops.SINK, src=UPat(Ops.STORE), allow_any_len=True, name="sink"), verify_sink_dims),
   # all parent UOps must have the same shape
-  (UPat(set(Ops)-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
+  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])
 
 # ***** uop helpers *****
