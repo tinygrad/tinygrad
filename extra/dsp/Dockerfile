@@ -30,7 +30,8 @@ RUN ./configure --target-list=hexagon-linux-user && make -j$(nproc)
 # Optionally, install QEMU into /usr/local (or leave it in place).
 RUN make install
 
-RUN apt-get install -y file
+# delete the source (for space)
+RUN cd .. && rm -rf /qemu-9.2.0
 
 # The QEMU binaries will be in /usr/local/bin.
 # Set the entrypoint to bash so you can interact with the container.

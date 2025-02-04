@@ -256,7 +256,9 @@ class AMDProgram(HCQProgram):
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.dev.dev_iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
-    if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requested: private_segment_size")
+
+    # Ensure scratch size
+    self.dev._ensure_has_local_memory(self.private_segment_size)
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
@@ -569,27 +571,16 @@ class AMDDevice(HCQCompiled):
       AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
     else: self.dev_iface.map(AMDDevice.signals_page)
 
-    # Scratch setup
-    max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
-    max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
-    self.max_private_segment_size = 4096
-    # <gfx103 requires alignment of 1024, >=gfx11 requires 256
-    wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256 if self.target >= 110000 else 1024)
-    self.scratch_len = (max_cu_id + 1) * self.dev_iface.props['max_slots_scratch_cu'] * wave_scratch_len
-    self.scratch = self.dev_iface.alloc(self.scratch_len)
+    self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
+    self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
     self.has_scratch_base_registers = self.target >= 110000
-    engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
-    waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
-    # >=gfx11 wavesize is per SE
-    wavesize = self.scratch_len // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
-    self.tmpring_size = waves << 12 | wavesize
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
     vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
-    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (max_cu_id + 1), mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * (max_cu_id + 1) * (max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
-    debug_memory_size = round_up((max_cu_id + 1) * (max_wave_id + 1) * 32, 64)
+    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
+    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
@@ -598,6 +589,11 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
+
+    # Scratch setup
+    self.max_private_segment_size = 0
+    self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
+
     atexit.register(self.device_fini)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
@@ -606,6 +602,21 @@ class AMDDevice(HCQCompiled):
     eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
     return self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, debug_memory_size=debug_memory_size,
                                        ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
+
+  def _ensure_has_local_memory(self, required):
+    if self.max_private_segment_size >= required: return
+
+    # <gfx103 requires alignment of 1024, >=gfx11 requires 256
+    wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= 110000 else 1024)
+
+    self.scratch, ok = self._realloc(getattr(self, 'scratch', None), (self.max_cu_id+1)*self.dev_iface.props['max_slots_scratch_cu']*wave_scratch_len)
+    if ok:
+      engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
+      waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
+      # >=gfx11 wavesize is per SE
+      wavesize = self.scratch.size // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
+      self.tmpring_size = waves << 12 | wavesize
+      self.max_private_segment_size = required
 
   def invalidate_caches(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
