@@ -1,4 +1,4 @@
-from tinygrad import Tensor, fetch
+from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
 from extra.onnx import OnnxRunner, OnnxValue
 import onnx
@@ -14,16 +14,14 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue]):
     ret.update({name:value})
   return ret
 
-def validate(fn, rtol=1e-5, atol=1e-5):
-  fp = fetch(fn)
-  run_onnx = OnnxRunner(onnx.load(fp))
-  new_inputs = get_example_inputs(run_onnx.graph_inputs)
-  tinygrad_out = run_onnx(new_inputs)
+def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
+  run_onnx = OnnxRunner(onnx.load(onnx_file))
+  tinygrad_out = run_onnx(inputs)
 
   ort_options = ort.SessionOptions()
   ort_options.log_severity_level = 3
-  ort_sess = ort.InferenceSession(fp, ort_options, ["CPUExecutionProvider"])
-  np_inputs = {k:v.numpy() for k,v in new_inputs.items()}
+  ort_sess = ort.InferenceSession(onnx_file, ort_options, ["CPUExecutionProvider"])
+  np_inputs = {k:v.numpy() if isinstance(v, Tensor) else v for k,v in inputs.items()}
   out_names = list(run_onnx.graph_outputs)
   out_values = ort_sess.run(out_names, np_inputs)
   ort_out = dict(zip(out_names, out_values))
