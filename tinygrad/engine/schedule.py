@@ -435,16 +435,17 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
 
   # create kernels + map buffers to realized tensors
-  kernels: list[UOp] = []
+  sinks: list[UOp] = []
   var_vals: dict[Variable, int] = {}
   for buf_uop,store in realize_map.items():
     assert store.op is Ops.STORE, f"expected a realized BUFFER to get a STORE {sink}"
-    kernels.append(schedule_uop(store.sink(), ctx, var_vals))
+    sinks.append(schedule_uop(store.sink(), ctx, var_vals))
     # can only schedule once
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     # increment refcount for this buffer
     buf_uop.buffer.ref(1)
-  sched_sink = UOp.sink(*kernels)
+  if len(sinks) == 0: return [], var_vals, becomes_map
+  sched_sink = UOp.sink(*sinks)
   # display, TODO: this is still not a complete sched_sink
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
   type_verify(list(sched_sink.toposort), kernel_spec)
