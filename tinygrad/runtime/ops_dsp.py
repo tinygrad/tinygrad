@@ -260,8 +260,8 @@ class MockDSPRenderer(DSPRenderer):
     ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     msrc = ['''static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
-        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" : "=r" (retval)
-          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "i" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
+        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = %7; trap0(#1); %0 = r0" : "=r" (retval)
+          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "r" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
       static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
       static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
       static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}

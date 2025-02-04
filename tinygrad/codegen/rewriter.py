@@ -33,7 +33,7 @@ def fold_expanded(ex, buf):
 
   # then rewrite everything we can
   #lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
-  if buf.dtype.base in {dtypes.char, dtypes.uchar}: lengths = [128]
+  if buf.dtype.base in {dtypes.char, dtypes.uchar}: lengths = [128, 4]
   elif buf.dtype.base in {dtypes.int, dtypes.uint}: lengths = [32]
   else: lengths = []
   used: set[tuple[UOp, UOp]] = set()
