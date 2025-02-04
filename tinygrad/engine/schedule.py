@@ -9,6 +9,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
+from tinygrad.spec import type_verify, kernel_spec
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -443,9 +444,13 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     # increment refcount for this buffer
     buf_uop.buffer.ref(1)
+  sched_sink = UOp.sink(*kernels)
+  # display, TODO: this is still not a complete sched_sink
+  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
+  type_verify(list(sched_sink.toposort), kernel_spec)
 
   # convert kernels to ScheduleItem
-  prescheduled = [kernel_to_si(k) for k in kernels]
+  prescheduled = [kernel_to_si(k) for k in sched_sink.src]
   # add schedule item children
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
