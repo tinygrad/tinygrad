@@ -654,6 +654,18 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
           DEBUG=5 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (LLVM)
+        env:
+          LLVM: 1
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
+          DEBUG=5 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (CLANG)
+        env:
+          CLANG: 1
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
+          DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (amd)
         env:
           MOCKGPU: 1
