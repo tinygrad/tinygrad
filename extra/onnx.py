@@ -63,24 +63,6 @@ def type_parse(onnx_type: TypeProto):
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
-# ***** python const *****
-cache_misses = 0
-@functools.lru_cache(None)
-def _cached_to_python_const(t:Tensor):
-  if t.dtype is dtypes.uint8: return t.data().tobytes()
-  if 0 in t.shape: return []
-  return t.tolist()
-
-# Tensor -> python value cache for parameters
-def to_python_const(t:Any) -> list[ConstType]|ConstType|bytes:
-  if not isinstance(t, Tensor): return t
-  global cache_misses
-  ret = _cached_to_python_const(t)
-  if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
-    print(f"Cache miss for {t}")
-    cache_misses = info.misses
-  return ret
-
 # ***** onnx spec *****
 SupportedDomains = Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"]
 @dataclasses.dataclass(frozen=True)
@@ -186,6 +168,23 @@ def normalize_domain(domain:str) -> SupportedDomains:
   domain = _SPECIAL_DOMAIN_MAPPINGS.get(domain, domain)
   if domain not in get_args(SupportedDomains): raise NotImplementedError(f"{domain=} is not supported")
   return cast(SupportedDomains, domain)
+
+cache_misses = 0
+@functools.lru_cache(None)
+def _cached_to_python_const(t:Tensor):
+  if t.dtype is dtypes.uint8: return t.data().tobytes()
+  if 0 in t.shape: return []
+  return t.tolist()
+
+# Tensor -> python value cache for parameters
+def to_python_const(t:Any) -> list[ConstType]|ConstType|bytes:
+  if not isinstance(t, Tensor): return t
+  global cache_misses
+  ret = _cached_to_python_const(t)
+  if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
+    print(f"Cache miss for {t}")
+    cache_misses = info.misses
+  return ret
 
 OpKey = tuple[SupportedDomains, str] # (domain, op_type)
 class _OnnxOps:
