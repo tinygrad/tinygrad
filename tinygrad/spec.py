@@ -134,6 +134,13 @@ shape_spec = PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])
 
+kernel_spec = PatternMatcher([
+  (UPat(Ops.DEVICE, src=()), lambda:True),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda:True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda:True),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat(Ops.KERNEL))), lambda:True),
+])
+
 # ***** uop helpers *****
 
 def type_verify(uops:list[UOp], *extra_specs:PatternMatcher):

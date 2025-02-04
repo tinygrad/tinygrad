@@ -9,6 +9,7 @@ from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
+from tinygrad.spec import type_verify, kernel_spec
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -409,6 +410,7 @@ if CAPTURE_PROCESS_REPLAY:
 # **** schedule creation and toposort
 
 def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]:
+  type_verify(list(sched_sink.toposort), kernel_spec)
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depends on the kernel's assign
   kernel_assigns: list[UOp] = []
   for x in sched_sink.toposort:
