@@ -1,9 +1,9 @@
-from tinygrad.runtime.ops_dsp import DSPCompiler
+from tinygrad import Device
 
 # PATH=/opt/homebrew/opt/llvm/bin:$PATH python3 extra/dsp/opt.py
 
 if __name__ == "__main__":
-  compiler = DSPCompiler()
+  compiler = Device["DSP"].compiler
 
   lib = compiler.compile("""
 typedef long HVX_Vector __attribute__((__vector_size__(128))) __attribute__ ((aligned(128)));
