@@ -21,14 +21,13 @@ class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def _opfix(self:T, b:ConstLike|T, match_dtype=True) -> tuple[T, T]: raise NotImplementedError
-  def _boolcast(self): return self  # overridden in Tensor, not in UOp/UPat
 
   # great functions you get!
-  def const_like(self, b): return self._opfix(b)[1]
-  def _binop(self, op, x, reverse=False):
-    a, b = self._opfix(x)
-    return b.alu(op, a) if reverse else a.alu(op, b)
-  def logical_not(self): return self._boolcast().ne(True)
+  def const_like(self, b:ConstLike): return self._opfix(b)[1]
+  def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x  # delete ufix when other fxns moved over
+  def _binop(self, op, x, reverse): return (of:=self._opfix(x))[1].alu(op, of[0]) if reverse else (of:=self._opfix(x))[0].alu(op, of[1])
+
+  def logical_not(self): return self.ne(True)
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
@@ -39,8 +38,8 @@ class MathTrait:
   def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
-  def sub(self, x, reverse=False): return (of:=self._opfix(x))[1] + (-of[0]) if reverse else (of:=self._opfix(x))[0] + (-of[1])
-  def div(self, x, reverse=False): return (of:=self._opfix(x))[1]*of[0].reciprocal() if reverse else (of:=self._opfix(x))[0]*of[1].reciprocal()
+  def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
+  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
 
@@ -64,12 +63,12 @@ class MathTrait:
   def __rxor__(self, x): return self.xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
 
-  def __lt__(self, x): return self._binop(Ops.CMPLT, x)
-  def __gt__(self, x): return self._binop(Ops.CMPLT, x, True)
+  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
+  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
   def __ge__(self, x): return (self < x).logical_not()
   def __le__(self, x): return (self > x).logical_not()
 
-  def ne(self, x): return self._binop(Ops.CMPNE, x)
+  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
   def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
@@ -81,13 +80,9 @@ class MathTrait:
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
-  def maximum(self, x): return self._binop(Ops.MAX, x)
-  def minimum(self, x): return (of:=self._opfix(x))[0].neg().maximum(-of[1]).neg()
-  def where(self, x, y):
-    x, y = x._opfix(y) if isinstance(x, MathTrait) else y._opfix(x)[::-1] if isinstance(y, MathTrait) else (x, y)
-    cond, x = self._opfix(x, match_dtype=False)
-    cond, y = cond._opfix(y, match_dtype=False)
-    return cond._boolcast().alu(Ops.WHERE, *x._opfix(y))
+  def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
+  def minimum(self, x): return -(-self).maximum(-x)
+  def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
   def reciprocal(self): return self.alu(Ops.RECIP)
   def sqrt(self): return self.alu(Ops.SQRT)
@@ -755,8 +750,7 @@ class UPat(MathTrait):
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
 
-  def _opfix(self, b:ConstLike|UPat, match_dtype=True):
-    return (self, b) if isinstance(b, UPat) else (self, UPat.const(self.dtype, cast(ConstType, b)))
+  def _opfix(self, b, match_dtype=False): return (self, b) if isinstance(b, UPat) else (self, UPat.const(self.dtype, cast(ConstType, b)))
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
