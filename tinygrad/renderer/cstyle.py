@@ -104,7 +104,8 @@ class CStyleLanguage(Renderer):
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
       return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
-    return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
+    if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
+    return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:list[UOp]) -> str:
