@@ -725,6 +725,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
 
+  def test_idiv_shift_rewrite_negative(self):
+    a = Tensor(-5).idiv(2).item()
+    b = Tensor(-5).contiguous().idiv(2).item()
+    self.assertEqual(a, b)
+    self.assertEqual(Tensor(-1).contiguous().idiv(4).item(), 0)  # NOTE this is trunc-div behaviour
+
+  def test_shift_rewrite_big_count(self):
+    # shift count bigger than int width is undefined; it seems to quietly give the previous result from the alu, so set that to 2 here
+    Tensor(1, dtype=dtypes.int).contiguous().add(1).item()
+    a = Tensor(3, dtype=dtypes.int).contiguous().mul(2**40).item()
+    Tensor(1, dtype=dtypes.int).contiguous().add(1).item()
+    b = Tensor(3, dtype=dtypes.int).contiguous().idiv(2**40).item()
+    self.assertEqual(a, 0)
+    self.assertEqual(b, 0)
+
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
