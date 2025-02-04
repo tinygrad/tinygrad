@@ -659,17 +659,14 @@ jobs:
           cache-name: cache-gpuocelot-osx-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: macos-15-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
+          key: macos-15-gpuocelot-183586142fde84eeb62572eb8acfb2a028932ebe-rebuild-9
       - name: Clone/compile gpuocelot
         if: matrix.backend == 'ptx' && steps.cache-build.outputs.cache-hit != 'true'
         run: |
-          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          git clone --recurse-submodules https://github.com/JakobSpahn/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot
-          git checkout 4524e34adb7eaccc6f71262f2e21d7052bb17c2f
-          git apply ${{ github.workspace }}/extra/mockgpu/nv/osx_gpuocelot_patches/*.patch
-          cd ocelot
-          mkdir build
-          cd build
+          git checkout 183586142fde84eeb62572eb8acfb2a028932ebe && git submodule update --recursive --init
+          cd ocelot && mkdir build && cd build
           cmake .. -Wno-dev -G Ninja -DBUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
           ninja
       - name: Install gpuocelot
@@ -680,6 +677,7 @@ jobs:
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
+        if: matrix.backend=='amd'
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
