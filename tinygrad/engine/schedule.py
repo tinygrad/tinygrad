@@ -331,9 +331,10 @@ view_right = merge_views+PatternMatcher([
 ])
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> UOp|None:
-  try: st, var_vals = unwrap(x.st).simplify().unbind()
-  except AssertionError: return None # TODO: can it check if an st is already unbound?
-  ctx.var_vals.update(var_vals)
+  st = unwrap(x.st).simplify()
+  if st.vars():
+    st, var_vals = st.unbind()
+    ctx.var_vals.update(var_vals)
   return st.to_uop() if st != x.st else None
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
