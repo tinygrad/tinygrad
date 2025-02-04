@@ -19,8 +19,9 @@ os.environ["RUN_PROCESS_REPLAY"] = "0"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+MAX_LINES = 100
 def trunc_log(x):
-  if len(lines:=repr(x).splitlines()) > 100: lines = lines[:100]+[f"WARN: truncated string with {len(lines)} lines"]
+  if len(lines:=repr(x).splitlines()) > MAX_LINES: lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
   logging.info("\n".join(lines))
 
 # user config
