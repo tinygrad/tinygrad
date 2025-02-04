@@ -466,5 +466,5 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
-    with Context(PICKLE_BUFFERS=0): diskcache_put("schedule_process_replay",str(big_sink.key),(big_sink,ContextVar._cache,[x.ast for x in schedule]))
+    with Context(PICKLE_BUFFERS=0): diskcache_put("schedule_process_replay", id(big_sink), (big_sink, ContextVar._cache, [x.ast for x in schedule]))
   return schedule, var_vals, becomes_map
