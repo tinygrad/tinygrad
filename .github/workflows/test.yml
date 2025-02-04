@@ -611,10 +611,8 @@ jobs:
   osxtests:
     strategy:
       fail-fast: false
-      matrix:
-        backend: [amd, clang, llvm]
 
-    name: Tests on MacOS (${{ matrix.backend }})
+    name: Tests on MacOS
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -631,50 +629,49 @@ jobs:
         with:
           path: /Users/runner/Library/Python/3.12/lib/python/site-packages
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-      - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install llvm
-        if: matrix.backend == 'llvm'
         run: |
-          brew install llvm uuuvn/tinygrad/tinyllvm
+          brew install llvm
       - name: Install comgr
-        if: matrix.backend == 'amd'
         run: |
           sudo mkdir -p /usr/local/lib
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
             jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
       - name: Install remu
-        if: matrix.backend == 'amd'
         run: |
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libremu.dylib
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Check Device.DEFAULT (AMD) and print some source
-        if: matrix.backend == 'amd'
+      - name: Check Device.DEFAULT and print some source (AMD)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AMD: 1
+          FORWARD_ONLY: 1
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT (LLVM) and print some source
-        if: matrix.backend == 'llvm'
-        run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT (CLANG) and print some source
-        if: matrix.backend == 'clang'
-        run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
+          DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (amd)
-        if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
-      - name: Run pytest (cpu)
-        if: matrix.backend=='llvm' || matrix.backend=='clang'
+        env:
+          MOCKGPU: 1
+          AMD: 1
+          FORWARD_ONLY: 1
+        run: |
+          python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+      - name: Run pytest (llvm)
+        env:
+          LLVM: 1
         run: |
           python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
-          ! (DEBUG=7 LLVM=1 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+      - name: Run pytest (clang)
+        env:
+          CLANG: 1
+        run: |
+          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
+          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
 
   wintests:
     strategy:
