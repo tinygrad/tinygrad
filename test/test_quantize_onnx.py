@@ -45,9 +45,10 @@ class TestQuantizeOnnx(unittest.TestCase):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
 
   def test_prequant(self):
+    N = 2048
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
-    X = Tensor(np.random.uniform(0, 255, size=(1,1024)).astype(np.uint8))
-    W = Tensor(np.random.uniform(0, 255, size=(1024,1024)).astype(np.uint8))
+    X = Tensor(np.random.uniform(0, 255, size=(1,N)).astype(np.uint8))
+    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     #out = X @ W
     out = X.matmul(W, acc_dtype=X.dtype)
@@ -60,7 +61,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
     ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
-    for _ in range(3): ei.run(wait=True)
+    for _ in range(5): ei.run(wait=True)
 
 if __name__ == "__main__":
   unittest.main()
