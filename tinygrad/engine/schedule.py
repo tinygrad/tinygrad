@@ -37,7 +37,7 @@ def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
-  (UPat(set(Ops)-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
+  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
     and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
@@ -81,7 +81,7 @@ remove_movement_ops = merge_views+PatternMatcher([
 @dataclass(frozen=True)
 class ScheduleContext:
   tensor_uops: dict[UOp, list[UOp]]                                  # this maps BUFFER uops of this schedule to the tensor uop
-  assigns: set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
+  assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
@@ -126,11 +126,11 @@ def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs)
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx.realizes, set()) else realize(ctx, b, src)
+    return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, b, src)
   # early realize before expand
   if resolve(prod(src.shape) < prod(st.shape)) and not getenv("DONT_REALIZE_EXPAND"): return realize(ctx, b, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, b, src)
 
 def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, x:UOp, **kwargs) -> UOp|None:
   if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(x.base).op is Ops.COPY: return None
@@ -365,7 +365,7 @@ to_si = PatternMatcher([
   # PRELOAD becomes LOAD
   (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
-  (UPat(set(Ops)-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
 ])
 
 def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
