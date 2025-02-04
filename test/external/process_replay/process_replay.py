@@ -20,8 +20,7 @@ os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 def trunc_log(x):
-  lines = (rep:=repr(x)).splitlines()
-  if len(lines) > 100: lines = lines[:100]+[f"WARN: truncated string with {len(lines)} lines"]
+  if len(lines:=repr(x).splitlines()) > 100: lines = lines[:100]+[f"WARN: truncated string with {len(lines)} lines"]
   logging.info("\n".join(lines))
 
 # user config
@@ -71,7 +70,8 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
     except Exception as e:
       changed += 1
       warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
-      for x in args[:-1]: trunc_log(x)
+      if ctx_vars: logging.info(ctx_vars)
+      for x in args[:-2]: trunc_log(x)
       continue
     # diff kernels
     try: assert str(args[-1]) == str(good)
