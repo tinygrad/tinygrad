@@ -444,15 +444,15 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     # increment refcount for this buffer
     buf_uop.buffer.ref(1)
-  if len(sinks) == 0: return [], var_vals, becomes_map
-  sched_sink = UOp.sink(*sinks)
-  # display, TODO: this is still not a complete sched_sink
+  sched_sink = UOp(Ops.SINK, src=tuple(sinks))
+  # display, TODO: this isn't a complete sched_sink yet
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # convert kernels to ScheduleItem
   prescheduled = [kernel_to_si(k) for k in sched_sink.src]
-  # add schedule item children
+  # add ScheduleItem children
+  # TODO: this should construct the graph directly from the sched_sink
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
   in_degree: defaultdict[ScheduleItem, int] = defaultdict(int)
