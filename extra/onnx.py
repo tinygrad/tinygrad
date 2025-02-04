@@ -80,59 +80,23 @@ def to_python_const(t:Any) -> list[ConstType]|ConstType|bytes:
     cache_misses = info.misses
   return ret
 
-# ***** onnx ops *****
+# ***** onnx spec *****
 SupportedDomains = Literal["ai.onnx", "ai.onnx.ml", "ai.onnx.training", "com.microsoft"]
-def normalize_domain(domain:str) -> SupportedDomains:
-  if domain in get_args(SupportedDomains): return domain
-  _SPECIAL_DOMAIN_MAPPINGS = {"": "ai.onnx", "ai.onnx.preview.training": "ai.onnx.training"}
-  if domain in _SPECIAL_DOMAIN_MAPPINGS: return _SPECIAL_DOMAIN_MAPPINGS[domain]
-  raise NotImplementedError(f"{domain} is not supported")
-
-OpKey = tuple[SupportedDomains, str]
-# https://github.com/onnx/onnx/blob/main/docs/Versioning.md#operator-versioning
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class OnnxOp:
-  domain: str
+  domain: SupportedDomains
   op_type: str
   since_version: int
   fxn: Callable
-  def __post_init__(self): self.domain = normalize_domain(self.domain)
   def __eq__(self, other:object):
     if not isinstance(other, OnnxOp): raise NotImplementedError
-    return self.domain == self.domain and self.op_type == other.op_type and self.since_version == other.since_version
+    return self.domain == other.domain and self.op_type == other.op_type and self.since_version == other.since_version
   def __call__(self, *inps, **opts): return self.fxn(*inps, **opts)
   def __repr__(self): return f"{self.domain}.{self.op_type}:{self.since_version}"
-  @property
-  def key(self) -> OpKey: return (self.domain, self.op_type)
 
-class _OnnxOps:
-  def __init__(self): self.registry: collections.defaultdict[OpKey, list[OnnxOp]] = collections.defaultdict(list)
-  def _register(self, fxn: Callable, domain: str, op_type: str | None, python_consts: tuple[str, ...], since_version: int):
-    if op_type is None: op_type = fxn.__name__
-    const_indices = [idx for idx,name in enumerate(inspect.signature(fxn).parameters) if name in python_consts]
-    def to_python_wrapped(*inps, **opts): return fxn(*(to_python_const(inp) if i in const_indices else inp for i,inp in enumerate(inps)), **opts)
-    onnx_op = OnnxOp(domain, op_type, since_version, to_python_wrapped)
-    assert onnx_op not in self.registry[onnx_op.key], f"duplicated op {onnx_op}"
-    self.registry[onnx_op.key].append(onnx_op)
-    return to_python_wrapped
-  def register_op(self, domain:str="ai.onnx", op:str|None=None, python_consts:tuple[str, ...]=(), since_version:int=1):
-    def decorator(fxn): return self._register(fxn, domain, op, python_consts, since_version)
-    return decorator
-  def register_tensor_ops(self, *ops:str, domain:str="ai.onnx", python_consts:tuple[str, ...]=(), since_version:int=1):
-    for op in ops: self._register(getattr(Tensor, op.lower()), domain, op, python_consts, since_version)
-  def match(self, domain, op_type, target_version) -> OnnxOp | None:
-    # get best match by using the version that supports opset_version and is closest to opset_version
-    key = (domain, op_type)
-    if key in self.registry and (valid:=[op for op in self.registry[key] if op.since_version <= target_version]):
-      return max(valid, key=lambda op: op.since_version)
-    return None
-
-OnnxOps = _OnnxOps()
-
-# ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
-  shape: tuple[str|int] # str is for variable dims
+  shape: tuple[str|int]
   dtype: DType
   is_optional: bool
   is_sequence: bool
@@ -140,8 +104,8 @@ class OnnxValue:
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
   num: int
-  inputs: tuple[str] # str is for names
-  outputs: tuple[str] # str is for names
+  inputs: tuple[str]
+  outputs: tuple[str]
   opts: dict[str, Any]
   op: OnnxOp
 
@@ -163,10 +127,10 @@ class OnnxRunner:
     self.graph_nodes: list[OnnxNode] = []
     unimplemented: list[str] = []
     for num,n in enumerate(model.graph.node):
-      domain, version = normalize_domain(n.domain), imported_version_map[n.domain]
-      if op := OnnxOps.match(domain, n.op_type, version):
+      version = imported_version_map[n.domain]
+      if op := OnnxOps.match(n.domain, n.op_type, version):
         self.graph_nodes.append(OnnxNode(num, tuple(n.input), tuple(n.output), {x.name: attribute_parse(x) for x in n.attribute}, op))
-      else: unimplemented.append(f"{domain}.{n.op_type}:{version}")
+      else: unimplemented.append(f"{n.domain}.{n.op_type}:{version}")
     if unimplemented: raise NotImplementedError(f"unimplemented ops: {set(unimplemented)}")
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
@@ -215,6 +179,41 @@ class OnnxRunner:
 ####################
 ##### ONNX OPS #####
 ####################
+# ***** ops registry *****
+def normalize_domain(domain:str) -> SupportedDomains:
+  if domain in get_args(SupportedDomains): return domain
+  _SPECIAL_DOMAIN_MAPPINGS = {"": "ai.onnx", "ai.onnx.preview.training": "ai.onnx.training"}
+  if domain in _SPECIAL_DOMAIN_MAPPINGS: return _SPECIAL_DOMAIN_MAPPINGS[domain]
+  raise NotImplementedError(f"{domain=} is not supported")
+
+OpKey = tuple[SupportedDomains, str] # (domain, op_type)
+class _OnnxOps:
+  def __init__(self): self.registry: collections.defaultdict[OpKey, list[OnnxOp]] = collections.defaultdict(list)
+  def _register(self, fxn: Callable, domain: str, op_type: str | None, python_consts: tuple[str, ...], since_version: int):
+    if op_type is None: op_type = fxn.__name__
+    domain = normalize_domain(domain)
+    key:OpKey = (domain, op_type)
+    const_indices = [idx for idx,name in enumerate(inspect.signature(fxn).parameters) if name in python_consts]
+    def to_python_wrapped(*inps, **opts): return fxn(*(to_python_const(inp) if i in const_indices else inp for i,inp in enumerate(inps)), **opts)
+    onnx_op = OnnxOp(domain, op_type, since_version, to_python_wrapped)
+    assert onnx_op not in self.registry[key], f"registered duplicated op {onnx_op}"
+    self.registry[key].append(onnx_op)
+    return to_python_wrapped
+  def register_op(self, domain:str="ai.onnx", op:str|None=None, python_consts:tuple[str, ...]=(), since_version:int=1):
+    def decorator(fxn): return self._register(fxn, domain, op, python_consts, since_version)
+    return decorator
+  def register_tensor_ops(self, *ops:str, domain:str="ai.onnx", python_consts:tuple[str, ...]=(), since_version:int=1):
+    for op in ops: self._register(getattr(Tensor, op.lower()), domain, op, python_consts, since_version)
+  def match(self, domain, op_type, target_version) -> OnnxOp | None:
+    domain = normalize_domain(domain)
+    # get best match by using the version that supports opset_version and is closest to opset_version
+    key:OpKey = (domain, op_type)
+    if key in self.registry and (valid:=[op for op in self.registry[key] if op.since_version <= target_version]):
+      return max(valid, key=lambda op: op.since_version)
+    return None
+
+OnnxOps = _OnnxOps()
+
 # ***** helper functions *****
 def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 
@@ -959,7 +958,7 @@ def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_p
 # ***** Training Ops *****
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
 # NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
-@OnnxOps.register_op(domain="ai.onnx.preview.training", op="Adagrad", python_consts=("T",))
+@OnnxOps.register_op(domain="ai.onnx.training", op="Adagrad", python_consts=("T",))
 @_onnx_training(3)
 def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:float=0.0, norm_coefficient:float=0.0):
   X, G, H = (i.detach() for i in inputs)
@@ -970,7 +969,7 @@ def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:flo
   X.assign(X.detach() - r * up)
   return [X, H]
 
-@OnnxOps.register_op(domain="ai.onnx.preview.training", op="Adam", python_consts=("T",))
+@OnnxOps.register_op(domain="ai.onnx.training", op="Adam", python_consts=("T",))
 @_onnx_training(4)
 def Adam(R:Tensor, T:int, *inputs:Tensor, alpha:float=0.9, beta:float=0.999, epsilon:float=0.0, norm_coefficient:float=0.0,
         norm_coefficient_post:float=0.0):
@@ -990,7 +989,7 @@ def Adam(R:Tensor, T:int, *inputs:Tensor, alpha:float=0.9, beta:float=0.999, eps
   X = (1 - norm_coefficient_post) * X
   return [X, V, H]
 
-@OnnxOps.register_op(domain="ai.onnx.preview.training", op="Momentum", python_consts=("T",))
+@OnnxOps.register_op(domain="ai.onnx.training", op="Momentum", python_consts=("T",))
 @_onnx_training(3)
 def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str, norm_coefficient:float):
   from tinygrad.nn.optim import SGD
@@ -1002,7 +1001,7 @@ def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str,
   opt.step()
   return [X, V]
 
-@OnnxOps.register_op(domain="ai.onnx.preview.training")
+@OnnxOps.register_op(domain="ai.onnx.training")
 def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **_):
   intermediate_tensors[y].backward()
   return tuple([t.grad for t in inputs])
