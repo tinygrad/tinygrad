@@ -350,6 +350,7 @@ class AMDev:
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
     self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
+    self.ip_versions:dict[int, int] = {}
 
     for num_die in range(ihdr.num_dies):
       dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
@@ -359,9 +360,14 @@ class AMDev:
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
-          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id: self.regs_offset[hw_ip][ip.instance_number] = list(ba)
+          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
+            self.regs_offset[hw_ip][ip.instance_number] = list(ba)
+            self.ip_versions[hw_ip] = int(f"{ip.major:02d}{ip.minor:02d}{ip.revision:02d}")
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
+
+    gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
+    self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
   def _build_regs(self):
     mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]

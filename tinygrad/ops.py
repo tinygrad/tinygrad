@@ -177,16 +177,18 @@ class GroupOp:
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
+  All = set(Ops)
+
 # some BUFFER ops can be processed with only a view
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:set[UOp]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:dict[UOp, None]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
-  visisted.add(u)
+  visisted[u] = None
   return all(can_pad(x.base, edges, visisted) for x in u.src)
 
 # With True as the default, this matches the old symbolic behavior
@@ -464,12 +466,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if axis is None: lbs = [self] * len(devices)
     else:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      # NOTE: this works for both even shards and uneven shards
       sz = self.shape[axis] // len(devices)
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs, off = [], 0
-      for sz in sizes:
+      lbs = []
+      for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
         lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
-        off += sz
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
     # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
     return UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
