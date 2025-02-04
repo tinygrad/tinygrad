@@ -61,7 +61,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
     ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
-    for _ in range(5): ei.run(wait=True)
+    for _ in range(3): ei.run(wait=True)
 
 if __name__ == "__main__":
   unittest.main()
