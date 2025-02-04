@@ -332,7 +332,7 @@ view_right = merge_views+PatternMatcher([
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> UOp|None:
   st = unwrap(x.st).simplify()
-  if st.vars():
+  if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
     ctx.var_vals.update(var_vals)
   return st.to_uop() if st != x.st else None
