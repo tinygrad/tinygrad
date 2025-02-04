@@ -111,7 +111,7 @@ class OnnxRunner:
     unimplemented: list[str] = []
     for num,n in enumerate(model.graph.node):
       version = imported_version_map[n.domain]
-      if op := OnnxOps.match(n.domain, n.op_type, version):
+      if op := registry.match(n.domain, n.op_type, version):
         self.graph_nodes.append(OnnxNode(num, tuple(n.input), tuple(n.output), {x.name: attribute_parse(x) for x in n.attribute}, op))
       else: unimplemented.append(f"{n.domain}.{n.op_type}:{version}")
     if unimplemented: raise NotImplementedError(f"unimplemented ops: {set(unimplemented)}")
@@ -163,12 +163,6 @@ class OnnxRunner:
 ##### ONNX OPS #####
 ####################
 # ***** ops registry *****
-def normalize_domain(domain:str) -> SupportedDomains:
-  _SPECIAL_DOMAIN_MAPPINGS = {"": "ai.onnx", "ai.onnx.preview.training": "ai.onnx.training"}
-  domain = _SPECIAL_DOMAIN_MAPPINGS.get(domain, domain)
-  if domain not in get_args(SupportedDomains): raise NotImplementedError(f"{domain=} is not supported")
-  return cast(SupportedDomains, domain)
-
 cache_misses = 0
 @functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor):
@@ -186,9 +180,15 @@ def to_python_const(t:Any) -> list[ConstType]|ConstType|bytes:
     cache_misses = info.misses
   return ret
 
+def normalize_domain(domain:str) -> SupportedDomains:
+  _SPECIAL_DOMAIN_MAPPINGS = {"": "ai.onnx", "ai.onnx.preview.training": "ai.onnx.training"}
+  domain = _SPECIAL_DOMAIN_MAPPINGS.get(domain, domain)
+  if domain not in (supported := get_args(SupportedDomains)): raise NotImplementedError(f"unsupported domain {domain}, supported {supported}")
+  return cast(SupportedDomains, domain)
+
 OpKey = tuple[SupportedDomains, str] # (domain, op_type)
-class _OnnxOps:
-  def __init__(self): self.registry: collections.defaultdict[OpKey, list[OnnxOp]] = collections.defaultdict(list)
+class _OpRegistry:
+  def __init__(self): self._registry: collections.defaultdict[OpKey, list[OnnxOp]] = collections.defaultdict(list)
   def _register(self, fxn: Callable, domain: str, op_type: str | None, python_consts: tuple[str, ...], since_version: int):
     if op_type is None: op_type = fxn.__name__
     domain = normalize_domain(domain)
@@ -196,23 +196,23 @@ class _OnnxOps:
     const_indices = [idx for idx,name in enumerate(inspect.signature(fxn).parameters) if name in python_consts]
     def to_python_wrapped(*inps, **opts): return fxn(*(to_python_const(inp) if i in const_indices else inp for i,inp in enumerate(inps)), **opts)
     onnx_op = OnnxOp(domain, op_type, since_version, to_python_wrapped)
-    assert onnx_op not in self.registry[key], f"registered duplicated op {onnx_op}"
-    self.registry[key].append(onnx_op)
+    assert onnx_op not in self._registry[key], f"registered duplicated op {onnx_op}"
+    self._registry[key].append(onnx_op)
     return to_python_wrapped
   def register_op(self, domain:str="ai.onnx", op:str|None=None, python_consts:tuple[str, ...]=(), since_version:int=1):
     def decorator(fxn): return self._register(fxn, domain, op, python_consts, since_version)
     return decorator
   def register_tensor_ops(self, *ops:str, domain:str="ai.onnx", python_consts:tuple[str, ...]=(), since_version:int=1):
     for op in ops: self._register(getattr(Tensor, op.lower()), domain, op, python_consts, since_version)
-  def match(self, domain, op_type, target_version) -> OnnxOp | None:
+  def match(self, domain:str, op_type:str, target_version:int) -> OnnxOp | None:
     domain = normalize_domain(domain)
-    # get best match by using the version that supports opset_version and is closest to opset_version
     key:OpKey = (domain, op_type)
-    if key in self.registry and (valid:=[op for op in self.registry[key] if op.since_version <= target_version]):
+    # get best match by using the version that supports opset_version and is closest to opset_version
+    if key in self._registry and (valid:=[op for op in self._registry[key] if op.since_version <= target_version]):
       return max(valid, key=lambda op: op.since_version)
     return None
 
-OnnxOps = _OnnxOps()
+registry = _OpRegistry()
 
 # ***** helper functions *****
 def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
@@ -272,10 +272,10 @@ def _onnx_training(input_group_size):
   return __decorator
 
 # ***** Property Ops *****
-@OnnxOps.register_op(python_consts=("start", "limit", "delta"))
+@registry.register_op(python_consts=("start", "limit", "delta"))
 def Range(start:float|int, limit:float|int, delta:float|int): return Tensor.arange(start=start, stop=limit, step=delta)
 
-@OnnxOps.register_op(python_consts=("encoded_stream",))
+@registry.register_op(python_consts=("encoded_stream",))
 def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   try: import PIL.Image
   except ImportError as e: raise ImportError("Pillow must be installed for the ImageDecoder operator") from e
@@ -285,16 +285,16 @@ def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
   if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
-@OnnxOps.register_op(python_consts=("encoded_stream",))
+@registry.register_op(python_consts=("encoded_stream",))
 def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
   # TODO: see if this can just use Tensor
   ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype is not None else x.dtype)
   return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Identity(x:Tensor): return x
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
             value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
   if value is not None: return value
@@ -305,220 +305,220 @@ def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:
   if value_string is not None or value_strings is not None and sparse_value is not None:
     raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
-@OnnxOps.register_op()
+@registry.register_op()
 def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
 
-@OnnxOps.register_op(python_consts=("shape",))
+@registry.register_op(python_consts=("shape",))
 def ConstantOfShape(shape:list[int], value:ConstType|None=None):
   if value is None: value = Tensor(0, dtype=dtypes.float32)
   return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Size(data:Tensor): return data.numel()
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
 
 # ***** Unary Ops (math) *****
-OnnxOps.register_tensor_ops("Neg", "Log", "Exp", "Sqrt", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan", "Abs", "Ceil", "Floor", "Round", "IsInf",
+registry.register_tensor_ops("Neg", "Log", "Exp", "Sqrt", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan", "Abs", "Ceil", "Floor", "Round", "IsInf",
   "IsNaN", "Sign", "Reciprocal")
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Not(x:Tensor): return x.logical_not()
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None):
   return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 # ***** Unary Ops (activation) *****
-OnnxOps.register_tensor_ops("Relu", "Sigmoid", "Elu", "Celu", "Selu", "HardSwish", "Sinh", "Cosh", "Tanh", "Asinh", "Acosh", "Atanh", "Erf", "Mish",
+registry.register_tensor_ops("Relu", "Sigmoid", "Elu", "Celu", "Selu", "HardSwish", "Sinh", "Cosh", "Tanh", "Asinh", "Acosh", "Atanh", "Erf", "Mish",
   "Softplus", "Softsign")
 
-@OnnxOps.register_op()
+@registry.register_op()
 def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
 
-@OnnxOps.register_op(domain="com.microsoft")
+@registry.register_op(domain="com.microsoft")
 def FastGelu(x:Tensor, bias:Tensor|None=None):
   # this is tanh approximated
   return (x + bias).gelu() if bias is not None else x.gelu()
 
-@OnnxOps.register_op()
+@registry.register_op()
 def PRelu(X:Tensor, slope:Tensor):
   # TODO: fix this
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
   return (X > 0).where(X, X * slope)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
 
-@OnnxOps.register_op(op="Softmax", since_version=1)
+@registry.register_op(op="Softmax", since_version=1)
 def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
 
-@OnnxOps.register_op(op="Softmax", since_version=13)
+@registry.register_op(op="Softmax", since_version=13)
 def Softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
 
-@OnnxOps.register_op(domain="ai.onnx.ml")
+@registry.register_op(domain="ai.onnx.ml")
 def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
 
 # ***** Unary Ops (broadcasted) *****
-OnnxOps.register_tensor_ops("Mul",  "Xor", "Mod", "Pow", "Where")
+registry.register_tensor_ops("Mul",  "Xor", "Mod", "Pow", "Where")
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Less(x:Tensor,y:Tensor): return x < y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Greater(x:Tensor,y:Tensor): return x > y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Equal(x:Tensor,y:Tensor): return x == y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def And(x:Tensor,y:Tensor): return (x==y).where(x, False)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Or(x:Tensor,y:Tensor): return (x==y).where(x, True)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def BitwiseAnd(x:Tensor,y:Tensor): return x & y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def BitwiseOr(x:Tensor,y:Tensor): return x | y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
 
-@OnnxOps.register_op()
+@registry.register_op()
 def BitwiseNot(x:Tensor): return ~x
 
 # ***** Casting Ops *****
 # TODO: saturate
-@OnnxOps.register_op()
+@registry.register_op()
 def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to))
 
-@OnnxOps.register_op()
+@registry.register_op()
 def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
 # ***** Reduce Ops *****
-@OnnxOps.register_op()
+@registry.register_op()
 def Max(*data_0:Tensor): return functools.reduce(Tensor.maximum, data_0)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Min(*data_0:Tensor): return functools.reduce(Tensor.minimum, data_0)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Sum(*data_0:Tensor): return functools.reduce(Tensor.add, data_0)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Mean(*data_0:Tensor): return Sum(*data_0) / len(data_0)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceMax(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceMin(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceSum(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceMean(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceSumSquare(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return ReduceSum(data.square(), axes, keepdims, noop_with_empty_axes)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceProd(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return data.prod(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceL1(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return ReduceSum(data.abs(), axes, keepdims, noop_with_empty_axes)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceL2(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return ReduceSumSquare(data, axes, keepdims, noop_with_empty_axes).sqrt()
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceLogSum(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return ReduceSum(data, axes, keepdims, noop_with_empty_axes).log()
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def ReduceLogSumExp(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
   return ReduceSum(data.exp(), axes, keepdims, noop_with_empty_axes).log()
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ArgMax(x:Tensor, axis:int=0, keepdims:int=1, select_last_index:int=0):
   if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
   return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ArgMin(x, axis:int=0, keepdims:int=1, select_last_index:int=0):
   return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
 # ***** Movement Ops *****
-@OnnxOps.register_op(python_consts=("shape",))
+@registry.register_op(python_consts=("shape",))
 def Reshape(data:Tensor, shape:list[int], allowzero:int=0):
   return data.reshape([x if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(shape)])
 
-@OnnxOps.register_op(python_consts=("axis",))
+@registry.register_op(python_consts=("axis",))
 def Flatten(x:Tensor, axis:int=1): return x.reshape(prod(x.shape[0:axis]), -1)
 
-@OnnxOps.register_op(python_consts=("shape",))
+@registry.register_op(python_consts=("shape",))
 def Expand(x:Tensor, shape:list[int]): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
 
-@OnnxOps.register_op(python_consts=("bias",))
+@registry.register_op(python_consts=("bias",))
 def Shrink(x:Tensor, bias:float=0.0, lambd:float=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Transpose(x:Tensor, perm:list[int]|None=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
 # TODO: add test for when axes is None
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def Squeeze(data:Tensor, axes:list[int]|None=None):
   return data.squeeze() if axes is None else functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
 
-@OnnxOps.register_op(python_consts=("axes",))
+@registry.register_op(python_consts=("axes",))
 def Unsqueeze(data:Tensor, axes:list[int]): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
 
-@OnnxOps.register_op(python_consts=("repeats",))
+@registry.register_op(python_consts=("repeats",))
 def Tile(x:Tensor, repeats:list[int]): return x.repeat(repeats)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Concat(*xs:Tensor, axis:int): return Tensor.cat(*xs, dim=axis)
 
-@OnnxOps.register_op(python_consts=("starts", "ends", "axes", "steps"))
+@registry.register_op(python_consts=("starts", "ends", "axes", "steps"))
 def Slice(data:Tensor, starts:list[int], ends:list[int], axes:list[int]|None=None, steps:list[int]|None=None):
   axes = axes or list(range(data.ndim))
   steps = steps or [1]*data.ndim
@@ -526,13 +526,13 @@ def Slice(data:Tensor, starts:list[int], ends:list[int], axes:list[int]|None=Non
   for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
   return data[tuple(slices)]
 
-@OnnxOps.register_op(python_consts=("split",))
+@registry.register_op(python_consts=("split",))
 def Split(data:Tensor, split:list[int]|None=None, num_outputs:int=0, axis:int=0):
   sz = data.shape[axis]
   if split is None: split = [sz // num_outputs + (1 if i < sz % num_outputs else 0) for i in range(num_outputs)]
   return data.split(split, axis)
 
-@OnnxOps.register_op(python_consts=("pads", "constant_value", "axes"))
+@registry.register_op(python_consts=("pads", "constant_value", "axes"))
 def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[int]|None=None,
         mode:Literal["constant", "reflect", "edge", "wrap"]="constant", value=0):
   value = constant_value or value
@@ -541,7 +541,7 @@ def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
   return x.pad(padding=_onnx_pads_to_tiny_pads(real_pads), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
-@OnnxOps.register_op(python_consts=("shape",))
+@registry.register_op(python_consts=("shape",))
 def CenterCropPad(t:Tensor, shape:list[int], axes:list[int]|None=None):
   shrink_arg:list[None|tuple[int,int]] = [None] * t.ndim
   pad_arg:list[None|tuple[int,int]] = [None] * t.ndim
@@ -552,18 +552,18 @@ def CenterCropPad(t:Tensor, shape:list[int], axes:list[int]|None=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 # ***** Processing Ops *****
-OnnxOps.register_tensor_ops("MatMul")
+registry.register_tensor_ops("MatMul")
 
-@OnnxOps.register_op()
+@registry.register_op()
 def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
                 dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
   return X.avg_pool2d(kernel_shape, strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad),
                       ceil_mode=ceil_mode, count_include_pad=count_include_pad)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
             storage_order:int=0, strides:list[int]|int=1):
   ret = X.max_pool2d(kernel_shape, strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad), ceil_mode=ceil_mode)
@@ -572,16 +572,16 @@ def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
-@OnnxOps.register_op()
+@registry.register_op()
 def GlobalMaxPool(X:Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
         kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations,
                   padding=_resolve_pool_pads(X, pads, kernel_shape or W.shape[2:], dilations, strides, auto_pad))
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
                   kernel_shape:list[int]|None=None, pads:list[int]|None=None, output_shape:list[int]|None=None, output_padding:list[int]|int=0,
                   strides:list[int]|int=1):
@@ -597,7 +597,7 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OP
   pads = _onnx_pads_to_tiny_pads(pads)
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
 
-@OnnxOps.register_op(python_consts=("outshape",))
+@registry.register_op(python_consts=("outshape",))
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=None, pads:list[int]|int=0, strides:list[int]|int=1):
   pads, strides = (make_tuple(x, len(xI.shape)) for x in (pads, strides))
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
@@ -605,16 +605,16 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shap
   if outshape is not None and outshape != ret.shape: pads = _auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")
   return ret.pad(_onnx_pads_to_tiny_pads(pads))
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Gemm(A:Tensor, B:Tensor, C:Tensor|None=None, alpha:float=1.0, beta:float=1.0, transA:int=0, transB:int=0, broadcast=0):
   ret = alpha * (A.transpose(transA) @ B.transpose(transB))
   if C is not None: ret = ret + beta * (C if broadcast == 0 else C.reshape([-1 if i < len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
   return ret
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Einsum(*Inputs:list[Tensor], equation:str): return Tensor.einsum(equation, *Inputs)
 
-@OnnxOps.register_op(python_consts=("axis",))
+@registry.register_op(python_consts=("axis",))
 def CumSum(X:Tensor, axis:int|list, exclusive:int=0, reverse:int=0):
   axis = X._resolve_dim(axis[0] if isinstance(axis, list) else axis)
   if reverse: X = X.flip(axis)
@@ -622,10 +622,10 @@ def CumSum(X:Tensor, axis:int|list, exclusive:int=0, reverse:int=0):
                       .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
   return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
-@OnnxOps.register_op(python_consts=("k",))
+@registry.register_op(python_consts=("k",))
 def Trilu(x:Tensor, k:int=0, upper:int=1): return x.triu(k) if upper else x.tril(k)
 
-@OnnxOps.register_op(python_consts=("roi", "scales", "sizes"))
+@registry.register_op(python_consts=("roi", "scales", "sizes"))
 def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
           axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
           extrapolation_value:float=0.0, keep_aspect_ratio_policy:str='stretch', mode:str='nearest', nearest_mode:str='round_prefer_floor'):
@@ -686,24 +686,24 @@ def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, si
   if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
   return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
 
-@OnnxOps.register_op(python_consts=("scales",))
+@registry.register_op(python_consts=("scales",))
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
 # ***** Neural Network Ops *****
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
-@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=7)
+@registry.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=7)
 def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
   if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   mask = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
 # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
-@OnnxOps.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=6)
+@registry.register_op(op="Dropout", python_consts=("ratio", "training_mode"), since_version=6)
 def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
 
 # TODO: factor out common implementation for these normalizations
 # https://medium.com/@zljdanceholic/groupnorm-then-batchnorm-instancenorm-layernorm-e2b2a1d350a0
-@OnnxOps.register_op()
+@registry.register_op()
 def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
                       training_mode:int=0, spatial=1, is_test=0):
   if training_mode:
@@ -720,34 +720,34 @@ def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, inpu
   invstd = (input_var + epsilon).rsqrt()
   return X.batchnorm(scale, B, input_mean, invstd)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def InstanceNormalization(x:Tensor, scale:Tensor, bias:Tensor, epsilon:float=1e-05):
   axis = tuple(range(2, x.ndim))
   mean = x.mean(axis=axis, keepdim=True)
   invstd = x.sub(mean).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
   return x.sub(mean).mul(scale.reshape(shape=[-1, 1, 1])).mul(invstd).add(bias.reshape(shape=[-1, 1, 1]))
 
-@OnnxOps.register_op()
+@registry.register_op()
 def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
   assert stash_type == 1, "only float32 is supported"
   axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
   mean = x.mean(axis=axes, keepdim=True)
   return x.layernorm(axes, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axes, keepdim=True).add(epsilon).rsqrt()
 
-@OnnxOps.register_op()
+@registry.register_op()
 def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
   return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
-@OnnxOps.register_op(domain="com.microsoft")
+@registry.register_op(domain="com.microsoft")
 def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
   x = x + skip + bias
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
-@OnnxOps.register_op(domain="com.microsoft")
+@registry.register_op(domain="com.microsoft")
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embedding:Tensor, position_embedding:Tensor,
                             segment_embedding:Tensor, gamma=None, beta=None, mask:Tensor|None=None,
                             position_ids:Tensor|None=None, epsilon=1e-12, mask_index_type=0):
@@ -774,36 +774,36 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embeddin
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
-@OnnxOps.register_op(python_consts=("depth",))
+@registry.register_op(python_consts=("depth",))
 def OneHot(indices:Tensor, depth:float|int|list, values:Tensor, axis:int=-1):
   # Scalar or Rank 1 tensor containing exactly one element
   depth = int(depth[0] if isinstance(depth, list) else depth)
   indices = (indices < 0).where(indices+depth, indices)
   return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
-@OnnxOps.register_op()
+@registry.register_op()
 def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
   return X.rearrange("b (c h1 w1) h w -> b c (h h1) (w w1)" if mode=="CRD" else "b (h1 w1 c) h w -> b c (h h1) (w w1)", h1=blocksize, w1=blocksize)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def SpaceToDepth(X:Tensor, blocksize:int):
   return X.rearrange("b c (h h1) (w w1) -> b (h1 w1 c) h w", h1=blocksize, w1=blocksize)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def LRN(x:Tensor, size:int, alpha:float=1e-4, beta:float=0.75, bias:float=1.0):
   pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
   return x / (pooled_x.reshape(x.shape) * alpha + bias).pow(beta)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def NegativeLogLikelihoodLoss(x:Tensor, target:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean"):
   return x.nll_loss(target, weight, ignore_index, reduction)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def SoftmaxCrossEntropyLoss(scores:Tensor, labels:Tensor, weights:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean"):
   log_probs = scores.log_softmax(1)
   return log_probs.nll_loss(labels, weights, ignore_index, reduction), log_probs
 
-@OnnxOps.register_op(python_consts=("size",))
+@registry.register_op(python_consts=("size",))
 def AffineGrid(theta:Tensor, size:list[int], align_corners:int=0):
   N, _, *spatial_dims = size
   def generate_grid(steps):
@@ -813,7 +813,7 @@ def AffineGrid(theta:Tensor, size:list[int], align_corners:int=0):
   base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
   return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-@OnnxOps.register_op(domain="com.microsoft")
+@registry.register_op(domain="com.microsoft")
 def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None,
               relative_position_bias:Tensor|None=None, past_sequence_length:Tensor|None=None, do_rotary:int|None=None,
               mask_filter_value:float|None=None, num_heads:int|None=None, past_present_share_buffer:int|None=None,
@@ -854,10 +854,10 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:
   return out, present if past is not None else out
 
 # ***** Indexing Ops *****
-@OnnxOps.register_op(domain="ai.onnx.ml")
+@registry.register_op(domain="ai.onnx.ml")
 def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Gather(x:Tensor, indices:Tensor, axis:int=0):
   if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
     x_sh = list(x.shape)
@@ -869,10 +869,10 @@ def Gather(x:Tensor, indices:Tensor, axis:int=0):
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
 
-@OnnxOps.register_op()
+@registry.register_op()
 def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
-@OnnxOps.register_op()
+@registry.register_op()
 def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
   if batch_dims == 0: return x[tuple(i.squeeze(-1) for i in indices.split(1, -1))]
   x_shape, i_shape = x.shape, indices.shape
@@ -884,7 +884,7 @@ def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
   ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
   return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul"]='none'):
   assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
   x = x.contiguous()
@@ -897,17 +897,17 @@ def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none"
     else: raise NotImplementedError("reduction doesn't support max or min")
   return x
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul"]="none"):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.scatter(axis, indices, updates, {"none":None, "mul": "multiply"}.get(reduction, reduction))
 
-@OnnxOps.register_op()
+@registry.register_op()
 def GatherElements(x:Tensor, indices:Tensor, axis:int):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
 
-@OnnxOps.register_op(python_consts=("condition",))
+@registry.register_op(python_consts=("condition",))
 def Compress(inp:Tensor, condition:list[bool], axis:int|None=None):
   if axis is None:
     inp = inp.flatten()
@@ -917,48 +917,48 @@ def Compress(inp:Tensor, condition:list[bool], axis:int|None=None):
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 # ***** Quantization Ops *****
-@OnnxOps.register_op()
+@registry.register_op()
 def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
   out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
   y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
   return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
 
-@OnnxOps.register_op()
+@registry.register_op()
 def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
   x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
   return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
                 y_zero_point: Tensor|int, B:Tensor|None=None, **opts):
   return _qlinearop_quantized(Conv, [x,w], [x_zero_point,w_zero_point], [x_scale,w_scale], y_scale, y_zero_point, **{"B":B, **opts})
 
-@OnnxOps.register_op()
+@registry.register_op()
 def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point:Tensor|int) -> Tensor:
   return _qlinearop_quantized(Tensor.matmul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], y_scale, y_zero_point)
 
-@OnnxOps.register_op(domain="com.microsoft")
+@registry.register_op(domain="com.microsoft")
 def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
   return _qlinearop_float(Tensor.add, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
-@OnnxOps.register_op(domain="com.microsoft")
+@registry.register_op(domain="com.microsoft")
 def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
   assert channels_last == 0, "unsure what this does"
   return _qlinearop_float(GlobalAveragePool, [X], [x_zero_point], [x_scale], y_scale, y_zero_point)
 
-@OnnxOps.register_op()
+@registry.register_op()
 def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None, **opts) -> Tensor:
   return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **{"B":B, **opts})
 
-@OnnxOps.register_op()
+@registry.register_op()
 def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_point: Tensor | int = 0) -> Tensor:
   return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
 
 # ***** Training Ops *****
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
 # NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
-@OnnxOps.register_op(domain="ai.onnx.training", op="Adagrad", python_consts=("T",))
+@registry.register_op(domain="ai.onnx.training", op="Adagrad", python_consts=("T",))
 @_onnx_training(3)
 def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:float=0.0, norm_coefficient:float=0.0):
   X, G, H = (i.detach() for i in inputs)
@@ -969,7 +969,7 @@ def Adagrad(R:Tensor, T:int, *inputs:Tensor, decay_factor:float=0.0, epsilon:flo
   X.assign(X.detach() - r * up)
   return [X, H]
 
-@OnnxOps.register_op(domain="ai.onnx.training", op="Adam", python_consts=("T",))
+@registry.register_op(domain="ai.onnx.training", op="Adam", python_consts=("T",))
 @_onnx_training(4)
 def Adam(R:Tensor, T:int, *inputs:Tensor, alpha:float=0.9, beta:float=0.999, epsilon:float=0.0, norm_coefficient:float=0.0,
         norm_coefficient_post:float=0.0):
@@ -989,7 +989,7 @@ def Adam(R:Tensor, T:int, *inputs:Tensor, alpha:float=0.9, beta:float=0.999, eps
   X = (1 - norm_coefficient_post) * X
   return [X, V, H]
 
-@OnnxOps.register_op(domain="ai.onnx.training", op="Momentum", python_consts=("T",))
+@registry.register_op(domain="ai.onnx.training", op="Momentum", python_consts=("T",))
 @_onnx_training(3)
 def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str, norm_coefficient:float):
   from tinygrad.nn.optim import SGD
@@ -1001,7 +1001,7 @@ def Momentum(R:Tensor, T:int, *inputs:Tensor, alpha:float, beta:float, mode:str,
   opt.step()
   return [X, V]
 
-@OnnxOps.register_op(domain="ai.onnx.training")
+@registry.register_op(domain="ai.onnx.training")
 def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **_):
   intermediate_tensors[y].backward()
   return tuple([t.grad for t in inputs])
