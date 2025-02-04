@@ -55,6 +55,13 @@ class TestQuantizeOnnx(unittest.TestCase):
     with Context(NOOPT=1):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
 
+  def test_prequant_conv2d_1x1(self):
+    X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
+    W = Tensor(np.random.uniform(0, 255, size=(64, 32, 1, 1)).astype(np.uint8))
+    out = X.conv2d(W, acc_dtype=X.dtype)
+    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    sexec(out, opts)
+
   def test_prequant_gemm(self):
     N = 512
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
