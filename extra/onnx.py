@@ -63,6 +63,7 @@ def type_parse(onnx_type: TypeProto):
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
+# ***** python const *****
 cache_misses = 0
 @functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor):
@@ -181,10 +182,10 @@ class OnnxRunner:
 ####################
 # ***** ops registry *****
 def normalize_domain(domain:str) -> SupportedDomains:
-  if domain in get_args(SupportedDomains): return domain
   _SPECIAL_DOMAIN_MAPPINGS = {"": "ai.onnx", "ai.onnx.preview.training": "ai.onnx.training"}
-  if domain in _SPECIAL_DOMAIN_MAPPINGS: return _SPECIAL_DOMAIN_MAPPINGS[domain]
-  raise NotImplementedError(f"{domain=} is not supported")
+  domain = _SPECIAL_DOMAIN_MAPPINGS.get(domain, domain)
+  if domain not in get_args(SupportedDomains): raise NotImplementedError(f"{domain=} is not supported")
+  return cast(SupportedDomains, domain)
 
 OpKey = tuple[SupportedDomains, str] # (domain, op_type)
 class _OnnxOps:
