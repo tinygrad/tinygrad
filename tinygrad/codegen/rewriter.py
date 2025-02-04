@@ -130,10 +130,10 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops and Ops.SHR in ops:
     pat += [
-      (UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: (x << powers_of_two[c.arg] if c.arg < 2**(8*x.dtype.itemsize) else x.const_like(0)) \
-        if c.arg in powers_of_two else None),
-      (UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x >> powers_of_two[c.arg] if c.arg < 2**(8*x.dtype.itemsize) else x.const_like(0)) \
-        if c.arg in powers_of_two and resolve(x >= 0, False) else None)
+      (UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << powers_of_two[c.arg] \
+        if c.arg in powers_of_two and c.arg < 2**(8*x.dtype.itemsize) else None),
+      (UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> powers_of_two[c.arg] \
+        if c.arg in powers_of_two and c.arg < 2**(8*x.dtype.itemsize) and resolve(x >= 0, False) else None)
     ]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
