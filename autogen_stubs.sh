@@ -69,7 +69,7 @@ generate_comgr() {
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
   fixup $BASE/comgr.py
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
-  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'"
+  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'" "'/usr/local/lib/libamd_comgr.dylib'" "'/opt/homebrew/lib/libamd_comgr.dylib'"
   sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\_try_dlopen_amd_comgr()\g" $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
@@ -79,6 +79,10 @@ generate_kfd() {
 
   fixup $BASE/kfd.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kfd.py
+  sed -i "s\import fcntl, functools\import functools" $BASE/kfd.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/kfd.py
+  sed -i "s\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, **kwargs):\def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:HWInterface, **kwargs):\g" $BASE/kfd.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kfd.py
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
@@ -218,11 +222,30 @@ generate_libc() {
   fixup $BASE/libc.py
 }
 
+generate_llvm() {
+  INC="$(llvm-config-14 --includedir)"
+  clang2py -k cdefstum \
+    $(find "$INC/llvm-c/" -type f -name '*.h' | sort) \
+    "$INC/llvm/Config/Targets.def" \
+    "$INC/llvm/Config/AsmPrinters.def" \
+    "$INC/llvm/Config/AsmParsers.def" \
+    "$INC/llvm/Config/Disassemblers.def" \
+    --clang-args="$(llvm-config-14 --cflags)" \
+    -o "$BASE/llvm.py"
+
+  sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support\g" "$BASE/llvm.py"
+  sed -i "s\FIXME_STUB\llvm\g" "$BASE/llvm.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVM_PATH)\g" "$BASE/llvm.py"
+
+  fixup "$BASE/llvm.py"
+}
+
 generate_kgsl() {
   clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
   fixup $BASE/kgsl.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/kgsl.py
   sed -nE 's/#define ([A-Za-z0-9_]+)_SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1_SHIFT) \& \1_MASK/p' extra/qcom_gpu_driver/msm_kgsl.h >> $BASE/kgsl.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kgsl.py
   python3 -c "import tinygrad.runtime.autogen.kgsl"
 }
 
@@ -263,6 +286,10 @@ generate_vfio() {
     /usr/include/linux/vfio.h \
     -o $BASE/vfio.py
   fixup $BASE/vfio.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
+  sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
+  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import HWInterface\g" $BASE/vfio.py
+  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
 }
 
 generate_am() {
@@ -337,6 +364,7 @@ elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pciaccess

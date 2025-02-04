@@ -2,7 +2,10 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.ops import UPat, Ops, UOp
 
-realized_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
+# NOTE: unlike before base for a realized tensor is always a BUFFER
+realized_pattern = UPat(Ops.BUFFER)
+# after realization, tensor uops become VIEW(BUFFER)
+buffer_view_pattern = UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),))
 const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),)))
 def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.lazydata, pat)
@@ -19,7 +22,7 @@ class TestTensorMutates(unittest.TestCase):
     self.assertIsNot(pa, a.lazydata)
     self.assertIsNot(pb, b.lazydata)
     self.assertIsNot(pr, ret.lazydata)
-    for t in [a,b,ret]: is_pattern(t, realized_pattern)
+    for t in [a,b,ret]: is_pattern_uop(t.lazydata.base, realized_pattern)
 
   def test_reshape_is_same_parent(self):
     a = Tensor([1,2,3])
@@ -29,6 +32,9 @@ class TestTensorMutates(unittest.TestCase):
     d.realize()
     is_pattern_uop(d.lazydata.base, realized_pattern)
     is_pattern_uop(c.lazydata.base, realized_pattern)
+    # NOTE: we keep movement ops on top of the buffer view
+    is_pattern_uop(c.lazydata, buffer_view_pattern)
+    is_pattern_uop(d.lazydata, UPat(Ops.RESHAPE, src=(buffer_view_pattern,)))
 
   def test_reshape_is_same_child(self):
     a = Tensor([1,2,3])
@@ -43,14 +49,15 @@ class TestTensorUopRepresentation(unittest.TestCase):
   def test_realized(self):
     a = Tensor([1.,2,3]).realize()
     print(a.lazydata)
-    is_pattern(a, realized_pattern)
+    is_pattern_uop(a.lazydata.base, realized_pattern)
 
   def test_add_realized(self):
     a = Tensor([1.,2,3]).realize()
     b = Tensor([4.,5,6]).realize()
     c = a+b
     print(c.lazydata)
-    is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+    #is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+    is_pattern(c, UPat(Ops.ADD, src=(UPat(Ops.VIEW, src=(realized_pattern,)), UPat(Ops.VIEW, src=(realized_pattern,)))))
 
   def test_const_pattern(self):
     a = Tensor(1)
@@ -68,9 +75,9 @@ class TestTensorUopRepresentation(unittest.TestCase):
   def test_viewed_consts_do_not_realize(self):
     a = Tensor.ones(10, 10)
     print(a.lazydata)
-    pre_realize = a.lazydata
     a.realize()
-    assert a.lazydata is pre_realize
+    is_pattern(a, const_pattern)
+    self.assertEqual(a.lazydata.shape, (10, 10))
 
   # currently, CONSTs have a "fake" BUFFER. this should be fixed
   # current:
@@ -107,7 +114,9 @@ class TestTensorUopRepresentation(unittest.TestCase):
     a = Tensor([1.,2,3]).realize()
     c = a.to("TEST")   # NOTE: this isn't checked
     print(c.lazydata)
-    is_pattern(c, UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)))
+    # TODO: COPY on a Tensor becomes a VIEW(COPY), this should be done in the scheduler not in ops
+    #is_pattern(c, UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)))
+    is_pattern(c, UPat(Ops.VIEW, src=(UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)),)))
 
 if __name__ == '__main__':
   unittest.main()
