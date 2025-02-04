@@ -60,9 +60,9 @@ if __name__ == "__main__":
                       activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
                       extra_options={"ActivationSymmetric": True})
 
-  run_onnx_jit, input_shapes, input_types = load_onnx_model(fn)
-  t_name, shape = list(input_shapes.items())[0]
-  assert shape[1:] == (3,224,224), f"shape is {shape}"
+  run_onnx_jit, input_specs = load_onnx_model(fn)
+  t_name, t_spec = list(input_specs.items())[0]
+  assert t_spec.shape[1:] == (3,224,224), f"shape is {t_spec.shape}"
 
   hit = 0
   for i,(img,y) in enumerate(imagenet_dataloader(cnt=100)):
