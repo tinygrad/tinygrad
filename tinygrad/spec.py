@@ -121,6 +121,15 @@ spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
 ])
 
+# *** this is the spec of a Kernel in UOp ***
+
+kernel_spec = PatternMatcher([
+  (UPat(Ops.DEVICE, src=()), lambda: True),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
+  # TODO: currently kernel only has buffer parents, this is incomplete. it should be BUFFER and ASSIGN
+  (UPat(Ops.KERNEL, src=UPat(Ops.BUFFER)), lambda: True),
+])
+
 # *** this is the UOp shape spec ***
 
 def verify_sink_dims(sink:UOp):
