@@ -80,11 +80,10 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  tensor_uops: dict[UOp, list[UOp]]                                  # this maps BUFFER uops of this schedule to the tensor uop
+  ops_metadata: dict[UOp, Metadata]                                  # this maps uops in the schedule to the tensor metadata
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
-  ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
   preloads: defaultdict[Buffer, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
@@ -244,7 +243,7 @@ def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
-  if (m:=ctx.tensor_uops[b][-1].metadata) is not None: ctx.ops_metadata[x] = m
+  if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
   if b not in ctx.realizes: return x # collapse BUFFER
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
@@ -387,7 +386,9 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> Sched
           # otherwise, it's not fine
           else: raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                                    +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)))
+  # NOTE: we only add the metadata for fused tensors
+  metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
+  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), metadata)
 
 # **** schedule creation and toposort
 
@@ -411,7 +412,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   buf_tensors: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items():
     if (b:=buffer_map.get(v)) is not None: buf_tensors.setdefault(b, []).append(k)
-  realize_map = group_realizes(sink, ctx:=ScheduleContext(buf_tensors))
+  ops_metadata = {k:v[-1].metadata for k,v in buf_tensors.items()}
+  realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
 
   # TODO: this should be the break between the "grouper" and the "linearizer"
   # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
