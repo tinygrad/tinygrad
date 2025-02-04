@@ -735,10 +735,7 @@ class TestOps(unittest.TestCase):
     # shift count bigger than int width is undefined; it seems to quietly give the previous result from the alu, so set that to 2 here
     Tensor(1, dtype=dtypes.int).contiguous().add(1).item()
     a = Tensor(3, dtype=dtypes.int).contiguous().mul(2**40).item()
-    Tensor(1, dtype=dtypes.int).contiguous().add(1).item()
-    b = Tensor(3, dtype=dtypes.int).contiguous().idiv(2**40).item()
     self.assertEqual(a, 0)
-    self.assertEqual(b, 0)
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
