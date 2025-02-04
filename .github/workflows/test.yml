@@ -369,7 +369,7 @@ jobs:
       with:
         python-version: 3.12
     - name: Install Dependencies
-      run: pip install --user -e '.'
+      run: pip install --user -e .
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -379,9 +379,9 @@ jobs:
         push: false
         tags: qemu-hexagon:latest
         cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-to: type=gha,mode=min
     - name: Run test_tiny on DSP
-      run: DSP=1 python -m pytest -n=auto test/test_tiny.py --durations=20
+      run: DEBUG=2 DSP=1 python test/test_tiny.py
 
   testwebgpu:
     name: WebGPU Tests
