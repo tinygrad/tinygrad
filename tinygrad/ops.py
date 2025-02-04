@@ -98,6 +98,8 @@ class Ops(FastEnum):
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
 
+  CUSTOM = auto()
+
   # MetaOps
   COPY = auto(); BUFFER_VIEW = auto() # noqa: E702
 
