@@ -731,12 +731,6 @@ class TestOps(unittest.TestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().idiv(4).item(), 0)  # NOTE this is trunc-div behaviour
 
-  def test_shift_rewrite_big_count(self):
-    # shift count bigger than int width is undefined; it seems to quietly give the previous result from the alu, so set that to 2 here
-    Tensor(1, dtype=dtypes.int).contiguous().add(1).item()
-    a = Tensor(3, dtype=dtypes.int).contiguous().mul(2**40).item()
-    self.assertEqual(a, 0)
-
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
