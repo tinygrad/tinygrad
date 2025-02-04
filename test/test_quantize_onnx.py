@@ -3,6 +3,8 @@ import onnx, unittest
 from onnx import helper, numpy_helper, TensorProto
 from examples.benchmark_onnx import load_onnx_model
 from tinygrad import Tensor, Context, dtypes, Device
+from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.engine.realize import CompiledRunner, ExecItem
 
 N = 1024
 
@@ -26,6 +28,15 @@ def create_gemm_model(model_path, in_size=N, out_size=N):
   onnx.save_model(model_def, model_path)
   return model_path
 
+def sexec(out, opts):
+  si = out.schedule()[-1]
+  k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
+  #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+  for opt in opts: k.apply_opt(opt)
+  prg = k.to_program()
+  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
+  for _ in range(3): ei.run(wait=True)
+
 class TestQuantizeOnnx(unittest.TestCase):
   def test_quant(self):
     from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader
@@ -44,7 +55,16 @@ class TestQuantizeOnnx(unittest.TestCase):
     with Context(NOOPT=1):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
 
-  def test_prequant(self):
+  def test_prequant_gemm(self):
+    N = 512
+    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
+    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
+    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
+    out = X.matmul(W, acc_dtype=X.dtype)
+    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    sexec(out, opts)
+
+  def test_prequant_gemv(self):
     N = 2048
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     X = Tensor(np.random.uniform(0, 255, size=(1,N)).astype(np.uint8))
@@ -52,16 +72,8 @@ class TestQuantizeOnnx(unittest.TestCase):
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     #out = X @ W
     out = X.matmul(W, acc_dtype=X.dtype)
-    si = out.schedule()[-1]
-    from tinygrad.codegen.kernel import Kernel, Opt, OptOps
-    from tinygrad.engine.realize import CompiledRunner, ExecItem
-    k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
-    #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-    for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
-    ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
-    for _ in range(3): ei.run(wait=True)
+    sexec(out, opts)
 
 if __name__ == "__main__":
   unittest.main()
