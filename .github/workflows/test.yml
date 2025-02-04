@@ -686,7 +686,7 @@ jobs:
         run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
       - name: Run pytest (nv)
         if: matrix.backend=='ptx'
-        run: python -m pytest -n=auto test/test_tiny.py --durations=20
+        run: python -m pytest -n=1 test/test_hcq.py test/test_tiny.py --durations=20
 
   wintests:
     strategy:
