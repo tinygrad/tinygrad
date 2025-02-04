@@ -19,6 +19,10 @@ os.environ["RUN_PROCESS_REPLAY"] = "0"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+def trunc_log(x):
+  lines = (rep:=repr(x)).splitlines()
+  if len(lines) > 100: lines = lines[:100]+[f"WARN: truncated string with {len(lines)} lines"]
+  logging.info("\n".join(lines))
 
 # user config
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
@@ -67,14 +71,14 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
     except Exception as e:
       changed += 1
       warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
-      for x in args[:-1]: logging.info(x)
+      for x in args[:-1]: trunc_log(x)
       continue
     # diff kernels
     try: assert str(args[-1]) == str(good)
     except AssertionError:
       changed += 1
       if ctx_vars: logging.info(ctx_vars)
-      for x in args[:-2]: logging.info(x)
+      for x in args[:-2]: trunc_log(x)
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
       warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
