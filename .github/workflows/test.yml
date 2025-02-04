@@ -648,6 +648,7 @@ jobs:
       - name: Check Device.DEFAULT and print some source (AMD)
         env:
           PYTHONPATH: ${{ github.workspace }}
+          MOCKGPU: 1
           AMD: 1
           FORWARD_ONLY: 1
         run: |
