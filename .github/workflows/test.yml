@@ -90,6 +90,11 @@ jobs:
           /opt/rocm/lib64
         EOF
         sudo ldconfig
+    - name: Install packages (llvm)
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends llvm-14-dev
     - name: Compile EfficientNet to C and test it
       run: |
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
@@ -127,6 +132,11 @@ jobs:
         ./autogen_stubs.sh io_uring
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+    - name: Verify LLVM autogen
+      run: |
+        cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
+        ./autogen_stubs.sh llvm
+        diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
 
   uops:
     name: uops tests
@@ -347,6 +357,33 @@ jobs:
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
+  testdsp:
+    name: DSP Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Install Dependencies
+      run: pip install --user -e .
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Build QEMU Docker with cache
+      uses: docker/build-push-action@v4
+      with:
+        file: extra/dsp/Dockerfile
+        push: false
+        load: true
+        tags: qemu-hexagon:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=min
+    - name: Run test_tiny on DSP
+      run: DEBUG=2 DSP=1 python test/test_tiny.py
+
   testwebgpu:
     name: WebGPU Tests
     runs-on: ubuntu-22.04
@@ -546,7 +583,7 @@ jobs:
           EOF
           sudo ldconfig
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
