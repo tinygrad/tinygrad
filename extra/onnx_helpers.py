@@ -20,7 +20,9 @@ def validate(fn, rtol=1e-5, atol=1e-5):
   new_inputs = get_example_inputs(run_onnx.graph_inputs)
   tinygrad_out = run_onnx(new_inputs)
 
-  ort_sess = ort.InferenceSession(fp)
+  ort_options = ort.SessionOptions()
+  ort_options.log_severity_level = 3
+  ort_sess = ort.InferenceSession(fp, ort_options, ["CPUExecutionProvider"])
   np_inputs = {k:v.numpy() for k,v in new_inputs.items()}
   out_names = list(run_onnx.graph_outputs)
   out_values = ort_sess.run(out_names, np_inputs)
