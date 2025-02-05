@@ -104,12 +104,10 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
 def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
   acted_lins, max_up, max_lcl, kernel_actions = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024), actions
 
-  if TC_SEARCH_OVER_SHAPE:
-    kernel_actions = [action for action in actions if action.op != OptOps.TC]
-    if len(lin.applied_opts) == 0: # tensor core opts must be first
-      for tc_action in [action for action in actions if action.op == OptOps.TC]:
-        axis, tc_opt = tc_action.axis, cast(tuple, tc_action.arg)[1]
-        kernel_actions += [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt)) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
+  if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
+    for i, action in enumerate(kernel_actions):
+      if action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
+        kernel_actions[i:i+1] = [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
