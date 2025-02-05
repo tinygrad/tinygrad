@@ -222,6 +222,7 @@ function sendMessageToWorker(worker, message) {
 
 
 const load_state_dict = async (device, progress) => {
+  let completed = 0;
   let totalLoaded = 0;
   let totalSize = 0;
   let partSize = {};
@@ -249,7 +250,7 @@ const load_state_dict = async (device, progress) => {
               for (;;) {
                   const { done, value } = await reader.read();
                   if (done) break;
-                  progressCallback(part, value.byteLength, total, "Downloading model:");
+                  progressCallback(part, value.byteLength, total, `Downloading model: ${completed}/29`);
                   controller.enqueue(value);
               }
                     
@@ -274,7 +275,7 @@ const load_state_dict = async (device, progress) => {
       console.log(`Cache hit: ${filename}, hash: ${hash}`);
       totalLoaded += part.content.byteLength;
       totalSize += part.content.byteLength;
-      progress(totalLoaded, totalSize, "Downloading model:")
+      progress(totalLoaded, totalSize, `Downloading model: ${completed}/29`)
       return Promise.resolve(part.content);
     } else {
       console.log(`Cache miss: ${filename}, hash: ${hash}`);
@@ -310,7 +311,7 @@ const load_state_dict = async (device, progress) => {
   // to limit memory overhead, we pause downloads if we have this number of downloaded files waiting to be processed
   const numDownloaders = 5; // TODO: dynamically base this on DL file size?
   const chainDownload = async (file) => {
-    loadPart(file.name, progressCallback) // triggers download
+    loadPart(`${window.MODEL_BASE_URL}/${file.name}`, progressCallback) // triggers download
     .then(async (arraybuf) => { 
       downloaded.push({ ...file, bytes: new Uint8Array(arraybuf)});
       // pause downloads if further processing is a bottleneck
@@ -429,7 +430,6 @@ const load_state_dict = async (device, progress) => {
     //console.log(`decompression elapsed seconds: ${(t1 - t0) / 1000}`)
   }
 
-  let completed = 0;
   const valid_final_dtypes = new Set(["float32", "int8", "int32"]);
   const loadFileToStateDict = async(file) => {
     for (const part of file.parts) {
