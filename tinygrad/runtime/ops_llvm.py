@@ -17,9 +17,9 @@ class LLVMCompiler(Compiler):
 
     triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    cpu, features = ctypes.string_at(llvm.LLVMGetHostCPUName()), ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
+    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
-    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, b'+reserve-x18,' + features if OSX and host_arch == 'AArch64' else features,
+    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, b'+reserve-x18,' + feats if OSX and host_arch == 'AArch64' else feats,
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
