@@ -40,6 +40,7 @@ class AMFirmware:
 
     blob, sos_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_sos.bin", am.struct_psp_firmware_header_v2_0)
     fw_bin = sos_hdr.psp_fw_bin
+    # exit(0)
 
     for fw_i in range(sos_hdr.psp_fw_bin_count):
       fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))

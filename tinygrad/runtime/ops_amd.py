@@ -432,12 +432,13 @@ class PCIIface:
 
   def __init__(self, dev, dev_id):
     self.dev = dev
+    supp_devs = [0x7480] # [0x744c, 0x7480]
 
     if first_dev:=len(PCIIface.gpus) == 0:
       libpciaccess.pci_system_init()
       pci_iter = libpciaccess.pci_id_match_iterator_create(None)
       while pcidev:=libpciaccess.pci_device_next(pci_iter):
-        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c: PCIIface.gpus.append(pcidev.contents)
+        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id in supp_devs: PCIIface.gpus.append(pcidev.contents)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]

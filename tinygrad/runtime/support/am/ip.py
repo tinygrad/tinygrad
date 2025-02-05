@@ -18,12 +18,16 @@ class AM_GMC(AM_IP):
     super().__init__(adev)
 
     # Memory controller aperture
-    self.mc_base = self.adev.regMMMC_VM_FB_LOCATION_BASE.read() << 24
+    self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
     self.vm_base = self.adev.mm.va_allocator.base
     self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
+
+    # print(self.adev.ip_versions[am.MMHUB_HWIP])
+    # print(hex(self.adev.mm.vram_size), hex(self.mc_base), hex(self.mc_end), hex(self.vm_base), hex(self.vm_end))
+    # exit(0)
 
     # GFX11 has 44-bit address space
     self.address_space_mask = (1 << 44) - 1
