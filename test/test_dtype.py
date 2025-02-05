@@ -327,6 +327,11 @@ class TestPtrDType(unittest.TestCase):
     dt = dtypes.float.vec(4).ptr().vec(4)
     self.assertEqual(dt, eval(str(dt)))
 
+  def test_vec_ptr_sz(self):
+    dt = dtypes.float.ptr(1024).vec(4)
+    self.assertEqual(dt, eval(str(dt)))
+    self.assertEqual(str(dt), "dtypes.float.ptr(1024).vec(4)")
+
   def test_vcount(self):
     dt = dtypes.float.ptr().vec(4)
     self.assertEqual(dt.vcount, 4)
