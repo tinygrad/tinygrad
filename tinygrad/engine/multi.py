@@ -48,8 +48,8 @@ def alu_multi(root:UOp):
   assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
 
-  # NOTE: they all have to share an axis, we always choose [-1]
-  axis, bounds = axes[-1] if len(axes := dedup([(x.axis, x.bounds) for x in msrcs if x.axis is not None])) else (None, None)
+  axis = root.axis
+  bounds = dedup([x.bounds for x in root.src if x.axis == axis])[-1] if axis is not None else None
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)
   new_real = tuple(all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])) if not_all_real else msrcs[0].real
@@ -69,23 +69,19 @@ def reduce_multi(root:UOp, multi:UOp):
     # all-reduce on sharded axes
     reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
     # if all partitions are real, do all_reduce
-    if all(multi.real): return UOp.multi(*all_reduce(op, reduced_parts), axis=None)
+    if all(multi.real): return UOp.multi(*all_reduce(op, reduced_parts), axis=root.axis)
     # only one partition is real, keep it
-    return UOp.multi(*reduced_parts, axis=None, real=multi.real)
+    return UOp.multi(*reduced_parts, axis=root.axis, real=multi.real)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return UOp.multi(*[x.r(op, axis) for x in multi.src], axis=multi.axis, real=multi.real)
+  return UOp.multi(*[x.r(op, axis) for x in multi.src], axis=root.axis, real=multi.real)
 
 def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
   return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
 
 def reshape_multi(root:UOp, multi:UOp):
   arg = root.arg
-  if multi.axis is None: return UOp.multi(*[x.reshape(arg) for x in multi.src], axis=None, real=multi.real)
+  if (new_axis:=root.axis) is None: return UOp.multi(*[x.reshape(arg) for x in multi.src], axis=new_axis, real=multi.real)
   assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
-  arg_acc:list[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
-  # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
-  # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
-  new_axis = len(arg_acc) - arg_acc[::-1].index(prod(multi.shape[:multi.axis])) - 1
   assert all(prod(lb.shape[multi.axis:])%prod(arg[new_axis+1:])==0 for lb in multi.src), \
     f"reshape cannot move items between shards {multi.shape} -> {root.arg=}"
   lbs = [x.reshape(tuple(s if a!=new_axis else prod(x.shape[multi.axis:])//prod(arg[new_axis+1:]) for a,s in enumerate(arg))) for x in multi.src]
@@ -109,7 +105,7 @@ def pad_multi(root:UOp, multi:UOp):
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
-  return UOp.multi(*[x.permute(root.arg) for x in multi.src], axis=root.arg.index(multi.axis) if multi.axis is not None else None, real=multi.real)
+  return UOp.multi(*[x.permute(root.arg) for x in multi.src], axis=root.axis, real=multi.real)
 
 def shrink_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == (0, multi.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \
@@ -125,9 +121,9 @@ def shrink_multi(root:UOp, multi:UOp):
   return UOp.multi(*[x.shrink(tuple((0, x.shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))) for x in multi.src],
                    axis=multi.axis, real=multi.real)
 
-def stride_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.arg[multi.axis] == 1, "flipping not supported on sharded axis"
-  return UOp.multi(*[x.stride(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
+def flip_multi(root:UOp, multi:UOp):
+  assert multi.axis is None or not root.arg[multi.axis], "flipping not supported on sharded axis"
+  return UOp.multi(*[x.flip(root.arg) for x in multi.src], axis=multi.axis, real=multi.real)
 
 def copy_multi(multi:UOp, device:UOp):
   # if we already have a copy on the device, return that
@@ -155,10 +151,11 @@ multi_pm = PatternMatcher([
   (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), pad_multi),
   (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
   (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
-  (UPat(Ops.STRIDE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), stride_multi),
+  (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="device"), UPat(Ops.MULTI, name="multi"), )), copy_multi),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH), src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
+        src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])
 
 @track_rewrites(named=True)
