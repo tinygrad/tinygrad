@@ -33,10 +33,12 @@ class AMRegister:
 
 class AMFirmware:
   def __init__(self):
+    def fmt_ver(hwip): return f"{adev.ip_versions[hwip]//10000}_{(adev.ip_versions[hwip]//100)%100}_{adev.ip_versions[hwip]%100}"
+
     # Load SOS firmware
     self.sos_fw = {}
 
-    blob, sos_hdr = self.load_fw("psp_13_0_0_sos.bin", am.struct_psp_firmware_header_v2_0)
+    blob, sos_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_sos.bin", am.struct_psp_firmware_header_v2_0)
     fw_bin = sos_hdr.psp_fw_bin
 
     for fw_i in range(sos_hdr.psp_fw_bin_count):
@@ -48,17 +50,17 @@ class AMFirmware:
     self.ucode_start: dict[str, int] = {}
     self.descs: list[tuple[int, memoryview]] = []
 
-    blob, hdr = self.load_fw("smu_13_0_0.bin", am.struct_smc_firmware_header_v1_0)
+    blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v1_0)
     self.smu_psp_desc = self.desc(am.GFX_FW_TYPE_SMU, blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes)
 
     # SDMA firmware
-    blob, hdr = self.load_fw("sdma_6_0_0.bin", am.struct_sdma_firmware_header_v2_0)
+    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0)
     self.descs += [self.desc(am.GFX_FW_TYPE_SDMA_UCODE_TH0, blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes)]
     self.descs += [self.desc(am.GFX_FW_TYPE_SDMA_UCODE_TH1, blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
-      blob, hdr = self.load_fw(f"gc_11_0_0_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
+      blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
 
       # Code part
       self.descs += [self.desc(getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'), blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes)]
@@ -69,12 +71,12 @@ class AMFirmware:
       self.ucode_start[fw_name] = hdr.ucode_start_addr_lo | (hdr.ucode_start_addr_hi << 32)
 
     # IMU firmware
-    blob, hdr = self.load_fw("gc_11_0_0_imu.bin", am.struct_imu_firmware_header_v1_0)
+    blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_imu.bin", am.struct_imu_firmware_header_v1_0)
     imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
     self.descs += [self.desc(am.GFX_FW_TYPE_IMU_I, blob, imu_i_off, imu_i_sz), self.desc(am.GFX_FW_TYPE_IMU_D, blob, imu_i_off + imu_i_sz, imu_d_sz)]
 
     # RLC firmware
-    blob, hdr0, hdr1, hdr2, hdr3 = self.load_fw("gc_11_0_0_rlc.bin", am.struct_rlc_firmware_header_v2_0,
+    blob, hdr0, hdr1, hdr2, hdr3 = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}__rlc.bin", am.struct_rlc_firmware_header_v2_0,
       am.struct_rlc_firmware_header_v2_1, am.struct_rlc_firmware_header_v2_2, am.struct_rlc_firmware_header_v2_3)
 
     for mem in ['GPM', 'SRM']:
@@ -263,7 +265,7 @@ class AMDev:
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
-    self.fw = AMFirmware()
+    self.fw = AMFirmware(self)
 
     # Initialize IP blocks
     self.soc21:AM_SOC21 = AM_SOC21(self)
