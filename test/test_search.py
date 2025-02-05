@@ -127,7 +127,7 @@ class TestBEAM(unittest.TestCase):
     b = Tensor.rand(16, 16)
     realized_ast, _ = helper_realized_ast(a @ b)
     actions_before = actions.copy()
-    get_kernel_actions(Kernel(realized_ast), False)
+    get_kernel_actions(Kernel(realized_ast))
     actions_after = actions.copy()
     assert actions_after == actions_before, "actions state was altered"
 
