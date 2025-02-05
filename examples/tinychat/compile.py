@@ -176,27 +176,21 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
 
 if __name__=="__main__":
   default_device = Device.DEFAULT
-  model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+  #model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+  model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
   model_size="1B"
   Tensor.no_grad = True
   f32_fn = os.path.join(os.path.dirname(__file__), "llama3_1B_f32.safetensors")
   max_context=1024
 
-  #clang_export_q6k_to_f32()
-  #metadata = prepare_browser_gguf_chunks(str(model_path))
-
-  if not os.path.exists(f32_fn):
-    # this is ugly, but wgpu adapter doesn't support f16 (they're working on it), throws exception on loading llama3 1B weights
-    # the tinygrad llama code just converts the f16 to f32 anyway, we let that happen, then transfer the weights to WEBGPU device
-    # TODO clean this up when wgpu supports f16, or maybe use dawn if it supports f16 (cc wpmed92)
-    model = build_transformer(model_path, model_size=model_size, max_context=max_context)
-    state_dict = get_state_dict(model)
-    safe_save(state_dict, f32_fn)
-    print(f"f32 weights saved to {f32_fn}, exiting to free idle GPU memory, restart program as-is to resume")
-    # TODO force free all the currently used GPU memory after loading state_dict into the WEBGPU-initialized model
-    #  this doesn't happen by default below, so we restart execution to clear ~3GB of GPU memory
-    #  maybe extra.models.llama.Transformer.forward_jit is the culprit?
-    sys.exit()
+  Device.DEFAULT="CLANG" # may be necessary for quantization to work, from float16 original weights
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=1024)
+  state_dict = get_state_dict(model)
+  state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
+  state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
+  Device.DEFAULT="WEBGPU"
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=1024, load_weights=False)
+  load_state_dict(model, state_dict, consume=True)
 
   tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
   tokenizer = Tokenizer(str(tokenizer_path))
@@ -213,13 +207,6 @@ if __name__=="__main__":
   bpe_path = os.path.join(os.path.dirname(__file__), "llama3-2.tiktoken")
   dump_tiktoken_bpe(mergeable_ranks, bpe_path)
 
-  Device.DEFAULT = "WEBGPU"
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context, load_weights=False)
-  state_dict = safe_load(f32_fn)
-  for k,v in state_dict.items(): v.replace(v.to("WEBGPU").realize()) # will get "needs a renderer" exception if we don't do this
-  state_dict = Int8Linear.quantize(state_dict, "WEBGPU")
-  load_state_dict(model, state_dict, consume=True)
-
   # TODO: make these variables tunable by client?
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   GlobalCounters.reset()
@@ -229,8 +216,7 @@ if __name__=="__main__":
   out = model.forward(Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
 
   # We waited to prepare the chunks until here, because model.freqs_cis and model.tok_embeddings.arange are only ready now
-  metadata = prepare_browser_gguf_chunks(str(model_path), model)
-  os.remove(f32_fn)
+  #metadata = prepare_browser_gguf_chunks(str(model_path), model)
 
   class Step(NamedTuple):
     name: str = ""
@@ -239,14 +225,7 @@ if __name__=="__main__":
     show_progress: bool = False
 
   start_pos = Variable("start_pos", 0, max_context).bind(0)
-  sub_steps = [
-    Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, show_progress=True),
-    # TODO: output transformer pipeline doesn't work unless we manually fix the start_pos instantiation and usage throughout entire pipeline
-    # TODO: Fix compiler to not have above issue
-    Step(name = "q6k_to_f32", input = [Tensor.randn(3_144_960, dtype=dtypes.uint8)], forward = q6k_to_f32), # throws exceptions with all larger sizes tried
-    # TODO: output q6k_to_f32 pipeline doesn't work unless we manually fix the uint32 buffer size allocation
-    # TODO: Fix compiler to not have above issue
-  ]
+  sub_steps = [Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, show_progress=True),]
 
   prg = ""
 
