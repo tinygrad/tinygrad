@@ -145,7 +145,7 @@ do_realize = PatternMatcher([
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
   # realize before COPY or BUFFER_VIEW
-  (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  (UPat(Ops.COPY, src=(UPat(), UPatScheduled())), realize),
   (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
