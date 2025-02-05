@@ -214,22 +214,15 @@ class WebGpuDevice(Compiled):
     # Get supported features
     supported_features = webgpu.WGPUSupportedFeatures()
     webgpu.wgpuAdapterGetFeatures(adapter_result[1], supported_features)
-    timestamp_supported = "WGPUFeatureName_TimestampQuery" in [webgpu.WGPUFeatureName__enumvalues[supported_features.features[i]]
-      for i in range(supported_features.featureCount)]
-
-    required_features = [webgpu.WGPUFeatureName_ShaderF16]
-    if timestamp_supported: required_features.append(webgpu.WGPUFeatureName_TimestampQuery)
-
-    assert adapter_result[1] is not None, "adapter should not be none"
-
-    device_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount = len(required_features),
-      requiredFeatures = (webgpu.WGPUFeatureName * len(required_features))(*required_features))
+    timestamp_supported = webgpu.WGPUFeatureName_TimestampQuery in [supported_features.features[i] for i in range(supported_features.featureCount)]
+    features = [webgpu.WGPUFeatureName_TimestampQuery] if timestamp_supported else []
+    dev_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount=len(features),requiredFeatures=(webgpu.WGPUFeatureName * len(features))(*features))
 
     # Limits
     supported_limits = webgpu.WGPUSupportedLimits()
     webgpu.wgpuAdapterGetLimits(adapter_result[1], ctypes.cast(ctypes.pointer(supported_limits),ctypes.POINTER(webgpu.struct_WGPUSupportedLimits)))
     limits = webgpu.WGPURequiredLimits(limits=supported_limits.limits)
-    device_desc.requiredLimits = ctypes.cast(ctypes.pointer(limits),ctypes.POINTER(webgpu.struct_WGPURequiredLimits))
+    dev_desc.requiredLimits = ctypes.cast(ctypes.pointer(limits),ctypes.POINTER(webgpu.struct_WGPURequiredLimits))
 
     # Requesting a device
     device_result: List[Any] = []
@@ -237,7 +230,7 @@ class WebGpuDevice(Compiled):
     def dev_cb(status, device_impl, msg, _): device_result[:] = status, device_impl, from_wgpu_str(msg)
 
     cb_info = create_cb_info(webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback, dev_cb)
-    wgpu_wait(webgpu.wgpuAdapterRequestDeviceF(adapter_result[1], device_desc, cb_info))
+    wgpu_wait(webgpu.wgpuAdapterRequestDeviceF(adapter_result[1], dev_desc, cb_info))
 
     if device_result[0] != webgpu.WGPURequestDeviceStatus_Success:
       raise RuntimeError(f"Failed to request device: [{webgpu.WGPURequestDeviceStatus__enumvalues[device_result[0]]}] {device_result[2]}")
