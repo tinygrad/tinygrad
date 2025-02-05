@@ -4,10 +4,9 @@
 import os, sys, json, hashlib, math
 from functools import partial
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
-from extra.models.llama import convert_from_gguf
 from extra.f16_decompress import u32_to_f16
 from examples.llama3 import build_transformer, Tokenizer, Int8Linear
-from tinygrad.nn.state import get_state_dict, safe_save, load_state_dict, safe_load, safe_load_metadata, gguf_load
+from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters, Variable
@@ -72,48 +71,23 @@ def clang_export_q6k_to_f32():
     # we still need to manually edit this file: 
     #   manually fixed type declarations, deleted buf_6 and buf_7, cast buf_0 to buf_6, cast buf_4 to buf_7
 
-def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.weight": "tok_embeddings.weight"}):
-  # currently takes just token_embd.weight from gguf file, the rest from tinygrad model state_dict
+def prepare_browser_chunks(model):
   # split weights into browser-friendly chunks
-  # export metadata JSON with offsets -- depends on tinygrad gguf metadata parser below
-
-  # It really simplifies the client code to require that our chunks are divisible by these factors
-  decomp_factor_product = 210 * 1 * 1 # include all relevant chunk sizes for decompression as factors; here we only need to reverse Q6_K quantization
-  chunk_size = decomp_factor_product * ((47 * 1024 * 1024) // decomp_factor_product) # small chunks based on iphone browser constraints
+  state_dict = get_state_dict(model)
+  del state_dict['output.weight'] # same as token_embeddings.weight
+  del state_dict['output.scale'] # same as token_embeddings.scale
+  chunk_size = 47 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
-
-  gguf_tensor = Tensor.empty(os.stat(model_path).st_size, dtype=dtypes.uint8, device=f"disk:{model_path}").to(Device.DEFAULT)
-  kv_data, state_dict, t_infos, data_start = gguf_load(gguf_tensor)
-  t_infos = [x for x in t_infos if x[0] in gguf_cherrypick]
-
-  # calculate byte size of each tensor
-  for i, info in enumerate(t_infos[:-1]):
-    size = t_infos[i+1][3] - t_infos[i][3]
-    t_infos[i] = (size, info)
-  assert (last_info_dtype:=t_infos[-1][2]) in (0, 14)
-  last_info_size = {0: 4, 14: 210/256}.get(last_info_dtype) * prod(t_infos[-1][1])
-  t_infos[-1] = (int(last_info_size), t_infos[-1])
-
-  # for llama, some model parameters used in inference are instantiated at runtime
-  new_state_dict = get_state_dict(model)
-  del new_state_dict['output.weight'] # same as token_embeddings.weight
-  new_weights = set(new_state_dict.keys()) - set(gguf_cherrypick.values())
-  new_weights = {name: new_state_dict[name].contiguous().to("CLANG").realize() for name in new_weights}
-  empty_t_infos = [] # for cache_kv buffers which are just zeroes to start
-  tiny_to_gguf = {dtypes.float: 0, dtypes.float16: 1, dtypes.int8: 16, dtypes.int: 18}
-  for k,v in new_weights.items():
-    if "cache_kv" not in k:
-      t_infos.append((v.lazydata.buffer.nbytes, (k, "not_from_gguf_file", tiny_to_gguf[v.dtype], "not_from_gguf_file")))
-    elif "cache_kv" in k:
-      empty_t_infos.append((v.lazydata.buffer.nbytes, (k, "not_from_gguf_file", tiny_to_gguf[v.dtype], "not_from_gguf_file")))
+  t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" not in k]
+  empty_t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" in k]
 
   split_t_infos = []
-  for size, info in t_infos:
+  for size, name, dtype in t_infos:
     if size <= chunk_size:
-      split_t_infos.append((size, info, ()))
+      split_t_infos.append((size, name, dtype, ()))
     else:
       for i in range(0, size, chunk_size):
-        split_t_infos.append((min(chunk_size, size-i), (f"{info[0]}_part{math.ceil(i/chunk_size)}", *info[1:]), (i, min(i+chunk_size, size))))
+        split_t_infos.append((min(chunk_size, size-i), f"{name}_part{math.ceil(i/chunk_size)}", dtype, (i, min(i+chunk_size, size))))
 
   files = []
   # FFD bin packing
@@ -128,33 +102,23 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
       if not placed:
         files.append([info])
 
-  gguf_dtypes = {0: "float32", 1: "float16", 14: "Q6_K", 16: "int8", 18: "int32"}
-  new_weights = {k: {"tensor": v} for k,v in new_weights.items()}
-  with open(model_path, 'rb') as reader:
-    for i, file in enumerate(files):
-      cursor = 0
-      with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "wb+") as writer:
-        for size, info, offsets in file:
-          name, part_num = (info[0], 0) if "_part" not in info[0] else (info[0].split("_part")[0], int(info[0].split("_part")[1]))
-          default = {"parts": {}, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}
-          weight_metadata = metadata.get(name, default) if name not in new_weights else new_weights[name].get("metadata", default)
-          weight_metadata["parts"][part_num] = {"file": i, "file_start_pos": cursor, "size": size}
-          if name not in new_weights:
-            file_offset = offsets[0] if offsets else 0
-            reader.seek(data_start + info[3] + file_offset)
-            data = reader.read(size)
-            metadata[name] = weight_metadata
-          elif name in new_weights:
-            data = bytes(new_weights[name]["tensor"].lazydata.buffer.as_buffer())
-            data = data if not offsets else data[offsets[0]:offsets[1]]
-            new_weights[name]["metadata"] = weight_metadata
-          writer.write(data)
-          cursor += size
+  tinygrad_dtypes = {dtypes.float32: "float32", dtypes.float16: "float16", dtypes.int8: "int8", dtypes.int32: "int32"} # TODO: still necessary?
+  for i, file in enumerate(files):
+    cursor = 0
+    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.chunk'), "wb+") as writer:
+      for size, name, dtype, offsets in file:
+        name, part_num = (name, 0) if "_part" not in name else (name.split("_part")[0], int(name.split("_part")[1]))
+        default = {"parts": {}, "dtype": tinygrad_dtypes[dtype]}
+        weight_metadata = metadata.get(name, default)
+        weight_metadata["parts"][part_num] = {"file": i, "file_start_pos": cursor, "size": size}
+        metadata[name] = weight_metadata
+        data = bytes(state_dict[name].lazydata.base.realized.as_buffer())
+        data = data if not offsets else data[offsets[0]:offsets[1]]
+        writer.write(data)
+        cursor += size
 
-  metadata = convert_from_gguf(metadata, model)
-  del metadata['output.weight'] # convert_from_gguf duplicates token_embd.weight to output.weight
-  new_weights.update({info[0]: {"metadata": {"parts": {0: {"empty": True, "size": size}}, "dtype": gguf_dtypes[info[2]], "gguf_shape": info[1]}} for size, info in empty_t_infos})
-  metadata.update({k: v["metadata"] for k,v in new_weights.items()})
+  metadata.update({name: {"parts": {0: {"empty": True, "size": size}}, "dtype": tinygrad_dtypes[dtype]} for size, name, dtype in empty_t_infos})
+
   for k in metadata:
     metadata[k]["parts"] = [part for part_num, part in sorted(metadata[k]["parts"].items(), key = lambda x: x[0])]
     cursor = 0
@@ -166,8 +130,8 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
   state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"state_dict": metadata, "state_dict_hash": state_dict_hash, "files": []}
   for i in range(len(files)):
-    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.gguf.chunk'), "rb") as reader:
-      metadata["files"].append({"name": f'net_part{i}.gguf.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
+    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.chunk'), "rb") as reader:
+      metadata["files"].append({"name": f'net_part{i}.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
   metadata_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"metadata": metadata, "metadata_hash": metadata_hash}
 
@@ -176,7 +140,6 @@ def prepare_browser_gguf_chunks(model_path, model, gguf_cherrypick={"token_embd.
 
 if __name__=="__main__":
   default_device = Device.DEFAULT
-  #model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
   model_size="1B"
   Tensor.no_grad = True
@@ -216,7 +179,7 @@ if __name__=="__main__":
   out = model.forward(Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
 
   # We waited to prepare the chunks until here, because model.freqs_cis and model.tok_embeddings.arange are only ready now
-  #metadata = prepare_browser_gguf_chunks(str(model_path), model)
+  metadata = prepare_browser_chunks(model)
 
   class Step(NamedTuple):
     name: str = ""
