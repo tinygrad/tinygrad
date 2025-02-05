@@ -18,7 +18,7 @@ class AM_GMC(AM_IP):
     super().__init__(adev)
 
     # Memory controller aperture
-    self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
+    self.mc_base = 0x8000000000 #(self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
@@ -45,19 +45,19 @@ class AM_GMC(AM_IP):
     # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
-    if ip == "MM": self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
+    # if ip == "MM": self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
 
-    self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
-      invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
+    # self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
+    #   invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
 
-    self.adev.wait_reg(self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK"), mask=(1 << vmid), value=(1 << vmid))
+    # self.adev.wait_reg(self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK"), mask=(1 << vmid), value=(1 << vmid))
 
-    if ip == "MM":
-      self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
-      self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1)
+    # if ip == "MM":
+    #   self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
+    #   self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1)
 
-      # Read back the register to ensure the invalidation is complete
-      self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
+    #   # Read back the register to ensure the invalidation is complete
+    #   self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
 
   def enable_vm_addressing(self, page_table, ip:Literal["MM", "GC"], vmid):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
@@ -376,6 +376,8 @@ class AM_PSP(AM_IP):
   def _bootloader_load_component(self, fw, compid):
     if fw not in self.adev.fw.sos_fw: return 0
 
+    print("will load", fw, compid)
+    
     self._wait_for_bootloader()
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])

@@ -95,6 +95,7 @@ class AMFirmware:
     self.descs += [self.desc(am.GFX_FW_TYPE_RLC_G, blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes)]
 
   def load_fw(self, fname:str, *headers):
+    print(fname)
     fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
     blob = memoryview(bytearray(fpath.read_bytes()))
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
@@ -371,6 +372,9 @@ class AMDev:
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
+
+    # print(self.ip_versions)
+    # exit(0)
 
   def _build_regs(self):
     mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]
