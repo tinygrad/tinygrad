@@ -88,6 +88,7 @@ class ScheduleContext:
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
+  var_vals: dict[Variable, int] = field(default_factory=dict)
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
   preloads: defaultdict[Buffer, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
@@ -230,7 +231,6 @@ def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
   for reduceop in double_reduces:
     top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
     if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
-  graph_rewrite(sink, break_sched, ctx)
   return ctx.realizes
 
 # break the SINK into stores
@@ -372,11 +372,11 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
   return var
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
-def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> UOp:
+def schedule_uop(pre:UOp, ctx:ScheduleContext) -> UOp:
   # unbind_vars + push views to edges
-  sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=var_vals), view_right)
+  sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(var_vals))
+  ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(ctx.var_vals))
   # deal with ASSIGN
   if len(ctx.assigns) != 0:
     assign_preloads = ctx.preloads[si_ctx.bufs[0].buffer]
@@ -398,6 +398,11 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> UOp:
   # NOTE: we only add the metadata for fused tensors
   metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
   return UOp(Ops.KERNEL, src=tuple(si_ctx.bufs), arg=Kernel(ast, metadata))
+
+create_kernels = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda ctx,x: x.replace(src=tuple(schedule_uop(s.sink(), ctx) for s in x.src))
+    if any(s.op is not Ops.KERNEL for s in x.src) else None),
+])
 
 # **** schedule creation and toposort
 
@@ -425,20 +430,16 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       buf_tensors.setdefault(b, []).append(k)
       ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
+  if len(realize_map) == 0: return [], {}, becomes_map
 
-  # create kernels + map buffers to realized tensors
-  sinks: list[UOp] = []
-  var_vals: dict[Variable, int] = {}
-  for buf_uop,store in realize_map.items():
-    assert store.op is Ops.STORE, f"expected a realized BUFFER to get a STORE {sink}"
-    sinks.append(schedule_uop(store.sink(), ctx, var_vals))
-    # can only schedule once
+  # map buffers to realized tensors
+  for buf_uop in realize_map:
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
-    # increment refcount for this buffer
     buf_uop.buffer.ref(1)
-  sched_sink = UOp(Ops.SINK, src=tuple(sinks))
-  # display, TODO: this isn't a complete sched_sink yet
-  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
+
+  # create kernels, TODO: this should use the SINK from tensor_map
+  graph_rewrite(sink, break_sched, ctx)
+  sched_sink = graph_rewrite(UOp.sink(*realize_map.values()), create_kernels, ctx)
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # TODO: this should be the break between the "grouper" and the "linearizer"
@@ -479,4 +480,4 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0):
       diskcache_put("schedule_process_replay", str(big_sink.key), (big_sink, ContextVar._cache, [x.ast for x in schedule]))
-  return schedule, var_vals, becomes_map
+  return schedule, ctx.var_vals, becomes_map
