@@ -120,6 +120,17 @@ class TestBEAM(unittest.TestCase):
       lins = get_kernel_actions(Kernel(realized_ast)).values()
       assert len(set(lin.tensor_core.dims for lin in lins if lin.tensor_core is not None)) > 1
 
+  def test_get_kernel_actions_preserves_actions_state(self):
+    from test.test_linearizer import helper_realized_ast
+    from tinygrad.engine.search import get_kernel_actions
+    a = Tensor.rand(16, 16)
+    b = Tensor.rand(16, 16)
+    realized_ast, _ = helper_realized_ast(a @ b)
+    actions_before = actions.copy()
+    get_kernel_actions(Kernel(realized_ast))
+    actions_after = actions.copy()
+    assert actions_after == actions_before, "actions state was not preserved"
+
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
