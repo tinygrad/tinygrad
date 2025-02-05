@@ -231,7 +231,6 @@ def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
   for reduceop in double_reduces:
     top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
     if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
-  graph_rewrite(sink, break_sched, ctx)
   return ctx.realizes
 
 # break the SINK into stores
@@ -439,6 +438,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     buf_uop.buffer.ref(1)
 
   # create kernels, TODO: this should use the SINK from tensor_map
+  graph_rewrite(sink, break_sched, ctx)
   sched_sink = graph_rewrite(UOp.sink(*realize_map.values()), create_kernels, ctx)
   type_verify(list(sched_sink.toposort), kernel_spec)
 
