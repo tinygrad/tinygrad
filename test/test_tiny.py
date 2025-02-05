@@ -27,7 +27,7 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(256).contiguous().sum()
     self.assertEqual(out.item(), 256)
 
-  def test_gemm(self, N=4, out_dtype=dtypes.float):
+  def test_gemm(self, N=64, out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
     self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
@@ -108,7 +108,7 @@ class TestTiny(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
   def test_image(self):
-    with Context(IMAGE=2): self.test_gemm(out_dtype=dtypes.imagef((4, 1, 4)))
+    with Context(IMAGE=2): self.test_gemm(N=4, out_dtype=dtypes.imagef((4, 1, 4)))
 
   def test_beam_image(self):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_image()
