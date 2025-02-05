@@ -278,6 +278,7 @@ def capstone_flatdump(lib: bytes):
     case machine: raise NotImplementedError(f"Capstone disassembly isn't supported for {machine}")
   for instr in cs.disasm(lib, 0):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
+  sys.stdout.flush()
 
 # *** ctypes helpers
 
