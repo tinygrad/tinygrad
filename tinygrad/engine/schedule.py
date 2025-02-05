@@ -349,8 +349,8 @@ def _append_buf(ctx:KernelContext, x:UOp) -> UOp:
   ctx.bufs.append(x)
   return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=x.size), (), len(ctx.bufs)-1)
 
-def check_load_st(glbl:UOp, st:UOp):
-  if glbl.arg != 0 or (st:=unwrap(st.st)).contiguous: return
+def check_load_st(glbl:UOp, view:UOp):
+  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
   # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
   if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
   # if it has a single view and it's equal when you shrink a contig, it's fine
@@ -376,7 +376,7 @@ to_si = PatternMatcher([
   # once images are loaded they become the base dtype
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
-  (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("st"))), check_load_st),
+  (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
 def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
