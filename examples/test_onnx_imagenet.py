@@ -39,9 +39,10 @@ def imagenet_dataloader(cnt=0):
     yield img,y
 
 if __name__ == "__main__":
-  model_fp32 = fetch(sys.argv[1])
+  fn = sys.argv[1]
   if getenv("QUANT"):
     from onnxruntime.quantization import quantize_dynamic, quantize_static, QuantFormat, QuantType, CalibrationDataReader
+    model_fp32 = fetch(fn)
     fn = '/tmp/model.quant.onnx'
     if getenv("DYNAMIC"):
       quantize_dynamic(model_fp32, fn)
@@ -59,7 +60,7 @@ if __name__ == "__main__":
                       activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
                       extra_options={"ActivationSymmetric": True})
 
-  run_onnx_jit, input_specs = load_onnx_model(model_fp32)
+  run_onnx_jit, input_specs = load_onnx_model(fetch(fn))
   t_name, t_spec = list(input_specs.items())[0]
   assert t_spec.shape[1:] == (3,224,224), f"shape is {t_spec.shape}"
 
