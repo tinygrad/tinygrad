@@ -102,16 +102,16 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
 
 # get dictionary of all possible actions
 def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
-  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
-  kernel_actions, tc_actions = actions, []
+  acted_lins, max_up, max_lcl, kernel_actions = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024), actions
+
   if TC_SEARCH_OVER_SHAPE:
     kernel_actions = [action for action in actions if action.op != OptOps.TC]
     if len(lin.applied_opts) == 0: # tensor core opts must be first
       for tc_action in [action for action in actions if action.op == OptOps.TC]:
         axis, tc_opt = tc_action.axis, cast(tuple, tc_action.arg)[1]
-        tc_actions += [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt)) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
+        kernel_actions += [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt)) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
 
-  for i,a in enumerate(kernel_actions + tc_actions):
+  for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
       if ((ax:=a.real_axis(lin)) >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in actions): continue
     lin2 = lin.copy()
