@@ -49,12 +49,10 @@ def read_buffer(dev, buf):
     usage=webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead, mappedAtCreation=False))
   copy_buffer_to_buffer(dev, buf, 0, tmp_buffer, 0, size)
   map_buffer(tmp_buffer, size)
-  ptr = webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size)
-  void_ptr = ctypes.cast(ptr, ctypes.c_void_p)
-  result = bytearray((ctypes.c_uint8 * size).from_address(void_ptr.value))
+  void_ptr = ctypes.cast(webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size), ctypes.c_void_p)
   webgpu.wgpuBufferUnmap(tmp_buffer)
   webgpu.wgpuBufferDestroy(tmp_buffer)
-  return memoryview(result).cast("B")
+  return memoryview((ctypes.c_uint8 * size).from_address(void_ptr.value)).cast("B")
 
 def pop_error(device):
   result: List[Any] = []
