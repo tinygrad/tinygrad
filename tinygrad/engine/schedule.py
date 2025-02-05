@@ -433,7 +433,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
   if len(realize_map) == 0: return [], {}, becomes_map
 
-  # map buffers to tensor uops
+  # map buffers to realized tensors
   for buf_uop in realize_map:
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     buf_uop.buffer.ref(1)
