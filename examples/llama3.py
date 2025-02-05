@@ -81,7 +81,7 @@ class Int8Linear:
   def quantize(tensors, device):
     new_tensors = {}
     for name,v in tensors.items():
-      if "feed_forward" in name or "attention.w" in name:
+      if "feed_forward" in name or "attention.w" in name or "tok_embeddings.weight" in name:
         assert "weight" in name, name
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
@@ -93,6 +93,18 @@ class Int8Linear:
       else:
         new_tensors[name] = v
     return new_tensors
+
+class Int8Embedding:
+  def __init__(self, vocab_size:int, embed_size:int):
+    self.vocab_sz, self.embed_sz = vocab_size, embed_size
+    self.weight, self.scale = Tensor.ones(vocab_size, embed_size, dtype=dtypes.int8), Tensor.ones(vocab_size, dtype=dtypes.float32)
+
+  def __call__(self, idx:Tensor) -> Tensor:
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
+    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
+    #arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), (self.weight.cast(dtype=dtypes.float32).T*self.scale).T
+    return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
 
 def NF4Linear(block_size):
   _CODE = [
@@ -148,10 +160,10 @@ MODEL_PARAMS = {
 }
 def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None, max_context=8192, load_weights=True):
   # build model
-  if quantize == "int8": linear = Int8Linear
-  elif quantize == "nf4": linear = NF4Linear(64)
-  else: linear = nn.Linear
-  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=max_context, jit=True)
+  if quantize == "int8": linear, embedding = Int8Linear, Int8Embedding
+  elif quantize == "nf4": linear, embedding = NF4Linear(64), nn.Embedding
+  else: linear, embedding = nn.Linear, nn.Embedding
+  model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, embedding=embedding, max_context=max_context, jit=True)
 
   if not load_weights: return model
   # load weights
@@ -240,8 +252,9 @@ if __name__ == "__main__":
   # download_model is the default without a model passed in
   if args.download_model or not args.model:
     if args.size == "1B":
-      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
-      args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+      tokenizer_dir = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
+      #args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+      args.model = fetch("./examples/tinychat/llama3_1B_f32.safetensors", "llama3_1B_f32.safetensors")
     elif args.size == "8B":
       fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
@@ -263,14 +276,25 @@ if __name__ == "__main__":
   print(f"seed = {Tensor._seed}")
   TEMPERATURE = args.temperature
 
-  tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
+  tokenizer = Tokenizer(str((tokenizer_dir if tokenizer_dir.is_dir() else tokenizer_dir.parent) / "tokenizer.model"))
   def encode_role(role: str):
     return [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode(role) + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
 
+  # TODO: revert these changes in __main__ before merge. The changes are for quick correctness testing on WEBGPU
+  Device.DEFAULT="WEBGPU"
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
-  model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
+  #model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device, max_context=1024)
+
+  model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, max_context=1024, device=device, load_weights=False)
+  state_dict = safe_load(args.model)
+  for k,v in state_dict.items(): v.replace(v.to("WEBGPU").realize()) # will get "needs a renderer" exception if we don't do this
+  state_dict = Int8Linear.quantize(state_dict, "WEBGPU")
+  state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
+  state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
+  load_state_dict(model, state_dict, consume=True)
+
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
   if not args.no_api and not args.benchmark:
