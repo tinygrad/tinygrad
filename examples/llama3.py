@@ -66,6 +66,7 @@ def load(fn:str):
     return torch_load(fn)
 
 # **** quantized linears ****
+# TODO: handle quantization from both float16 and float32
 class Int8Linear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
@@ -83,6 +84,7 @@ class Int8Linear:
     for name,v in tensors.items():
       if "feed_forward" in name or "attention.w" in name or "tok_embeddings.weight" in name:
         assert "weight" in name, name
+        v = v.cast(dtypes.float32)
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
         new_tensors[name] = int8_weight
@@ -254,7 +256,8 @@ if __name__ == "__main__":
     if args.size == "1B":
       tokenizer_dir = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
       #args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
-      args.model = fetch("./examples/tinychat/llama3_1B_f32.safetensors", "llama3_1B_f32.safetensors")
+      #args.model = fetch("./examples/tinychat/llama3_1B_f32.safetensors", "llama3_1B_f32.safetensors")
+      args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
     elif args.size == "8B":
       fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
@@ -282,18 +285,18 @@ if __name__ == "__main__":
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
 
-  # TODO: revert these changes in __main__ before merge. The changes are for quick correctness testing on WEBGPU
-  Device.DEFAULT="WEBGPU"
+  # TODO: revert these changes in __main__ before merge. The below changes are for quick correctness testing of quantization
+  Device.DEFAULT="CLANG" # may be necessary for quantization from float16 to work
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
-  #model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device, max_context=1024)
-
-  model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, max_context=1024, device=device, load_weights=False)
-  state_dict = safe_load(args.model)
-  for k,v in state_dict.items(): v.replace(v.to("WEBGPU").realize()) # will get "needs a renderer" exception if we don't do this
-  state_dict = Int8Linear.quantize(state_dict, "WEBGPU")
+  clang_model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device, max_context=1024)
+  from tinygrad.nn.state import get_state_dict
+  state_dict = get_state_dict(clang_model)
   state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
   state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
-  load_state_dict(model, state_dict, consume=True)
+  Device.DEFAULT="WEBGPU"
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
+  model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, max_context=1024, device=device, load_weights=False)
+  load_state_dict(model, state_dict)
 
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
