@@ -32,7 +32,7 @@ class AMRegister:
   def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
 
 class AMFirmware:
-  def __init__(self):
+  def __init__(self, adev):
     def fmt_ver(hwip): return f"{adev.ip_versions[hwip]//10000}_{(adev.ip_versions[hwip]//100)%100}_{adev.ip_versions[hwip]%100}"
 
     # Load SOS firmware
