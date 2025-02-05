@@ -22,8 +22,7 @@ def create_cb_info(cb_info_type, cb_type, cb): return cb_info_type(nextInChain=N
 
 def write_buffer(device, buf, offset, src):
   src = bytearray(src)
-  src_pointer = (ctypes.c_uint8 * len(src)).from_buffer(src)
-  webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, src_pointer, len(src))
+  webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, (ctypes.c_uint8 * len(src)).from_buffer(src), len(src))
 
 def map_buffer(buf, size):
   result: List[Any] = []
@@ -36,18 +35,18 @@ def map_buffer(buf, size):
   if result[0] != webgpu.WGPUBufferMapAsyncStatus_Success:
     raise RuntimeError(f"Failed to map buffer: [{webgpu.WGPUBufferMapAsyncStatus__enumvalues[result[0]]}] {result[1]}")
 
-def copy_buffer_to_buffer(device, src, src_offset, dst, dst_offset, size):
-  encoder = webgpu.wgpuDeviceCreateCommandEncoder(device, webgpu.WGPUCommandEncoderDescriptor())
+def copy_buffer_to_buffer(dev, src, src_offset, dst, dst_offset, size):
+  encoder = webgpu.wgpuDeviceCreateCommandEncoder(dev, webgpu.WGPUCommandEncoderDescriptor())
   webgpu.wgpuCommandEncoderCopyBufferToBuffer(encoder, src, src_offset, dst, dst_offset, size)
   cb = webgpu.wgpuCommandEncoderFinish(encoder, webgpu.WGPUCommandBufferDescriptor())
-  submit(device, [cb])
+  webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(dev), 1, (webgpu.WGPUCommandBuffer*1)(cb))
   webgpu.wgpuCommandBufferRelease(cb)
   webgpu.wgpuCommandEncoderRelease(encoder)
 
 def read_buffer(dev, buf):
   size = webgpu.wgpuBufferGetSize(buf)
-  tmp_usage = webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead
-  tmp_buffer = webgpu.wgpuDeviceCreateBuffer(dev, webgpu.WGPUBufferDescriptor(size=size, usage=tmp_usage, mappedAtCreation=False))
+  tmp_buffer = webgpu.wgpuDeviceCreateBuffer(dev, webgpu.WGPUBufferDescriptor(size=size,
+    usage=webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead, mappedAtCreation=False))
   copy_buffer_to_buffer(dev, buf, 0, tmp_buffer, 0, size)
   map_buffer(tmp_buffer, size)
   ptr = webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size)
@@ -56,9 +55,6 @@ def read_buffer(dev, buf):
   webgpu.wgpuBufferUnmap(tmp_buffer)
   webgpu.wgpuBufferDestroy(tmp_buffer)
   return memoryview(result).cast("B")
-
-def submit(device, command_buffers):
-  webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(device), len(command_buffers), (webgpu.WGPUCommandBuffer * len(command_buffers))(*command_buffers))
 
 def pop_error(device):
   result: List[Any] = []
@@ -104,16 +100,13 @@ class WebGPUProgram:
           webgpu.WGPUBufferDescriptor(size=webgpu.wgpuBufferGetSize(bufs[0]), usage=webgpu.wgpuBufferGetUsage(bufs[0])))
         buf_patch = True
 
+    # Creating bind group layout
     binding_layouts = [webgpu.WGPUBindGroupLayoutEntry(binding=0, visibility= webgpu.WGPUShaderStage_Compute,
       buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform))]
     binding_layouts += [webgpu.WGPUBindGroupLayoutEntry(binding=i+1, visibility=webgpu.WGPUShaderStage_Compute,
       buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform if i >= len(tmp_bufs)
       else webgpu.WGPUBufferBindingType_Storage)) for i in range(len(tmp_bufs)+len(vals))]
-    bindings = [webgpu.WGPUBindGroupEntry(binding=0, buffer=create_uniform(self.dev, float('inf')), offset=0, size=4)]
-    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=create_uniform(self.dev, x) if i >= len(tmp_bufs) else x, offset=0,
-      size=4 if i >= len(tmp_bufs) else webgpu.wgpuBufferGetSize(x)) for i,x in enumerate(tuple(tmp_bufs)+vals)]
 
-    # Creating bind group layout
     bl_arr_type = webgpu.WGPUBindGroupLayoutEntry * len(binding_layouts)
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     bind_group_layouts = [webgpu.wgpuDeviceCreateBindGroupLayout(self.dev, webgpu.WGPUBindGroupLayoutDescriptor(
@@ -132,6 +125,10 @@ class WebGPUProgram:
     if pipe_err := pop_error(self.dev): raise RuntimeError(f"Error creating pipeline layout: {pipe_err}")
 
     # Creating bind group
+    bindings = [webgpu.WGPUBindGroupEntry(binding=0, buffer=create_uniform(self.dev, float('inf')), offset=0, size=4)]
+    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=create_uniform(self.dev, x) if i >= len(tmp_bufs) else x, offset=0,
+      size=4 if i >= len(tmp_bufs) else webgpu.wgpuBufferGetSize(x)) for i,x in enumerate(tuple(tmp_bufs)+vals)]
+
     bg_arr_type = webgpu.WGPUBindGroupEntry * len(bindings)
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_group_layouts[0], entryCount=len(bindings), entries=bg_arr_type(*bindings))
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
@@ -173,7 +170,7 @@ class WebGPUProgram:
     if wait: webgpu.wgpuCommandEncoderResolveQuerySet(command_encoder, query_set, 0, 2, query_buf, 0)
 
     cmd_buf = webgpu.wgpuCommandEncoderFinish(command_encoder, webgpu.WGPUCommandBufferDescriptor())
-    submit(self.dev, [cmd_buf])
+    webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(self.dev), 1, (webgpu.WGPUCommandBuffer*1)(cmd_buf))
 
     if buf_patch:
       copy_buffer_to_buffer(self.dev, tmp_bufs[0], 0, bufs[0], 0, webgpu.wgpuBufferGetSize(bufs[0]))
@@ -189,8 +186,7 @@ class WebGpuAllocator(Allocator):
   def __init__(self, dev): self.dev = dev
   def _alloc(self, size: int, options):
     # WebGPU buffers have to be 4-byte aligned
-    return webgpu.wgpuDeviceCreateBuffer(
-      self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
+    return webgpu.wgpuDeviceCreateBuffer(self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
       usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc))
   def _copyin(self, dest, src: memoryview):
     if src.nbytes % 4:
@@ -199,8 +195,7 @@ class WebGpuAllocator(Allocator):
     write_buffer(self.dev, dest, 0, padded_src if src.nbytes % 4 else src)
   def _copyout(self, dest: memoryview, src):
     buffer_data = read_buffer(self.dev, src)
-    src_len = webgpu.wgpuBufferGetSize(src)
-    dest[:] = buffer_data[:dest.nbytes] if src_len  > dest.nbytes else buffer_data
+    dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
   def _free(self, opaque, options):
     webgpu.wgpuBufferDestroy(opaque)
 
