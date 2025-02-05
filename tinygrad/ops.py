@@ -1155,6 +1155,9 @@ symbolic_simple = PatternMatcher([
   # *** cast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+  # ** pow **
+  # positive const ** x
+  (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
