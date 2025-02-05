@@ -129,7 +129,7 @@ class TestBEAM(unittest.TestCase):
     actions_before = actions.copy()
     get_kernel_actions(Kernel(realized_ast))
     actions_after = actions.copy()
-    assert actions_after == actions_before, "actions state was altered"
+    assert actions_after == actions_before, "actions state was not preserved"
 
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
