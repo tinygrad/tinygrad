@@ -16,15 +16,14 @@ elif OSX and 'tinygrad.runtime.ops_metal' in sys.modules:
   if LLVM_PATH is None:
     raise RuntimeError("LLVM can't be opened in the same process with metal. You can install llvm distribution which supports that via `brew install uuuvn/tinygrad/tinyllvm`") # noqa: E501
 elif OSX:
-  brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()
+  brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm@17']).decode().strip()
   # `brew --prefix` will return even if formula is not installed
   if not os.path.exists(brew_prefix):
     raise RuntimeError('LLVM not found, you can install it with `brew install llvm`')
   LLVM_PATH = os.path.join(brew_prefix, 'lib', 'libLLVM.dylib')
 else:
   LLVM_PATH = ctypes.util.find_library('LLVM')
-  # use newer LLVM if possible
-  for ver in reversed(range(14, 19+1)):
+  for ver in range(17, 19+1):
     if LLVM_PATH is not None: break
     LLVM_PATH = ctypes.util.find_library(f'LLVM-{ver}')
   if LLVM_PATH is None:

@@ -582,6 +582,14 @@ jobs:
             /opt/rocm/lib64
           EOF
           sudo ldconfig
+      - name: Install llvm 17 (amd)
+        # if: matrix.backend == 'amd'
+        run: |
+          wget https://repo.radeon.com/amdgpu/6.0/ubuntu/pool/main/l/llvm-amdgpu/libllvm17.0.60000-amdgpu_17.0.60000-1697589.20.04_amd64.deb
+          dpkg-deb --fsys-tarfile  libllvm17.0.60000-amdgpu_17.0.60000-1697589.20.04_amd64.deb | tar -xvf - -C /tmp ./opt/amdgpu/lib/x86_64-linux-gnu/llvm-17.0/lib/libLLVM-17.so          
+          ldd /tmp/opt/amdgpu/lib/x86_64-linux-gnu/llvm-17.0/lib/libLLVM-17.so
+          sudo cp /tmp/opt/amdgpu/lib/x86_64-linux-gnu/llvm-17.0/lib/libLLVM-17.so /usr/local/lib/          
+          sudo ldconfig
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
@@ -631,7 +639,8 @@ jobs:
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Install llvm
         run: |
-          brew install llvm
+          brew install llvm@17
+          ls /opt/homebrew/opt/llvm@17/lib
       - name: Install comgr
         run: |
           sudo mkdir -p /usr/local/lib
