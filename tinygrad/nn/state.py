@@ -297,7 +297,7 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   ```python
   fn = "Meta-Llama-3-8B-Instruct.Q4_0.gguf"
   gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
-  kv_data, state_dict, t_infos, data_start = gguf_load(gguf_tensor)
+  kv_data, state_dict = gguf_load(gguf_tensor)
   ```
   """
   reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
@@ -323,4 +323,4 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
-  return kv_data, state_dict, t_infos, data_start
+  return kv_data, state_dict
