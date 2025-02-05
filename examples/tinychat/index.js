@@ -333,10 +333,12 @@ const load_state_dict = async (device, progress) => {
   await kernelsReady;
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
   const model = await transformer().setup(device, state_dict, progress);
+  delete state_dict["output.weight"]; // uses same data as tok_embeddings.weight, TODO: make consistent with wasm loading
+  delete state_dict["output.scale"]; // uses same data as tok_embeddings.weight, TODO: make consistent with wasm loading
 
 
+  /*
   if (window.BACKEND === "WebGPU") {
-    delete state_dict["output.weight"]; // uses same data as tok_embeddings.weight, TODO: make consistent with wasm loading
     const num_decompressers = 8;
     // decompression time goes from 15sec to 10sec by scheduling GPU jobs like below, with Q6_K quantized llama-3.2-1B
     // TODO: can we get tinygrad to give us bigger kernels? currently throws exceptions when trying to compile them
@@ -429,14 +431,14 @@ const load_state_dict = async (device, progress) => {
     //const t1 = performance.now();
     //console.log(`decompression elapsed seconds: ${(t1 - t0) / 1000}`)
   }
+    */
 
   const valid_final_dtypes = new Set(["float32", "int8", "int32"]);
   const loadFileToStateDict = async(file) => {
     for (const part of file.parts) {
       if (part.empty) continue;
       part.bytes = (part.size === file.bytes.length) ? file.bytes : file.bytes.slice(part.file_start_pos, part.file_start_pos + part.size);
-      if (part.dtype === "Q6_K") await decompressToStateDict(part, state_dict, pipelinePool, device, progress); // TODO: move this function def within this scope
-      else if (valid_final_dtypes.has(part.dtype)) {
+      if (valid_final_dtypes.has(part.dtype)) {
         new Uint8Array(state_dict[part.key].bytes.getMappedRange(part.target_start_pos, part.bytes.length)).set(part.bytes);
       }
       else throw new Error(`unexpected dtype: ${part.dtype} in file: ${file.name}`);
