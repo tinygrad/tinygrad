@@ -355,12 +355,12 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MUL, ops)
 
   def test_bitshift_right(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.int, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
-    a1 = UOp(Ops.IDIV, dtypes.int, (l1, c1))
-    a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
+    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c1 = UOp(Ops.CONST, dtypes.uint, (), 2)
+    c2 = UOp(Ops.CONST, dtypes.uint, (), 3)
+    l1 = UOp(Ops.LOAD, dtypes.uint, (g1.index(c1),))
+    a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
+    a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     ops = [x.op for x in uops]

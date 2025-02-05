@@ -94,10 +94,9 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
   def test_literal_one_pow(self):
     _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
-  # this fails because of DETACH, it shouldn't
-  # update: passes after CONST(VIEW(DEVICE)) in tensor
+  # TODO: pow simplification
   def test_tensor_one_pow(self):
-    _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
+    _check_ast_count(1, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
@@ -220,9 +219,7 @@ class TestMultiConstFolding(unittest.TestCase):
     t = Tensor.arange(16).float().realize().to(ds)
 
     # non const folding case creates one ast on each shard
-    # NOTE: there's extra contiguous kernels here since it's realizing both the CONTIGUOUS and its parent COPY
-    # why does multi call contiguous on a COPY?
-    _check_ast_count(7, t + 1)
+    _check_ast_count(4, t + 1)
     _check_ast_count(4, 1 + t)
     _check_ast_count(4, t * 2)
     _check_ast_count(4, 2 * t)

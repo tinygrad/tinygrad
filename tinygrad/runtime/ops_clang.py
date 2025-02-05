@@ -12,7 +12,7 @@ class ClangJITCompiler(Compiler):
     # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     args = ['-march=native', f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib']
-    arch_args = ['-ffixed-x18'] if platform.machine() == 'arm64' else []
+    arch_args = ['-ffixed-x18'] if target == 'arm64' else []
     obj = subprocess.check_output(['clang', '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
     return jit_loader(obj)
 
