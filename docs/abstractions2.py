@@ -7,6 +7,7 @@
 
 print("******** first, the runtime ***********")
 
+import sys
 from tinygrad.runtime.ops_clang import ClangJITCompiler, MallocAllocator, CPUProgram
 
 # allocate some buffers
@@ -19,7 +20,9 @@ MallocAllocator._copyin(a, memoryview(bytearray([2,0,0,0])))
 MallocAllocator._copyin(b, memoryview(bytearray([3,0,0,0])))
 
 # compile a program to a binary
-lib = ClangJITCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+prg = "void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }"
+if sys.platform == 'win32': prg = "__attribute__((ms_abi)) " + prg
+lib = ClangJITCompiler().compile(prg)
 
 # create a runtime for the program
 fxn = CPUProgram("add", lib)
