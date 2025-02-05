@@ -9,6 +9,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
+from tinygrad.spec import type_verify, kernel_spec
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -57,8 +58,8 @@ sym = symbolic_simple+PatternMatcher([
   # remove contiguous if we can just view the buffer
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
-  # contiguous/buffer is already contiguous
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER)),)), lambda root: root.src[0]),
+  # contiguous/buffer/copy is already contiguous
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY)),)), lambda root: root.src[0]),
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
@@ -80,11 +81,10 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  tensor_uops: dict[UOp, list[UOp]]                                  # this maps BUFFER uops of this schedule to the tensor uop
+  ops_metadata: dict[UOp, Metadata]                                  # this maps uops in the schedule to the tensor metadata
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
-  ops_metadata: dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
   preloads: defaultdict[Buffer, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
@@ -244,7 +244,7 @@ def load_realized(ctx:ScheduleContext, b:UOp, st:UOp):
   return UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, unwrap(st.st).to_uop()))
 
 def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
-  if (m:=ctx.tensor_uops[b][-1].metadata) is not None: ctx.ops_metadata[x] = m
+  if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
   if b not in ctx.realizes: return x # collapse BUFFER
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
@@ -255,7 +255,7 @@ break_sched = PatternMatcher([
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),
 ])
 
-# **** ScheduleItem creation
+# **** convert Kernel to a ScheduleItem (for legacy reasons)
 
 @dataclass(frozen=True)
 class ScheduleItem:
@@ -272,6 +272,18 @@ class ScheduleItem:
     return tuple(b for i,b in enumerate(self.bufs) if i not in self.output_idxs)
   @functools.cached_property
   def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
+
+def kernel_to_si(k:UOp) -> ScheduleItem:
+  assert k.op is Ops.KERNEL, f"must be KERNEL {k}"
+  return ScheduleItem(k.arg.ast, tuple(u.buf_uop.buffer for u in k.src), k.arg.metadata)
+
+# **** Kernel creation
+
+@dataclass(frozen=True)
+class Kernel:
+  ast: UOp
+  metadata: tuple[Metadata, ...]
+  def __repr__(self): return f"<Kernel {len(list(self.ast.toposort))} {self.ast.op} {self.metadata}>"
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
@@ -364,7 +376,7 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
   return var
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
-def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> ScheduleItem:
+def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> UOp:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
@@ -387,7 +399,9 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> Sched
           # otherwise, it's not fine
           else: raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                                    +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), tuple(dedup(m for x in pre.toposort if (m:=ctx.ops_metadata.get(x)) is not None)))
+  # NOTE: we only add the metadata for fused tensors
+  metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
+  return UOp(Ops.KERNEL, src=tuple(si_ctx.bufs), arg=Kernel(ast, metadata))
 
 # **** schedule creation and toposort
 
@@ -409,26 +423,36 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
   # get realizes
   buf_tensors: dict[UOp, list[UOp]] = {}
+  ops_metadata: dict[UOp, Metadata] = {}
   for k,v in tensor_map.items():
-    if (b:=buffer_map.get(v)) is not None: buf_tensors.setdefault(b, []).append(k)
-  realize_map = group_realizes(sink, ctx:=ScheduleContext(buf_tensors))
+    if (b:=buffer_map.get(v)) is not None:
+      buf_tensors.setdefault(b, []).append(k)
+      ops_metadata[b] = k.metadata
+  realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
 
   # TODO: this should be the break between the "grouper" and the "linearizer"
   # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
   # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
 
-  # create schedule items + map buffers to realized tensors
-  prescheduled: list[ScheduleItem] = []
+  # create kernels + map buffers to realized tensors
+  sinks: list[UOp] = []
   var_vals: dict[Variable, int] = {}
   for buf_uop,store in realize_map.items():
     assert store.op is Ops.STORE, f"expected a realized BUFFER to get a STORE {sink}"
-    prescheduled.append(schedule_uop(store.sink(), ctx, var_vals))
+    sinks.append(schedule_uop(store.sink(), ctx, var_vals))
     # can only schedule once
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     # increment refcount for this buffer
     buf_uop.buffer.ref(1)
+  sched_sink = UOp(Ops.SINK, src=tuple(sinks))
+  # display, TODO: this isn't a complete sched_sink yet
+  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
+  type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # add kernel children
+  # convert kernels to ScheduleItem
+  prescheduled = [kernel_to_si(k) for k in sched_sink.src]
+  # add ScheduleItem children
+  # TODO: this should construct the graph directly from the sched_sink
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
   in_degree: defaultdict[ScheduleItem, int] = defaultdict(int)
