@@ -50,9 +50,10 @@ def read_buffer(dev, buf):
   copy_buffer_to_buffer(dev, buf, 0, tmp_buffer, 0, size)
   map_buffer(tmp_buffer, size)
   void_ptr = ctypes.cast(webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size), ctypes.c_void_p)
+  buf_copy = bytearray((ctypes.c_uint8 * size).from_address(void_ptr.value))
   webgpu.wgpuBufferUnmap(tmp_buffer)
   webgpu.wgpuBufferDestroy(tmp_buffer)
-  return memoryview((ctypes.c_uint8 * size).from_address(void_ptr.value)).cast("B")
+  return memoryview(buf_copy).cast("B")
 
 def pop_error(device):
   result: List[Any] = []
@@ -113,9 +114,8 @@ class WebGPUProgram:
     if bg_layout_err := pop_error(self.dev): raise RuntimeError(f"Error creating bind group layout: {bg_layout_err}")
 
     # Creating pipeline layout
-    pipeline_layout_desc = webgpu.WGPUPipelineLayoutDescriptor()
-    pipeline_layout_desc.bindGroupLayoutCount = len(bind_group_layouts)
-    pipeline_layout_desc.bindGroupLayouts = (webgpu.WGPUBindGroupLayout * len(bind_group_layouts))(*bind_group_layouts)
+    pipeline_layout_desc = webgpu.WGPUPipelineLayoutDescriptor(bindGroupLayoutCount=len(bind_group_layouts),
+      bindGroupLayouts = (webgpu.WGPUBindGroupLayout * len(bind_group_layouts))(*bind_group_layouts))
 
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
     pipeline_layout = webgpu.wgpuDeviceCreatePipelineLayout(self.dev, pipeline_layout_desc)
