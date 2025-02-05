@@ -63,6 +63,9 @@ sym = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
+  # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
+  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
+  lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
   # remove CONST/BIND/BUFFER from SINK
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
@@ -112,6 +115,7 @@ def add_buffers(buf:UOp, buffer_map:dict[UOp, UOp], cache:dict[UOp, UOp]) -> UOp
   op = buf.replace(dtype=dtype, src=tuple(add_buffers(x, buffer_map, cache) for x in buf.src))
   # track the buffer uop for the simplified uop
   buffer_map[buf] = buf_uop
+  if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).buf_uop.buffer.view(op.size, op.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   # (early) bufferize
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
   return ret
@@ -132,11 +136,6 @@ def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs)
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, b, src)
 
-def create_subbuffer(base:UOp, b:UOp, root:UOp, x:UOp):
-  if isinstance(b.device, tuple) or not b.device.startswith("DISK"): return None
-  buffers[b] = x.buf_uop.buffer.view(b.size, b.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
-  return base.replace(src=(b, root.replace(op=Ops.BUFFER_VIEW)))
-
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
@@ -144,11 +143,8 @@ do_realize = PatternMatcher([
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
-  # realize before COPY or BUFFER_VIEW
-  (UPat(Ops.COPY, src=(UPat(), UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
-  # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
-  (UPatScheduled((Ops.BITCAST, Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),)), create_subbuffer),
+  # realize before COPY
+  (UPat(Ops.COPY, src=(UPat(), UPatScheduled())), realize),
 ])
 
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
@@ -286,7 +282,7 @@ class Kernel:
   def __repr__(self): return f"<Kernel {len(list(self.ast.toposort))} {self.ast.op} {self.metadata}>"
 
 @dataclass(frozen=True)
-class ScheduleItemContext:
+class KernelContext:
   var_vals: dict[Variable, int]
   bufs: list[UOp] = field(default_factory=list)
 
@@ -342,14 +338,14 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> UOp|None:
+def _append_st_vars(ctx:KernelContext, x:UOp) -> UOp|None:
   st = unwrap(x.st).simplify()
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
     ctx.var_vals.update(var_vals)
   return st.to_uop() if st != x.st else None
 
-def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
+def _append_buf(ctx:KernelContext, x:UOp) -> UOp:
   ctx.bufs.append(x)
   return UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(size=x.size), (), len(ctx.bufs)-1)
 
@@ -380,7 +376,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext, var_vals:dict[UOp, int]) -> UOp:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  ast = graph_rewrite(sink, to_si, si_ctx:=ScheduleItemContext(var_vals))
+  ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(var_vals))
   # deal with ASSIGN
   if len(ctx.assigns) != 0:
     assign_preloads = ctx.preloads[si_ctx.bufs[0].buffer]
@@ -430,10 +426,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
 
-  # TODO: this should be the break between the "grouper" and the "linearizer"
-  # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
-  # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
-
   # create kernels + map buffers to realized tensors
   sinks: list[UOp] = []
   var_vals: dict[Variable, int] = {}
@@ -448,6 +440,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # display, TODO: this isn't a complete sched_sink yet
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
   type_verify(list(sched_sink.toposort), kernel_spec)
+
+  # TODO: this should be the break between the "grouper" and the "linearizer"
+  # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
+  # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
 
   # convert kernels to ScheduleItem
   prescheduled = [kernel_to_si(k) for k in sched_sink.src]
