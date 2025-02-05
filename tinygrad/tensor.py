@@ -3313,12 +3313,9 @@ class Tensor(SimpleMathTrait):
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
     if not base.is_floating_point(): raise RuntimeError("base needs to be float")
-    # start with b ** e = exp(e * log(b))
-    ret = base.abs().log().mul(exponent).exp()
-    # negative base adjustment: nan for non-integer exponent and -1 for odd exponent
-    adj = (base < 0).detach().where((exponent != exponent.int()).detach().where(math.nan, (exponent.int()%2==1).where(-1, 1)), 1)
-    # fix 0 ** 0 = 1
-    ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * adj)
+
+    # NOTE: pow(int, float) -> int
+    ret = base._apply_uop(UOp.pow, exponent)
     return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
