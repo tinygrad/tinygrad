@@ -420,7 +420,8 @@ expander = PatternMatcher([
          Ops.VECTORIZE, Ops.IF), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"),
+    lambda acc,v: acc.replace(dtype=v.dtype, src=(acc.src[0].broadcast(v.dtype.count),)+acc.src[1:])),
   # BARRIERs aren't actually expanded
   (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
    lambda ex: UOp(Ops.UNROLL, dtypes.void, (UOp(Ops.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
@@ -449,6 +450,11 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
+  (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
+])
+
+devectorize_load_store = PatternMatcher([
+  (UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
@@ -507,9 +513,13 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   sink = graph_rewrite(sink, sym+expander)
 
-  # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
-  sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
-    mulacc_unrolled)
+  if opts is not None and opts.dont_devectorize:
+    # new devectorize for load/store
+    sink = graph_rewrite(sink, sym+devectorize_load_store)
+  else:
+    # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
+    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
+      mulacc_unrolled)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
