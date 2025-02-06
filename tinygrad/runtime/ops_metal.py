@@ -151,7 +151,7 @@ class MetalProgram:
     self.ns_name = to_ns_str(self.name)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
-    if prod(local_size) > cast(int, self.max_total_threads):
+    if prod(local_size) > self.max_total_threads:
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
       memory_length = msg(self.pipeline_state, "staticThreadgroupMemoryLength", restype=ctypes.c_ulong)
       raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
