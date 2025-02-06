@@ -193,7 +193,7 @@ class CapturedJit(Generic[ReturnType]):
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
-  if tensors: Tensor.realize(*tensors)
+  if len(unrealized_tensors := [x for x in tensors if not x.lazydata.is_realized]): Tensor.realize(*unrealized_tensors)
   # TODO: should we be unpacking multi here?
   lbs: list[UOp] = flatten([t.lazydata.src if t.lazydata.op is Ops.MULTI else [t.lazydata] for t in tensors])
   input_buffers: list[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
