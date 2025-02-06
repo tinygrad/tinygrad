@@ -607,6 +607,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: b**1.1, lambda: a**1.1)
 
   def test_pow_const(self):
+    helper_test_op([(45,65)], lambda x: x**0.0)
     helper_test_op([(45,65)], lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0)
     helper_test_op([(45,65)], lambda x: 1.0**x)
@@ -616,8 +617,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2.0**x)
     # TODO: fix backward
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
-    # TODO: fix backward, should be nan
-    helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
+    helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
