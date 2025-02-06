@@ -44,14 +44,8 @@ def msg(selector: str, restype: type[T] = objc_id):
   def _msg(ptr: objc_id, *args: Any) -> T: return sender(ptr, resname, *args)
   return _msg
 
-# Ignore mypy error reporting incompatible default, because typevar default only works on python 3.12
-#def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T: # type: ignore [assignment]
-#  sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
-#  sender.restype = restype
-#  return sender(ptr, sel(selector), *args)
-
 @functools.lru_cache(None)
-def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
+def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode(), restype=objc_instance)
 def from_ns_str(s): return bytes(msg(s, "UTF8String", restype=ctypes.c_char_p)).decode()
 
 def to_struct(*t: int, _type: type = ctypes.c_ulong): return init_c_struct_t(tuple([(f"field{i}", _type) for i in range(len(t))]))(*t)

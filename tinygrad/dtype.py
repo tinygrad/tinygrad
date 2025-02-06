@@ -80,6 +80,8 @@ class dtypes:
   @functools.lru_cache(None)
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
   @staticmethod
+  def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
+  @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
     if x.__class__ is int: return dtypes.default_int
