@@ -177,15 +177,21 @@ function deleteTensorFromDb(db, id) {
 }
 
 function makeProgress(total) {
-  return function progress(loaded, message) {
-    const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
-    document.querySelector('.progress').style.width = `${percentage}%`;
-    document.getElementById('progress-percentage').textContent = `${percentage}%`;
+  let acc = 0;
+  const ret = function progress(amount, message) {
+    if (amount >= 0) { // allow updating message only
+      acc += amount;
+      const percentage = total ? Math.trunc((acc / total) * 100) : 0;
+      document.querySelector('.progress').style.width = `${percentage}%`;
+      document.getElementById('progress-percentage').textContent = `${percentage}%`;
+    }
     if (message) {
       this.loadingMessage = message;
       document.getElementById('loading-message').textContent = this.loadingMessage;
     }
   }.bind(this);
+  ret.total = total;
+  return ret;
 }
 
 async function hashBuffer(bytes) {
@@ -238,7 +244,6 @@ function sendMessageToWorker(worker, message) {
 async function load_state_dict (data, device, progress) {
   const state_dict = data.metadata.state_dict;
   let completed = 0;
-  let totalLoaded = 0;
 
   // modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
   const loadPart = async (part) => {
@@ -249,8 +254,7 @@ async function load_state_dict (data, device, progress) {
               for (;;) {
                   const { done, value } = await reader.read();
                   if (done) break;
-                  totalLoaded += value.byteLength;
-                  progress(totalLoaded, `Downloading model:`);
+                  progress(value.byteLength, `Loading model:`);
                   controller.enqueue(value);
               }
               controller.close();
@@ -267,8 +271,7 @@ async function load_state_dict (data, device, progress) {
 
     if (part) {
       console.log(`Cache hit: ${filename}, hash: ${hash}`);
-      totalLoaded += part.content.byteLength;
-      progress(totalLoaded, `Loading model:`)
+      progress(part.content.byteLength, `Loading model:`)
       return Promise.resolve(part.content);
     } else {
       console.log(`Cache miss: ${filename}, hash: ${hash}`);
@@ -356,17 +359,6 @@ document.addEventListener("alpine:init", () => {
     lastSeenToks: [],
 
     progress: null,
-    /*
-    progress(loaded, total, message) {
-      const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
-      document.querySelector('.progress').style.width = `${percentage}%`;
-      document.getElementById('progress-percentage').textContent = `${percentage}%`;
-      if (message) {
-        this.loadingMessage = message;
-        document.getElementById('loading-message').textContent = this.loadingMessage;
-      }
-    },
-    */
 
     async init() {
       const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
@@ -393,40 +385,32 @@ document.addEventListener("alpine:init", () => {
       if (window.BACKEND === "WebGPU") {
         try {
           device = await getDevice();
-          var modelPromise = load_state_dict(data, device, this.progress);
           console.log("WebGPU device initialized");
+          var model = await load_state_dict(data, device, this.progress);
         } catch (error) {
-          this.progress(0, 100, "Failed to launch WebGPU. Loading WASM model instead...");
+          this.progress(0, "Failed to launch WebGPU. Loading WASM model instead...");
           window.BACKEND = "WASM";
           console.log(`error: ${error}\nFailed to launch WebGPU. Loading WASM model instead...`); // return;
         }
       }
 
       try {
-        const placeholder = 1; // TODO: clean up this section, handle WASM
-      } catch (error) {this.progress(0, 100, `Error decompressing model: ${error}`); console.log(error); return;}
-
-      var p = 0;
-      try {
-        this.progress(p, 100, "Loading tokenizer:");
+        this.progress(0.01 * totalSize, "Loading tokenizer:");
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
-        p = 10; this.progress(p, 100, "Loading tokenizer:");
+        this.progress(0.01 * totalSize, "Loading tokenizer:");
         const wasmBytes = await wasmResponse.arrayBuffer();
         await tiktokenReady;
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
-        p = 20; this.progress(p, 100, "Loading tokenizer:");
+        this.progress(0.01 * totalSize, "Loading tokenizer:");
 
         this.tokenizer = await createTokenizer(`${window.MODEL_BASE_URL}/llama3-2.tiktoken`);
         const tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
-        p = 30; this.progress(p, 100, "Loading tokenizer:");
-      } catch (error) {this.progress(p, 100, `Error launching tokenizer: ${error}`); console.log(error); return;}
+        this.progress(0.01 * totalSize, "Loading tokenizer:");
+      } catch (error) {this.progress(-1, `Error launching tokenizer: ${error}`); console.log(error); return;}
 
       try {
-        p = 40; this.progress(p, 100, `Launching ${window.BACKEND} model:`);
-        //await kernelsReady;
         if (window.BACKEND === "WebGPU") {
-          const model = await modelPromise;
           this.nets = {"transformer": model};
         }
         else if (window.BACKEND === "WASM") {
@@ -435,9 +419,9 @@ document.addEventListener("alpine:init", () => {
           msg = await sendMessageToWorker(modelWorker, {header: "state_dict", data: state_dict});
           this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(modelWorker, {header: "token", data: [tok, start_pos]})};
         }
-        this.progress(100, 100, `Launching ${window.BACKEND} model:`);
+        this.progress(0.01 * totalSize, `Launching ${window.BACKEND} model:`);
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
-      } catch (error) {this.progress(p, 100, `Error launching model: ${error}`); console.log(error); return;}
+      } catch (error) {this.progress(-1, `Error launching model: ${error}`); console.log(error); return;}
     },
 
     // current state
