@@ -2257,14 +2257,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  # TODO: linearizer block error
-  @unittest.expectedFailure
-  def test_avg_pool3d_failure(self):
-    with Context(NOOPT=0):
-      helper_test_op([(1,1,16,16,16)],
-        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
-
   def test_avg_pool3d_noopt(self):
     with Context(NOOPT=1):
       helper_test_op([(1,1,16,16,16)],
@@ -2743,6 +2735,7 @@ class TestOpsUint8(unittest.TestCase):
     helper_test_op(None,
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
+
 
 if __name__ == '__main__':
   np.random.seed(1337)

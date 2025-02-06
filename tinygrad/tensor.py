@@ -2097,6 +2097,15 @@ class Tensor(SimpleMathTrait):
     if not ceil_mode: return pool(self, reg_pads).mean(axis)
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
+  def avg_pool3d(self, kernel_size=(2,2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
+    """Applies 3D average pooling over an input signal composed of several input planes."""
+    axis, k_ = tuple(range(-len(k_ := make_tuple(kernel_size, 3)), 0)), make_tuple(kernel_size, 3)
+    def pool(x, p): return x.pad(p)._pool(k_, stride if stride is not None else k_, dilation)
+    reg_pads, ceil_pads = self._resolve_pool_pads(padding, len(k_)), self._apply_ceil_mode(reg_pads := self._resolve_pool_pads(padding, len(k_)), k_, stride if stride is not None else k_, dilation)  # noqa: E501
+    if not count_include_pad: return pool(self, ceil_pads if ceil_mode else reg_pads).sum(axis) / pool(self.ones_like(), ceil_pads if ceil_mode else reg_pads).sum(axis)  # noqa: E501
+    if not ceil_mode: return pool(self, reg_pads).mean(axis)
+    return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
+
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
     Applies max pooling over a tensor.
