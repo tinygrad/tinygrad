@@ -332,6 +332,12 @@ generate_am() {
   fixup $BASE/am/mmhub_3_0_0.py
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/mmhub_3_0_2_offset.h \
+    extra/amdpci/headers/mmhub_3_0_2_sh_mask.h \
+    -o $BASE/am/mmhub_3_0_2.py
+  fixup $BASE/am/mmhub_3_0_2.py
+
+  clang2py -k cdefstum \
     extra/amdpci/headers/nbio_4_3_0_offset.h \
     extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
     -o $BASE/am/nbio_4_3_0.py

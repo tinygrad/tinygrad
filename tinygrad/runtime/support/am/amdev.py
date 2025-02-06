@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
-from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
+from tinygrad.runtime.autogen.am import am, mp_11_0, gc_11_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -40,7 +40,6 @@ class AMFirmware:
 
     blob, sos_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_sos.bin", am.struct_psp_firmware_header_v2_0)
     fw_bin = sos_hdr.psp_fw_bin
-    # exit(0)
 
     for fw_i in range(sos_hdr.psp_fw_bin_count):
       fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
@@ -95,7 +94,6 @@ class AMFirmware:
     self.descs += [self.desc(am.GFX_FW_TYPE_RLC_G, blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes)]
 
   def load_fw(self, fname:str, *headers):
-    print(fname)
     fpath = next(f for loc in ["/lib/firmware/updates/amdgpu/", "/lib/firmware/amdgpu/"] if (f:=pathlib.Path(loc + fname)).exists())
     blob = memoryview(bytearray(fpath.read_bytes()))
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
@@ -373,11 +371,20 @@ class AMDev:
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-    # print(self.ip_versions)
-    # exit(0)
+  def _load_module(self, prefix:str, hwip):
+    version = [self.ip_versions[hwip]//10000, (self.ip_versions[hwip]//100)%100, self.ip_versions[hwip]%100]
+    for ver in [version, version[:2]+[0], version[:1]+[0, 0]]:
+      try:
+        print(f"Loading {prefix} module with version {ver}")
+        return __import__(f"tinygrad.runtime.autogen.am.{prefix}_{ver[0]}_{ver[1]}_{ver[2]}", fromlist=[f"{prefix}_{ver[0]}_{ver[1]}_{ver[2]}"])
+      except ImportError: pass
+    print(f"Failed to load {prefix} module with version {version}")
+    return None
 
   def _build_regs(self):
-    mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]
+    mods = [("MP0", self._load_module("mp", am.MP0_HWIP)), ("MP1", mp_11_0), ("NBIO", self._load_module("nbio", am.NBIO_HWIP)), 
+            ("MMHUB", self._load_module("mmhub", am.MMHUB_HWIP)), ("GC", self._load_module("gc", am.GC_HWIP)),
+            ("OSSSYS", self._load_module("osssys", am.OSSSYS_HWIP))]
     for base, module in mods:
       rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
       reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
