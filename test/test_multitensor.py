@@ -84,7 +84,7 @@ class TestMultiTensor(unittest.TestCase):
     for si, ei in zip(sched[:], lower_schedule(sched)):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
-    assert names[-2] == names[-1], "function was relinearized"
+    self.assertEqual(len(set(names)), 3), "function was relinearized"
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
   def test_sharded_memory(self):
@@ -774,10 +774,9 @@ class TestMultiTensor(unittest.TestCase):
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule()
-    self.assertEqual(len(sched), 8)
+    self.assertEqual(len(sched), 6)
     # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
     self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
-    # all these kernels are just because multi calls contiguous on every single shard
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 

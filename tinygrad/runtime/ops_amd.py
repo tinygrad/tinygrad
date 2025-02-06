@@ -426,6 +426,7 @@ class KFDIface:
 class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping # noqa: E702
 
 class PCIIface:
+  supported_devs:list[int] = [0x744c, 0x7480]
   vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
   vfio_fd:HWInterface
   gpus:list[Any] = []
@@ -437,7 +438,7 @@ class PCIIface:
       libpciaccess.pci_system_init()
       pci_iter = libpciaccess.pci_id_match_iterator_create(None)
       while pcidev:=libpciaccess.pci_device_next(pci_iter):
-        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c: PCIIface.gpus.append(pcidev.contents)
+        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id in PCIIface.supported_devs: PCIIface.gpus.append(pcidev.contents)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
@@ -496,9 +497,11 @@ class PCIIface:
     libpciaccess.pci_device_cfg_read_u16(self.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
     libpciaccess.pci_device_cfg_write_u16(self.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
 
-    # TODO: this is for 7900xtx, the only tested card.
-    self.props = {'simd_count': 192, 'simd_per_cu': 2, 'max_waves_per_simd': 16, 'gfx_target_version': 110000, 'max_slots_scratch_cu': 32,
-                  'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
+    array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
+    simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
+    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': self.adev.ip_versions[am.GC_HWIP],
+      'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
+      'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
     fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size

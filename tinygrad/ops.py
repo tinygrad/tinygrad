@@ -89,6 +89,7 @@ class MathTrait(SimpleMathTrait):
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
+  def pow(self, x): return self.alu(Ops.POW, x)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
@@ -133,7 +134,7 @@ class Ops(FastEnum):
 
   # BinaryOps
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -155,7 +156,7 @@ class Ops(FastEnum):
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY,
-            Ops.SUB, Ops.FDIV}
+            Ops.SUB, Ops.FDIV, Ops.POW}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 
@@ -175,7 +176,7 @@ class GroupOp:
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
 
   # do not preserve f(0) = 0
-  UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
+  UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
 
   All = set(Ops)
 
@@ -466,14 +467,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if axis is None: lbs = [self] * len(devices)
     else:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      # NOTE: this works for both even shards and uneven shards
       sz = self.shape[axis] // len(devices)
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs, off = [], 0
-      for sz in sizes:
+      lbs = []
+      for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
         lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
-        off += sz
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
     return UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
 
   # *** from LazyBuffer ***
@@ -512,8 +512,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 else self
+    if (self.op is Ops.VIEW and len(self.src) == 1) or self.op in GroupOp.Movement: return self.src[0].base
+    return self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
@@ -676,10 +676,15 @@ def safe_exp2(x):
   try: return 2 ** x
   except OverflowError: return math.inf
 
+def safe_pow(x, y):
+  try: return math.nan if isinstance(p:=pow(x, y), complex) else p
+  except ZeroDivisionError: return math.inf
+  except ValueError: return math.inf if x > 0 else -math.inf
+
 python_alu: dict[Ops, Callable]  = {
   Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: safe_exp2,
   Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
   Ops.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], Ops.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0,
@@ -1107,6 +1112,13 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
+def simplify_pow(x:UOp, c:UOp) -> UOp|None:
+  if c.arg < 0: return x.reciprocal().pow(-c)
+  if c.arg == 0: return x.const_like(1)
+  if int(c.arg-0.5)+0.5 == c.arg: return x.pow(c.const_like(c.arg-0.5)) * x.sqrt()
+  if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
+  return None
+
 # def max_var_const(x:UOp, c1:UOp, c2:UOp):
 #   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
@@ -1150,6 +1162,10 @@ symbolic_simple = PatternMatcher([
   # *** cast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+  # ** pow **
+  (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
+  # positive const ** x
+  (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
 ])
 
 symbolic = symbolic_simple+PatternMatcher([

@@ -131,12 +131,6 @@ class Tensor(SimpleMathTrait):
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __new__(cls, *args, **kwargs):
-    instance = super().__new__(cls)
-    all_tensors.add(weakref.ref(instance))
-    return instance
-  def __del__(self): all_tensors.discard(weakref.ref(self))
-
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
@@ -173,7 +167,7 @@ class Tensor(SimpleMathTrait):
       dtype = dtype or dtypes.uint8
       data = _metaop(Ops.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
 
-    # by this point, it has to be a LazyBuffer
+    # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
@@ -183,6 +177,19 @@ class Tensor(SimpleMathTrait):
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
+
+    # add to all_tensors after construction succeeds
+    all_tensors.add(weakref.ref(self))
+  def __del__(self): all_tensors.discard(weakref.ref(self))
+
+  def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
+    new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
+    needs_input_grad = [t.requires_grad for t in (self,)+x]
+    return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
+
+  def _apply_broadcasted_uop(self, fxn:Callable, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    lhs,rhs = self._broadcasted(x, reverse)
+    return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -220,17 +227,6 @@ class Tensor(SimpleMathTrait):
 
   @property
   def dtype(self) -> DType: return self.lazydata.dtype
-
-  def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
-    ret = Tensor.__new__(Tensor)
-    needs_input_grad = [t.requires_grad for t in (self,)+x]
-    ret.requires_grad, ret.grad = True if any(needs_input_grad) else None if None in needs_input_grad else False, None
-    ret.lazydata = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
-    return ret
-
-  def _apply_broadcasted_uop(self, fxn:Callable, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
-    lhs,rhs = self._broadcasted(x, reverse)
-    return lhs._apply_uop(fxn, rhs)
 
   # ***** data handlers ****
 
@@ -1100,7 +1096,7 @@ class Tensor(SimpleMathTrait):
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     # turn scalar Tensors into const val for int indexing if possible
-    x, indices = self, [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
+    x, indices = self, list(indices)
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
@@ -3085,11 +3081,6 @@ class Tensor(SimpleMathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  # TODO: tensor should stop checking if things are const
-  def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
-    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.base.op is Ops.CONST \
-      and unwrap(x.lazydata.st).views[0].mask is None and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
-
   def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Adds `self` and `x`.
@@ -3289,40 +3280,21 @@ class Tensor(SimpleMathTrait):
     Equivalent to `self ** x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(2).numpy())
+    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print((2 ** Tensor([-1, 2, 3])).numpy())
+    print((2.0 ** Tensor([-1, 2, 3])).numpy())
     ```
     """
-    x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and not reverse:
-      # simple pow identities
-      if x < 0: return self.reciprocal().pow(-x).cast(self.dtype)
-      if x == 0: return 1 + self * 0
-      # rewrite pow 0.5 to sqrt
-      if int(x - 0.5) + 0.5 == x: return self.pow(int(x - 0.5)) * self.sqrt()
-      if int(x) == x: return self.pow(x // 2).square() * (1 if x % 2 == 0 else self)
-
-    # positive const ** self
-    if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
-
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
     if not base.is_floating_point(): raise RuntimeError("base needs to be float")
-    # start with b ** e = exp(e * log(b))
-    ret = base.abs().log().mul(exponent).exp()
-    # correct sign of negative base with odd exponent
-    negative_base = (base < 0).detach().where(1, 0)
-    # 1 for non-negative base or negative even exponent, -1 for negative odd exponent, don't care about non-integer exponent
-    correct_sign = (exponent.int()%2==0).where(1, 1-2*negative_base)
-    # inject nan for negative base and non-integer exponent
-    inject_nan = (negative_base * (exponent != exponent.trunc())).detach().where(math.nan, 1)
-    # apply correct_sign inject_nan, and fix 0 ** 0 = 1
-    ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+
+    # NOTE: pow(int, float) -> int
+    ret = base._apply_uop(UOp.pow, exponent)
     return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
