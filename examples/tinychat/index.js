@@ -3,6 +3,9 @@ window.MODEL_BASE_URL= ".";
 const queryParams = new URLSearchParams(window.location.search);
 const normalizedParams = Object.fromEntries([...queryParams].map(([key, value]) => [key.toUpperCase(), value.toUpperCase()]));
 window.BACKEND = (normalizedParams["BACKEND"] === "WASM") ? "WASM" : "WebGPU";
+const isMobileAgent = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+window.isMobile = isMobileAgent || hasTouchScreen;
 
 const tiktokenReady = (async () => {
   const { init, get_encoding, Tiktoken, load } = await import('./tiktoken.js');
@@ -309,7 +312,7 @@ const load_state_dict = async (device, progress) => {
   const toDownload = data.metadata.files.filter(file => !cachedFileHashes.has(file.hash));
   const downloaded = [];
   // to limit memory overhead, we pause downloads if we have this number of downloaded files waiting to be processed
-  const numDownloaders = 5; // TODO: dynamically base this on DL file size?
+  const numDownloaders = window.isMobile ? 5 : toDownload.length; // TODO: dynamically base this on DL file size? current assumption is 16 MiB chunks
   const chainDownload = async (file) => {
     loadPart(`${window.MODEL_BASE_URL}/${file.name}`, progressCallback) // triggers download
     .then(async (arraybuf) => { 
@@ -351,6 +354,7 @@ const load_state_dict = async (device, progress) => {
     completed += 1;
   }
 
+  const loadDelay = window.isMobile ? 100 : 20 // hoping to improve stability on mobile
   while (completed < data.metadata.files.length) {
     // prioritize files from downloaded queue, so we can continue downloading more files
     if (downloaded.length) {
@@ -364,7 +368,7 @@ const load_state_dict = async (device, progress) => {
       file.bytes = await getPart(file.name, file.hash); // reads data from IndexedDB
       await loadFileToStateDict(file); // increments completed when done
     }
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, loadDelay));
   }
 
   return model;
