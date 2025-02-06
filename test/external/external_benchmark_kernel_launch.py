@@ -18,6 +18,12 @@ if __name__ == "__main__":
   for i in range(5):
     st = time.perf_counter()
     c = plus(a,b)
+    et = time.perf_counter() - st
+    print(f"nosync  {i}: {et*1e6:.2f} us")
+  Device[c.device].synchronize()
+  for i in range(5):
+    st = time.perf_counter()
+    c = plus(a,b)
     Device[c.device].synchronize()
     et = time.perf_counter() - st
     print(f"precise {i}: {et*1e6:.2f} us")
@@ -27,7 +33,7 @@ if __name__ == "__main__":
     c = plus(a,b)
     Device[c.device].synchronize()
     et = time.perf_counter() - st
-  print(f"kernel {GlobalCounters.time_sum_s*1e3:.2f} ms / full {et*1e3:.2f} ms -- {et/GlobalCounters.time_sum_s:.2f} x")
+  print(f"kernel {GlobalCounters.time_sum_s*1e3:.2f} ms / full {et*1e3:.2f} ms -- {et/(GlobalCounters.time_sum_s+1e-12):.2f} x")
   with Profiling():
     c = plus(a,b)
     Device[c.device].synchronize()
