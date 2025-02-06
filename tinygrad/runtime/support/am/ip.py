@@ -372,8 +372,6 @@ class AM_PSP(AM_IP):
   def _bootloader_load_component(self, fw, compid):
     if fw not in self.adev.fw.sos_fw: return 0
 
-    print("will load", fw, compid)
-    
     self._wait_for_bootloader()
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
