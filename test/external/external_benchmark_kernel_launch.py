@@ -36,4 +36,3 @@ if __name__ == "__main__":
   print(f"kernel {GlobalCounters.time_sum_s*1e3:.2f} ms / full {et*1e3:.2f} ms -- {et/(GlobalCounters.time_sum_s+1e-12):.2f} x")
   with Profiling():
     c = plus(a,b)
-    Device[c.device].synchronize()
