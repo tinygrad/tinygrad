@@ -455,7 +455,8 @@ devectorize = PatternMatcher([
 ])
 
 devectorize_load_store = PatternMatcher([
-  (UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
+  # TODO: add vectorized support to transcendental
+  (UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
@@ -514,7 +515,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   sink = graph_rewrite(sink, sym+expander)
 
-  if opts is not None and opts.dont_devectorize:
+  if getenv("NO_DEVECTORIZE"):
     # new devectorize for load/store
     sink = graph_rewrite(sink, sym+devectorize_load_store)
   else:

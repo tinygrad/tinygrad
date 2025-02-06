@@ -93,7 +93,6 @@ def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
 class LLVMRenderer(Renderer):
   device = "LLVM"
   supports_float4 = True
-  dont_devectorize = True
   has_local = False
   has_shared = False
   global_max = None
