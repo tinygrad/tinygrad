@@ -37,7 +37,7 @@ compiler.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 libdispatch.dispatch_data_create.restype = objc_instance
 
 @functools.lru_cache(None)
-def msg(selector: str, restype: type[T] = objc_id):
+def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
   resname = libobjc.sel_registerName(selector.encode())
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
   sender.restype = restype
@@ -46,7 +46,7 @@ def msg(selector: str, restype: type[T] = objc_id):
 
 @functools.lru_cache(None)
 def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
-def from_ns_str(s): return bytes(msg(s, "UTF8String", restype=ctypes.c_char_p)).decode()
+def from_ns_str(s): return bytes(msg("UTF8String", ctypes.c_char_p)(s)).decode()
 
 def to_struct(*t: int, _type: type = ctypes.c_ulong): return init_c_struct_t(tuple([(f"field{i}", _type) for i in range(len(t))]))(*t)
 
@@ -54,13 +54,13 @@ def wait_check(cbuf: Any):
   msg("waitUntilCompleted")(cbuf)
   error_check(msg("error", objc_instance)(cbuf))
 
-def cmdbuf_label(cbuf: objc_id) -> str|None: return from_ns_str(label) if (label:=msg("label", restype=objc_id)(cbuf)).value is not None else None
-def cmdbuf_st_time(cbuf: objc_id) -> float: return cast(float, msg("GPUStartTime", restype=ctypes.c_double)(cbuf))
-def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg("GPUEndTime", restype=ctypes.c_double)(cbuf))
+def cmdbuf_label(cbuf: objc_id) -> str|None: return from_ns_str(label) if (label:=msg("label", objc_id)(cbuf)).value is not None else None
+def cmdbuf_st_time(cbuf: objc_id) -> float: return cast(float, msg("GPUStartTime", ctypes.c_double)(cbuf))
+def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg("GPUEndTime", ctypes.c_double)(cbuf))
 
 def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
-  raise error_constructor(from_ns_str(msg(error, "localizedDescription", restype=objc_instance)))
+  raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
@@ -183,7 +183,7 @@ class MetalAllocator(LRUAllocator):
     ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
+  def _free(self, opaque:MetalBuffer, options): msg("release")(opaque.buf)
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
@@ -193,7 +193,7 @@ class MetalAllocator(LRUAllocator):
     msg("endEncoding")(encoder)
     if src_dev != dest_dev:
       msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      dest_command_buffer = msg("commandBuffer")(dest_dev.mtl_queue, restype=objc_instance)
+      dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
       msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       msg("commit")(dest_command_buffer)
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
@@ -205,7 +205,7 @@ class MetalAllocator(LRUAllocator):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(cast(int, msg("contents", restype=objc_id)(src.buf).value), src.size + src.offset)[src.offset:]
+    return to_mv(cast(int, msg("contents", objc_id)(src.buf).value), src.size + src.offset)[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "CPU -> METAL")
   def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> CPU")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
