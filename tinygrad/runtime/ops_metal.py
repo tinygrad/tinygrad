@@ -42,6 +42,7 @@ def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) 
   sender.restype = restype
   return sender(ptr, sel(selector), *args)
 
+@functools.lru_cache(None)
 def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode(), restype=objc_instance)
 def from_ns_str(s): return bytes(msg(s, "UTF8String", restype=ctypes.c_char_p)).decode()
 
@@ -146,13 +147,14 @@ class MetalProgram:
     self.pipeline_state = msg(self.dev.sysdevice, "newComputePipelineStateWithDescriptor:options:reflection:error:",
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()), restype=objc_instance)
     error_check(error_pipeline_creation)
+    # cache these msg calls
+    self.max_total_threads: int = cast(int, msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong))
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
-    max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
-    if prod(local_size) > cast(int, max_total_threads):
+    if prod(local_size) > self.max_total_threads:
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
       memory_length = msg(self.pipeline_state, "staticThreadgroupMemoryLength", restype=ctypes.c_ulong)
-      raise RuntimeError(f"local size {local_size} bigger than {max_total_threads} with exec width {exec_width} memory length {memory_length}")
+      raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
     command_buffer = msg(self.dev.mtl_queue, "commandBuffer", restype=objc_instance)
     encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "setComputePipelineState:", self.pipeline_state)
@@ -160,7 +162,7 @@ class MetalProgram:
     for i,a in enumerate(vals, start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
     msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_size), to_struct(*local_size))
     msg(encoder, "endEncoding")
-    msg(command_buffer, "setLabel:", to_ns_str(self.name))
+    msg(command_buffer, "setLabel:", to_ns_str(self.name)) # TODO: is this always needed?
     msg(command_buffer, "commit")
     self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
