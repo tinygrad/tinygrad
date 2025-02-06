@@ -1095,7 +1095,6 @@ class Tensor(SimpleMathTrait):
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    # turn scalar Tensors into const val for int indexing if possible
     x, indices = self, list(indices)
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -1228,8 +1227,8 @@ class Tensor(SimpleMathTrait):
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
-    if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
-    if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self.realize()._getitem(indices, v)
