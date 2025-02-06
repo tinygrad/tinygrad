@@ -1,75 +1,18 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 # TODO: merge with compile_clang.py
 
-import os, sys, json, hashlib, math
-from functools import partial
+import os, json, hashlib, math
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
-from extra.f16_decompress import u32_to_f16
-from examples.llama3 import build_transformer, Tokenizer, Int8Linear
+from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters, Variable
-from tinygrad.helpers import fetch, prod
-from typing import NamedTuple, Any, List, Literal
+from tinygrad.helpers import fetch
+from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
-from tinygrad.helpers import flatten
 from tinygrad.ops import Ops
 from collections import OrderedDict
-
-# from nn.state.ggml_data_to_tensor
-def q_to_uint8(t: Tensor, b: int) -> Tensor:
-  # TODO: rewrite with arange?
-  shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-  return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
-
-# adapted from nn.state.ggml_data_to_tensor
-# uint8 (256 elements per 210 bytes) to float32
-def q6k_to_f32(x: Tensor, target: Literal["WEBGPU", "CLANG"] = "WEBGPU") -> Tensor:
-  blocks = x.reshape((-1, 210))
-  xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
-  scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
-  if target == "WEBGPU":
-    # hack to avoid fp16 which isn't supported by wgpu adapter
-    d = u32_to_f16(blocks[:,-2:].cat(Tensor.zeros(blocks.shape[0], 2, dtype=dtypes.uint8), dim=1).bitcast(dtypes.uint32)).reshape(-1, 2)[:,0:1].expand((-1,256))
-  elif target == "CLANG":
-    d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
-  return (d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales).cast(dtypes.float32).flatten()
-
-def clang_export_q6k_to_f32():
-  # won't work currently due to compile_net exceptions
-  # works with commit 254ea814259465bffd157b10094a32e412ca8860
-  Device.DEFAULT="CLANG"
-  class Step(NamedTuple):
-    name: str = ""
-    input: List[Tensor] = []
-    forward: Any = None
-
-  step = Step(
-    name = "q6k_to_f32", 
-    input = [Tensor.randn(430_080, dtype=dtypes.uint8).realize()], # llama-3.2-1B Q6_K weights are multiples of 430_080 bytes
-    forward = partial(q6k_to_f32, target="CLANG"),
-  )
-  
-  run, special_names = jit_model(step, *step.input)
-
-  # hack the jit code to make clang export work
-  # TODO: fix the export_model.compile_net code, which doesn't work by default here
-  #   export_model doesn't work by default because there are ViewOp ExecItems (for casting) that don't have code,
-  #   where extra.export_model.compile_net is looking for it
-  Tensor.realize(*step.input)
-  lbs = flatten([t.lazydata.lbs for t in step.input])
-  input_buffers = [lb.base.realized for lb in lbs if lb.base.realized is not None]
-  out = run.captured(input_buffers, {}, clear_inputs=False)
-  functions, statements, bufs, bufs_to_save = compile_net(run.captured, special_names)
-  input_names = [name for _,name in special_names.items() if "input" in name]
-  output_names = [name for _,name in special_names.items() if "output" in name]
-  prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
-
-  with open(os.path.join(os.path.dirname(__file__), "q6k_to_f32.c"), "w") as text_file:
-    text_file.write(prg)
-    # we still need to manually edit this file: 
-    #   manually fixed type declarations, deleted buf_6 and buf_7, cast buf_0 to buf_6, cast buf_4 to buf_7
 
 def prepare_browser_chunks(model):
   # split weights into browser-friendly chunks

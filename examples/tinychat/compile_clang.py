@@ -9,7 +9,6 @@ from typing import List, Tuple, Any, NamedTuple
 from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Ops
 from collections import OrderedDict
-from examples.tinychat.compile import q6k_to_f32
 
 if __name__=="__main__":
   Device.DEFAULT = "CLANG"
@@ -35,7 +34,6 @@ if __name__=="__main__":
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
     Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, model=model),
-    Step(name = "q6k_to_f32", input = [Tensor.randn(430_080, dtype=dtypes.uint8)], forward = q6k_to_f32),
   ]
 
   # TODO: refactor to move some corrected CLANG rendering to export_model.py

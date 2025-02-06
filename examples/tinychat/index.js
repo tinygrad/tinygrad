@@ -194,27 +194,6 @@ function makeProgress(total) {
   return ret;
 }
 
-async function hashBuffer(bytes) {
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function getFreePipeline(pipelinePool) {
-  for (;;) {
-    const idx = pipelinePool.findIndex(obj => !obj.busy);
-    if (idx >= 0) {
-      pipelinePool[idx].busy = true;
-      return pipelinePool[idx].pipeline;
-    }
-    await new Promise(r => setTimeout(r, 5));
-  }
-}
-
-function releasePipeline(pipeline, pipelinePool) {
-  const obj = pipelinePool.find(obj => obj.pipeline === pipeline);
-  if (obj) obj.busy = false;
-}
-
 function sendMessageToWorker(worker, message) {
   return new Promise((resolve, reject) => {
     const onMessage = (event) => {
@@ -233,10 +212,7 @@ function sendMessageToWorker(worker, message) {
     worker.addEventListener('error', onError);
 
     if (message.header === "token") {worker.postMessage(message.data);}
-    else if (message.header === "setup") {worker.postMessage(message.data);}
-    // if message.data is a [k, v] from Object.entries(state_dict)
-    else if (message.header === "k_v") {worker.postMessage(message.data, [message.data[1].bytes.buffer]);}
-    // if message.data is the decompressed state_dict
+    // if message.data is the state_dict
     else if (message.header === "state_dict") {worker.postMessage(message.data, Object.values(message.data).flatMap(({ bytes }) => bytes ? [bytes.buffer] : []));}
   });
 }
