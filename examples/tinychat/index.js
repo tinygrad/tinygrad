@@ -176,6 +176,18 @@ function deleteTensorFromDb(db, id) {
   });
 }
 
+function makeProgress(total) {
+  return function progress(loaded, message) {
+    const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
+    document.querySelector('.progress').style.width = `${percentage}%`;
+    document.getElementById('progress-percentage').textContent = `${percentage}%`;
+    if (message) {
+      this.loadingMessage = message;
+      document.getElementById('loading-message').textContent = this.loadingMessage;
+    }
+  }.bind(this);
+}
+
 async function hashBuffer(bytes) {
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -223,51 +235,30 @@ function sendMessageToWorker(worker, message) {
   });
 }
 
-
-const load_state_dict = async (device, progress) => {
+async function load_state_dict (data, device, progress) {
+  const state_dict = data.metadata.state_dict;
   let completed = 0;
   let totalLoaded = 0;
-  let totalSize = 0;
-  let partSize = {};
-
-  const progressCallback = (part, loaded, total, message) => {
-    totalLoaded += loaded;
-
-    if (!partSize[part]) {
-      totalSize += total;
-      partSize[part] = true;
-    }
-                
-    progress(totalLoaded, totalSize, message);
-  };
 
   // modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
-  const loadPart = async (part, progressCallback) => {
+  const loadPart = async (part) => {
       const response = await fetch(part);
-      const contentLength = response.headers.get('content-length');
-      const total = parseInt(contentLength, 10);
-
       const res = new Response(new ReadableStream({
           async start(controller) {
               const reader = response.body.getReader();
               for (;;) {
                   const { done, value } = await reader.read();
                   if (done) break;
-                  progressCallback(part, value.byteLength, total, `Downloading model: ${completed}/29`);
+                  totalLoaded += value.byteLength;
+                  progress(totalLoaded, `Downloading model:`);
                   controller.enqueue(value);
               }
-                    
               controller.close();
           },
       }));
         
       return res.arrayBuffer();
   };
-
-  const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
-  // TODO: cache metadata (and everything else) so tinychat works offline
-  const data = await response.json();
-  const state_dict = data.metadata.state_dict;
 
   let db = await initDb();
 
@@ -277,12 +268,11 @@ const load_state_dict = async (device, progress) => {
     if (part) {
       console.log(`Cache hit: ${filename}, hash: ${hash}`);
       totalLoaded += part.content.byteLength;
-      totalSize += part.content.byteLength;
-      progress(totalLoaded, totalSize, `Downloading model: ${completed}/29`)
+      progress(totalLoaded, `Loading model:`)
       return Promise.resolve(part.content);
     } else {
       console.log(`Cache miss: ${filename}, hash: ${hash}`);
-      return loadPart(`${window.MODEL_BASE_URL}/${filename}`, progressCallback);
+      return loadPart(`${window.MODEL_BASE_URL}/${filename}`);
     }
   }
 
@@ -295,18 +285,6 @@ const load_state_dict = async (device, progress) => {
   const deletionPromises = notInCorrectHashes.map(async (hash) => deleteTensorFromDb(db, hash));
   //for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
 
-  for (const [k,v] of Object.entries(state_dict)) {
-    for (const part of v.parts) {
-      if (part.empty) state_dict[k].empty = true; // assumes no other parts of this weight exist and are non-empty
-      else {
-        part.key = k;
-        part.dtype = v.dtype;
-        if (!data.metadata.files[part.file].parts) data.metadata.files[part.file].parts = [];
-        data.metadata.files[part.file].parts.push(part);
-      }
-    }
-  }
-
   const cachedFileHashes = new Set(dbKeys.filter(key => correctHashesSet.has(key)));
   const cachedFiles = data.metadata.files.filter(file => cachedFileHashes.has(file.hash));
   const toDownload = data.metadata.files.filter(file => !cachedFileHashes.has(file.hash));
@@ -314,7 +292,7 @@ const load_state_dict = async (device, progress) => {
   // to limit memory overhead, we pause downloads if we have this number of downloaded files waiting to be processed
   const numDownloaders = window.isMobile ? 5 : toDownload.length; // TODO: dynamically base this on DL file size? current assumption is 16 MiB chunks
   const chainDownload = async (file) => {
-    loadPart(`${window.MODEL_BASE_URL}/${file.name}`, progressCallback) // triggers download
+    loadPart(`${window.MODEL_BASE_URL}/${file.name}`) // triggers download
     .then(async (arraybuf) => { 
       downloaded.push({ ...file, bytes: new Uint8Array(arraybuf)});
       // pause downloads if further processing is a bottleneck
@@ -322,15 +300,6 @@ const load_state_dict = async (device, progress) => {
       if (toDownload.length && downloaded.length < numDownloaders) chainDownload(toDownload.shift()); // start next download
     })
   }
-  /*
-  let totalLoaded = 0;
-  let totalSize = Object.values(state_dict).filter(item => item.dtype === "Q6_K").reduce((sum, item) => sum + item.size, 0);
-  const numCheckpoints = 90;
-  let nextCheckpoint = totalSize / numCheckpoints;
-  const decompProgressFraction = 0.90;
-  totalSize = totalSize / decompProgressFraction; // extend progress bar for minor steps after decompression
-  const t0 = performance.now();
-  */
   for (let i=0; i<numDownloaders; i++) if (toDownload.length) chainDownload(toDownload.shift());
 
   await kernelsReady;
@@ -386,6 +355,8 @@ document.addEventListener("alpine:init", () => {
     max_context: 1024,
     lastSeenToks: [],
 
+    progress: null,
+    /*
     progress(loaded, total, message) {
       const percentage = total ? Math.trunc((loaded / total) * 100) : 0;
       document.querySelector('.progress').style.width = `${percentage}%`;
@@ -395,13 +366,34 @@ document.addEventListener("alpine:init", () => {
         document.getElementById('loading-message').textContent = this.loadingMessage;
       }
     },
+    */
 
     async init() {
+      const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
+      // TODO: cache metadata (and everything else) so tinychat works offline
+      const data = await response.json();
+      const state_dict = data.metadata.state_dict;
+      let totalSize = 0;
+      for (const [k,v] of Object.entries(state_dict)) {
+        for (const part of v.parts) {
+          if (part.empty) state_dict[k].empty = true; // assumes no other parts of this weight exist and are non-empty
+          else {
+            totalSize += part.size;
+            part.key = k;
+            part.dtype = v.dtype;
+            if (!data.metadata.files[part.file].parts) data.metadata.files[part.file].parts = [];
+            data.metadata.files[part.file].parts.push(part);
+          }
+        }
+      }
+      totalSize = totalSize / 0.8; // give space in progress bar for initializing model bufs, and tokenizer
+      this.progress = makeProgress.call(this, totalSize); // creates closure with totalSize
+
       var device = null;
       if (window.BACKEND === "WebGPU") {
         try {
           device = await getDevice();
-          var modelPromise = load_state_dict(device, this.progress.bind(this));
+          var modelPromise = load_state_dict(data, device, this.progress);
           console.log("WebGPU device initialized");
         } catch (error) {
           this.progress(0, 100, "Failed to launch WebGPU. Loading WASM model instead...");
@@ -434,7 +426,6 @@ document.addEventListener("alpine:init", () => {
         p = 40; this.progress(p, 100, `Launching ${window.BACKEND} model:`);
         //await kernelsReady;
         if (window.BACKEND === "WebGPU") {
-          //const model = await transformer().setup(device, state_dict, this.progress.bind(this));
           const model = await modelPromise;
           this.nets = {"transformer": model};
         }
