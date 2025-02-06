@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
