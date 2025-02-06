@@ -1,6 +1,6 @@
 import ctypes, platform, sys
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
-from tinygrad.helpers import OSX, getenv, capstone_flatdump
+from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
 import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.runtime.support.elf import jit_loader
@@ -17,9 +17,10 @@ class LLVMCompiler(Compiler):
 
     triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
-    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, b'+reserve-x18,' + feats if OSX and host_arch == 'AArch64' else feats,
+    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
+    if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
+    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
@@ -34,18 +35,18 @@ class LLVMCompiler(Compiler):
 
     super().__init__(f"compile_llvm_jit{'_opt' if opt else ''}")
 
-  def __del__(self):
-    llvm.LLVMDisposePassBuilderOptions(self.pbo)
+  def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
   def compile(self, src:str) -> bytes:
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
     expect(llvm.LLVMRunPasses(mod, self.passes, self.target_machine, self.pbo), 'failed to run passes')
+    if DEBUG >= 7: print(ctypes.string_at(llvm.LLVMPrintModuleToString(mod)).decode())
     obj_buf = expect(llvm.LLVMTargetMachineEmitToMemoryBuffer(self.target_machine, mod, llvm.LLVMObjectFile, err:=cerr(),
                                                               ctypes.pointer(buf:=llvm.LLVMMemoryBufferRef())), err, buf)
-    obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeModule(mod)
+    obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
     return jit_loader(obj)
 
