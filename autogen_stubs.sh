@@ -161,6 +161,14 @@ nv_status_codes = {}
   python3 -c "import tinygrad.runtime.autogen.nv_gpu"
 }
 
+
+generate_nvcuvid() {
+  clang2py \
+    nvcuvid/cuviddec.h \
+    nvcuvid/nvcuvid.h \
+    -o $BASE/nvcuvid.py
+}
+
 generate_amd() {
   # clang2py broken when pass -x c++ to prev headers
   clang2py -k cdefstum \
@@ -357,6 +365,8 @@ generate_am() {
   fixup $BASE/am/smu_v13_0_0.py
 }
 
+
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -365,6 +375,7 @@ elif [ "$1" == "nvrtc" ]; then generate_nvrtc
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
+elif [ "$1" == "nvcuvid" ]; then generate_nvcuvid
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "qcom" ]; then generate_qcom
