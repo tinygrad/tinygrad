@@ -21,7 +21,7 @@ def lcast(input_type:DType, output_type:DType):
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
     if dtypes.is_int(output_type): return 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
-  if dtypes.is_unsigned(input_type) or input_type.scalar() == dtypes.bool:
+  if dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
     if dtypes.is_float(output_type): return 'uitofp'
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
   if dtypes.is_int(input_type):
@@ -50,7 +50,7 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
-  # GEP / VECTORIZE / CAST pointer
+  # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"  {ctx[x]} = extractelement {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {x.arg[0]}"),
   (UPat(Ops.VECTORIZE, src=UPat.var('y'), name="x"), lambda ctx,x,y:
    f"  {ctx[x]}_z = insertelement <1 x {ldt(y.dtype)}> poison, {ldt(y.dtype)} {ctx[y]}, i32 0\n"
@@ -92,7 +92,7 @@ def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
-  supports_float4 = False
+  supports_float4 = True
   dont_devectorize = True
   has_local = False
   has_shared = False
