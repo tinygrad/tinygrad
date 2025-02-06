@@ -76,7 +76,7 @@ class AMDCompiler(Compiler):
     self.arch = arch
     self.llvm_backend = None
     if llvm:
-      self.llvm_backend = LLVMCompiler("AMDGPU", True, triple="amdgcn-amd-amdhsa", arch=arch, features="+cumode")
+      self.llvm_backend = LLVMCompiler("AMDGPU", True, triple="amdgcn-amd-amdhsa", arch=arch, feats="+cumode")
     super().__init__(f"compile_hip_{self.arch}")
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, self.llvm_backend)

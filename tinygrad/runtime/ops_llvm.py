@@ -16,7 +16,7 @@ class LLVMCompiler(Compiler):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
 
     triple = triple.encode() or ({'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf')
-    target = expect(llvm.LLVMGetTargetFromTriple(triple.encode(), ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
+    target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
     cpu = arch.encode() or ctypes.string_at(llvm.LLVMGetHostCPUName())
     feats = feats.encode() or ((b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()))
