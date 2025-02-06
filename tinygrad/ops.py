@@ -1112,6 +1112,13 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
+def simplify_pow(x:UOp, c:UOp) -> UOp|None:
+  if c.arg < 0: return x.reciprocal().pow(-c)
+  if c.arg == 0: return x.const_like(1)
+  if int(c.arg-0.5)+0.5 == c.arg: return x.pow(c.const_like(c.arg-0.5)) * x.sqrt()
+  if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
+  return None
+
 # def max_var_const(x:UOp, c1:UOp, c2:UOp):
 #   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
@@ -1156,6 +1163,7 @@ symbolic_simple = PatternMatcher([
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   # ** pow **
+  (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
 ])
