@@ -342,7 +342,7 @@ const load_state_dict = async (device, progress) => {
       if (part.empty) continue;
       part.bytes = (part.size === file.bytes.length) ? file.bytes : file.bytes.slice(part.file_start_pos, part.file_start_pos + part.size);
       if (valid_final_dtypes.has(part.dtype)) {
-        new Uint8Array(state_dict[part.key].bytes.getMappedRange(part.target_start_pos, part.bytes.length)).set(part.bytes);
+        device.queue.writeBuffer(state_dict[part.key].bytes, part.target_start_pos, part.bytes); // improves stability over mappedAtCreation writing
       }
       else throw new Error(`unexpected dtype: ${part.dtype} in file: ${file.name}`);
       part.bytes = null;
@@ -367,7 +367,6 @@ const load_state_dict = async (device, progress) => {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
 
-  for (const [k,v] of Object.entries(state_dict)) if (!v.empty) v.bytes.unmap();
   return model;
 };
 
