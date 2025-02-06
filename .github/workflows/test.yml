@@ -495,16 +495,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04]
-        backend: [llvm, clang, gpu, nv, ptx, amd] #, triton]
-        include:
-          - os: macos-15
-            backend: ptx
-          - os: macos-15
-            backend: amd
+        backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
 
-    name: Tests on (${{ matrix.backend }}, ${{matrix.os}})
-    runs-on: ${{ matrix.os }}
+    name: Tests on (${{ matrix.backend }})
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
 
     steps:
@@ -519,18 +513,17 @@ jobs:
       - name: Cache python packages
         uses: actions/cache@v4
         with:
-          path: ${{ startsWith(matrix.os, 'ubuntu-') && '${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages' || '/Users/runner/Library/Python/3.12/lib/python/site-packages' }} 
-          key: ${{ matrix.backend }}-${{ matrix.os }}-packages-${{ hashFiles('**/setup.py') }}
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
+          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Cache downloads
-        if: startsWith(matrix.os, 'ubuntu-')
         uses: actions/cache@v4
         with:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && (startsWith(matrix.os, 'ubuntu-') && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || startsWith(matrix.os, 'macos-') && 'PTX=1\n\nMOCKGPU=1\nNV=1\nFORWARD_ONLY=1') || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
-        if: startsWith(matrix.os, 'ubuntu-') && matrix.backend == 'gpu'
+        if: matrix.backend == 'gpu'
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
@@ -540,17 +533,12 @@ jobs:
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
       - name: Install packages (cuda)
-        if: startsWith(matrix.os, 'ubuntu-') && (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv')
+        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y || true
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
             flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
-      - name: Install packages (ptx, macos)
-        if: startsWith(matrix.os, 'macos-') && matrix.backend == 'ptx'
-        run: |
-          brew update
-          brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
       - name: Cache gpuocelot
         if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         id: cache-build
@@ -559,29 +547,24 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ${{ matrix.os }}-gpuocelot-${{ startsWith(matrix.os, 'ubuntu-') && '4524e34adb7eaccc6f71262f2e21d7052bb17c2f' || '183586142fde84eeb62572eb8acfb2a028932ebe' }}-rebuild-9
+          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
-          git clone --recurse-submodules ${{ startsWith(matrix.os, 'ubuntu-') && 'https://github.com/gpuocelot/gpuocelot.git' || 'https://github.com/JakobSpahn/gpuocelot.git' }} ${{ github.workspace }}/gpuocelot
-          cd ${{ github.workspace }}/gpuocelot
-          git checkout ${{ startsWith(matrix.os, 'ubuntu-') && '4524e34adb7eaccc6f71262f2e21d7052bb17c2f' || '183586142fde84eeb62572eb8acfb2a028932ebe' }}
-          git submodule update --recursive --init
-          cd ocelot && mkdir build && cd build
-          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DBUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
+          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          cd ${{ github.workspace }}/gpuocelot/ocelot
+          git checkout 4524e34adb7eaccc6f71262f2e21d7052bb17c2f
+          mkdir build
+          cd build
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
           ninja
       - name: Install gpuocelot
-        if: startsWith(matrix.os, 'ubuntu-') && (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv')
+        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
-      - name: Install gpuocelot (macos)
-        if: startsWith(matrix.os, 'macos-') && matrix.backend == 'ptx'
-        run: |
-          cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          sudo ninja install -d explain
       - name: Install packages (amd)
-        if: startsWith(matrix.os, 'ubuntu-') && matrix.backend == 'amd'
+        if: matrix.backend == 'amd'
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
@@ -599,48 +582,160 @@ jobs:
             /opt/rocm/lib64
           EOF
           sudo ldconfig
-      - name: Install comgr (amd, macos)
-        if: startsWith(matrix.os, 'macos-') && matrix.backend == 'amd'
-        run: |
-          sudo mkdir -p /usr/local/lib
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
-            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
-      - name: Install remu (amd, macos)
-        if: startsWith(matrix.os, 'macos-') && matrix.backend == 'amd'
-        run: |
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
       - name: Install dependencies
-        run: pip install ${{ startsWith(matrix.os, 'macos-') && '--user' || '' }} -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda or amd)
-        if: startsWith(matrix.os, 'ubuntu-') && (matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv')
+        if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
         run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
       - name: Run ONNX (only LLVM)
-        if: startsWith(matrix.os, 'ubuntu-') && matrix.backend == 'llvm'
+        if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
-        if: startsWith(matrix.os, 'ubuntu-') && (matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv')
+        if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
-        if: startsWith(matrix.os, 'ubuntu-') && matrix.backend=='amd'
+        if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
       - name: Run TRANSCENDENTAL math
-        if: startsWith(matrix.os, 'ubuntu-')
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-      - name: Run pytest (${{matrix.backend}}, macos)
-        if: startsWith(matrix.os, 'macos-') && (matrix.backend=='amd' || matrix.backend=='ptx')
-        run: python -m pytest -n=${{ matrix.backend=='ptx' && '1' || 'auto'}} test/test_hcq.py test/test_tiny.py --durations=20
       - name: Run process replay tests
         run: |
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  osxtests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [amd, ptx]
+
+    name: Tests on MacOS (${{ matrix.backend }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: /Users/runner/Library/Python/3.12/lib/python/site-packages
+          key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' ||  matrix.backend == 'ptx' && 'PTX=1\n\nMOCKGPU=1\nNV=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Install comgr
+        if: matrix.backend == 'amd'
+        run: |
+          sudo mkdir -p /usr/local/lib
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
+            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+      - name: Install remu
+        if: matrix.backend == 'amd'
+        run: |
+          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
+            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+      - name: Install gpuocelot dependencies (ptx)
+        if: matrix.backend == 'ptx'
+        run: |
+          brew update
+          brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+      - name: Cache gpuocelot
+        if: matrix.backend == 'ptx'
+        id: cache-build
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-gpuocelot-osx-build
+        with:
+          path: ${{ github.workspace }}/gpuocelot/ocelot
+          key: macos-15-gpuocelot-183586142fde84eeb62572eb8acfb2a028932ebe-rebuild-9
+      - name: Clone/compile gpuocelot
+        if: matrix.backend == 'ptx' && steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          git clone --recurse-submodules https://github.com/JakobSpahn/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          cd ${{ github.workspace }}/gpuocelot
+          git checkout 183586142fde84eeb62572eb8acfb2a028932ebe && git submodule update --recursive --init
+          cd ocelot && mkdir build && cd build
+          cmake .. -Wno-dev -G Ninja -DBUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
+          ninja
+      - name: Install gpuocelot
+        if: matrix.backend == 'ptx'
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot/build
+          sudo ninja install -d explain
+      - name: Install dependencies
+        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT and print some source
+        if: matrix.backend=='amd'
+        run: |
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (amd)
+        if: matrix.backend=='amd'
+        run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+      - name: Run pytest (nv)
+        if: matrix.backend=='ptx'
+        run: python -m pytest -n=1 test/test_hcq.py test/test_tiny.py --durations=20
+
+  wintests:
+    strategy:
+      fail-fast: false
+    name: Tests on Windows (llvm+clang)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Cache python packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
+          key: windows-packages-${{ hashFiles('**/setup.py') }}
+      - name: Set env
+        shell: bash
+        run: |
+          if [ "${{ matrix.backend }}" = "clang" ]; then
+            echo "CLANG=1" >> $GITHUB_ENV
+          elif [ "${{ matrix.backend }}" = "llvm" ]; then
+            echo "LLVM=1" >> $GITHUB_ENV
+          fi
+      - name: Install dependencies
+        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Check Device.DEFAULT and print some source (llvm)
+        shell: bash
+        run: |
+          PYTHONPATH=${{ github.workspace }} LLVM=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (clang)
+        shell: bash
+        run: |
+          PYTHONPATH=${{ github.workspace }} CLANG=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} CLANG=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest (llvm)
+        shell: bash
+        run: |
+          LLVM=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+      - name: Run pytest (clang)
+        shell: bash
+        run: |
+          CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
