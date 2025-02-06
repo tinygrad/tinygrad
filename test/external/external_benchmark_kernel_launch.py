@@ -21,7 +21,6 @@ if __name__ == "__main__":
     et = time.perf_counter() - st
     Device[c.device].synchronize()
     print(f"nosync  {i}: {et*1e6:.2f} us")
-  Device[c.device].synchronize()
   for i in range(5):
     st = time.perf_counter()
     c = plus(a,b)
