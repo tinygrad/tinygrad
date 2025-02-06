@@ -15,6 +15,12 @@ if __name__ == "__main__":
       c = plus(a,b)
       Device[c.device].synchronize()
   assert c.item() == 2
+  for i in range(5):
+    st = time.perf_counter()
+    c = plus(a,b)
+    Device[c.device].synchronize()
+    et = time.perf_counter() - st
+    print(f"precise {i}: {et*1e6:.2f} us")
   assert GlobalCounters.time_sum_s == 0
   with Context(DEBUG=2):
     st = time.perf_counter()
