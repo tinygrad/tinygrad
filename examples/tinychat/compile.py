@@ -76,7 +76,7 @@ def prepare_browser_chunks(model):
   state_dict = get_state_dict(model)
   del state_dict['output.weight'] # same as token_embeddings.weight
   del state_dict['output.scale'] # same as token_embeddings.scale
-  chunk_size = 47 * 1024 * 1024 # small chunks based on iphone browser constraints
+  chunk_size = 16 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
   t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" not in k]
   empty_t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" in k]
