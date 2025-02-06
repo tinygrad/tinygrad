@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
-from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
+from tinygrad.runtime.autogen.am import am, mp_11_0, gc_11_0_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -371,8 +371,16 @@ class AMDev:
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
+  def _ip_module(self, prefix:str, hwip):
+    version = [self.ip_versions[hwip]//10000, (self.ip_versions[hwip]//100)%100, self.ip_versions[hwip]%100]
+    for ver in [version, version[:2]+[0], version[:1]+[0, 0]]:
+      try: return __import__(f"tinygrad.runtime.autogen.am.{prefix}_{ver[0]}_{ver[1]}_{ver[2]}", fromlist=[f"{prefix}_{ver[0]}_{ver[1]}_{ver[2]}"])
+      except ImportError: pass
+    assert False, f"am {self.devfmt}: failed to load {prefix} module with version {version}"
+
   def _build_regs(self):
-    mods = [("MP0", mp_13_0_0), ("MP1", mp_11_0), ("NBIO", nbio_4_3_0), ("MMHUB", mmhub_3_0_0), ("GC", gc_11_0_0), ("OSSSYS", osssys_6_0_0)]
+    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
+      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP))]
     for base, module in mods:
       rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
       reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
