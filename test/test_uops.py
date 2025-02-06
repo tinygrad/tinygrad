@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Any, List
+from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -17,7 +17,7 @@ from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
-def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
 def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
@@ -26,7 +26,7 @@ def _uops_to_prg(uops_list):
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
-def uop(uops:List[UOp], uop:Ops, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
+def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
   return uops[-1]
 
