@@ -8,10 +8,10 @@ from tinygrad.helpers import Profiling, Timing, GlobalCounters
 def plus(a:Tensor, b:Tensor): return a+b
 
 if __name__ == "__main__":
-  a = Tensor([1])
-  b = Tensor([1])
+  a = Tensor([1]).realize()
+  b = Tensor([1]).realize()
   for i in range(5):
-    with Timing():
+    with Timing(prefix=f"{i}:"):
       c = plus(a,b)
       Device[c.device].synchronize()
   assert c.item() == 2
