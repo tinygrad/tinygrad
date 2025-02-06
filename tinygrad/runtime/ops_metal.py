@@ -42,6 +42,7 @@ def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) 
   sender.restype = restype
   return sender(ptr, sel(selector), *args)
 
+@functools.lru_cache(None)
 def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode(), restype=objc_instance)
 def from_ns_str(s): return bytes(msg(s, "UTF8String", restype=ctypes.c_char_p)).decode()
 
@@ -148,7 +149,6 @@ class MetalProgram:
     error_check(error_pipeline_creation)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong))
-    self.ns_name = to_ns_str(self.name)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > self.max_total_threads:
@@ -162,7 +162,7 @@ class MetalProgram:
     for i,a in enumerate(vals, start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
     msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_size), to_struct(*local_size))
     msg(encoder, "endEncoding")
-    msg(command_buffer, "setLabel:", self.ns_name) # TODO: is this always needed?
+    msg(command_buffer, "setLabel:", to_ns_str(self.name)) # TODO: is this always needed?
     msg(command_buffer, "commit")
     self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
