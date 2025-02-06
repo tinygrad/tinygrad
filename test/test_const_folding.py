@@ -1,6 +1,6 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, GroupOp
 from tinygrad.helpers import CI
 import numpy as np
 from tinygrad.device import is_dtype_supported
@@ -96,6 +96,13 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
+
+  def test_2_pow_is_exp2(self):
+    t = 2.0 ** Tensor([1.0, 2.0, 3.0])
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.EXP2])
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
