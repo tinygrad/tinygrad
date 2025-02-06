@@ -44,7 +44,14 @@ class Attention:
       values = xv
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
+    old_res = xq.scaled_dot_product_attention(keys, values, mask)
+
+    padding = Tensor.zeros(xq.shape[0], xq.shape[1], (16 - (xq.shape[2]) % 16) % 16, xq.shape[3])
+    xq, keys, values = xq.cat(padding, dim=-2), keys.cat(padding, dim=-2), values.cat(padding, dim=-2)
+    new_res = xq.flash_attention(keys, values, 16, 16, mask_shift=start_pos)[0].shrink((None, None, (0, seqlen), None))
+
+    print(f"difference {(new_res - old_res).abs().sum().numpy()} l1 norms {old_res.abs().sum().numpy()} {new_res.abs().sum().numpy()}",)
+    return self.c_proj(xq.flash_attention(keys, values, 16, 16, mask_shift=start_pos)[0].shrink((None, None, (0, seqlen), None)).transpose(1, 2).reshape(bsz, seqlen, self.dim))
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -178,7 +185,7 @@ class GPT2:
     prompt_tokens = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     toks = [prompt_tokens[:] for _ in range(batch_size)]
     start_pos = 0
-    for _ in trange(max_length, disable=(timing==True)):
+    for _ in range(max_length):
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s

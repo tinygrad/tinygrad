@@ -3545,6 +3545,58 @@ class Tensor(SimpleMathTrait):
       qk = qk + attn_mask
     return qk.softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
 
+  def flash_attention(self, k, v, Bc, Br, is_casual = False, mask_shift = None):
+    mask_shift = 0 if mask_shift == None else mask_shift
+    mask_shift = mask_shift if type(mask_shift) == int else mask_shift.val
+    O_list = []
+    L_list = []
+    # N: sequence lenght
+    _, _, N, d = self.shape
+    assert N % Bc == 0, f"Sequence lenght must be devisible by Bc {Bc}, but N is {N}"
+    assert N % Br == 0, f"Sequence lenght must be devisible by Br {Br}, but N is {N}"
+    # Tr: number of query blocks
+    Tr = N // Br
+    # Tc: number of key and value blocks
+    Tc = N // Bc
+    O = Tensor.zeros(self.shape).contiguous().realize()
+    L = Tensor.zeros(self.shape[0], self.shape[1], N, 1).contiguous().realize()
+    m_chunk = Tensor.zeros(self.shape[0], self.shape[1], Br, 1).contiguous().realize()
+    l_chunk = Tensor.zeros(self.shape[0], self.shape[1], Br, 1).contiguous().realize()
+    O_chunk = Tensor.zeros(self.shape[0], self.shape[1], Br, d).contiguous().realize()
+    for i_Tr in range(Tr):
+        q_chunk = self.shrink((None, None, (i_Tr * Br, (i_Tr + 1) * Br), None))
+        m_chunk.assign(Tensor.zeros(self.shape[0], self.shape[1], Br, 1)).realize()
+        l_chunk.assign(Tensor.zeros(self.shape[0], self.shape[1], Br, 1)).realize()
+        O_chunk.assign(Tensor.zeros(self.shape[0], self.shape[1], Br, d)).realize()
+        for i_Tc in range(Tc):
+            k_chunk = k.shrink((None, None, (i_Tc * Bc, (i_Tc + 1) * Bc), None))
+            v_chunk = v.shrink((None, None, (i_Tc * Bc, (i_Tc + 1) * Bc), None))
+            S_chunk = q_chunk.matmul(k_chunk.transpose(-2,-1)) / math.sqrt(d)
+            if not is_casual and (i_Tc + 1) * Bc >= i_Tr * Br + mask_shift:
+                if i_Tc * Bc > i_Tr * Br + mask_shift:
+                    break
+
+                S_chunk = S_chunk + Tensor.full((self.shape[0], self.shape[1], Br, Bc), float("-inf")).triu(i_Tr * Br - i_Tc * Bc + mask_shift + 1)
+
+
+            if i_Tr == 0:
+                m_new_chunk = S_chunk.max(axis=-1, keepdim=True)
+            else:
+                m_new_chunk = m_chunk.maximum(S_chunk.max(axis=-1, keepdim=True))
+            # reciprocal of the delta
+            dm_exp = (m_chunk - m_new_chunk).exp()
+            m_chunk.assign(m_new_chunk).realize()
+            P_chunk = (S_chunk - m_chunk).exp()
+            l_chunk.assign(dm_exp * l_chunk + P_chunk.sum(axis=-1, keepdim=True)).realize()
+            O_chunk.assign(O_chunk / dm_exp + P_chunk @ v_chunk).realize()
+
+        O_chunk = O_chunk / l_chunk
+        L_chunk = m_chunk + l_chunk.log()
+        O.shrink((None, None, (i_Tr * Br, (i_Tr + 1) * Br), None)).assign(O_chunk).realize()
+        L.shrink((None, None, (i_Tr * Br, (i_Tr + 1) * Br), None)).assign(L_chunk).realize()
+
+    return O, L
+
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
     reductions: dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
