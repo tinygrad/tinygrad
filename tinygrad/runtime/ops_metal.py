@@ -11,9 +11,6 @@ class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
   def __del__(self): msg("release")(self)
 
-#@functools.lru_cache(None)
-#def sel(name: str): return libobjc.sel_registerName(name.encode())
-
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
   MTLResourceStorageModeShared = 0 << 4
