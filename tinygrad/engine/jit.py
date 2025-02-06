@@ -24,7 +24,8 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
   def flush_batch():
     nonlocal current_batch, current_device, max_batch_size
     try:
-      if (len(current_batch) <= 1 or current_device is None) and not getenv("GRAPH_ONE_KERNEL"): raise GraphException("only one kernel doesn't graph")
+      if current_device is None: raise GraphException("no device for graph")
+      if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): raise GraphException("only one kernel doesn't graph")
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
