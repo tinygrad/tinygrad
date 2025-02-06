@@ -3289,7 +3289,7 @@ class Tensor(SimpleMathTrait):
     Equivalent to `self ** x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(2).numpy())
+    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
