@@ -3295,7 +3295,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print((2 ** Tensor([-1, 2, 3])).numpy())
+    print((2.0 ** Tensor([-1, 2, 3])).numpy())
     ```
     """
     x = self._to_const_val(x)
@@ -3306,9 +3306,6 @@ class Tensor(SimpleMathTrait):
       # rewrite pow 0.5 to sqrt
       if int(x - 0.5) + 0.5 == x: return self.pow(int(x - 0.5)) * self.sqrt()
       if int(x) == x: return self.pow(x // 2).square() * (1 if x % 2 == 0 else self)
-
-    # positive const ** self
-    if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
 
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
