@@ -31,7 +31,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
 
   # link the found UOps back to Tensors. exit early if there's no Tensors to realize
   # NOTE: this uses all_tensors, but it's fast
-  fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and getattr(t, 'lazydata', None) in all_uops]
+  fixed_tensors: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and t.lazydata in all_uops]
 
   if len(fixed_tensors):
     # potentially rewrite all the discovered Tensors
