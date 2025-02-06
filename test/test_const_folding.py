@@ -104,6 +104,27 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
     self.assertEqual(alu, [Ops.EXP2])
 
+  def test_pow_05_is_sqrt(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** 0.5
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.SQRT])
+
+  def test_pow_neg_05_is_rsqrt(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** -0.5
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.RECIP, Ops.SQRT])
+
+  def test_pow_8_has_3_muls(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** 8
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.MUL, Ops.MUL, Ops.MUL])
+
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
