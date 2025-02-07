@@ -8,7 +8,7 @@ from tinygrad.renderer.cstyle import MetalRenderer
 # This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
 # library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
 # doesn't seem to be anything we can do.
-with contextlib.suppress(RuntimeError):
+with contextlib.suppress(FileNotFoundError):
   import tinygrad.runtime.autogen.llvm # noqa: F401
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
