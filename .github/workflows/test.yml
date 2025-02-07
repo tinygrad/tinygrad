@@ -314,7 +314,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testdsp:
-    name: DSP Tests
+    name: Linux (DSP)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -337,7 +337,7 @@ jobs:
       run: DEBUG=2 DSP=1 python test/test_tiny.py
 
   testwebgpu:
-    name: WebGPU Tests
+    name: Linux (WebGPU)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -362,56 +362,6 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
-  testmetal:
-    name: Metal Tests
-    runs-on: macos-14
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: metal
-        deps: testing
-        python-version: '3.11'
-        webgpu: 'true'
-    - name: Check Device.DEFAULT (METAL) and print some source
-      run: |
-        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
-        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    - name: Run metal test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
-    - name: Run real world test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
-    - name: Run ONNX
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-    - name: Test tensor core ops (fake)
-      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
-    - name: Test tensor core ops (real)
-      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    - name: Test Beam Search
-      run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-    - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
-    # - name: Fuzz Test models schedule
-    # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
-    - name: Run TRANSCENDENTAL math
-      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    # WebGPU e2e tests
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 python3 -m examples.compile_efficientnet
-    - name: Clean npm cache
-      run: npm cache clean --force
-    - name: Install Puppeteer
-      run: npm install puppeteer
-    - name: Run WEBGPU Efficientnet
-      run: node test/web/test_webgpu.js
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
 
   tests:
     strategy:
@@ -419,7 +369,7 @@ jobs:
       matrix:
         backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
 
-    name: Tests on (${{ matrix.backend }})
+    name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -457,13 +407,93 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  osxtests:
-    strategy:
-      fail-fast: false
+# ****** OSX Tests ******
 
-    name: Tests on MacOS
+  testmetal:
+    name: MacOS (metal)
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: metal
+        deps: testing
+        python-version: '3.11'
+        webgpu: 'true'
+    - name: Check Device.DEFAULT (METAL) and print some source
+      run: |
+        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
+        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+    - name: Run metal test
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
+    - name: Run real world test
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+    - name: Run ONNX
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Test tensor core ops (fake)
+      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
+    - name: Test tensor core ops (real)
+      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
+    - name: Test Beam Search
+      run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+    - name: Fuzz Test linearizer
+      run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+    # - name: Fuzz Test models schedule
+    # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
+    - name: Run TRANSCENDENTAL math
+      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  osxwebgpu:
+    name: MacOS (webgpu)
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: osx-webgpu
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 python3 -m examples.compile_efficientnet
+    - name: Clean npm cache
+      run: npm cache clean --force
+    - name: Install Puppeteer
+      run: npm install puppeteer
+    - name: Run WEBGPU Efficientnet
+      run: node test/web/test_webgpu.js
+
+  osxclang:
+    name: MacOS (clang)
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: macos-clang
+          deps: testing
+      - name: Run pytest (clang)
+        env:
+          CLANG: 1
+        run: |
+          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
+          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+
+  osxtests:
+    name: MacOS (amd+llvm)
+    runs-on: macos-15
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -474,27 +504,6 @@ jobs:
           deps: testing
           amd: 'true'
           llvm: 'true'
-      - name: Check Device.DEFAULT and print some source (AMD)
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          MOCKGPU: 1
-          AMD: 1
-          FORWARD_ONLY: 1
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
-          DEBUG=5 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT and print some source (LLVM)
-        env:
-          LLVM: 1
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
-          DEBUG=5 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT and print some source (CLANG)
-        env:
-          CLANG: 1
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
-          DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (amd)
         env:
           MOCKGPU: 1
@@ -508,17 +517,18 @@ jobs:
         run: |
           python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
           ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
-      - name: Run pytest (clang)
-        env:
-          CLANG: 1
-        run: |
-          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
-          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+
+# ****** Windows Tests ******
 
   wintests:
-    name: Tests on Windows (llvm+clang)
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [llvm, clang]
+
+    name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -527,10 +537,8 @@ jobs:
         with:
           key: windows-minimal
           deps: testing_minimal
-      - name: Run pytest (llvm)
+      - name: Set env
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}"
+      - name: Run pytest (${{ matrix.backend }})
         shell: bash
-        run: LLVM=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
-      - name: Run pytest (clang)
-        shell: bash
-        run: CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
-
+        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
