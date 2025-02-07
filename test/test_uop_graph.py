@@ -1,11 +1,11 @@
 from typing import List
 import unittest, time
 from tinygrad import dtypes, Device
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, AMX
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, graph_rewrite, expander, sym
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
@@ -397,7 +397,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(local=True), (), ("temp", 1))
+    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=1, local=True), (), "temp")
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -448,58 +448,58 @@ def float4_rewrite(sink): return full_graph_rewrite(sink, Renderer())
 
 class TestExpander(unittest.TestCase):
   def test_expand_add_broadcast(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
     sink = expander_rewrite(e1+3)
-    assert sink.op is Ops.EXPAND and len(sink.src[0].arg) == 4
+    assert sink.op is Ops.UNROLL and len(sink.src[0].arg) == 4
     self.assertTupleEqual(sink.src[0].arg, (3,4,5,6))
 
   def test_contract_simple(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
     con = UOp(Ops.CONTRACT, dtypes.int.vec(4), (e1,), ((1,4),))
     sink = expander_rewrite(con)
     self.assertEqual(sink.op, Ops.VCONST)
     self.assertTupleEqual(sink.arg, (0,1,2,3))
 
   def test_contract_axis_1(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,4),(2,4)))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,4),(2,4)))
     con = UOp(Ops.CONTRACT, dtypes.int.vec(4), (e1,), ((1,4),))
     sink = expander_rewrite(con)
-    assert sink.op is Ops.EXPAND and len(sink.src[0].arg) == 16 and sink.arg == ((2,4),)
+    assert sink.op is Ops.UNROLL and len(sink.src[0].arg) == 16 and sink.arg == ((2,4),)
     assert sink.src[0].op is Ops.VCONST
     self.assertTupleEqual(sink.src[0].arg[0:4], (0,4,8,12))
     self.assertTupleEqual(sink.src[0].arg[12:], (3,7,11,15))
 
   def test_contract_axis_2(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,4),(2,4)))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,4),(2,4)))
     con = UOp(Ops.CONTRACT, dtypes.int.vec(4), (e1,), ((2,4),))
     sink = expander_rewrite(con)
-    assert sink.op is Ops.EXPAND and len(sink.src[0].arg) == 16 and sink.arg == ((1,4),)
+    assert sink.op is Ops.UNROLL and len(sink.src[0].arg) == 16 and sink.arg == ((1,4),)
     assert sink.src[0].op is Ops.VCONST
     self.assertTupleEqual(sink.src[0].arg[0:4], (0,1,2,3))
     self.assertTupleEqual(sink.src[0].arg[12:], (12,13,14,15))
 
   def test_contract_axis_2_big(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,2),(2,2),(3,2),(4,2)))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,2),(2,2),(3,2),(4,2)))
     con = UOp(Ops.CONTRACT, dtypes.int.vec(2), (e1,), ((2,2),))
     sink = expander_rewrite(con)
-    assert sink.op is Ops.EXPAND and sink.arg == ((1, 2), (3, 2), (4, 2))
+    assert sink.op is Ops.UNROLL and sink.arg == ((1, 2), (3, 2), (4, 2))
     self.assertTupleEqual(sink.src[0].arg[0:2], (0,4))
     self.assertTupleEqual(sink.src[0].arg[12:14], (10,14))
 
   def test_contract_multi_axis(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,2),(2,2),(3,2),(4,2)))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(16), tuple(x for x in range(16))),), ((1,2),(2,2),(3,2),(4,2)))
     sink = expander_rewrite(UOp(Ops.CONTRACT, dtypes.int.vec(4), (e1,), ((3, 2), (2, 2))))
-    assert sink.op is Ops.EXPAND and sink.arg == ((1, 2), (4, 2))
+    assert sink.op is Ops.UNROLL and sink.arg == ((1, 2), (4, 2))
     self.assertTupleEqual(sink.src[0].arg[0:4], (0, 4, 2, 6))
     sink = expander_rewrite(UOp(Ops.CONTRACT, dtypes.int.vec(4), (e1,), ((2, 2), (3, 2))))
-    assert sink.op is Ops.EXPAND and sink.arg == ((1, 2), (4, 2))
+    assert sink.op is Ops.UNROLL and sink.arg == ((1, 2), (4, 2))
     self.assertTupleEqual(sink.src[0].arg[0:4], (0, 2, 4, 6))
 
   def test_contract_mid(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(8), tuple(x for x in range(8))),), ((1,2),(2,2),(3,2)))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(8), tuple(x for x in range(8))),), ((1,2),(2,2),(3,2)))
     con = UOp(Ops.CONTRACT, dtypes.int.vec(2), (e1,), ((2,2),))
     sink = expander_rewrite(con)
-    assert sink.op is Ops.EXPAND and sink.arg == ((1,2),(3,2))
+    assert sink.op is Ops.UNROLL and sink.arg == ((1,2),(3,2))
     assert sink.src[0].op is Ops.VCONST and len(sink.src[0].arg) == 8
     self.assertTupleEqual(sink.src[0].arg, (0,2,1,3,4,6,5,7))
 
@@ -511,7 +511,7 @@ class TestExpander(unittest.TestCase):
     assert sink.src[0] == sink.src[1]
 
   def test_contract_half_expand(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
     con = UOp(Ops.CONTRACT, dtypes.int.vec(8), (e1,), ((1,4), (2,2)))
     sink = expander_rewrite(con)
     assert sink.op is Ops.VCONST and len(sink.arg) == 8
@@ -520,18 +520,18 @@ class TestExpander(unittest.TestCase):
     assert sink.arg[6] == sink.arg[7]
 
   def test_expand_same_axis(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
-    e2 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(4*x for x in range(4))),), ((1,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((1,4),))
+    e2 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(4*x for x in range(4))),), ((1,4),))
     sink = expander_rewrite(e1+e2)
-    self.assertEqual(sink.op, Ops.EXPAND)
+    self.assertEqual(sink.op, Ops.UNROLL)
     self.assertEqual(sink.src[0].op, Ops.VCONST)
     self.assertTupleEqual(sink.src[0].arg, (0,5,10,15))
 
   def test_expand_different_axis(self, flip=False):
-    e1 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(4*x for x in range(4))),), ((1,4),))
-    e2 = UOp(Ops.EXPAND, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((2,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(4*x for x in range(4))),), ((1,4),))
+    e2 = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(4), tuple(x for x in range(4))),), ((2,4),))
     sink = expander_rewrite((e2+e1) if flip else (e1+e2))
-    assert sink.op is Ops.EXPAND and len(sink.src[0].arg) == 16
+    assert sink.op is Ops.UNROLL and len(sink.src[0].arg) == 16
     assert sink.arg == ((1, 4), (2, 4))
     self.assertTupleEqual(sink.src[0].arg, (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
 
@@ -539,7 +539,7 @@ class TestExpander(unittest.TestCase):
 
   @unittest.skip("no longer supported")
   def test_reduce_known_axis(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     sink = UOp(Ops.REDUCE, dtypes.int, (3*e1,e1), Ops.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is Ops.CONST
@@ -547,7 +547,7 @@ class TestExpander(unittest.TestCase):
 
   @unittest.skip("no longer supported")
   def test_reduce_const(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     sink = UOp(Ops.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), Ops.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is Ops.CONST
@@ -555,31 +555,31 @@ class TestExpander(unittest.TestCase):
 
   @unittest.skip("no longer supported")
   def test_double_expand(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
-    e2 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((2,4),))
-    e = UOp(Ops.EXPAND, dtypes.int, (e1, e2), ((1,2),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
+    e2 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((2,4),))
+    e = UOp(Ops.UNROLL, dtypes.int, (e1, e2), ((1,2),))
     sink = expander_rewrite(e)
-    assert sink.op is Ops.EXPAND and len(sink.src) == 8
+    assert sink.op is Ops.UNROLL and len(sink.src) == 8
     assert sink.arg == ((1, 2), (2, 4))
     self.assertListEqual([x.arg for x in sink.src], [0,1,2,3,4,5,6,7])
 
   @unittest.skip("no longer supported")
   def test_double_expand_reverse(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    e2 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((1,4),))
-    e = UOp(Ops.EXPAND, dtypes.int, (e1, e2), ((2,2),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e2 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((1,4),))
+    e = UOp(Ops.UNROLL, dtypes.int, (e1, e2), ((2,2),))
     sink = expander_rewrite(e)
-    assert sink.op is Ops.EXPAND and len(sink.src) == 8
+    assert sink.op is Ops.UNROLL and len(sink.src) == 8
     assert sink.arg == ((1, 4), (2, 2))
     self.assertListEqual([x.arg for x in sink.src], [0, 4, 1, 5, 2, 6, 3, 7])
 
   @unittest.skip("no longer supported")
   def test_double_expand_middle(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,2),(3,2)))
-    e2 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((1,2),(3,2)))
-    e = UOp(Ops.EXPAND, dtypes.int, (e1, e2), ((2,2),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,2),(3,2)))
+    e2 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, 4+x) for x in range(4)), ((1,2),(3,2)))
+    e = UOp(Ops.UNROLL, dtypes.int, (e1, e2), ((2,2),))
     sink = expander_rewrite(e)
-    assert sink.op is Ops.EXPAND and len(sink.src) == 8
+    assert sink.op is Ops.UNROLL and len(sink.src) == 8
     assert sink.arg == ((1, 2), (2, 2), (3, 2))
     self.assertListEqual([x.arg for x in sink.src], [0, 1, 4, 5, 2, 3, 6, 7])
 
@@ -587,8 +587,8 @@ class TestExpander(unittest.TestCase):
   @unittest.expectedFailure
   @unittest.skip
   def test_reduce_different_axis(self):
-    e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    e2 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
+    e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
+    e2 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
     sink = UOp(Ops.REDUCE, dtypes.int, (e1,e2), Ops.ADD)
     sink = expander_rewrite(sink)
     print(sink)
@@ -602,6 +602,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 1
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_two_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)]
@@ -661,7 +662,7 @@ class TestLoadStoreFolder(unittest.TestCase):
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 4))
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -680,7 +681,7 @@ class TestIFUOps(unittest.TestCase):
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 16))
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))

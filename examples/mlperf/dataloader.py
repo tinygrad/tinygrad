@@ -223,14 +223,8 @@ def batch_load_train_bert(BS:int):
   assert cycle_length > 0, "cycle_length must be greater than 0"
 
   dataset = InterleavedDataset(train_files, cycle_length)
-  buffer = [dataset.get() for _ in range(1000)]
   while True:
-    batch = []
-    for _ in range(BS):
-      index = random.randint(0, 999)
-      batch.append(buffer[index])
-      buffer[index] = dataset.get()
-    yield process_batch_bert(batch)
+    yield process_batch_bert([dataset.get() for _ in range(BS)])
 
 # Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 416
 def batch_load_val_bert(BS:int):

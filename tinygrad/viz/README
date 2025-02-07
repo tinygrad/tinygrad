@@ -8,16 +8,17 @@ https://tiny-tools-client.vercel.app/
 and a viewer for:
 SAVE_SCHEDULE=1
 TRACK_MATCH_STATS=2
-PROFILE=1 (eventually)
+PROFILE=1
 
 to use:
-1. Run tinygrad with VIZ=1 (this saves the pkls and launches the server (new process please!))
+1. Run tinygrad with VIZ=1 and/or PROFILE=1 (this saves the pkls and launches the server (new process please!))
 2. That's it!
 
 This should be able to:
-1. See all schedules
-2. See all graphs and how they were rewritten
-3. See generated code
+1. See all schedules (VIZ=1)
+2. See all graphs and how they were rewritten (VIZ=1)
+3. See generated code (VIZ=1)
+4. See profile (PROFILE=1)
 
 bunch of dev rules:
 * everything must be responsive to keyboard smashing! lag should never happen

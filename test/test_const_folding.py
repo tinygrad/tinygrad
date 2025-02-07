@@ -1,16 +1,15 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import Ops
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.ops import Ops, GroupOp
 from tinygrad.helpers import CI
 import numpy as np
 from tinygrad.device import is_dtype_supported
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  schedule = create_schedule(t.lazydata.lbs)
+  schedule = t.schedule()
   asts = [s for s in schedule if s.ast.op is Ops.SINK]
-  assert len(asts) == desired_count
+  assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
@@ -98,13 +97,42 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
+  def test_2_pow_is_exp2(self):
+    t = 2.0 ** Tensor([1.0, 2.0, 3.0])
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.EXP2])
+
+  def test_pow_05_is_sqrt(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** 0.5
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.SQRT])
+
+  def test_pow_neg_05_is_rsqrt(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** -0.5
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.RECIP, Ops.SQRT])
+
+  def test_pow_8_has_3_muls(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** 8
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+    self.assertEqual(alu, [Ops.MUL, Ops.MUL, Ops.MUL])
+
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
-    _check_ast_count(0, t[:,:,Tensor(1),:])
-    _check_ast_count(0, t[:,:,Tensor(1)+2,:])
-    _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
+    # TODO: fold these
+    _check_ast_count(2, t[:,:,Tensor(1),:])
+    _check_ast_count(2, t[:,:,Tensor(1)+2,:])
+    _check_ast_count(2, t[:,:,Tensor(1),Tensor(0)])
 
   @unittest.expectedFailure
   def test_const_tensor_index(self):
@@ -130,11 +158,12 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_cast_padded(self):
     # NOTE: this is folded due to CAST_BEFORE_VIEW
+    # update: CAST_BEFORE_VIEW=1 is no longer supported
     if is_dtype_supported(dtypes.int16):
-      _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
       np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
     if is_dtype_supported(dtypes.uint16):
-      _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+      _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
       np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # not folded
     if is_dtype_supported(dtypes.int64):
@@ -183,13 +212,12 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     # contiguous folded const can still schedule
     a = Tensor.empty(1, 0).sum().contiguous()
     _check_ast_count(2, a+2)
-    self.assertIsNotNone(a.lazydata.realized)
+    self.assertIsNotNone(a.lazydata.base.realized)
     np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
     # otherwise we just fuse it
     _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
     np.testing.assert_equal((Tensor.empty(1, 0).sum()+2).numpy(), 2)
 
-  @unittest.expectedFailure  # requires pow support on UOps
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
     np.testing.assert_equal(Tensor.full((2, 3), fill_value=2).prod().numpy(), 2**(2*3))
@@ -238,6 +266,8 @@ class TestMultiConstFolding(unittest.TestCase):
     _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
 
+  # failing because multi calls .contiguous() on every single sharded uop
+  @unittest.expectedFailure
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)

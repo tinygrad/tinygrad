@@ -1,10 +1,11 @@
-from typing import List, Dict, cast
+from typing import cast
 import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 
 def ldt(dt:DType):
+  if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
   return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
@@ -20,7 +21,7 @@ def lcast(input_type:DType, output_type:DType):
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
     if dtypes.is_int(output_type): return 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
-  if dtypes.is_unsigned(input_type) or input_type == dtypes.bool:
+  if dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
     if dtypes.is_float(output_type): return 'uitofp'
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
   if dtypes.is_int(input_type):
@@ -49,12 +50,24 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
+  # GEP/VECTORIZE/CAST for float4 support
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"  {ctx[x]} = extractelement {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {x.arg[0]}"),
+  (UPat(Ops.VECTORIZE, src=UPat.var('y'), name="x"), lambda ctx,x,y:
+   f"  {ctx[x]}_z = insertelement <1 x {ldt(y.dtype)}> poison, {ldt(y.dtype)} {ctx[y]}, i32 0\n"
+   f"  {ctx[x]} = shufflevector <1 x {ldt(y.dtype)}> {ctx[x]}_z, <1 x {ldt(y.dtype)}> poison, <{x.dtype.count} x i32> zeroinitializer"),
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
+                                                            f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
+                                                            f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}" if isinstance(x.dtype, PtrDType) else None),
+
   # unary/binary/ternary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x:
    f"  {ctx[x]} = call{flags} {ldt(x.dtype)} @llvm.sqrt.{ldt(x.src[0].dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
+  (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
@@ -73,9 +86,13 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
 
+def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
+  u16_buf = buf.replace(dtype=dtypes.ushort.ptr(size=cast(PtrDType,buf.dtype).size))
+  return UOp.load(UOp.index(u16_buf, idx), dtype=dtypes.ushort).cast(dtypes.uint).mul(1<<16).bitcast(dtypes.float32).cast(root.dtype)
+
 class LLVMRenderer(Renderer):
   device = "LLVM"
-  supports_float4 = False
+  supports_float4 = True
   has_local = False
   has_shared = False
   global_max = None
@@ -87,17 +104,22 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+    # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
+    (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
-  def render(self, name: str, uops: List[UOp]) -> str:
-    r: Dict[UOp, str] = {}
-    args: List[str] = []
-    kernel: List[str] = []
-    end_lines: Dict[str, None] = {}
+  def __init__(self, abi:str|None=None):
+    self.abi = abi
+
+  def render(self, name: str, uops: list[UOp]) -> str:
+    r: dict[UOp, str] = {}
+    args: list[str] = []
+    kernel: list[str] = []
+    end_lines: dict[str, None] = {}
     vc = -1
 
     # prealloc all assigns
-    acc_to_assign: Dict[UOp, UOp] = {}
+    acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
       if u.op is Ops.ASSIGN:
         vc += 1
@@ -129,10 +151,17 @@ class LLVMRenderer(Renderer):
         # generate the phi nodes for the assigns
         if u.op is Ops.RANGE:
           for x in acc_to_assign:
-            if u in x.src:  # if this range is relevent for this acc
+            if u in x.src:  # if this range is relevant for this acc
               vc += 1
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
               r[x] = f"%acc{vc}"
 
-    # output the function
-    return f"define void @{name}({','.join(args)}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
+    # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
+    return f'''\
+define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
+{chr(10).join(kernel)}
+  ret void
+}}
+{chr(10).join(end_lines.keys())}
+attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
+'''

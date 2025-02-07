@@ -137,7 +137,6 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a-b
     helper_test_generic_square('sub', 4096, f, f)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "breaking on webgpu CI")
   def test_pow(self):
     def f(a, b): return a.pow(b)
     helper_test_generic_square('pow', 2048, f, f)
@@ -203,8 +202,12 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return (a*b).sum()
     helper_test_generic_square('mul_sum', 4096, f, f)
 
-  def test_add(self):
-    for N in [1, 1024, 4096]:
+  def test_add_a(self):
+    def f(a, b): return a + b
+    helper_test_generic_square('add', 1, f, f)
+
+  def test_add_big(self):
+    for N in [1024, 4096]:
       def f(a, b): return a + b
       helper_test_generic_square('add', N, f, f)
 

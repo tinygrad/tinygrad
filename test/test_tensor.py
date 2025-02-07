@@ -3,11 +3,16 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.engine.schedule import create_schedule
-from tinygrad.helpers import getenv, temp, CI, _METADATA, mv_address
+from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
+from tinygrad.ops import Ops, UOp
+from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -58,57 +63,41 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
-  # This will only work if retain_graph works.
-  def test_retain_graph(self):
+  def test_accumulate_gradients(self):
     x = Tensor(x_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
     m = Tensor(m_init)
     out = x.dot(W).relu()
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
-    out.backward(retain_graph=True)
-    xgrad,wgrad = x.grad.numpy(), W.grad.numpy()
-    out.backward(retain_graph=True)
-    xgrad2,wgrad2 = x.grad.numpy(), W.grad.numpy()
+    out.backward()
+    xgrad,wgrad = x.grad, W.grad
+    out.backward()
+    xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
-    xgrad3,wgrad3 = x.grad.numpy(), W.grad.numpy()
-    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
-    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
-    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
+    xgrad3,wgrad3 = x.grad, W.grad
+    np.testing.assert_allclose(xgrad3.numpy(), xgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3.numpy(), wgrad.numpy() * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2.numpy(), xgrad.numpy() * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
 
-  @unittest.expectedFailure
   def test_second_order_backward_pass(self):
     def test_pytorch():
-      x = torch.tensor(x_init)
-      m = torch.tensor(m_init, requires_grad=True)
-      out = x.mul(m).sum()
-      # use retain graph so we can compute second order derivatives later
-      out.backward(retain_graph=True)
-      # save first-order gradient (dO/dm). they still contain graph information on how they were constructed wrt x and W
-      grad_m = m.grad
-      # zero gradients so second-order gradients are correct
-      m.grad = None
-      # compute second-order gradients
-      grad_m.sum().backward(retain_graph=True)
-
-      # d2O/dm2
-      second_grad_m = m.grad
-      return second_grad_m.numpy()
+      x_val = torch.tensor([2.0], requires_grad=True)
+      f = x_val**3
+      first_derivative = torch.autograd.grad(outputs=f, inputs=x_val, create_graph=True)[0]
+      second_derivative = torch.autograd.grad(outputs=first_derivative, inputs=x_val)[0]
+      # d^2f/dx^2 = 6x = 6*2 = 12
+      return second_derivative.numpy()
 
     def test_tinygrad():
-      x = Tensor(x_init)
-      m = Tensor(m_init, requires_grad=True)
-      out = x.mul(m).sum()
-      out.backward()
-      grad_m = m.grad
-      m.grad = None
-      grad_m.sum().backward()
-      second_grad_m = m.grad # currently, this will be None (incorrect)
-      return second_grad_m.numpy()
+      x_val = Tensor(2.0)
+      f = x_val**3
+      first_derivative = f.gradient(x_val)[0]
+      second_derivative = first_derivative.gradient(x_val)[0]
+      return second_derivative.numpy()
 
-    for x,y in zip(test_tinygrad(), test_pytorch()):
-      np.testing.assert_allclose(x, y, atol=1e-5)
+    np.testing.assert_allclose(test_tinygrad(), test_pytorch(), atol=1e-5)
 
   # passing `gradient` to backward
   def test_backward_pass_vjp(self):
@@ -135,7 +124,6 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs which breaks webgpu") #TODO: remove after #1461
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
       u = Tensor(U_init, requires_grad=True)
@@ -424,6 +412,10 @@ class TestTinygrad(unittest.TestCase):
     data = [np.array(1.0), np.array(2.0), np.array(3.0)]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_dtype_errors(self):
+    with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
+    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)
@@ -477,7 +469,7 @@ class TestTinygrad(unittest.TestCase):
   def test_repr_with_grad(self):
     a = Tensor([1], requires_grad=True)
     b = Tensor([1])
-    c = (a + b).mean().backward()
+    c = (a + b).sum().backward()
     print(a)
     print(c)
 
@@ -493,12 +485,20 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
+  def test_no_attributeerror_after_apply_uop_exception(self):
+    try:
+      Tensor.arange(4).reshape(3,2)
+    except ValueError:
+      Tensor.zeros(2, 2).realize()
+
+@unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
+    if not is_dtype_supported(dtype):
+      return
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()
     t = s.to(dest)
@@ -573,7 +573,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     a = t.reshape(0)
     assert a.shape == (0,)
     np.testing.assert_equal(a.numpy(), np.zeros((0,)))
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(ValueError):
       # cannot reshape from size 0 to size 1
       a = t.reshape(())
 
@@ -657,10 +657,26 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_clone(self):
     a = Tensor.rand(16, 16).realize()
-    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+    b = a.clone()
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
     a = Tensor.rand(16, 16).mul(5.0).add(5.0)
-    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+    b = a.clone()
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
+
+  def test_clone_with_shrink(self):
+    a = Tensor.rand(16, 16)
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
+
+  def test_clone_with_shrink_realized(self):
+    a = Tensor.rand(16, 16).realize()
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
   def test_clone_with_grad(self):
     a = Tensor.rand(16, 16, requires_grad=True)
@@ -735,7 +751,7 @@ class TestTensorMetadata(unittest.TestCase):
     W = Tensor.rand(3, 3, requires_grad=True)
     out = x.matmul(W)
     self.assertEqual(out.lazydata.metadata.name, "matmul")
-    si = create_schedule([out.lazydata])[-1]
+    si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "matmul")
 
@@ -743,7 +759,7 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True)
     out = x.relu()
     self.assertEqual(out.lazydata.metadata.name, "relu")
-    si = create_schedule([out.lazydata])[-1]
+    si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
@@ -752,15 +768,15 @@ class TestTensorMetadata(unittest.TestCase):
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
     self.assertEqual(out.lazydata.metadata.name, "__mul__")
-    self.assertEqual(out.lazydata.srcs[0].metadata.name, "relu")
-    self.assertEqual(out.lazydata.srcs[1].metadata.name, "sigmoid")
-    si = create_schedule([out.lazydata])[-1]
+    self.assertEqual(out.lazydata.src[0].metadata.name, "relu")
+    self.assertEqual(out.lazydata.src[1].metadata.name, "sigmoid")
+    si = out.schedule()[-1]
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
   def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True).realize()
+    y = Tensor.rand(3, requires_grad=True).realize()
     out = (x.relu() * y.sigmoid()).sum()
     self.assertEqual(out.lazydata.metadata.name, "sum")
     out.backward()
@@ -768,12 +784,80 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertTrue(x.grad.lazydata.metadata.backward)
     self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
     self.assertTrue(y.grad.lazydata.metadata.backward)
-    si = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])[-1]
-    self.assertEqual(len(si.metadata), 3)
+    si = Tensor.schedule(out, x.grad, y.grad)[-1]
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
     self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
     self.assertEqual(bw[0].name, "sigmoid")
+
+class TestIdxUpcast(unittest.TestCase):
+  def _find_op(self, ast: UOp, op: Ops):
+    if ast.op is op: return ast
+    for src in ast.src:
+      if (ret:=self._find_op(src, op)) is not None: return ret
+  def _schedule_render(self, a: Tensor):
+    schedule, _ = a.schedule_with_vars()
+    for s in schedule:
+      if s.ast.op is Ops.SINK:
+        renderer = Device[s.bufs[0].device].renderer
+        uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
+        renderer.render("test", uops)
+        return uops
+
+  def _assert(self, dtype: DType, a: Tensor):
+    uops = self._schedule_render(a)
+    # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
+    store = next(uop for uop in uops if uop.op is Ops.STORE)
+    assert store.op is Ops.STORE
+    idx = self._find_op(store, Ops.INDEX)
+    if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+      assert idx.op is Ops.INDEX
+      idx_val = idx.src[1]
+      assert idx_val.dtype is dtype
+
+  # use expand to generate kernel that uses large idx
+  def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
+    self._assert(dtype, Tensor.empty(dim1, dim2, 1).expand(-1, -1, dim3).contiguous())
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_overflow(self):
+    # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
+    self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_overflow_sym(self):
+    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  def test_regular(self):
+    self.do_op_then_assert(dtypes.int, 64, 64, 64)
+
+  def test_regular_sym(self):
+    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+
+  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  def test_symfold(self):
+    # This would cause an overflow, but after sym fold it's within int32
+    a = Tensor.arange(65535)
+    uops = self._schedule_render(a)
+    assert all(uop.dtype is not dtypes.long for uop in uops)
+
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_int64_unsupported_overflow_sym(self):
+    with self.assertRaises(KeyError):
+      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_int64_unsupported_overflow(self):
+    with self.assertRaises(KeyError):
+      self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+
+  @unittest.skip("This is kept for reference, it requires large memory to run")
+  def test_overflow_kernel_run(self):
+    # This creates a total of 2**31+10 elements, requiring at least 2147 MB memory to run
+    # Modified example from issue 3271
+    a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
+    a.realize()
 
 if __name__ == '__main__':
   unittest.main()

@@ -3,7 +3,6 @@ import unittest, ctypes
 
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import Context, CI, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
@@ -21,7 +20,7 @@ def helper_exec_op(device, outbuf, inbufs):
       s = fst[0]
       for i in range(1, len(inbufs)): s = s.xor(fst[i])
 
-      si = create_schedule([s.lazydata])[-1]
+      si = s.schedule()[-1]
       prg = get_runner(device, si.ast)
     cached_prgs[(device, len(inbufs))] = prg
 

@@ -2,7 +2,8 @@
 import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import temp
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -168,16 +169,6 @@ class TestAssign(unittest.TestCase):
     a += 1
     np.testing.assert_allclose(a.numpy(), 3)
 
-  # NOTE: this is similar to the resnet failure
-  #@unittest.expectedFailure
-  def test_double_assign_alt(self):
-    a = Tensor.ones(4).contiguous().realize()
-    b = Tensor([1, 2, 3, 4]).realize().lazydata
-    a1 = a.lazydata.assign(b)
-    a2 = a.lazydata.assign(b)
-    sched = create_schedule([a1, a2])
-    self.assertEqual(len(sched), 1)
-
   def test_crossover_assign(self):
     a = Tensor.full((4,), 2).contiguous().realize()
     b = Tensor.full((4,), 3).contiguous().realize()
@@ -293,6 +284,7 @@ class TestAssign(unittest.TestCase):
       #assert ba1 == ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
+  @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
     a = Tensor.randn(32, 32).realize()
     b = Tensor.full((32, ), 1.).contiguous().realize()
@@ -331,6 +323,7 @@ class TestAssign(unittest.TestCase):
       b.assign(r + b.permute(1, 0))
       b.realize()
 
+  @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use(self):
     a = Tensor.randn(32, 32, 32).realize()
     b = Tensor.full((32, 32), 1.).contiguous().realize()
@@ -343,6 +336,7 @@ class TestAssign(unittest.TestCase):
       c.assign(r + b_perm)
       Tensor.realize(b, c)
 
+  @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use_possible(self):
     a = Tensor.randn(32, 32, 32, dtype=dtypes.int).realize()
     b = Tensor.arange(32 * 32).reshape(32, 32).realize()
@@ -376,6 +370,14 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  def test_setitem_half(self):
+    a = Tensor.full((8,), 1.0, dtype=dtypes.half).contiguous().realize()
+    b = Tensor.full((4,), 2.0, dtype=dtypes.half).contiguous().realize()
+    assign = a[:4].assign(b)
+    assign.realize()
+    np.testing.assert_allclose(a.numpy(), [2., 2., 2., 2., 1., 1., 1., 1.])
+
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -386,6 +388,10 @@ class TestAssign(unittest.TestCase):
     oba2 = a.lazydata.base.output_buffer
     assert oba1 is None and oba2 is None
     np.testing.assert_allclose(a.numpy(), np.arange(N*N,dtype=np.int32).reshape((N,N)))
+
+  def test_disk_assignment(self):
+    a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
+    np.testing.assert_equal(a, np.ones(5))
 
 if __name__ == "__main__":
   unittest.main()
