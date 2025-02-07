@@ -26,4 +26,5 @@ runs:
         path: ~/.cache/tinygrad/downloads/
         key: downloads-cache-${{ inputs.key }}
     - name: Install dependencies
+      shell: bash
       run: pip install -e ".[${{ inputs.deps }}]"  --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
