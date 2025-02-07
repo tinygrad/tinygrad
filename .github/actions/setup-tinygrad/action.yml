@@ -44,12 +44,18 @@ runs:
     # **** Caching packages ****
     # TODO: key should include input.deps, but it can't since it can't contain commas
 
-    - name: Cache Python packages (Linux or macOS)
-      if: inputs.key != '' && (runner.os == 'Linux' || runner.os == 'macOS')
+    - name: Cache Python packages (Linux)
+      if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
         key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+    - name: Cache Python packages (macOS)
+      if: inputs.key != '' && runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: /Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages
+        key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache Python packages (Windows)
       if: inputs.key != '' && runner.os == 'Windows'
       uses: actions/cache@v4
