@@ -270,7 +270,7 @@ async function load_state_dict (data, device, progress) {
   const toDownload = data.metadata.files.filter(file => !cachedFileHashes.has(file.hash));
   const downloaded = [];
   // to limit memory overhead, we pause downloads if we have this number of downloaded files waiting to be processed
-  const numDownloaders = window.isMobile ? 5 : toDownload.length; // TODO: dynamically base this on DL file size? current assumption is 16 MiB chunks
+  const numDownloaders = window.isMobile ? 2 : toDownload.length; // TODO: dynamically base this on DL file size? current assumption is 16 MiB chunks
   const chainDownload = async (file) => {
     loadPart(`${window.MODEL_BASE_URL}/${file.name}`) // triggers download
     .then(async (arraybuf) => { 
