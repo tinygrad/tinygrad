@@ -42,6 +42,7 @@ package.json
 package-lock.json
 temp
 *.csv
+huggingface_results.json
 .coverage
 coverage.xml
 htmlcov

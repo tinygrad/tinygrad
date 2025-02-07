@@ -5,12 +5,18 @@ import onnx
 import numpy as np
 import onnxruntime as ort
 
-def get_example_inputs(graph_inputs:dict[str, OnnxValue]):
+def get_example_inputs(graph_inputs:dict[str, OnnxValue], config):
+  def _get_shape(shape):
+    return tuple(dim if isinstance(dim, int) else 1 for dim in shape)
+  def _get_value(shape, dtype):
+    np_dtype = _to_np_dtype(dtype)
+    return np.random.uniform(size=shape).astype(np_dtype) * 8
+
   ret: dict[str, Tensor] = {}
   for name, spec in graph_inputs.items():
     assert not spec.is_optional and not spec.is_sequence, "only allow tensor input for now"
-    shape = tuple(dim if isinstance(dim, int) else 1 for dim in spec.shape)
-    value = Tensor(np.random.uniform(size=shape).astype(_to_np_dtype(spec.dtype)) * 8).realize()
+    shape = _get_shape(spec.shape)
+    value = Tensor(_get_value(shape, spec.dtype)).realize()
     ret.update({name:value})
   return ret
 
