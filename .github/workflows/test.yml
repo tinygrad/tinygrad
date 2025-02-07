@@ -455,7 +455,7 @@ jobs:
       fail-fast: false
       matrix:
         backend: [llvm, clang, gpu, ptx, amd, nv]
-        group: [0, 1]
+        group: [1,2]
 
     name: Linux (${{ matrix.backend }}-${{ matrix.group }})
     runs-on: ubuntu-22.04
@@ -541,7 +541,7 @@ jobs:
           EOF
           sudo ldconfig
       - name: Install dependencies
-        run: pip install -e pytest-test-groups '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
