@@ -12,14 +12,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+_common-steps: &common-steps
+  - name: Checkout the code
+    uses: actions/checkout@v4
+
 jobs:
   docs:
     name: Test Docs Generation
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+    <<: *common-steps
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
