@@ -40,6 +40,7 @@ setup(name='tinygrad',
             "torch",
             "pytest",
             "pytest-xdist",
+            "hypothesis",
         ],
         'testing': [
             "numpy",
