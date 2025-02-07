@@ -30,8 +30,8 @@ runs:
       with:
         # TODO: key should include input.deps, but it can't since it can't contain commas
         path: ${{ runner.os == 'macOS'
-                  ? '/Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages'
-                  : ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages }}
+                  ? '/Users/runner/Library/Python/' + inputs['python-version'] + '/lib/python/site-packages'
+                  : ${{ env.Python3_ROOT_DIR }}/lib/python' + inputs['python-version'] + '/site-packages }}
         key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache downloads
       uses: actions/cache@v4

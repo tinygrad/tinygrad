@@ -456,7 +456,7 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}-${{ hashFiles('**/setup.py') }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+          key: ${{ matrix.backend }}
           deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
           opencl: matrix.backend == 'gpu'
       - name: Set env
@@ -545,17 +545,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: /Users/runner/Library/Python/3.12/lib/python/site-packages
-          key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+          key: macos-other
+          deps: testing
       - name: Install llvm
         run: |
           brew install llvm
@@ -570,8 +564,6 @@ jobs:
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libremu.dylib
-      - name: Install dependencies
-        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source (AMD)
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -661,28 +653,3 @@ jobs:
         shell: bash
         run: |
           CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
-
-  #testunicorn:
-  #  name: ARM64 unicorn Test
-  #  runs-on: ubuntu-latest
-  #  timeout-minutes: 20
-  #  steps:
-  #    - name: Checkout Code
-  #      uses: actions/checkout@v4
-  #    - name: Set up Python 3.11
-  #      uses: actions/setup-python@v5
-  #      with:
-  #        python-version: 3.11
-  #    - name: Cache python packages
-  #      uses: actions/cache@v4
-  #      with:
-  #        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-  #        key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
-  #    - name: Install cross-assembler
-  #      run: |
-  #        sudo apt update -y
-  #        sudo apt install -y --no-install-recommends gcc-aarch64-linux-gnu
-  #    - name: Install dependencies
-  #      run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
-  #    - name: Test arm
-  #      run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
