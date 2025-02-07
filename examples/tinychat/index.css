@@ -245,6 +245,9 @@ main {
   resize: none;
   outline: none;
 }
+.mobile .input-form { /* prevent auto-zoom on touching prompt box */
+  font-size: 16px;
+}
 
 .input-button {
   height: 3rem;
