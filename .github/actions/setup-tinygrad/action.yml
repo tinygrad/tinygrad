@@ -1,7 +1,4 @@
 name: Setup Python & Install
-env:
-  # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '9'
 description: Sets up Python and installs project dependencies.
 inputs:
   python-version:
@@ -43,18 +40,21 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
+
+    # **** Caching packages ****
+    # TODO: key should include input.deps, but it can't since it can't contain commas
+
     - name: Cache Python packages (Linux)
       if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
-        # TODO: key should include input.deps, but it can't since it can't contain commas
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages }}
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
         key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache Python packages (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
-        path: '/Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages'
+        path: /Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages
         key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache Python packages (Windows)
       if: inputs.key != '' && runner.os == 'Windows'
@@ -62,18 +62,24 @@ runs:
       with:
         path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
         key: windows-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+
+    # **** Caching downloads ****
+
     - name: Cache downloads (Linux)
       if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
-        path: '~/.cache/tinygrad/downloads/'
+        path: ~/.cache/tinygrad/downloads/
         key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Cache downloads (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
-        path: '~/Library/Caches/tinygrad/downloads/'
+        path: ~/Library/Caches/tinygrad/downloads/
         key: osx-downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+
+    # **** Python deps ****
+
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
@@ -82,6 +88,9 @@ runs:
       if: inputs.deps == ''
       shell: bash
       run: pip install -e .
+
+    # **** OpenCL ****
+
     - name: Install OpenCL
       if: inputs.opencl == 'true'
       shell: bash
