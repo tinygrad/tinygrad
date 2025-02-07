@@ -171,7 +171,7 @@ runs:
       if: inputs.webgpu == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
     - name: Install dependencies for software-based vulkan
       if: inputs.webgpu == 'true' && runner.os == 'Linux'
       shell: bash
