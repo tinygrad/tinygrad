@@ -120,9 +120,7 @@ if __name__=="__main__":
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
-    # TODO: jit_model crashes with BEAM=2 for decompression stuff, fix CLANG BEAM=2 bug
-    context = Context(BEAM=2) if step.name == "transformer" else Context(BEAM=0)
-    with context:
+    with Context(BEAM=2):
       step_top, step_prg = compile_step(step)
     top += step_top
     prg += step_prg

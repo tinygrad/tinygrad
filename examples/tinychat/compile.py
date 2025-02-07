@@ -8,7 +8,7 @@ from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad import Device, GlobalCounters, Variable
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, Context
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 from tinygrad.ops import Ops
@@ -241,8 +241,8 @@ if __name__=="__main__":
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
-    prg += compile_step(model, step)
-    base_url="."
+    with Context(BEAM=3):
+      prg += compile_step(model, step)
 
   partStartOffsets=[]
 
