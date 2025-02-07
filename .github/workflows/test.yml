@@ -224,7 +224,7 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
-    name: Linters+fuzz+unit Tests
+    name: Linters+unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -257,14 +257,35 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+    - name: Repo line count < 11000 lines
+      run: MAX_LINE_COUNT=11000 python sz.py
+
+  fuzzing:
+    name: Fuzzing Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # TODO: run the pre-commit hook to replace a lot of this
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    - name: Cache python packages
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.10/site-packages
+        key: fuzzing-packages-${{ hashFiles('**/setup.py') }}-3.10
+    - name: Install dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Repo line count < 11000 lines
-      run: MAX_LINE_COUNT=11000 python sz.py
 
   testopencl:
     strategy:
@@ -347,17 +368,10 @@ jobs:
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf optimizers
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf losses
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_losses.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf metrics
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_metrics.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf datasets
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
+        name: Test MLPerf stuff
+        run: |
+          GPU=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py \
+            test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
@@ -368,7 +382,7 @@ jobs:
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   testdsp:
-    name: DSP Tests
+    name: Linux DSP Tests (dockerized)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -395,7 +409,7 @@ jobs:
       run: DEBUG=2 DSP=1 python test/test_tiny.py
 
   testwebgpu:
-    name: WebGPU Tests
+    name: Linux WebGPU Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -710,7 +724,6 @@ jobs:
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    # WebGPU e2e tests
     - name: Run process replay tests
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
@@ -718,7 +731,7 @@ jobs:
         cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   testosxwebgpu:
-    name: MacOS WebGPU Tests
+    name: MacOS WebGPU e2e Tests
     runs-on: macos-14
     timeout-minutes: 10
 
