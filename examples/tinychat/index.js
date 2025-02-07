@@ -323,8 +323,7 @@ async function load_state_dict (data, device, progress) {
     // prioritize files from downloaded queue, so we can continue downloading more files
     if (downloaded.length) {
       const file = downloaded.shift();
-      if (isMobile) await saveTensorToDb(db, file.hash, file.bytes); // might improve stability
-      else saveTensorToDb(db, file.hash, file.bytes);
+      await saveTensorToDb(db, file.hash, file.bytes); // prevent race between indexedDB and wasm
       await loadFileToStateDict(file); // increments completed when done
     }
     else if (!downloaded.length && cachedFiles.length) {
