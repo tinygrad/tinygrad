@@ -120,7 +120,7 @@ class TestAssign(unittest.TestCase):
 
   def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy
-    with self.assertRaisesRegex(RuntimeError, "cycle"):
+    with self.assertRaisesRegex(RecursionError, "maximum recursion depth exceeded"):
       a = Tensor.ones(4).contiguous().realize()
       times_a = a*3
       a.assign(Tensor.full((4,), 2.).contiguous())
@@ -128,7 +128,7 @@ class TestAssign(unittest.TestCase):
       np.testing.assert_allclose(new.numpy(), 4)
 
   def test_assign_diamond_contiguous_cycle(self):
-    with self.assertRaisesRegex(RuntimeError, "cycle"):
+    with self.assertRaisesRegex(RecursionError, "maximum recursion depth exceeded"):
       a = Tensor.ones(4).contiguous().realize()
       times_a = a*3
       a.assign(Tensor.full((4,), 2.))
@@ -205,7 +205,7 @@ class TestAssign(unittest.TestCase):
 
   def test_crossunder_assign(self):
     # NOTE: should *not* raise AssertionError from numpy
-    with self.assertRaisesRegex(RuntimeError, "cycle"):
+    with self.assertRaisesRegex(RecursionError, "maximum recursion depth exceeded"):
       a = Tensor.full((4,), 2).contiguous().realize()
       b = Tensor.full((4,), 3).contiguous().realize()
       c = a+9

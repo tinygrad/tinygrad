@@ -235,16 +235,14 @@ def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
 
 # break the SINK into stores
 
-def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
-  if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
-  if b not in ctx.realizes: return x # collapse BUFFER
-  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
+def store_or_fuse(ctx:dict[UOp, UOp], b:UOp, x:UOp, st:UOp):
+  if b not in ctx: return x # collapse BUFFER
+  ctx[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
   # VIEW of BUFFER either becomes a LOAD/STORE or we fuse it
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)),
-   lambda ctx,st,b: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, st.st.to_uop()))),
+  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"),)), lambda st,b: UOp(Ops.LOAD, b.dtype.base, (b, st.st.to_uop()))),
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), store_or_fuse),
 ])
 
@@ -265,10 +263,6 @@ class ScheduleItem:
     return tuple(b for i,b in enumerate(self.bufs) if i not in self.output_idxs)
   @functools.cached_property
   def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
-
-def kernel_to_si(k:UOp) -> ScheduleItem:
-  assert k.op is Ops.KERNEL and isinstance(k.metadata, tuple), f"must be KERNEL {k}"
-  return ScheduleItem(k.arg.ast, tuple(u.buf_uop.buffer for u in k.src), k.metadata)
 
 # **** Kernel creation
 
@@ -381,7 +375,7 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
   return var
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
-def schedule_uop(pre:UOp, ctx:ScheduleContext) -> UOp:
+def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
@@ -396,7 +390,7 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> UOp:
       if x.op is Ops.PRELOAD: assign_preloads[x.buf_uop] = None
   # NOTE: we only add the metadata for fused tensors
   metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
-  return UOp(Ops.KERNEL, src=tuple(si_ctx.bufs), arg=Kernel(ast, metadata))
+  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -404,9 +398,30 @@ if CAPTURE_PROCESS_REPLAY:
   def save_process_replay():
     for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
+# NOTE: realizes become ASSIGN(BUFFER, KERNEL) in the schedule graph
+def init_kernel(ctx:dict[UOp, UOp], u:UOp): return u.buf_uop.assign(UOp(Ops.KERNEL, src=u.src, arg=Kernel(ctx[u.buf_uop].sink(), ())))
+def is_kernel(u:UOp) -> bool: return u.op is Ops.ASSIGN and u.src[1].op is Ops.KERNEL
+
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.BUFFER}
+def append_to_kernel(ctx:dict[UOp, UOp], x:UOp):
+  new_src: list[UOp] = []
+  for s in x.src:
+    # these ops never fuse
+    if s.op in DONT_PLACE_IN_KERNEL or is_kernel(s): pass
+    # otherwise check if we're realizing it
+    elif is_scheduled(s) and s.buf_uop in ctx: pass
+    else:
+      # fuse this op!
+      new_src.extend(uval(s).src if is_scheduled(s) else s.src)
+      continue
+    # don't fuse this op
+    new_src.append(s)
+  return x.replace(src=n) if (n:=tuple(dedup(new_src))) != x.src else None
+
 create_kernels = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda ctx,x: x.replace(src=tuple(schedule_uop(s.sink(), ctx) for s in x.src))
-    if any(s.op is not Ops.KERNEL for s in x.src) else None),
+  (UPat(Ops.SINK, name="x"), lambda ctx,x: x.replace(src=tuple(init_kernel(ctx, s) for s in x.src))
+    if any(not is_kernel(s) for s in x.src) else None),
+  (UPat(Ops.KERNEL, name="x"), append_to_kernel),
 ])
 
 # **** schedule creation and toposort
@@ -442,44 +457,45 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
     buf_uop.buffer.ref(1)
 
-  # create kernels, TODO: this should use the SINK from tensor_map
-  graph_rewrite(sink, break_sched, ctx)
-  sched_sink = graph_rewrite(UOp.sink(*realize_map.values()), create_kernels, ctx)
+  # break the sink into kernels
+  graph_rewrite(sink, break_sched, realize_map)
+  # create the kernel graph
+  sched_sink = sink
+  while 1:
+    sched_sink = graph_rewrite(sched_sink, create_kernels, realize_map)
+    rep: dict[UOp, UOp] = {}
+    for u in sched_sink.toposort:
+      if u.op is not Ops.KERNEL: continue
+      for s in u.src:
+        if s.op in DONT_PLACE_IN_KERNEL or is_kernel(s): continue
+        # otherwise it becomes a new kernel
+        rep[s] = init_kernel(realize_map, s)
+    if len(rep) == 0: break
+    sched_sink = sched_sink.substitute(rep)
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # TODO: this should be the break between the "grouper" and the "linearizer"
-  # here, there should just be one sink UOp with BUFFER/KERNEL/COPY/ASSIGN (assign is the parent if you want the buffer post assign)
-  # call into `def linearize_schedule(sched_sink:UOp) -> list[ScheduleItem]`
+  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depends on the kernel's assign
+  kernel_assigns: list[UOp] = []
+  for x in sched_sink.toposort:
+    if x.op is Ops.ASSIGN: kernel_assigns.append(x)
+  replacements = {}
+  for x in sched_sink.toposort:
+    if x.op is Ops.ASSIGN:
+      assigned_to = x.src[0]
+      new_srcs = []
+      for ka in kernel_assigns:
+        k = ka.src[1]
+        if k not in x.src and any(y is assigned_to for y in k.src): new_srcs.append(ka)
+      if len(new_srcs):
+        assert x not in replacements
+        replacements[x] = x.replace(src=x.src+tuple(new_srcs))
+  new_sched_sink = sched_sink.substitute(replacements)
+  type_verify(list(new_sched_sink.toposort), kernel_spec)
+  if getenv("VIZ"): graph_rewrite(new_sched_sink, PatternMatcher([]))
 
-  # convert kernels to ScheduleItem
-  prescheduled = [kernel_to_si(k) for k in sched_sink.src]
-  # add ScheduleItem children
-  # TODO: this should construct the graph directly from the sched_sink
-  schedule_targets = {out:si for si in prescheduled for out in si.outputs}
-  graph: defaultdict[ScheduleItem, list[ScheduleItem]] = defaultdict(list)
-  in_degree: defaultdict[ScheduleItem, int] = defaultdict(int)
-  for si in prescheduled:
-    # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in ctx.preloads[si.bufs[0]] if (xsi:=schedule_targets.get(x.buffer)) is not None and xsi is not si)
-    for assign in parents_assigns:
-      graph[si].append(assign)
-      in_degree[assign] += 1
-    # realize outputs after all parents are realized
-    scheduled_parents = dedup(xsi for x in si.inputs if (xsi:=schedule_targets.get(x)) is not None and xsi not in parents_assigns)
-    for x in scheduled_parents:
-      graph[x].append(si)
-      in_degree[si] += 1
+  # final toposort
+  schedule = [schedule_uop(u.src[1].arg.ast, ctx) for u in new_sched_sink.toposort if u.op is Ops.ASSIGN]
 
-  # do BFS
-  queue = deque(si for si in prescheduled if in_degree[si] == 0)
-  schedule: list[ScheduleItem] = []
-  while queue:
-    schedule.append(si:=queue.popleft())
-    for x in graph[si]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
-  # confirm everything was scheduled correctly
-  if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
