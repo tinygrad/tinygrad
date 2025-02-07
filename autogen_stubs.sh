@@ -357,6 +357,14 @@ generate_am() {
   fixup $BASE/am/smu_v13_0_0.py
 }
 
+generate_webgpu() {
+  clang2py -l /usr/local/lib/libwebgpu_dawn.so extra/webgpu/webgpu.h -o $BASE/webgpu.py
+  fixup $BASE/webgpu.py
+  sed -i 's/import ctypes/import ctypes, ctypes.util/g' $BASE/webgpu.py
+  sed -i "s|ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))|g" $BASE/webgpu.py
+  python3 -c "import tinygrad.runtime.autogen.webgpu"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -375,6 +383,7 @@ elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pciaccess
 elif [ "$1" == "vfio" ]; then generate_vfio
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am
+elif [ "$1" == "webgpu" ]; then generate_webgpu
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
 else echo "usage: $0 <type>"
 fi
