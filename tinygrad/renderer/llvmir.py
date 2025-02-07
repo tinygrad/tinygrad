@@ -1,8 +1,9 @@
 from typing import cast
 import math, struct
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, amx_tc
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
+from tinygrad.helpers import dedup, AMX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -28,6 +29,18 @@ def lcast(input_type:DType, output_type:DType):
     if dtypes.is_float(output_type): return 'sitofp'
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
+
+def render_wmma(ctx, wmma: UOp) -> str:
+  def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #2'
+
+  return "\n".join([
+    *[f"  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype)}* %amx_{i}, align {src.dtype.itemsize}" for i, src in enumerate(wmma.src)],
+      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0 ; AMX set',
+    *[f"  {ctx[wmma]}_ld_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(4, f'{ctx[wmma]}_ld_{i}')}" for i in range(16)],
+      f"  {AMX(0, '%ptr_amx_1')}\n  {AMX(1, '%ptr_amx_0')}\n  {AMX(12, 0)}",
+    *[f"  {ctx[wmma]}_st_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(5, f'{ctx[wmma]}_st_{i}')}" for i in range(16)],
+      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0 ; AMX clr',
+      f"  {ctx[wmma]} = load <256 x float>, ptr %amx_2, align 1024"])
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
@@ -84,6 +97,9 @@ llvm_rewrite = PatternMatcher([
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
+
+  # wmma
+  (UPat(Ops.WMMA, name="wmma"), render_wmma),
 ])
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
@@ -96,6 +112,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
+  if AMX: tensor_cores = amx_tc
 
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
@@ -117,6 +134,10 @@ class LLVMRenderer(Renderer):
     kernel: list[str] = []
     end_lines: dict[str, None] = {}
     vc = -1
+
+    for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
+      dts=[arg[2].vec(sz) for sz in (arg[1][0], arg[1][0], arg[1][0]*arg[1][0])]
+      kernel+=[f"  %amx_{i} = alloca {ldt(dt)}, align {dt.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dt)}* %amx_{i} to i64" for i,dt in enumerate(dts)]
 
     # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}

@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.renderer import Renderer, TensorCore
+from tinygrad.renderer import Renderer, TensorCore, amx_tc
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
@@ -164,6 +164,7 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
+  if AMX: tensor_cores = amx_tc
 
   # language options
   buffer_suffix = " restrict"
@@ -174,10 +175,6 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16))]) + \
     CStyleLanguage.extra_matcher
 
-  if AMX:
-    tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
-                               swizzle=(None, ((),(4,5,6,7,0,1,2,3))), opts=("u0","u0","u0","u0","u1","u1","u1","u1"))
-                               for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
   if sys.platform == 'win32':
     kernel_prefix = "__attribute__((ms_abi)) "
   def render_vector_prefix(self, dt:DType) -> str:
