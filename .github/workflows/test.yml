@@ -72,6 +72,9 @@ jobs:
         sudo apt update -y || true
         sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
           flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
+    - name: Install packages (webgpu)
+      run: |
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
     - name: Install packages (amd)
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -132,6 +135,11 @@ jobs:
         ./autogen_stubs.sh io_uring
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+    - name: Verify WebGPU autogen
+      run: |
+        cp tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
+        ./autogen_stubs.sh webgpu
+        diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
     - name: Verify LLVM autogen
       run: |
         cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
@@ -401,7 +409,10 @@ jobs:
         path: ~/.local/lib/python3.11/site-packages
         key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Install dawn (WebGPU)
+      run: |
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
     - name: Install dependencies for software-based vulkan
       run: |
         sudo apt update -y || true
@@ -417,7 +428,7 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 WGPU_BACKEND_TYPE=Vulkan python3 -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit \
+          WEBGPU=1 python3 -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit \
           --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py --ignore=test/test_speed_v_torch.py --ignore=test/test_transcendental.py \
           --ignore=test/test_fuzz_shape_ops.py --ignore=test/test_linearizer_failures.py --durations=20
     - name: Run process replay tests
@@ -447,6 +458,10 @@ jobs:
         key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Install dawn (WebGPU)
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
     - name: Cache downloads
       uses: actions/cache@v4
       with:
@@ -478,7 +493,7 @@ jobs:
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     # WebGPU e2e tests
     - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
+      run: WEBGPU=1 python3 -m examples.compile_efficientnet
     - name: Clean npm cache
       run: npm cache clean --force
     - name: Install Puppeteer
