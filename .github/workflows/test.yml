@@ -47,7 +47,8 @@ jobs:
         cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
     - name: Test Docs Build
-      run: python -m mkdocs build --strict
+      # NOTE: the default is GPU here, but you can't use it since it lacks 'cl_khr_fp16'
+      run: CLANG=1 python -m mkdocs build --strict
     - name: Test Docs
       run: |
         python docs/abstractions2.py
@@ -218,7 +219,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linting
-        python-version: 3.10
+        python-version: '3.10'
         deps: linting,testing
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
@@ -261,7 +262,7 @@ jobs:
         with:
           key: alt-${{ matrix.task }}
           deps: testing,testing_tf
-          python-version: 3.11
+          python-version: '3.11'
           opencl: true
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
@@ -336,7 +337,7 @@ jobs:
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: 3.12
+        python-version: '3.12'
     - name: Install Dependencies
       run: pip install --user -e .
     - name: Set up Docker Buildx
@@ -365,7 +366,7 @@ jobs:
       with:
         key: webgpu
         deps: testing
-        python-version: 3.11
+        python-version: '3.11'
     - name: Install dawn (WebGPU)
       run: |
         sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
@@ -401,7 +402,7 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: 3.11
+        python-version: '3.11'
     - name: Install dawn (WebGPU)
       run: |
         sudo mkdir -p /usr/local/lib
@@ -619,12 +620,10 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: 3.12
+          python-version: '3.12'
       - name: Cache python packages
         uses: actions/cache@v4
         with:

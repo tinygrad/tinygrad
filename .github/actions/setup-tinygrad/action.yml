@@ -11,7 +11,7 @@ inputs:
   key:
     description: 'Key for the python cache'
     required: false
-    default: false  # if you don't set a key, it doesn't cache
+    default: ''  # if you don't set a key, it doesn't cache
   deps:
     description: 'Extra dependency groups (comma separated)'
     required: true
@@ -27,26 +27,26 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
     - name: Cache Python packages (Linux)
-      if: ${{ inputs.key }} && ${{ runner.os == 'Linux' }}
+      if: ${{ inputs.key != '' }} && ${{ runner.os == 'Linux' }}
       uses: actions/cache@v4
       with:
         # TODO: key should include input.deps, but it can't since it can't contain commas
         path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages }}
         key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache Python packages (macOS)
-      if: ${{ inputs.key }} && ${{ runner.os == 'macOS' }}
+      if: ${{ inputs.key != '' }} && ${{ runner.os == 'macOS' }}
       uses: actions/cache@v4
       with:
         path: '/Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages'
         key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache downloads (Linux)
-      if: ${{ inputs.key }} && ${{ runner.os == 'Linux' }}
+      if: ${{ inputs.key != '' }} && ${{ runner.os == 'Linux' }}
       uses: actions/cache@v4
       with:
         path: '~/.cache/tinygrad/downloads/'
         key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Cache downloads (macOS)
-      if: ${{ inputs.key }} && ${{ runner.os == 'macOS' }}
+      if: ${{ inputs.key != '' }} && ${{ runner.os == 'macOS' }}
       uses: actions/cache@v4
       with:
         path: '~/Library/Caches/tinygrad/downloads/'
@@ -55,7 +55,7 @@ runs:
       shell: bash
       run: pip install -e ".[${{ inputs.deps }}]"  --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install OpenCL
-      if: ${{ inputs.opencl }}
+      if: ${{ inputs.opencl == 'true' }}
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
