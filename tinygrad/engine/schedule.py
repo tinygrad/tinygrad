@@ -234,9 +234,10 @@ def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
 
 # break the SINK into stores
 
-def store_or_fuse(ctx:dict[UOp, UOp], b:UOp, x:UOp, st:UOp):
-  if b not in ctx: return x # collapse BUFFER
-  ctx[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
+def store_or_fuse(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
+  if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
+  if b not in ctx.realizes: return x # collapse BUFFER
+  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(st.shape).to_uop(), x)
   return UOp(Ops.LOAD, x.dtype, (b, unwrap(st.st).to_uop()))
 
 break_sched = PatternMatcher([
@@ -447,7 +448,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     buf_uop.buffer.ref(1)
 
   # break the sink into kernels
-  graph_rewrite(sink, break_sched, realize_map)
+  graph_rewrite(sink, break_sched, ctx)
   # create the kernel graph
   sched_sink = sink
   while 1:

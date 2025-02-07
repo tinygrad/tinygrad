@@ -744,7 +744,6 @@ class TestInferenceMode(unittest.TestCase):
       assert W.grad is None
     f(x, m, W)
 
-@unittest.skip("TODO: bringing this back is easy, maybe it should be go in KERNEL construction")
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
   def test_matmul(self):
