@@ -1,7 +1,5 @@
 name: Unit Tests
 env:
-  # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '9'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -423,9 +421,9 @@ jobs:
         with:
           key: ${{ matrix.backend }}
           deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
-          opencl: ${{ matrix.backend == 'gpu' }}
-          amd: ${{ matrix.backend == 'amd' }}
-          cuda: ${{ matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv' }}
+          opencl: ${{ matrix.backend == 'gpu' && 'true' }}
+          amd: ${{ matrix.backend == 'amd' && 'true' }}
+          cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -467,8 +465,8 @@ jobs:
         with:
           key: macos-other
           deps: testing
-          amd: true
-          llvm: true
+          amd: 'true'
+          llvm: 'true'
       - name: Check Device.DEFAULT and print some source (AMD)
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -524,14 +522,6 @@ jobs:
         with:
           key: windows
           deps: testing
-      - name: Set env
-        shell: bash
-        run: |
-          if [ "${{ matrix.backend }}" = "clang" ]; then
-            echo "CLANG=1" >> $GITHUB_ENV
-          elif [ "${{ matrix.backend }}" = "llvm" ]; then
-            echo "LLVM=1" >> $GITHUB_ENV
-          fi
       - name: Check Device.DEFAULT and print some source (llvm)
         shell: bash
         run: |
