@@ -1,4 +1,3 @@
-from __future__ import annotations
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.ops import Ops, UOp, sint
@@ -43,27 +42,12 @@ def to_sharded(lbs:list[UOp], axis:int, bounds: tuple[tuple[int, int], ...]) -> 
 
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, graph_rewrite_map, track_rewrites
 
-def get_axis(root:UOp):
-  if root.op is Ops.MULTI: return root.arg[0]
-  # NOTE: they all have to share an axis, we always choose [-1]
-  if root.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in root.src if x.axis is not None])) else None
-  src_axis = get_axis(root.src[0])
-  if root.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in root.arg[1] else src_axis
-  if root.op is Ops.RESHAPE:
-    if src_axis is None: return None
-    arg_acc:list[sint] = list(itertools.accumulate(root.arg, operator.mul, initial=1))
-    # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
-    # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
-    return len(arg_acc) - arg_acc[::-1].index(prod(root.src[0].shape[:src_axis])) - 1
-  if root.op is Ops.PERMUTE: return root.arg.index(src_axis) if src_axis is not None else None
-  raise NotImplementedError("rest should be passthrough")
-
 def alu_multi(root:UOp):
   msrcs = root.src
   assert all(x.op is Ops.MULTI for x in msrcs), f"all buffers must be MultiLazyBuffer {[x.op for x in msrcs]}"
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
 
-  axis = get_axis(root)
+  axis = root.axis
   bounds = dedup([x.bounds for x in root.src if x.axis == axis])[-1] if axis is not None else None
   srcs:list[list[UOp]] = []
   not_all_real = not all(all(mlb.real) for mlb in msrcs)
@@ -79,23 +63,23 @@ def alu_multi(root:UOp):
   return UOp.multi(*new_lbs, axis=axis, real=new_real)
 
 def reduce_multi(root:UOp, multi:UOp):
-  (op, axis), new_axis = root.arg, get_axis(root)
+  op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
     reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(multi.src, multi.real)]
     # if all partitions are real, do all_reduce
-    if all(multi.real): return UOp.multi(*all_reduce(op, reduced_parts), axis=new_axis)
+    if all(multi.real): return UOp.multi(*all_reduce(op, reduced_parts), axis=root.axis)
     # only one partition is real, keep it
-    return UOp.multi(*reduced_parts, axis=new_axis, real=multi.real)
+    return UOp.multi(*reduced_parts, axis=root.axis, real=multi.real)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return UOp.multi(*[x.r(op, axis) for x in multi.src], axis=new_axis, real=multi.real)
+  return UOp.multi(*[x.r(op, axis) for x in multi.src], axis=root.axis, real=multi.real)
 
 def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
   return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
 
 def reshape_multi(root:UOp, multi:UOp):
-  arg, new_axis = root.arg, get_axis(root)
-  if multi.axis is None: return UOp.multi(*[x.reshape(arg) for x in multi.src], axis=new_axis, real=multi.real)
+  arg = root.arg
+  if (new_axis:=root.axis) is None: return UOp.multi(*[x.reshape(arg) for x in multi.src], axis=new_axis, real=multi.real)
   assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
   assert all(prod(lb.shape[multi.axis:])%prod(arg[new_axis+1:])==0 for lb in multi.src), \
     f"reshape cannot move items between shards {multi.shape} -> {root.arg=}"
@@ -120,7 +104,7 @@ def pad_multi(root:UOp, multi:UOp):
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
-  return UOp.multi(*[x.permute(root.arg) for x in multi.src], axis=get_axis(root), real=multi.real)
+  return UOp.multi(*[x.permute(root.arg) for x in multi.src], axis=root.axis, real=multi.real)
 
 def shrink_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.arg[multi.axis] == (0, multi.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \

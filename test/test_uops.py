@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Any, List
+from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -17,7 +17,7 @@ from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
-def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
 def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
@@ -26,7 +26,7 @@ def _uops_to_prg(uops_list):
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
-def uop(uops:List[UOp], uop:Ops, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
+def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
   return uops[-1]
 
@@ -355,12 +355,12 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MUL, ops)
 
   def test_bitshift_right(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.int, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
-    a1 = UOp(Ops.IDIV, dtypes.int, (l1, c1))
-    a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
+    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c1 = UOp(Ops.CONST, dtypes.uint, (), 2)
+    c2 = UOp(Ops.CONST, dtypes.uint, (), 3)
+    l1 = UOp(Ops.LOAD, dtypes.uint, (g1.index(c1),))
+    a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
+    a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     ops = [x.op for x in uops]
