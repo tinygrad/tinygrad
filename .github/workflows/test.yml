@@ -705,6 +705,38 @@ jobs:
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
+    - name: Run process replay tests
+      run: |
+        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  testosxwebgpu:
+    name: MacOS WebGPU e2e + other Tests
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+    - name: Cache python packages
+      uses: actions/cache@v4
+      with:
+        path: /Users/runner/Library/Python/3.11/lib/python/site-packages
+        key: webgpu-m1-testing2-user3-packages-${{ hashFiles('**/setup.py') }}
+    - name: Install Dependencies
+      run: pip install --user -e '.[testing,webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Cache downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/tinygrad/downloads/
+        key: downloads-cache-webgpu-only-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Run ONNX
@@ -723,38 +755,6 @@ jobs:
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    - name: Run process replay tests
-      run: |
-        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
-
-  testosxwebgpu:
-    name: MacOS WebGPU e2e Tests
-    runs-on: macos-14
-    timeout-minutes: 10
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-        key: webgpu-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-    - name: Install Dependencies
-      run: pip install --user -e '.[webgpu]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Cache downloads
-      uses: actions/cache@v4
-      with:
-        path: ~/Library/Caches/tinygrad/downloads/
-        key: downloads-cache-webgpu-only-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
     - name: Clean npm cache
