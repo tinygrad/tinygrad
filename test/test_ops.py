@@ -607,6 +607,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: b**1.1, lambda: a**1.1)
 
   def test_pow_const(self):
+    helper_test_op([(45,65)], lambda x: x**0.0)
     helper_test_op([(45,65)], lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0)
     helper_test_op([(45,65)], lambda x: 1.0**x)
@@ -616,8 +617,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2.0**x)
     # TODO: fix backward
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
-    # TODO: fix backward, should be nan
-    helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
+    helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
@@ -724,6 +724,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
+
+  def test_idiv_shift_rewrite_negative(self):
+    a = Tensor(-5).idiv(2).item()
+    b = Tensor(-5).contiguous().idiv(2).item()
+    self.assertEqual(a, b)
+    self.assertEqual(Tensor(-1).contiguous().idiv(4).item(), 0)  # NOTE this is trunc-div behaviour
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
@@ -2027,6 +2033,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(bs,1,5,1), (1,1,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
       lambda x,w: Tensor.conv2d(x,w,stride=2).relu())
+
+  @unittest.skipIf(Device.DEFAULT != "LLVM", "DEVECTORIZE=0 only for LLVM")
+  def test_strided_conv2d_simple_vec(self):
+    with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
 
   def test_strided_conv2d(self):
     bs = 4
