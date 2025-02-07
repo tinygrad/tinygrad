@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Any, List
+from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -7,15 +7,17 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
+from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
+from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
+from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
-def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
 def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
@@ -24,7 +26,7 @@ def _uops_to_prg(uops_list):
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
-def uop(uops:List[UOp], uop:Ops, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
+def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
   return uops[-1]
 
@@ -310,7 +312,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(local=True), (), ('smem', 16))
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, local=True), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
@@ -320,7 +322,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
   def test_local_packed(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(local=True), (), ('smem', 16))
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, local=True), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
@@ -329,7 +331,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(local=True), (), ('smem', 16))
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, local=True), (), 'smem')
     st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
     st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
@@ -353,17 +355,28 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MUL, ops)
 
   def test_bitshift_right(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.int, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
-    a1 = UOp(Ops.IDIV, dtypes.int, (l1, c1))
-    a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
+    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c1 = UOp(Ops.CONST, dtypes.uint, (), 2)
+    c2 = UOp(Ops.CONST, dtypes.uint, (), 3)
+    l1 = UOp(Ops.LOAD, dtypes.uint, (g1.index(c1),))
+    a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
+    a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertIn(Ops.IDIV, ops)
+
+  def test_mulacc_unrolled(self):
+    # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
+    # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)
+    a = Tensor.empty(1024)
+    b = Tensor.empty(1024)
+    c = (a*b).sum()
+    k = Kernel(c.schedule()[-1].ast)
+    k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+    uops = k.linearize().uops
+    self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
@@ -377,12 +390,11 @@ class TestUOpMethod(unittest.TestCase):
 
   def test_uop_variables(self):
     a = UOp.variable("a", 1, 10)
-    uop_var = UOp.const(dtypes.int, a)
-    st_var = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0),
-                                           ShapeTracker.from_shape((2, a)).to_uop()))
-    ast_vars = (st_var+uop_var).variables()
-    self.assertEqual(len(ast_vars), 1)
-    self.assertEqual(ast_vars[0], a)
+    uop_var = Tensor(a.bind(1))
+    st_var = Tensor.empty((2, 1)).reshape((2, a.bind(1)))
+    _, var_vals = (uop_var+st_var).schedule_with_vars()
+    self.assertEqual(len(var_vals), 1)
+    self.assertEqual(list(var_vals)[0], a)
 
   def test_const_factor(self):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 8))
@@ -482,7 +494,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "uopgraph.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "rewriter.py")
     self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
@@ -513,7 +525,6 @@ class TestShapeSpec(unittest.TestCase):
     a = Tensor.ones((4, 4)).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
 
-  @unittest.expectedFailure
   def test_padded_const(self):
     a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
     ast = a.contiguous().schedule()[0].ast
@@ -527,16 +538,15 @@ class TestShapeSpec(unittest.TestCase):
     assert x.st.views[-1].mask is y.st.views[-1].mask is None
     assert all(s.shape == (3, 3) for s in valid_ternary.src)
 
-  # currently this is None, it shouldn't be
-  @unittest.expectedFailure
+  # NOTE: CONST ShapeTracker comes from its source
   def test_scalar_const(self):
-    a = UOp.const(dtypes.int, 0)
+    a = Tensor(0).lazydata
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
 
-  @unittest.expectedFailure
   def test_scalar_var(self):
     vv = UOp.variable("a", 1, 4).bind(2)
-    self.assertEqual(vv.st, ShapeTracker.from_shape(()))
+    t = Tensor(vv).lazydata
+    self.assertEqual(t.st, ShapeTracker.from_shape(()))
 
   # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
 
@@ -577,7 +587,6 @@ class TestShapeSpec(unittest.TestCase):
     assign.realize()
     self.assertEqual(a.tolist(), [1, 0, 1, 1])
 
-  @unittest.expectedFailure
   def test_buffer_st(self):
     a = UOp.new_buffer(Device.DEFAULT, 10, dtypes.float)
     self.assertEqual(a.st, ShapeTracker.from_shape((10,)))

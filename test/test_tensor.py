@@ -7,6 +7,12 @@ from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
+from tinygrad.ops import Ops, UOp
+from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -57,17 +63,16 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
-  # This will only work if retain_graph works.
-  def test_retain_graph(self):
+  def test_accumulate_gradients(self):
     x = Tensor(x_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
     m = Tensor(m_init)
     out = x.dot(W).relu()
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad,wgrad = x.grad, W.grad
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
     xgrad3,wgrad3 = x.grad, W.grad
@@ -480,6 +485,12 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
+  def test_no_attributeerror_after_apply_uop_exception(self):
+    try:
+      Tensor.arange(4).reshape(3,2)
+    except ValueError:
+      Tensor.zeros(2, 2).realize()
+
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
@@ -646,19 +657,26 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_clone(self):
     a = Tensor.rand(16, 16).realize()
-    self.assertIsNot(a.lazydata, a.clone().lazydata)
-    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+    b = a.clone()
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
     a = Tensor.rand(16, 16).mul(5.0).add(5.0)
-    self.assertIsNot(a.lazydata, a.clone().lazydata)
-    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+    b = a.clone()
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
   def test_clone_with_shrink(self):
-    a = Tensor.empty(16, 16)
-    self.assertIsNot(a.lazydata, a.clone().lazydata)
+    a = Tensor.rand(16, 16)
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
-    b = a.shrink(((2, 10), None))
-    self.assertIsNot(b.lazydata, b.clone().lazydata)
+  def test_clone_with_shrink_realized(self):
+    a = Tensor.rand(16, 16).realize()
+    b = a.shrink(((2, 10), None)).clone()
+    b.realize()
+    self.assertIsNot(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
   def test_clone_with_grad(self):
     a = Tensor.rand(16, 16, requires_grad=True)
@@ -757,8 +775,8 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
   def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True).realize()
+    y = Tensor.rand(3, requires_grad=True).realize()
     out = (x.relu() * y.sigmoid()).sum()
     self.assertEqual(out.lazydata.metadata.name, "sum")
     out.backward()
@@ -772,6 +790,74 @@ class TestTensorMetadata(unittest.TestCase):
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
     self.assertEqual(bw[0].name, "sigmoid")
+
+class TestIdxUpcast(unittest.TestCase):
+  def _find_op(self, ast: UOp, op: Ops):
+    if ast.op is op: return ast
+    for src in ast.src:
+      if (ret:=self._find_op(src, op)) is not None: return ret
+  def _schedule_render(self, a: Tensor):
+    schedule, _ = a.schedule_with_vars()
+    for s in schedule:
+      if s.ast.op is Ops.SINK:
+        renderer = Device[s.bufs[0].device].renderer
+        uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
+        renderer.render("test", uops)
+        return uops
+
+  def _assert(self, dtype: DType, a: Tensor):
+    uops = self._schedule_render(a)
+    # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
+    store = next(uop for uop in uops if uop.op is Ops.STORE)
+    assert store.op is Ops.STORE
+    idx = self._find_op(store, Ops.INDEX)
+    if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+      assert idx.op is Ops.INDEX
+      idx_val = idx.src[1]
+      assert idx_val.dtype is dtype
+
+  # use expand to generate kernel that uses large idx
+  def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
+    self._assert(dtype, Tensor.empty(dim1, dim2, 1).expand(-1, -1, dim3).contiguous())
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_overflow(self):
+    # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
+    self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_overflow_sym(self):
+    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  def test_regular(self):
+    self.do_op_then_assert(dtypes.int, 64, 64, 64)
+
+  def test_regular_sym(self):
+    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+
+  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  def test_symfold(self):
+    # This would cause an overflow, but after sym fold it's within int32
+    a = Tensor.arange(65535)
+    uops = self._schedule_render(a)
+    assert all(uop.dtype is not dtypes.long for uop in uops)
+
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_int64_unsupported_overflow_sym(self):
+    with self.assertRaises(KeyError):
+      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+
+  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  def test_int64_unsupported_overflow(self):
+    with self.assertRaises(KeyError):
+      self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
+
+  @unittest.skip("This is kept for reference, it requires large memory to run")
+  def test_overflow_kernel_run(self):
+    # This creates a total of 2**31+10 elements, requiring at least 2147 MB memory to run
+    # Modified example from issue 3271
+    a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
+    a.realize()
 
 if __name__ == '__main__':
   unittest.main()
