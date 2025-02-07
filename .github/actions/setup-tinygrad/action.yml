@@ -1,13 +1,19 @@
 name: Setup Python & Install
+env:
+  # increment this when downloads substantially change to avoid the internet
+  DOWNLOAD_CACHE_VERSION: '9'
 description: Sets up Python and installs project dependencies.
 inputs:
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
   key:
     description: 'Key for the python cache'
     required: true
   deps:
     description: 'Extra dependency groups (comma separated)'
-    required: false
-    default: ''
+    required: true
   opencl:
     description: "Install OpenCL?"
     required: false
@@ -15,20 +21,20 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set up Python 3.12
+    - name: Set up Python ${{ inputs.python-version }}
       uses: actions/setup-python@v5
       with:
-        python-version: 3.12
+        python-version: ${{ inputs.python-version }}
     - name: Cache Python packages (Linux)
       uses: actions/cache@v4
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
-        key: python-package-${{ inputs.key }}
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
+        key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}-${{ inputs.deps }}
     - name: Cache downloads (Linux)
       uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-${{ inputs.key }}
+        key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Install dependencies
       shell: bash
       run: pip install -e ".[${{ inputs.deps }}]"  --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/

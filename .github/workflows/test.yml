@@ -145,17 +145,11 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        python-version: 3.12
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
-        key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
-    - name: Install dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        key: uops
+        deps: testing
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -222,17 +216,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        python-version: "3.10"
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.10/site-packages
-        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.10
-    - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        key: linting
+        python-version: 3.10
+        deps: linting,testing
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
@@ -272,8 +261,9 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: alt-${{ matrix.task }}-${{ hashFiles('**/setup.py') }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+          key: alt-${{ matrix.task }}
           deps: testing,testing_tf
+          python-version: 3.11
           opencl: true
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
@@ -372,26 +362,16 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
+        key: webgpu
+        deps: webgpu,testing
         python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: ~/.local/lib/python3.11/site-packages
-        key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-    - name: Install Dependencies
-      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Install dependencies for software-based vulkan
       run: |
         sudo apt update -y || true
         sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
-    - name: Cache downloads
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
