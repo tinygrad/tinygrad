@@ -17,7 +17,7 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-class SimpleMathTrait:
+class MathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
@@ -71,14 +71,14 @@ class SimpleMathTrait:
   def __ne__(self, x): return self.ne(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):
-  # TODO: move to Tensor when new backward is done
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
   def __rshift__(self, x): return self.rshift(x)
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
+  def __pow__(self, x): return self.pow(x)
+  def __rpow__(self, x): return self.pow(x, True)
 
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
@@ -89,7 +89,7 @@ class MathTrait(SimpleMathTrait):
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
-  def pow(self, x): return self.alu(Ops.POW, self.ufix(x))
+  def pow(self, x, reverse=False): return self._binop(Ops.POW, x, reverse)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):

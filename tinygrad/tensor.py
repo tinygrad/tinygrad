@@ -8,7 +8,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -116,7 +116,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(SimpleMathTrait):
+class Tensor(MathTrait):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -487,9 +487,9 @@ class Tensor(SimpleMathTrait):
 
   @staticmethod
   def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor):
-    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
-    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
+    x = (counts1.cast(dtypes.uint64) * 2**32) | counts0.cast(dtypes.uint64)
+    x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) * 2**32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
+    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
 
   @staticmethod
@@ -3249,29 +3249,35 @@ class Tensor(SimpleMathTrait):
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
-  def lshift(self, x:int):
+  def lshift(self, x:Union[Tensor, ConstType], reverse=False):
     """
-    Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
+    Computes left arithmetic shift of `self` by `x` bits.
     Equivalent to `self << x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    return self.mul(2 ** x)
+    a, b = self._broadcasted(x, reverse=reverse)
+    if a.dtype != dtypes.bool and not dtypes.is_int(a.dtype): raise RuntimeError(f"{self.dtype} is not supported")
+    # shift by a count greater than bit width isn't supported; this fix matches torch
+    b_invalid = (b < 0) | (b >= 8*a.dtype.itemsize)
+    return a._apply_uop(UOp.lshift, b_invalid.where(8*a.dtype.itemsize-1, b))._apply_broadcasted_uop(UOp.lshift, b_invalid)
 
-  def rshift(self, x:int):
+  def rshift(self, x:Union[Tensor, ConstType], reverse=False):
     """
-    Computes right arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
+    Computes right arithmetic shift of `self` by `x` bits.
     Equivalent to `self >> x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0, f"not supported {self.dtype=} {x=}"
-    return self.idiv(2 ** x)
+    a, b = self._broadcasted(x, reverse=reverse)
+    if a.dtype != dtypes.bool and not dtypes.is_int(a.dtype): raise RuntimeError(f"{self.dtype} is not supported")
+    # shift by a count greater than bit width isn't supported; this fix matches torch
+    b_invalid = (b < 0) | (b >= 8*a.dtype.itemsize)
+    return a._apply_uop(UOp.rshift, b_invalid.where(8*a.dtype.itemsize-1, b))._apply_broadcasted_uop(UOp.rshift, b_invalid)
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3355,13 +3361,8 @@ class Tensor(SimpleMathTrait):
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
 
-  def __lshift__(self, x) -> Tensor: return self.lshift(x)
-  def __rshift__(self, x) -> Tensor: return self.rshift(x)
-
-  def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
 
-  def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
