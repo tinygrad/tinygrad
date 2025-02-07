@@ -90,7 +90,6 @@ class ScheduleContext:
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   var_vals: dict[Variable, int] = field(default_factory=dict)
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
-  preloads: defaultdict[Buffer, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
 # this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
@@ -362,8 +361,6 @@ to_si = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
   # don't need DEVICE anymore
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
-  # PRELOAD becomes LOAD
-  (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
   # once images are loaded they become the base dtype
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
@@ -380,14 +377,6 @@ def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
   ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(ctx.var_vals))
-  # deal with ASSIGN
-  if len(ctx.assigns) != 0:
-    assign_preloads = ctx.preloads[si_ctx.bufs[0].buffer]
-    for x in list(sink.toposort)[::-1]:
-      # we only allow a kernel to depend on either the before ASSIGN or after ASSIGN version of a BUFFER
-      if x.op is Ops.LOAD and x.buf_uop in assign_preloads: raise RuntimeError("cycle detected in graph")
-      # PRELOAD tells the toposort this kernel should run before ASSIGN
-      if x.op is Ops.PRELOAD: assign_preloads[x.buf_uop] = None
   # NOTE: we only add the metadata for fused tensors
   metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
   return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), metadata)
