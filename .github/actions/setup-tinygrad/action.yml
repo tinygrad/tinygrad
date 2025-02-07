@@ -28,6 +28,14 @@ inputs:
     description: "Install CUDA?"
     required: false
     default: false
+  webgpu:
+    description: "Install webgpu?"
+    required: false
+    default: false
+  llvm:
+    description: "Install LLVM?"
+    required: false
+    default: false
 runs:
   using: "composite"
   steps:
@@ -80,8 +88,11 @@ runs:
           intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
           intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
           intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
-    - name: Install packages (amd)
-      if: inputs.amd == 'true'
+
+    # **** AMD ****
+
+    - name: Install AMD (Linux)
+      if: inputs.amd == true && runner.os == 'Linux'
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -100,7 +111,20 @@ runs:
           /opt/rocm/lib64
         EOF
         sudo ldconfig
-    # **** 4 things for CUDA ****
+    - name: Install AMD comgr+remu (macOS)
+      if: inputs.amd == true && runner.os == 'macOS'
+      shell: bash
+      run: |
+        sudo mkdir -p /usr/local/lib
+        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+          jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
+          sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+          jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
+          sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+
+    # **** CUDA ****
+
     - name: Install packages (cuda)
       if: inputs.cuda == 'true'
       shell: bash
@@ -135,3 +159,40 @@ runs:
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build
         sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
+
+    # **** WebGPU ****
+
+    - name: Install WebGPU dawn (Linux)
+      if: inputs.webgpu == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
+    - name: Install dependencies for software-based vulkan
+      if: inputs.webgpu == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt update -y || true
+        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
+
+    - name: Install WebGPU dawn (macOS)
+      if: inputs.webgpu == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
+
+    # **** LLVM ****
+
+    - name: Install LLVM (Linux)
+      if: inputs.llvm == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends llvm-14-dev
+
+    - name: Install LLVM (macOS)
+      if: inputs.llvm == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install llvm

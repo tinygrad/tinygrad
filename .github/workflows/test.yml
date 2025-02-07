@@ -27,6 +27,8 @@ jobs:
         opencl: true
         amd: true
         cuda: true
+        webgpu: true
+        llvm: true
     - name: Install capstone for CLANG disassembly
       run: pip install capstone
     - name: Use as an external package
@@ -59,14 +61,6 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Install packages (webgpu)
-      run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
-    - name: Install packages (llvm)
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt update -y || true
-        sudo apt install -y --no-install-recommends llvm-14-dev
     - name: Compile EfficientNet to C and test it
       run: |
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
@@ -341,13 +335,7 @@ jobs:
         key: webgpu
         deps: testing
         python-version: '3.11'
-    - name: Install dawn (WebGPU)
-      run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
-    - name: Install dependencies for software-based vulkan
-      run: |
-        sudo apt update -y || true
-        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
+        webgpu: true
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
@@ -377,10 +365,7 @@ jobs:
         key: metal
         deps: testing
         python-version: '3.11'
-    - name: Install dawn (WebGPU)
-      run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
+        webgpu: true
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
@@ -482,20 +467,8 @@ jobs:
         with:
           key: macos-other
           deps: testing
-      - name: Install llvm
-        run: |
-          brew install llvm
-      - name: Install comgr
-        run: |
-          sudo mkdir -p /usr/local/lib
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
-            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
-      - name: Install remu
-        run: |
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+          amd: true
+          llvm: true
       - name: Check Device.DEFAULT and print some source (AMD)
         env:
           PYTHONPATH: ${{ github.workspace }}
