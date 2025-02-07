@@ -562,12 +562,12 @@ class TestSchedule(unittest.TestCase):
   def test_pow_const_tensor_simplified(self):
     x = Tensor([1,2,3,4])
     # NOTE: this does not test ** Tensor(2) is simpler in ast than ** Tensor(2.5)
-    out = x ** Tensor(2)
+    out = x ** Tensor(2.0)
     check_schedule(out, 1)
 
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
-    out = x ** Tensor(0)
+    out = x ** Tensor(0.0)
     # NOTE: this is ConstBuffer 0 + ConstBuffer 1
     check_schedule(out, 0)
 

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Tuple, Any, List
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time, struct
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
@@ -20,7 +19,7 @@ class DSPRenderer(ClangRenderer):
                  Ops.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
                  Ops.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
     msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
@@ -55,7 +54,7 @@ class DSPProgram:
   def __init__(self, dev:DSPDevice, name:str, lib:bytes):
     self.dev, self.lib = dev, lib
 
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
@@ -66,7 +65,7 @@ class DSPProgram:
     return timer[0] / 1e6
 
 class DSPBuffer:
-  def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
+  def __init__(self, va_addr:int, size:int, share_info, offset:int=0):
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator):
@@ -229,7 +228,7 @@ class RPCListener(threading.Thread):
 # ***** mock DSP *****
 
 class MockDSPRenderer(DSPRenderer):
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     msrc = ['''static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
@@ -254,7 +253,7 @@ class MockDSPRenderer(DSPRenderer):
 
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()
