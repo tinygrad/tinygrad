@@ -25,10 +25,10 @@ jobs:
       with:
         deps: docs
         opencl: 'true'
-        amd: true
-        cuda: true
-        webgpu: true
-        llvm: true
+        amd: 'true'
+        cuda: 'true'
+        webgpu: 'true'
+        llvm: 'true'
     - name: Install capstone for CLANG disassembly
       run: pip install capstone
     - name: Use as an external package
@@ -335,7 +335,7 @@ jobs:
         key: webgpu
         deps: testing
         python-version: '3.11'
-        webgpu: true
+        webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
@@ -365,7 +365,7 @@ jobs:
         key: metal
         deps: testing
         python-version: '3.11'
-        webgpu: true
+        webgpu: 'true'
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
@@ -419,13 +419,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
+        uses: ${{ github.workspace }}/.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}
           deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
-          opencl: matrix.backend == 'gpu'
-          amd: matrix.backend == 'amd'
-          cuda: (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv')
+          opencl: ${{ matrix.backend == 'gpu' }}
+          amd: ${{ matrix.backend == 'amd' }}
+          cuda: ${{ matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
