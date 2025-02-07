@@ -2093,9 +2093,15 @@ class Tensor(SimpleMathTrait):
     ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
     if not count_include_pad:
       pads = ceil_pads if ceil_mode else reg_pads
-      return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
+      # NOTE: Using functools.reduce since sum optimization doesn't really work on pool(ones_like()) or its varients
+      return pool(self, pads).sum(axis) / functools.reduce(lambda x, ax: x.sum(ax), axis, pool(self.ones_like(), pads))
     if not ceil_mode: return pool(self, reg_pads).mean(axis)
-    return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
+    return (
+      pool(self, ceil_pads).sum(axis) /
+      functools.reduce(
+        lambda x, ax: x.sum(ax), axis, pool(self.pad(reg_pads).ones_like(), tuple(cp - rp for cp, rp in zip(ceil_pads, reg_pads)))
+      )
+    )
 
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
