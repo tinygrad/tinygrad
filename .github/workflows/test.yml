@@ -13,10 +13,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  autogen:
-    name: Autogen+Docs
+  docs:
+    name: Test Docs Generation
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -24,10 +24,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: 3.12
-    - name: Install docs dependencies (no cache)
-      run: pip install -e '.[docs]'
-    - name: Install capstone for CLANG disassembly
-      run: pip install capstone
+    - name: Install docs dependencies (no cache) + capstone for CLANG disassembly
+      run: pip install -e '.[docs]' capstone
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -57,6 +55,23 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+    - name: Compile EfficientNet to C and test it
+      run: |
+        CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
+        clang -O2 recognize.c -lm -o recognize
+        cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+
+  autogen:
+    name: Test Autogen Generation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
     - name: Install OpenCL
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -95,11 +110,6 @@ jobs:
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         sudo apt update -y || true
         sudo apt install -y --no-install-recommends llvm-14-dev
-    - name: Compile EfficientNet to C and test it
-      run: |
-        CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
-        clang -O2 recognize.c -lm -o recognize
-        cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
     - name: Verify OpenCL autogen
       run: |
         cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
