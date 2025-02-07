@@ -25,15 +25,20 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
-    - name: Cache Python packages (Linux)
+    - name: Cache Python packages
       uses: actions/cache@v4
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
-        key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}-${{ inputs.deps }}
-    - name: Cache downloads (Linux)
+        # TODO: key should include input.deps, but it can't since it can't contain commas
+        path: ${{ runner.os == 'macOS'
+                  ? '/Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages'
+                  : ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages }}
+        key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+    - name: Cache downloads
       uses: actions/cache@v4
       with:
-        path: ~/.cache/tinygrad/downloads/
+        path: ${{ runner.os == 'macOS'
+                  ? '~/Library/Caches/tinygrad/downloads/'
+                  : '~/.cache/tinygrad/downloads/' }}
         key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Install dependencies
       shell: bash
