@@ -2019,6 +2019,11 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,stride=2).relu(),
       lambda x,w: Tensor.conv2d(x,w,stride=2).relu())
 
+  @unittest.expectedFailure
+  @unittest.skipIf(Device.DEFAULT != "LLVM", "DEVECTORIZE=0 only for LLVM")
+  def test_strided_conv2d_simple_vec(self):
+    with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
+
   def test_strided_conv2d(self):
     bs = 4
     cin = 3
