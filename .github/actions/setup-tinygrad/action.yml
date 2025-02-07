@@ -8,6 +8,10 @@ inputs:
     description: 'Extra dependency groups (comma separated)'
     required: false
     default: ''
+  opencl:
+    description: "Install OpenCL?"
+    required: false
+    default: false
 runs:
   using: "composite"
   steps:
@@ -28,3 +32,14 @@ runs:
     - name: Install dependencies
       shell: bash
       run: pip install -e ".[${{ inputs.deps }}]"  --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+    - name: Install OpenCL
+      if: ${{ inputs.opencl }}
+      shell: bash
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt update || true
+        sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
+          intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
+          intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
+          intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16

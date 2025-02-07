@@ -269,31 +269,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Install OpenCL
-        run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-          echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt update || true
-          sudo apt install --allow-unauthenticated -y --no-install-recommends \
-            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          python-version: 3.11
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-packages-${{ hashFiles('**/setup.py') }}
-      - name: Cache downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/tinygrad/downloads/
-          key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
-      - name: Install Dependencies
-        run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
+          key: alt-${{ matrix.task }}-${{ hashFiles('**/setup.py') }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+          deps: testing,testing_tf
+          opencl: true
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
         run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
@@ -504,23 +485,14 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Setup Python and Install dependencies
+      - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-${{ hashFiles('**/setup.py') }}-${{ env.DOWNLOAD_CACHE_VERSION }}
           deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
+          opencl: matrix.backend == 'gpu'
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
-      - name: Install OpenCL
-        if: matrix.backend == 'gpu'
-        run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-          echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt update || true
-          sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
-            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
       - name: Install packages (cuda)
         if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         run: |
