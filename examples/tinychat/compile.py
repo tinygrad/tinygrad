@@ -68,6 +68,7 @@ def prepare_browser_chunks(model):
     for i, part in enumerate(metadata[k]["parts"]):
       metadata[k]["parts"][i]["target_start_pos"] = cursor
       cursor += part["size"]
+    metadata[k]["size"] = cursor
 
   # compute hashes, which client app will check to determine whether to update with new weights and/or detect integrity issues
   state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()

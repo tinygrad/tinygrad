@@ -16,11 +16,9 @@ if __name__=="__main__":
   model_size="1B"
   Tensor.no_grad = True
   max_context=1024
-  #model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context)
   model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=1024)
-  state_dict = get_state_dict(model)
-  state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
-  state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
+  model.output.weight = model.tok_embeddings.weight
+  model.output.scale = model.tok_embeddings.scale
 
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
 
@@ -36,14 +34,14 @@ if __name__=="__main__":
 
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [
-    Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, model=model),
+    Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward),
   ]
 
   # TODO: refactor to move some corrected CLANG rendering to export_model.py
   def compile_step(step: Step):
     run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
-    state = get_state_dict(step.model)
+    state = get_state_dict(model)
     weightbuf_to_name = {id(x.lazydata.base.realized): name for name, x in state.items()}
     # this omits saving the random seeds, which therefore will be set in client by default to 0,0 (2x uint32)
     # also omits exporting kv caches, which will be zero initialized by wasm
@@ -54,6 +52,10 @@ if __name__=="__main__":
     # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
     dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
 
+    # output and tok_embeddings have the same weight/scale; here we ensure consistency with the WebGPU compile code
+    for k,v in weightbuf_to_name.items():
+      if "output.weight" in v or "output.scale" in v:
+        weightbuf_to_name[k] = v.replace("output", "tok_embeddings")
     # buf_to_name must have unchanged order from hereafter. We rely on known ordering to map weights from JS
     buf_to_name = tuple((f"{name}", f"{weightbuf_to_name[data[2]]}") for name, data in bufs_to_save.items())
     if bufs_to_save:
@@ -92,14 +94,13 @@ if __name__=="__main__":
     input_ptrs = OrderedDict((f"inputPtr{name.split("input")[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
     output_ptrs = OrderedDict((f"outputPtr{name.split("output")[1]}", (name, bufs[name][0])) for name in outputs)
     top = f"import {step.name}Module from './{step.name}.js'\n"
-    prg = f"""\nvar {step.name} = async function{f"(metadata, progress)" if bufs_to_save else "()"} {{
+    prg = f"""\nvar {step.name} = async function{f"(state_dict)" if bufs_to_save else "()"} {{
 
   const wasm = await {step.name}Module();
   {f"""const weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
   for (const [i, name] of weightNames.entries()) {{
-    const bufPtr = wasm._malloc(metadata[name].size);
-    wasm.HEAPU8.set(metadata[name].bytes, bufPtr);
-    metadata[name].bytes = null;
+    const bufPtr = wasm._malloc(state_dict[name].size);
+    state_dict[name].wasm_buf_start_pos = bufPtr;
     wasm._set_buf(i, bufPtr);
   }}""" if bufs_to_save else ""}
 
@@ -113,7 +114,7 @@ if __name__=="__main__":
       {"\n      ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
       return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}];
     }},
-    wasm: wasm
+    wasm: wasm{",\n    state_dict: state_dict" if bufs_to_save else ""}
   }}
 }}\n"""
 

@@ -4,13 +4,26 @@ const kernelsReady = (async () => {
   Object.assign(self, exports);
 })();
 
-async function setupTransformer(event) {
+async function initStateDict(event) {
   await kernelsReady;
   self.model = await self.transformer(event.data);
   self.inputPtr = self.model.wasm._malloc(4);
   self.outputPtr = self.model.wasm._malloc(4);
-  self.addEventListener("message", inference);
-  self.removeEventListener("message", setupTransformer);
+  self.addEventListener("message", loadStateDict);
+  self.removeEventListener("message", initStateDict);
+  self.postMessage(self.model.state_dict);
+  delete self.model.state_dict;
+}
+
+function loadStateDict(event) {
+  if (event.data === "done") {
+    self.addEventListener("message", inference);
+    self.removeEventListener("message", loadStateDict);
+  }
+  else {
+    const part = event.data;
+    self.model.wasm.HEAPU8.set(part.bytes, part.target_start_pos);
+  }
   self.postMessage("success");
 }
 
@@ -25,4 +38,4 @@ function inference(event) {
   self.postMessage(int32nextTok[0]);
 }
 
-self.addEventListener('message', setupTransformer);
+self.addEventListener('message', initStateDict);

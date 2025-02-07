@@ -213,13 +213,13 @@ function sendMessageToWorker(worker, message) {
     worker.addEventListener('error', onError);
 
     if (message.header === "token") {worker.postMessage(message.data);}
-    // if message.data is the state_dict
-    else if (message.header === "state_dict") {worker.postMessage(message.data, Object.values(message.data).flatMap(({ bytes }) => bytes ? [bytes.buffer] : []));}
+    else if (message.header === "init_state_dict") worker.postMessage(Object.fromEntries(Object.entries(message.data).filter(([_, v]) => !v.empty)));
+    else if (message.header === "load_part") worker.postMessage(message.data, message.data === "done" ? [] : [message.data.bytes.buffer]);
   });
 }
 
 async function load_state_dict (data, device, progress) {
-  const state_dict = data.metadata.state_dict;
+  let state_dict = data.metadata.state_dict;
   let completed = 0;
 
   // modified from examples/webgpu/stable_diffusion/index.html getProgressDlForPart
@@ -284,9 +284,17 @@ async function load_state_dict (data, device, progress) {
 
   await kernelsReady;
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
-  const model = await transformer().setup(device, state_dict, progress);
-  delete state_dict["output.weight"]; // uses same data as tok_embeddings.weight, TODO: make consistent with wasm loading
-  delete state_dict["output.scale"]; // uses same data as tok_embeddings.weight, TODO: make consistent with wasm loading
+  let model;
+  if (window.BACKEND === "WebGPU") {
+    model = await transformer().setup(device, state_dict, progress);
+  }
+  else if (window.BACKEND === "WASM") {
+    progress(0.02 * progress.total, 'Loading model:');
+    model = new Worker(`./worker.js?version=${Date.now()}`);
+    progress(0.02 * progress.total, 'Loading model:');
+    state_dict = await sendMessageToWorker(model, {header: "init_state_dict", data: state_dict});
+    progress(0.11 * progress.total, 'Loading model:');
+  }
 
   const valid_final_dtypes = new Set(["float32", "int8", "int32"]);
   const loadFileToStateDict = async(file) => {
@@ -294,7 +302,13 @@ async function load_state_dict (data, device, progress) {
       if (part.empty) continue;
       part.bytes = (part.size === file.bytes.length) ? file.bytes : file.bytes.slice(part.file_start_pos, part.file_start_pos + part.size);
       if (valid_final_dtypes.has(part.dtype)) {
-        device.queue.writeBuffer(state_dict[part.key].bytes, part.target_start_pos, part.bytes); // improves stability over mappedAtCreation writing
+        if (window.BACKEND === "WebGPU") {
+          device.queue.writeBuffer(state_dict[part.key].bytes, part.target_start_pos, part.bytes); // improves stability over mappedAtCreation writing
+        }
+        else if (window.BACKEND === "WASM") {
+          part.target_start_pos = state_dict[part.key].wasm_buf_start_pos + part.target_start_pos
+          const msg = await sendMessageToWorker(model, {header: "load_part", data: part});
+        }
       }
       else throw new Error(`unexpected dtype: ${part.dtype} in file: ${file.name}`);
       part.bytes = null;
@@ -339,12 +353,24 @@ document.addEventListener("alpine:init", () => {
     progress: null,
 
     async init() {
+      var device = null;
+      if (window.BACKEND === "WebGPU") {
+        try {
+          device = await getDevice();
+          console.log("WebGPU device initialized");
+        } catch (error) {
+          //this.progress(0, "Failed to launch WebGPU. Loading WASM model instead...");
+          window.BACKEND = "WASM";
+          console.log(`error: ${error}\nFailed to launch WebGPU. Loading WASM model instead...`); // return;
+        }
+      }
+
       const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
       // TODO: cache metadata (and everything else) so tinychat works offline
       const data = await response.json();
       const state_dict = data.metadata.state_dict;
       let totalSize = 0;
-      for (const [k,v] of Object.entries(state_dict)) {
+      for (let [k,v] of Object.entries(state_dict)) {
         for (const part of v.parts) {
           if (part.empty) state_dict[k].empty = true; // assumes no other parts of this weight exist and are non-empty
           else {
@@ -358,19 +384,6 @@ document.addEventListener("alpine:init", () => {
       }
       totalSize = totalSize / 0.8; // give space in progress bar for initializing model bufs, and tokenizer
       this.progress = makeProgress.call(this, totalSize); // creates closure with totalSize
-
-      var device = null;
-      if (window.BACKEND === "WebGPU") {
-        try {
-          device = await getDevice();
-          console.log("WebGPU device initialized");
-          var model = await load_state_dict(data, device, this.progress);
-        } catch (error) {
-          this.progress(0, "Failed to launch WebGPU. Loading WASM model instead...");
-          window.BACKEND = "WASM";
-          console.log(`error: ${error}\nFailed to launch WebGPU. Loading WASM model instead...`); // return;
-        }
-      }
 
       try {
         this.progress(0.01 * totalSize, "Loading tokenizer:");
@@ -388,14 +401,14 @@ document.addEventListener("alpine:init", () => {
       } catch (error) {this.progress(-1, `Error launching tokenizer: ${error}`); console.log(error); return;}
 
       try {
+        const model = await load_state_dict(data, device, this.progress);
+
         if (window.BACKEND === "WebGPU") {
           this.nets = {"transformer": model};
         }
         else if (window.BACKEND === "WASM") {
-          const modelWorker = new Worker(`./worker.js?version=${Date.now()}`);
-          let msg = await sendMessageToWorker(modelWorker, {header: "setup", data: "setup_transformer"});
-          msg = await sendMessageToWorker(modelWorker, {header: "state_dict", data: state_dict});
-          this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(modelWorker, {header: "token", data: [tok, start_pos]})};
+          const msg = await sendMessageToWorker(model, {header: "load_part", data: "done"});
+          this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(model, {header: "token", data: [tok, start_pos]})};
         }
         this.progress(0.01 * totalSize, `Launching ${window.BACKEND} model:`);
         this.loadingMessage = ""; // Triggers removal of loading bar, display of prompt box
