@@ -497,7 +497,7 @@ jobs:
       matrix:
         backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
 
-    name: Tests on (${{ matrix.backend }})
+    name: Tests on Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -611,10 +611,12 @@ jobs:
   osxtests:
     strategy:
       fail-fast: false
+      matrix:
+        backend: [amd, llvm, clang]
 
-    name: Tests on MacOS
+    name: Tests on MacOS (${{ matrix.backend }})
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -630,43 +632,21 @@ jobs:
           path: /Users/runner/Library/Python/3.12/lib/python/site-packages
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Install llvm
+        if: matrix.backend == 'llvm'
         run: |
           brew install llvm
-      - name: Install comgr
+      - name: Install comgr+remu
+        if: matrix.backend == 'amd'
         run: |
           sudo mkdir -p /usr/local/lib
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
-            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
-      - name: Install remu
-        run: |
+            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | sudo xargs curl -L -o /usr/local/lib/libremu.dylib
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Check Device.DEFAULT and print some source (AMD)
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          MOCKGPU: 1
-          AMD: 1
-          FORWARD_ONLY: 1
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
-          DEBUG=5 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT and print some source (LLVM)
-        env:
-          LLVM: 1
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
-          DEBUG=5 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT and print some source (CLANG)
-        env:
-          CLANG: 1
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
-          DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (amd)
+        if: matrix.backend == 'amd'
         env:
           MOCKGPU: 1
           AMD: 1
@@ -674,12 +654,14 @@ jobs:
         run: |
           python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
       - name: Run pytest (llvm)
+        if: matrix.backend == 'llvm'
         env:
           LLVM: 1
         run: |
           python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
           ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
       - name: Run pytest (clang)
+        if: matrix.backend == 'clang'
         env:
           CLANG: 1
         run: |
@@ -689,9 +671,11 @@ jobs:
   wintests:
     strategy:
       fail-fast: false
-    name: Tests on Windows (llvm+clang)
+      matrix:
+        backend: [llvm, clang]
+    name: Tests on Windows (${{ matrix.backend }})
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -716,21 +700,12 @@ jobs:
           fi
       - name: Install dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Check Device.DEFAULT and print some source (llvm)
+      - name: Check Device.DEFAULT and print some source ${{ matrix.backend }}
         shell: bash
         run: |
-          PYTHONPATH=${{ github.workspace }} LLVM=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT and print some source (clang)
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}', Device.DEFAULT"
+          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run pytest ${{ matrix.backend }}
         shell: bash
         run: |
-          PYTHONPATH=${{ github.workspace }} CLANG=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} CLANG=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Run pytest (llvm)
-        shell: bash
-        run: |
-          LLVM=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
-      - name: Run pytest (clang)
-        shell: bash
-        run: |
-          CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+          python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
