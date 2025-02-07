@@ -90,6 +90,11 @@ jobs:
           /opt/rocm/lib64
         EOF
         sudo ldconfig
+    - name: Install packages (llvm)
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends llvm-14-dev
     - name: Compile EfficientNet to C and test it
       run: |
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
@@ -127,6 +132,11 @@ jobs:
         ./autogen_stubs.sh io_uring
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+    - name: Verify LLVM autogen
+      run: |
+        cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
+        ./autogen_stubs.sh llvm
+        diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
 
   uops:
     name: uops tests
@@ -347,6 +357,33 @@ jobs:
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
+  testdsp:
+    name: DSP Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Install Dependencies
+      run: pip install --user -e .
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Build QEMU Docker with cache
+      uses: docker/build-push-action@v4
+      with:
+        file: extra/dsp/Dockerfile
+        push: false
+        load: true
+        tags: qemu-hexagon:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=min
+    - name: Run test_tiny on DSP
+      run: DEBUG=2 DSP=1 python test/test_tiny.py
+
   testwebgpu:
     name: WebGPU Tests
     runs-on: ubuntu-22.04
@@ -546,7 +583,7 @@ jobs:
           EOF
           sudo ldconfig
       - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
@@ -574,10 +611,8 @@ jobs:
   osxtests:
     strategy:
       fail-fast: false
-      matrix:
-        backend: [amd]
 
-    name: Tests on MacOS (${{ matrix.backend }})
+    name: Tests on MacOS
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -594,30 +629,62 @@ jobs:
         with:
           path: /Users/runner/Library/Python/3.12/lib/python/site-packages
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-      - name: Set env
-        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+      - name: Install llvm
+        run: |
+          brew install llvm
       - name: Install comgr
-        if: matrix.backend == 'amd'
         run: |
           sudo mkdir -p /usr/local/lib
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
             jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
       - name: Install remu
-        if: matrix.backend == 'amd'
         run: |
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libremu.dylib
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Check Device.DEFAULT and print some source
+      - name: Check Device.DEFAULT and print some source (AMD)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          MOCKGPU: 1
+          AMD: 1
+          FORWARD_ONLY: 1
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
+          DEBUG=5 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (LLVM)
+        env:
+          LLVM: 1
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
+          DEBUG=5 python3 test/test_ops.py TestOps.test_add
+      - name: Check Device.DEFAULT and print some source (CLANG)
+        env:
+          CLANG: 1
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
+          DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (amd)
-        if: matrix.backend=='amd'
-        run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+        env:
+          MOCKGPU: 1
+          AMD: 1
+          FORWARD_ONLY: 1
+        run: |
+          python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+      - name: Run pytest (llvm)
+        env:
+          LLVM: 1
+        run: |
+          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
+          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+      - name: Run pytest (clang)
+        env:
+          CLANG: 1
+        run: |
+          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
+          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
 
   wintests:
     strategy:

@@ -8,7 +8,7 @@ with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.10.0',
+      version='0.10.1',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -24,7 +24,6 @@ setup(name='tinygrad',
       install_requires=[],
       python_requires='>=3.10',
       extras_require={
-        'llvm': ["llvmlite"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [

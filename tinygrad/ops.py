@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG
+from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG, dedup
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
@@ -89,11 +89,12 @@ class MathTrait(SimpleMathTrait):
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
+  def pow(self, x): return self.alu(Ops.POW, x)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); PRELOAD = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); PRELOAD = auto(); KERNEL = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -133,7 +134,7 @@ class Ops(FastEnum):
 
   # BinaryOps
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -155,7 +156,7 @@ class Ops(FastEnum):
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY,
-            Ops.SUB, Ops.FDIV}
+            Ops.SUB, Ops.FDIV, Ops.POW}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 
@@ -175,7 +176,9 @@ class GroupOp:
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
 
   # do not preserve f(0) = 0
-  UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
+  UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
+
+  All = set(Ops)
 
 # some BUFFER ops can be processed with only a view
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
@@ -183,10 +186,10 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM",
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:set[UOp]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:dict[UOp, None]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
-  visisted.add(u)
+  visisted[u] = None
   return all(can_pad(x.base, edges, visisted) for x in u.src)
 
 # With True as the default, this matches the old symbolic behavior
@@ -436,10 +439,21 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
     return tuple(itertools.pairwise(itertools.accumulate([lb.shape[self.axis] for lb in self.src], initial=0)))
 
-  @property
-  def axis(self):
-    assert self.op is Ops.MULTI
-    return self.arg[0]
+  @functools.cached_property
+  def axis(self) -> Optional[int]:
+    if self.op is Ops.MULTI: return self.arg[0]
+    # NOTE: they all have to share an axis, we always choose [-1]
+    if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
+    src_axis = self.src[0].axis
+    if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
+    if self.op is Ops.RESHAPE:
+      if src_axis is None: return None
+      arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))
+      # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+      # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
+      return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+    if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
+    return src_axis
 
   @property
   def real(self):
@@ -453,14 +467,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if axis is None: lbs = [self] * len(devices)
     else:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
+      # NOTE: this works for both even shards and uneven shards
       sz = self.shape[axis] // len(devices)
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
-      lbs, off = [], 0
-      for sz in sizes:
+      lbs = []
+      for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
         lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
-        off += sz
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    # NOTE: this contiguous is making it impossible for the scheduler to do late const folding
     return UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
 
   # *** from LazyBuffer ***
@@ -499,8 +512,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
-    return self.src[0].base if self.op is Ops.VIEW and len(self.src) == 1 else self
+    if (self.op is Ops.VIEW and len(self.src) == 1) or self.op in GroupOp.Movement: return self.src[0].base
+    return self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
   def _mop(self, op:Ops, arg):
@@ -663,10 +676,15 @@ def safe_exp2(x):
   try: return 2 ** x
   except OverflowError: return math.inf
 
+def safe_pow(x, y):
+  try: return math.nan if isinstance(p:=pow(x, y), complex) else p
+  except ZeroDivisionError: return math.inf
+  except ValueError: return math.inf if x > 0 else -math.inf
+
 python_alu: dict[Ops, Callable]  = {
   Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: safe_exp2,
   Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
   Ops.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], Ops.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0,
@@ -1094,6 +1112,13 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
+def simplify_pow(x:UOp, c:UOp) -> UOp|None:
+  if c.arg < 0: return x.reciprocal().pow(-c)
+  if c.arg == 0: return x.const_like(1)
+  if int(c.arg-0.5)+0.5 == c.arg: return x.pow(c.const_like(c.arg-0.5)) * x.sqrt()
+  if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
+  return None
+
 # def max_var_const(x:UOp, c1:UOp, c2:UOp):
 #   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
@@ -1137,6 +1162,10 @@ symbolic_simple = PatternMatcher([
   # *** cast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+  # ** pow **
+  (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
+  # positive const ** x
+  (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
 ])
 
 symbolic = symbolic_simple+PatternMatcher([

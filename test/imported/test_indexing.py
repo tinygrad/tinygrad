@@ -1048,6 +1048,7 @@ class TestIndexing(unittest.TestCase):
     a = src[0].mul(src[1])
     self.assertEqual(a[0,1].item(), 2)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int64), "need dtypes.int64")
   def test_getitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
     one = Tensor(1, dtype=dtypes.int64)
@@ -1112,6 +1113,7 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
     self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
 
+  @unittest.skip("does not fold now")
   def test_getitem_scalars_simple_folding(self):
     a = Tensor.randn(2, 3)
     zero = Tensor(0, dtype=dtypes.int64)

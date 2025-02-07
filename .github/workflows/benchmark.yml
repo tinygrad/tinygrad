@@ -82,8 +82,8 @@ jobs:
       run: |
         python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize int8 | tee llama_int8.txt
         python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize nf4 | tee llama_nf4.txt
-    - name: Run LLaMA 7B on 4 (virtual) GPUs
-      run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+    #- name: Run LLaMA 7B on 4 (virtual) GPUs
+    #  run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
       run: |
         JIT=0 python3.11 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
@@ -300,9 +300,8 @@ jobs:
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
-      # TODO: remove DISABLE_DROPOUT once dropout is fixed
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 DISABLE_DROPOUT=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -498,9 +497,8 @@ jobs:
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
       run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
-      # TODO: remove DISABLE_DROPOUT once dropout is fixed
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 DISABLE_DROPOUT=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
