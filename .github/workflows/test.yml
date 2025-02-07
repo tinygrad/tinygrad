@@ -129,8 +129,8 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: uops
-        deps: testing
+        key: uops-minimal
+        deps: testing_minimal
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -288,14 +288,8 @@ jobs:
         run: PYTHONPATH="." DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
       - name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-      - name: Test MLPerf optimizers
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
-      - name: Test MLPerf losses
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_losses.py --durations=20
-      - name: Test MLPerf metrics
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_metrics.py --durations=20
-      - name: Test MLPerf datasets
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
+      - name: Test MLPerf stuff
+        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
@@ -513,23 +507,11 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows
-          deps: testing
-      - name: Check Device.DEFAULT and print some source (llvm)
-        shell: bash
-        run: |
-          PYTHONPATH=${{ github.workspace }} LLVM=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'LLVM', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} LLVM=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Check Device.DEFAULT and print some source (clang)
-        shell: bash
-        run: |
-          PYTHONPATH=${{ github.workspace }} CLANG=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'CLANG', Device.DEFAULT"
-          DEBUG=5 PYTHONPATH=${{ github.workspace }} CLANG=1 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+          key: windows-minimal
+          deps: testing_minimal
       - name: Run pytest (llvm)
         shell: bash
-        run: |
-          LLVM=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+        run: LLVM=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
       - name: Run pytest (clang)
         shell: bash
-        run: |
-          CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+        run: CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
