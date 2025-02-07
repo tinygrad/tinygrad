@@ -24,7 +24,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
-        opencl: true
+        opencl: 'true'
         amd: true
         cuda: true
         webgpu: true
@@ -235,7 +235,7 @@ jobs:
           key: alt-${{ matrix.task }}
           deps: testing,testing_tf
           python-version: '3.11'
-          opencl: true
+          opencl: 'true'
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
         run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py

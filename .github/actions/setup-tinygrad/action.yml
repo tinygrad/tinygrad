@@ -19,7 +19,7 @@ inputs:
   opencl:
     description: "Install OpenCL?"
     required: false
-    default: false
+    default: 'false'
   amd:
     description: "Install AMD?"
     required: false
@@ -74,9 +74,14 @@ runs:
       with:
         path: '~/Library/Caches/tinygrad/downloads/'
         key: osx-downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Install dependencies
+    - name: Install dependencies (with extra)
+      if: inputs.deps != ''
       shell: bash
       run: pip install -e ".[${{ inputs.deps }}]"  --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+    - name: Install dependencies (without extra)
+      if: inputs.deps == ''
+      shell: bash
+      run: pip install -e .
     - name: Install OpenCL
       if: inputs.opencl == 'true'
       shell: bash
@@ -92,7 +97,7 @@ runs:
     # **** AMD ****
 
     - name: Install AMD (Linux)
-      if: inputs.amd == true && runner.os == 'Linux'
+      if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -112,7 +117,7 @@ runs:
         EOF
         sudo ldconfig
     - name: Install AMD comgr+remu (macOS)
-      if: inputs.amd == true && runner.os == 'macOS'
+      if: inputs.amd == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
         sudo mkdir -p /usr/local/lib
