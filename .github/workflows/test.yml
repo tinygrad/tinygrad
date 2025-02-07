@@ -312,12 +312,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    - name: Install Dependencies
-      run: pip install --user -e .
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -550,15 +546,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          python-version: '3.12'
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-          key: windows-packages-${{ hashFiles('**/setup.py') }}
+          key: windows
+          deps: testing
       - name: Set env
         shell: bash
         run: |
@@ -567,8 +559,6 @@ jobs:
           elif [ "${{ matrix.backend }}" = "llvm" ]; then
             echo "LLVM=1" >> $GITHUB_ENV
           fi
-      - name: Install dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source (llvm)
         shell: bash
         run: |

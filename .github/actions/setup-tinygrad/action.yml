@@ -14,7 +14,8 @@ inputs:
     default: ''  # if you don't set a key, it doesn't cache
   deps:
     description: 'Extra dependency groups (comma separated)'
-    required: true
+    required: false
+    default: ''
   opencl:
     description: "Install OpenCL?"
     required: false
@@ -35,7 +36,7 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
     - name: Cache Python packages (Linux)
-      if: inputs.key != '' && runner.os == 'macOS'
+      if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
         # TODO: key should include input.deps, but it can't since it can't contain commas
@@ -47,8 +48,14 @@ runs:
       with:
         path: '/Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages'
         key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+    - name: Cache Python packages (Windows)
+      if: inputs.key != '' && runner.os == 'Windows'
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
+        key: windows-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
     - name: Cache downloads (Linux)
-      if: inputs.key != '' && runner.os == 'macOS'
+      if: inputs.key != '' && runner.os == 'Linux'
       uses: actions/cache@v4
       with:
         path: '~/.cache/tinygrad/downloads/'
@@ -75,6 +82,7 @@ runs:
           intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
     - name: Install packages (amd)
       if: inputs.amd == 'true'
+      shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
@@ -95,6 +103,7 @@ runs:
     # **** 4 things for CUDA ****
     - name: Install packages (cuda)
       if: inputs.cuda == 'true'
+      shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         sudo apt update -y || true
@@ -111,6 +120,7 @@ runs:
         key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
     - name: Clone/compile gpuocelot
       if: inputs.cuda == 'true' && steps.cache-build.outputs.cache-hit != 'true'
+      shell: bash
       run: |
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
@@ -121,6 +131,7 @@ runs:
         ninja
     - name: Install gpuocelot
       if: inputs.cuda == 'true'
+      shell: bash
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build
         sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
