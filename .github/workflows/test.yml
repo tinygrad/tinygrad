@@ -13,10 +13,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  autogen:
-    name: Autogen+Docs
+  docs:
+    name: Docs
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -24,11 +24,6 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
-        opencl: 'true'
-        amd: 'true'
-        cuda: 'true'
-        webgpu: 'true'
-        llvm: 'true'
     - name: Install capstone for CLANG disassembly
       run: pip install capstone
     - name: Use as an external package
@@ -51,8 +46,7 @@ jobs:
         cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
     - name: Test Docs Build
-      # NOTE: the default is GPU here, but you can't use it since it lacks 'cl_khr_fp16'
-      run: CLANG=1 python -m mkdocs build --strict
+      run: python -m mkdocs build --strict
     - name: Test Docs
       run: |
         python docs/abstractions2.py
@@ -66,6 +60,22 @@ jobs:
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
         clang -O2 recognize.c -lm -o recognize
         cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+
+  autogen:
+    name: Autogen
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        opencl: 'true'
+        amd: 'true'
+        cuda: 'true'
+        webgpu: 'true'
+        llvm: 'true'
     - name: Verify OpenCL autogen
       run: |
         cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
@@ -216,13 +226,40 @@ jobs:
     - name: Repo line count < 11200 lines
       run: MAX_LINE_COUNT=11200 python sz.py
 
-  testopencl:
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [optimage, onnx]
+  testgpuimage:
+    name: 'GPU IMAGE+compile Tests'
+    runs-on: ubuntu-20.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: gpuimage
+          deps: testing
+          python-version: '3.11'
+          opencl: 'true'
+      - name: Run Kernel Count Test
+        run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+      - name: Test WINO=1
+        run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
+      - name: Test GPU IMAGE=2 ops + training
+        run: |
+          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
+          PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
+      - name: Test openpilot model kernel count and gate usage
+        run: |
+          PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2105 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+      - name: Test openpilot alt model correctness (float32)
+        run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
+      - name: Test openpilot fastvits model correctness (float32)
+        run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
 
-    name: ${{ matrix.task=='optimage'&&'GPU IMAGE+compile Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
+  testopencl:
+    name: 'ONNX+Optimization Tests'
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -232,66 +269,34 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: alt-${{ matrix.task }}
+          key: onnxopt
           deps: testing,testing_tf
           python-version: '3.11'
           opencl: 'true'
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Run Kernel Count Test
-        run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
-      - if: ${{ matrix.task == 'optimage'}}
-        name: Test WINO=1
-        run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
-      - if: ${{ matrix.task == 'optimage'}}
-        name: Test GPU IMAGE=2 ops + training
-        run: |
-          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
-          PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test openpilot model kernel count and gate usage
-        run: |
-          PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2105 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test openpilot alt model correctness (float32)
-        run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test openpilot fastvits model correctness (float32)
-        run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test ONNX (GPU)
+      - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test ONNX (CLANG)
+      - name: Test ONNX (CLANG)
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Run CLOUD=1 Test
+      - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CLANG CLOUD=1 python3 test/test_tiny.py
           CLOUDDEV=GPU CLOUD=1 python3 test/test_tiny.py
           CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test Optimization Helpers
+      - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test Action Space
+      - name: Test Action Space
         run: PYTHONPATH="." DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test Beam Search
+      - name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf optimizers
+      - name: Test MLPerf optimizers
         run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf losses
+      - name: Test MLPerf losses
         run: GPU=1 python -m pytest -n=auto test/external/external_test_losses.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf metrics
+      - name: Test MLPerf metrics
         run: GPU=1 python -m pytest -n=auto test/external/external_test_metrics.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test MLPerf datasets
+      - name: Test MLPerf datasets
         run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Run handcode_opt
+      - name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
@@ -299,7 +304,7 @@ jobs:
   testdsp:
     name: DSP Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -499,8 +504,6 @@ jobs:
           ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
 
   wintests:
-    strategy:
-      fail-fast: false
     name: Tests on Windows (llvm+clang)
     runs-on: windows-latest
     timeout-minutes: 45
