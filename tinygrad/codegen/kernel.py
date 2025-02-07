@@ -495,6 +495,10 @@ class Kernel:
 
     # **** below this line need to be optional and benchmarked ****
 
+
+    # TODO: analyze this snippet of code (maybe the bug ?)
+    # when I comment 509-516 out, then test runs properly with NOOPT=0 
+
     # TODO: doing extra upcasts with images doesn't work for some reason (maybe has to do with to_image_idx)
     # to trigger the above bug, remove prod(self.full_shape[self.first_upcast:]) from the below
     # expression and run test/test_ops.py with IMAGE=2
