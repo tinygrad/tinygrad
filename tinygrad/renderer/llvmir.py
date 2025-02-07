@@ -31,7 +31,7 @@ def lcast(input_type:DType, output_type:DType):
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
 def render_wmma(ctx, wmma: UOp) -> str:
-  def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #2'
+  def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0'
 
   return "\n".join([
     *[f"  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype)}* %amx_{i}, align {src.dtype.itemsize}" for i, src in enumerate(wmma.src)],
