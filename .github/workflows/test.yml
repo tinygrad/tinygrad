@@ -502,17 +502,13 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
       - name: Setup Python and Install dependencies
         uses: ./.github/actions/setup-tinygrad
         with:
+          key: ${{ matrix.backend }}-${{ hashFiles('**/setup.py') }}-${{ env.DOWNLOAD_CACHE_VERSION }}
           deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
-          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-          downloadkey: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
-      - name: Cache downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/tinygrad/downloads/
-          key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL

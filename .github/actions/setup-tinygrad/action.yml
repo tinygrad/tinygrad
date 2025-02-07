@@ -4,9 +4,6 @@ inputs:
   key:
     description: 'Key for the python cache'
     required: true
-  key:
-    description: 'Key for the download cache'
-    required: true
   deps:
     description: 'Extra dependency groups (comma separated)'
     required: false
@@ -14,8 +11,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
@@ -24,11 +19,11 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
-        key: ${{ inputs.key }}
+        key: python-package-${{ inputs.key }}
     - name: Cache downloads (Linux)
       uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
-        key: ${{ inputs.downloadkey }}
+        key: downloads-cache-${{ inputs.key }}
     - name: Install dependencies
       run: pip install -e ".[${{ inputs.deps }}]"  --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
