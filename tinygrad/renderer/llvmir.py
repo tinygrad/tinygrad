@@ -3,7 +3,7 @@ import math, struct
 from tinygrad.renderer import Renderer, amx_tc
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
-from tinygrad.helpers import dedup, AMX
+from tinygrad.helpers import dedup, prod, AMX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -136,8 +136,8 @@ class LLVMRenderer(Renderer):
     vc = -1
 
     for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
-      dts=[arg[2].vec(sz) for sz in (arg[1][0], arg[1][0], arg[1][0]*arg[1][0])]
-      kernel+=[f"  %amx_{i} = alloca {ldt(dt)}, align {dt.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dt)}* %amx_{i} to i64" for i,dt in enumerate(dts)]
+      for i, dt in enumerate(arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in arg[6]]):
+        kernel += [f"  %amx_{i} = alloca {ldt(dt)}, align {dt.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dt.ptr())} %amx_{i} to i64"]
 
     # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}
