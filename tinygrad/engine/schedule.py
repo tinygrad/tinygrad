@@ -16,17 +16,17 @@ sys.setrecursionlimit(10000)
 
 # **** schedule simplifier
 
-def simplify_reduceop(reduce:UOp, x:UOp) -> UOp|None:
-  if not all_int(x.shape): return None
-  # remove reduce on unmasked const
-  prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
-  ret = x.const_arg
+def simplify_stride0_reduce(reduce:UOp, x:UOp):
+  # must be unmasked (NOTE: can be relaxed if not masked on stride 0 axis)
+  if any(v.mask is not None for v in unwrap(x.st).views): return None
+  # must have all stride 0 in the relevant axis (NOTE: can do partial)
+  if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
+  prshape = prod(x.shape[i] for i in reduce.arg[1])
+  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
   match reduce.arg[0]:
-    case Ops.ADD: ret *= prshape
-    case Ops.MUL: ret **= prshape
-    case Ops.MAX: pass # NOTE: Ops.MAX is passthrough
-    case _: return None
-  return reduce.const_like(ret)
+    case Ops.ADD: return ret*prshape
+    case Ops.MUL: return ret.pow(prshape)
+    case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
 
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   if (sti:=unwrap(src.st).invert(src.base.shape)) is not None: ctx[src.base] = contig.view(sti)
@@ -45,8 +45,8 @@ sym = symbolic_simple+PatternMatcher([
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-  # reduce of const is collapsed (TODO: make this a generic rule for stride0)
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), simplify_reduceop),
+  # reduce on stride 0 is collapsed
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_stride0_reduce),
   # COPY(CONST) creates a new CONST on the destination device
   (UPat(Ops.COPY, name="root", src=(UPat(), UPat.cvar("x"),)), lambda root,x: root.const_like(x.const_arg)),
   # no COPY to same device, except clone (arg is True)

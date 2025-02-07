@@ -89,7 +89,7 @@ class MathTrait(SimpleMathTrait):
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
-  def pow(self, x): return self.alu(Ops.POW, x)
+  def pow(self, x): return self.alu(Ops.POW, self.ufix(x))
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
