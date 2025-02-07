@@ -1,4 +1,4 @@
-import time, mmap, sys, shutil, os, glob
+import time, mmap, sys, shutil, os, glob, subprocess
 from tinygrad.helpers import to_mv, DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import smu_v13_0_0
@@ -73,6 +73,12 @@ class SMICtx:
     self.opened_pci_resources = {}
     self.prev_lines_cnt = 0
 
+    remove_parts = ["Advanced Micro Devices, Inc. [AMD/ATI]", "VGA compatible controller:"]
+    lspci = subprocess.check_output(["lspci"]).decode("utf-8").splitlines()
+    self.lspci = {l.split()[0]: l.split(" ", 1)[1] for l in lspci}
+    for k,v in self.lspci.items():
+      for part in remove_parts: self.lspci[k] = self.lspci[k].replace(part, "").strip().rstrip()
+
   def _open_am_device(self, pcibus):
     if pcibus not in self.opened_pci_resources:
       bar_fds = {bar: os.open(f"/sys/bus/pci/devices/{pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
@@ -112,7 +118,7 @@ class SMICtx:
     dev_metrics = self.collect()
     dev_content = []
     for dev, metrics in dev_metrics.items():
-      device_line = [f"PCIe device: {bold(dev.pcibus)}"] + [""]
+      device_line = [f"{bold(dev.pcibus)}: {self.lspci[dev.pcibus[5:]]}"] + [""]
       activity_line = [f"GFX Activity {draw_bar(metrics.SmuMetrics.AverageGfxActivity / 100, 50)}"] \
                     + [f"MEM Activity {draw_bar(metrics.SmuMetrics.AverageUclkActivity / 100, 50)}"] + [""]
 
