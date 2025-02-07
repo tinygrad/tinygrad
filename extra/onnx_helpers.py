@@ -6,17 +6,33 @@ import numpy as np
 import onnxruntime as ort
 
 def get_example_inputs(graph_inputs:dict[str, OnnxValue], config):
-  def _get_shape(shape):
-    return tuple(dim if isinstance(dim, int) else 1 for dim in shape)
-  def _get_value(shape, dtype):
-    np_dtype = _to_np_dtype(dtype)
-    return np.random.uniform(size=shape).astype(np_dtype) * 8
+  def _get_shape(shape: tuple[str|int]):
+    ret = []
+    for dim in shape:
+      match dim:
+        case int(): ret.append(dim)
+        case "width" | "height": ret.append(224)
+        case "sequence_length" | "decoder_sequence_length" | "encoder_sequence_length": ret.append(20)
+        case "batch_size": ret.append(1)
+        case "num_channels": ret.append(config.get("in_channels", 3))
+        case _: ret.append(1)
+    return ret
+  def _get_value(name, shape, dtype):
+    match name:
+      case "input_ids":
+        vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 50265)
+        val = np.random.randint(0, vocab_size, shape)
+      case "attention_mask": val = np.random.randint(0, 2, shape)
+      case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
+      case "image_tensor": val = np.random.randint(0, 256, shape)
+      case _: val = np.random.uniform(size=shape) * 8 if shape else np.array(0)
+    return val.astype(_to_np_dtype(dtype))
 
   ret: dict[str, Tensor] = {}
   for name, spec in graph_inputs.items():
     assert not spec.is_optional and not spec.is_sequence, "only allow tensor input for now"
     shape = _get_shape(spec.shape)
-    value = Tensor(_get_value(shape, spec.dtype)).realize()
+    value = Tensor(_get_value(name, shape, spec.dtype)).realize()
     ret.update({name:value})
   return ret
 

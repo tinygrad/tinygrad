@@ -113,9 +113,6 @@ backend_test.exclude('string')
 backend_test.exclude('test_strnorm_*')
 backend_test.exclude('test_regex_*')
 
-# no quantize
-backend_test.exclude('test_dynamicquantizelinear_*')
-
 # no rnn
 backend_test.exclude('test_gru_*')
 backend_test.exclude('test_rnn_*')
@@ -179,6 +176,18 @@ backend_test.exclude('test_scatter_elements_with_reduction_min_cpu') # min not y
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
+
+# TODO: weird numpy numerical for divide
+# In [7]: (Tensor([-2.5], dtype=dtypes.float32) / Tensor(0.019607844, dtype=dtypes.float32)).tolist()
+# Out[7]: [-127.49999237060547]
+#
+# In [8]: (Tensor([-2.5], dtype=dtypes.float32) / Tensor([0.019607844], dtype=dtypes.float32)).tolist()
+# Out[8]: [-127.5]
+#
+# In [9]: np.array([-2.5], dtype=np.float32) / np.array([0.019607844], dtype=np.float32)
+# Out[9]: array([-127.49999], dtype=float32)
+backend_test.exclude('test_dynamicquantizelinear_cpu')
+backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')

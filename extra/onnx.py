@@ -286,6 +286,7 @@ def get_onnx_ops():
   Softmax = {1:Softmax_1, 13:Softmax_13}
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
+  def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
   def FastGelu(x:Tensor, bias:Tensor|None=None):
     # this is tanh approximated
     return (x + bias).gelu() if bias is not None else x.gelu()
@@ -715,6 +716,12 @@ def get_onnx_ops():
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
+
+  def DynamicQuantizeLinear(x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    scale = ((x.max().maximum(0) - x.min().minimum(0)) / 255).float()
+    zero_point = _clamp_cast((x.min()._inverse() / scale).round(), dtypes.uint8)
+    y = _clamp_cast(((x / scale).round() + zero_point), dtypes.uint8)
+    return y, scale, zero_point
 
   def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point: Tensor|int, B:Tensor|None=None, **opts):

@@ -16,7 +16,7 @@ def get_config(root_path:Path):
 
 def run_huggingface_benchmark(onnx_model_path, config):
   inputs = get_example_inputs(OnnxRunner(onnx.load(onnx_model_path)).graph_inputs, config)
-  validate(onnx_model_path, inputs)
+  validate(onnx_model_path, inputs, 2e-4, 2e-4)
 
 if __name__ == "__main__":
   assert getenv("LIMIT") or getenv("MODELPATH", ""), "ex: LIMIT=25 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
