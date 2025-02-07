@@ -12,12 +12,15 @@ from collections import OrderedDict
 
 if __name__=="__main__":
   Device.DEFAULT = "CLANG"
-  model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
+  model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
   model_size="1B"
   Tensor.no_grad = True
-  f32_fn = os.path.join(os.path.dirname(__file__), "llama3_1B_f32.safetensors")
   max_context=1024
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context)
+  #model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context)
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=1024)
+  state_dict = get_state_dict(model)
+  state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
+  state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
 
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
 
@@ -120,7 +123,7 @@ if __name__=="__main__":
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
-    with Context(BEAM=2):
+    with Context(BEAM=3):
       step_top, step_prg = compile_step(step)
     top += step_top
     prg += step_prg
