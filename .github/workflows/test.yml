@@ -20,12 +20,15 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        python-version: 3.12
-    - name: Install docs dependencies (no cache)
-      run: pip install -e '.[docs]'
+        deps: docs
+        opencl: 'true'
+        amd: 'true'
+        cuda: 'true'
+        webgpu: 'true'
+        llvm: 'true'
     - name: Install capstone for CLANG disassembly
       run: pip install capstone
     - name: Use as an external package
@@ -48,7 +51,8 @@ jobs:
         cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
     - name: Test Docs Build
-      run: python -m mkdocs build --strict
+      # NOTE: the default is GPU here, but you can't use it since it lacks 'cl_khr_fp16'
+      run: CLANG=1 python -m mkdocs build --strict
     - name: Test Docs
       run: |
         python docs/abstractions2.py
@@ -57,47 +61,6 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Install OpenCL
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-        sudo apt update || true
-        sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
-          intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-          intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-          intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
-    - name: Install packages (cuda)
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt update -y || true
-        sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-          flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
-    - name: Install packages (webgpu)
-      run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
-    - name: Install packages (amd)
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.1.2 jammy main
-        EOF
-        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
-        sudo apt update || true
-        sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
-        curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-        jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
-        sudo xargs curl -L -o /usr/local/lib/libremu.so
-        sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
-          /opt/rocm/lib
-          /opt/rocm/lib64
-        EOF
-        sudo ldconfig
-    - name: Install packages (llvm)
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt update -y || true
-        sudo apt install -y --no-install-recommends llvm-14-dev
     - name: Compile EfficientNet to C and test it
       run: |
         CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
@@ -153,17 +116,11 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        python-version: 3.12
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
-        key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
-    - name: Install dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        key: uops
+        deps: testing
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -230,17 +187,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        python-version: "3.10"
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.10/site-packages
-        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.10
-    - name: Install dependencies
-      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+        key: linting
+        python-version: '3.10'
+        deps: linting,testing
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
@@ -277,31 +229,13 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Install OpenCL
-        run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-          echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt update || true
-          sudo apt install --allow-unauthenticated -y --no-install-recommends \
-            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          python-version: 3.11
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-packages-${{ hashFiles('**/setup.py') }}
-      - name: Cache downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/tinygrad/downloads/
-          key: downloads-cache-${{ matrix.task }}-${{ env.DOWNLOAD_CACHE_VERSION }}
-      - name: Install Dependencies
-        run: pip install -e '.[testing,testing_tf]' --extra-index-url https://download.pytorch.org/whl/cpu
+          key: alt-${{ matrix.task }}
+          deps: testing,testing_tf
+          python-version: '3.11'
+          opencl: 'true'
       - if: ${{ matrix.task == 'optimage' }}
         name: Run Kernel Count Test
         run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
@@ -360,10 +294,7 @@ jobs:
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
-        run: |
-          export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-          export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-          cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+        uses: ./.github/actions/process-replay
 
   testdsp:
     name: DSP Tests
@@ -372,12 +303,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.12
-    - name: Install Dependencies
-      run: pip install --user -e .
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -399,29 +326,13 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: ~/.local/lib/python3.11/site-packages
-        key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-    - name: Install Dependencies
-      run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Install dawn (WebGPU)
-      run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so
-    - name: Install dependencies for software-based vulkan
-      run: |
-        sudo apt update -y || true
-        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
-    - name: Cache downloads
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
+        key: webgpu
+        deps: testing
+        python-version: '3.11'
+        webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
@@ -432,10 +343,7 @@ jobs:
           --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py --ignore=test/test_speed_v_torch.py --ignore=test/test_transcendental.py \
           --ignore=test/test_fuzz_shape_ops.py --ignore=test/test_linearizer_failures.py --durations=20
     - name: Run process replay tests
-      run: |
-        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmetal:
     name: Metal Tests
@@ -445,28 +353,13 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
       with:
-        fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v4
-      with:
-        path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-        key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-    - name: Install Dependencies
-      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Install dawn (WebGPU)
-      run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.dylib -o /usr/local/lib/libwebgpu_dawn.dylib
-    - name: Cache downloads
-      uses: actions/cache@v4
-      with:
-        path: ~/Library/Caches/tinygrad/downloads/
-        key: downloads-cache-metal-only-${{ env.DOWNLOAD_CACHE_VERSION }}
+        key: metal
+        deps: testing
+        python-version: '3.11'
+        webgpu: 'true'
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
@@ -501,10 +394,7 @@ jobs:
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
     - name: Run process replay tests
-      run: |
-        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   tests:
     strategy:
@@ -519,86 +409,16 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
-          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-      - name: Cache downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/tinygrad/downloads/
-          key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+          key: ${{ matrix.backend }}
+          deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
+          opencl: ${{ matrix.backend == 'gpu' && 'true' }}
+          amd: ${{ matrix.backend == 'amd' && 'true' }}
+          cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
-      - name: Install OpenCL
-        if: matrix.backend == 'gpu'
-        run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-          echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-          sudo apt update || true
-          sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
-            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
-      - name: Install packages (cuda)
-        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
-        run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-          sudo apt update -y || true
-          sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
-      - name: Cache gpuocelot
-        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
-        id: cache-build
-        uses: actions/cache@v4
-        env:
-          cache-name: cache-gpuocelot-build
-        with:
-          path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
-      - name: Clone/compile gpuocelot
-        if: (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && steps.cache-build.outputs.cache-hit != 'true'
-        run: |
-          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
-          cd ${{ github.workspace }}/gpuocelot/ocelot
-          git checkout 4524e34adb7eaccc6f71262f2e21d7052bb17c2f
-          mkdir build
-          cd build
-          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
-          ninja
-      - name: Install gpuocelot
-        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
-        run: |
-          cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
-      - name: Install packages (amd)
-        if: matrix.backend == 'amd'
-        run: |
-          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-          wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-          sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
-          deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.1.2 jammy main
-          EOF
-          echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
-          sudo apt update || true
-          sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
-          curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-          jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
-          sudo xargs curl -L -o /usr/local/lib/libremu.so
-          sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
-            /opt/rocm/lib
-            /opt/rocm/lib64
-          EOF
-          sudo ldconfig
-      - name: Install dependencies
-        run: pip install -e '.[testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
@@ -618,10 +438,7 @@ jobs:
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
-        run: |
-          export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
-          export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
-          cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+        uses: ./.github/actions/process-replay
 
   osxtests:
     strategy:
@@ -633,33 +450,13 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: /Users/runner/Library/Python/3.12/lib/python/site-packages
-          key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-      - name: Install llvm
-        run: |
-          brew install llvm
-      - name: Install comgr
-        run: |
-          sudo mkdir -p /usr/local/lib
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
-            jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
-      - name: Install remu
-        run: |
-          curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
-            jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
-            sudo xargs curl -L -o /usr/local/lib/libremu.dylib
-      - name: Install dependencies
-        run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+          key: macos-other
+          deps: testing
+          amd: 'true'
+          llvm: 'true'
       - name: Check Device.DEFAULT and print some source (AMD)
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -710,27 +507,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
         with:
-          fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.12
-      - name: Cache python packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
-          key: windows-packages-${{ hashFiles('**/setup.py') }}
-      - name: Set env
-        shell: bash
-        run: |
-          if [ "${{ matrix.backend }}" = "clang" ]; then
-            echo "CLANG=1" >> $GITHUB_ENV
-          elif [ "${{ matrix.backend }}" = "llvm" ]; then
-            echo "LLVM=1" >> $GITHUB_ENV
-          fi
-      - name: Install dependencies
-        run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+          key: windows
+          deps: testing
       - name: Check Device.DEFAULT and print some source (llvm)
         shell: bash
         run: |
@@ -749,28 +530,3 @@ jobs:
         shell: bash
         run: |
           CLANG=1 python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
-
-  #testunicorn:
-  #  name: ARM64 unicorn Test
-  #  runs-on: ubuntu-latest
-  #  timeout-minutes: 20
-  #  steps:
-  #    - name: Checkout Code
-  #      uses: actions/checkout@v4
-  #    - name: Set up Python 3.11
-  #      uses: actions/setup-python@v5
-  #      with:
-  #        python-version: 3.11
-  #    - name: Cache python packages
-  #      uses: actions/cache@v4
-  #      with:
-  #        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-  #        key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
-  #    - name: Install cross-assembler
-  #      run: |
-  #        sudo apt update -y
-  #        sudo apt install -y --no-install-recommends gcc-aarch64-linux-gnu
-  #    - name: Install dependencies
-  #      run: pip install -e '.[testing,arm]' --extra-index-url https://download.pytorch.org/whl/cpu
-  #    - name: Test arm
-  #      run: CI=1 ARM64=1 CLANG=1 python -m pytest -n=auto test/ -k 'not (test_nn.py and (test_conv_transpose2d or test_conv2d))' --ignore=test/models --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_specific_conv.py  --ignore=test/unit/test_disk_tensor.py
