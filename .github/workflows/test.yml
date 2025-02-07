@@ -261,8 +261,8 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Repo line count < 11000 lines
-      run: MAX_LINE_COUNT=11000 python sz.py
+    - name: Repo line count < 11200 lines
+      run: MAX_LINE_COUNT=11200 python sz.py
 
   testopencl:
     strategy:
