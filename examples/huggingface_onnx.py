@@ -1,4 +1,4 @@
-import onnx, json, os, collections
+import onnx, json, os
 from pathlib import Path
 from huggingface_hub import list_models, snapshot_download
 from tinygrad.helpers import _ensure_downloads_dir, getenv
@@ -19,13 +19,12 @@ def run_huggingface_benchmark(onnx_model_path, config):
   validate(onnx_model_path, inputs)
 
 if __name__ == "__main__":
-  assert getenv("LIMIT") or getenv("MODELPATH", ""), "ex: LIMIT=100 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
+  assert getenv("LIMIT") or getenv("MODELPATH", ""), "ex: LIMIT=25 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
 
   # for running
   if limit := getenv("LIMIT"):
     sort = "downloads"
-    result = {}
-    counter = collections.Counter()
+    result = {"passed": 0, "failed": 0}
     print(f"** Running benchmarks for top {limit} models ranked by '{sort}' on huggingface **")
     for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
       print(f"{i}: ({getattr(model, sort)} {sort}) ")
@@ -40,12 +39,10 @@ if __name__ == "__main__":
         try:
           run_huggingface_benchmark(onnx_model_path, get_config(root_path))
           result[model.id][relative_path] = {"status": "passed"}
-          counter["passed"] += 1
+          result["passed"] += 1
         except Exception as e:
           result[model.id][relative_path] = {"status": f"failed {e}"}
-          counter["failed"] += 1
-    print(counter)
-    result.update(counter)
+          result["failed"] += 1
 
     with open("huggingface_results.json", "w") as f:
       json.dump(result, f, indent=2)
