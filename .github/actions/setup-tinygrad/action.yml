@@ -203,7 +203,7 @@ runs:
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         sudo apt update -y || true
-        sudo apt install -y --no-install-recommends llvm-14-dev
+        sudo apt install -y --no-install-recommends llvm-dev
 
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
