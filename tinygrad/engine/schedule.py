@@ -458,20 +458,21 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   graph_rewrite(sink, break_sched, ctx)
   # create the kernel graph
   sched_sink = sink
-  before_assign: dict[UOp, list[UOp]] = {}
+  before_assign: dict[UOp, dict[UOp, UOp]] = {}
   while 1:
     sched_sink = graph_rewrite(sched_sink, create_kernels, realize_map)
     rep: dict[UOp, UOp] = {}
     for u in sched_sink.toposort:
       if not is_kernel(u): continue
       for s in u.src[1].src:
-        if s.op is Ops.BUFFER and s is not u.buf_uop: before_assign.setdefault(s, []).append(u)
+        if s.op is Ops.BUFFER and s is not u.buf_uop: before_assign.setdefault(s, {})[u.buf_uop] = u
         if s.op in DONT_PLACE_IN_KERNEL or is_kernel(s): continue
         # otherwise it becomes a new kernel
         rep[s] = init_kernel(realize_map, s)
       # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
       if (assign_src:=before_assign.get(u.buf_uop)):
-        if (new_src:=tuple(dedup(u.src+tuple(assign_src)))) != u.src: rep[u] = u.replace(src=new_src)
+        # now the ASSIGN becomes (BUF, KERNEL, ...more_assigns)
+        if (new_src:=(u.buf_uop,u.src[1])+tuple(assign_src.values())) != u.src: rep[u] = u.replace(src=new_src)
     if len(rep) == 0: break
     sched_sink = sched_sink.substitute(rep)
   type_verify(list(sched_sink.toposort), kernel_spec)
