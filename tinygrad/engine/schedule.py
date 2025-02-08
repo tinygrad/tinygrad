@@ -264,6 +264,10 @@ class ScheduleItem:
   @functools.cached_property
   def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
 
+def kernel_to_si(k:UOp) -> ScheduleItem:
+  assert k.op is Ops.KERNEL and isinstance(k.metadata, tuple), f"must be KERNEL {k}"
+  return ScheduleItem(k.arg.ast, tuple(u.buf_uop.buffer for u in k.src), k.metadata)
+
 # **** Kernel creation
 
 @dataclass(frozen=True)
@@ -373,14 +377,14 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
   return var
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
-def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
+def schedule_uop(pre:UOp, ctx:ScheduleContext) -> UOp:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
   ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(ctx.var_vals))
   # NOTE: we only add the metadata for fused tensors
   metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
-  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), metadata)
+  return UOp(Ops.KERNEL, src=tuple(si_ctx.bufs), arg=Kernel(ast, metadata))
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -484,7 +488,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if getenv("VIZ"): graph_rewrite(new_sched_sink, PatternMatcher([]))
 
   # final toposort
-  schedule = [schedule_uop(u.src[1].arg.ast, ctx) for u in new_sched_sink.toposort if u.op is Ops.ASSIGN]
+  schedule = [kernel_to_si(schedule_uop(u.src[1].arg.ast, ctx)) for u in new_sched_sink.toposort if u.op is Ops.ASSIGN]
 
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
