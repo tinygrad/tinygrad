@@ -137,10 +137,10 @@ jobs:
         ./autogen_stubs.sh llvm
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
 
-  uops:
-    name: uops tests
+  tc:
+    name: Tensor Core tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -195,6 +195,19 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         PYTHONPATH=. DEBUG=2 EMULATE_INTEL=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
+
+  bepython:
+    name: Linux (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: be-minimal
+        deps: testing_minimal
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
@@ -207,9 +220,9 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
-    name: Linters+fuzz+unit Tests
+    name: Linters+unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     # TODO: run the pre-commit hook to replace a lot of this
     steps:
@@ -235,14 +248,26 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+    - name: Repo line count < 11200 lines
+      run: MAX_LINE_COUNT=11200 python sz.py
+
+  fuzzing:
+    name: Fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: fuzzing
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Repo line count < 11200 lines
-      run: MAX_LINE_COUNT=11200 python sz.py
 
   testgpuimage:
     name: 'GPU IMAGE+compile Tests'
@@ -423,7 +448,6 @@ jobs:
         key: metal
         deps: testing
         python-version: '3.11'
-        webgpu: 'true'
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
@@ -462,6 +486,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: osx-webgpu
+        webgpu: 'true'
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 python3 -m examples.compile_efficientnet
     - name: Clean npm cache
