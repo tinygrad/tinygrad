@@ -3,10 +3,10 @@ from pathlib import Path
 from huggingface_hub import list_models, snapshot_download
 from tinygrad.helpers import _ensure_downloads_dir, getenv
 from extra.onnx import OnnxRunner
-from extra.onnx_helpers import validate, get_example_inputs
+from extra.onnx_helpers import validate, get_example_inputs, truncate_model
 
 HUGGINGFACE_URL = "https://huggingface.co"
-SKIPPED_FILES = ["limit", "avx2", "arm64", "avx512", "avx512_vnni"]
+SKIPPED_FILES = ["avx2", "arm64", "avx512", "avx512_vnni"]
 SKIPPED_REPOS = ["stabilityai/stable-diffusion-xl-base-1.0"]
 
 def huggingface_download_onnx_model(model_id:str):
@@ -18,14 +18,14 @@ def get_config(root_path:Path):
 
 def run_huggingface_benchmark(onnx_model_path, config):
   inputs = get_example_inputs(OnnxRunner(onnx.load(onnx_model_path)).graph_inputs, config)
-  validate(onnx_model_path, inputs, getenv("ONNXLIMIT", -1), rtol=1e-3, atol=1e-3)
+  validate(onnx_model_path, inputs, rtol=1e-3, atol=1e-3)
 
 if __name__ == "__main__":
   assert getenv("LIMIT") or getenv("MODELPATH", ""), "ex: LIMIT=25 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
 
   # for running
   if limit := getenv("LIMIT"):
-    sort = "downloads"
+    sort = "downloads"  # recent 30 days downloads
     result = {"passed": 0, "failed": 0}
     print(f"** Running benchmarks on top {limit} models ranked by '{sort}' on huggingface **")
     for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
@@ -54,7 +54,11 @@ if __name__ == "__main__":
 
   # for debug
   if model_path := str(getenv("MODELPATH", "")):
+    limit = getenv("ONNXLIMIT", -1)
     model_id, relative_path = model_path.split("/", 2)[:2], model_path.split("/", 2)[2]
     model_id = "/".join(model_id)
     root_path = huggingface_download_onnx_model(model_id)
-    run_huggingface_benchmark(root_path / relative_path, get_config(root_path))
+    onnx_model = root_path / relative_path
+    if limit != -1: onnx_model = truncate_model(onnx_model, limit)
+    run_huggingface_benchmark(onnx_model, get_config(root_path))
+    if limit != -1: os.remove(onnx_model)
