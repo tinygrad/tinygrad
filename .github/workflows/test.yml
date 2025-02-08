@@ -310,7 +310,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopenpilot:
-    name: 'Openpilot compile Tests'
+    name: 'Openpilot Compile Tests'
     runs-on: ubuntu-20.04
     timeout-minutes: 10
     steps:
@@ -320,7 +320,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: openpilot-compile
-          deps: testing_minimal
+          deps: testing
           opencl: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
