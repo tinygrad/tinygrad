@@ -1,15 +1,26 @@
-import os, pathlib, struct, ctypes, tempfile, functools, decimal
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal
 from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, cpu_profile, ProfileDeviceEvent, ProfileRangeEvent
 from tinygrad.renderer.cstyle import MetalRenderer
+
+# Opening METAL after LLVM doesn't fail because ctypes.CDLL opens with RTLD_LOCAL but MTLCompiler opens it's own llvm with RTLD_GLOBAL
+# This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
+# library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
+# doesn't seem to be anything we can do.
+with contextlib.suppress(FileNotFoundError):
+  import tinygrad.runtime.autogen.llvm # noqa: F401
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
   def __hash__(self): return hash(self.value)
   def __eq__(self, other): return self.value == other.value
 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
-  def __del__(self): msg("release")(self)
+  def __del__(self):
+    # CPython doesn't make any guarantees about order in which globals (like `msg` or `libobjc`) are destroyed when the interpreter shuts down
+    # https://github.com/tinygrad/tinygrad/pull/8949 triggered the unlucky ordering which lead to a bunch of errors at exit
+    # TODO: Why isn't `sys.is_finalizing` working?
+    if msg is not None and libobjc is not None: msg("release")(self)
 
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0

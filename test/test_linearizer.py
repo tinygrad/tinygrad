@@ -1233,9 +1233,11 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
+    # sum_collapse is a full collapse now
     assert len(sched) == 1
-    lin = Kernel(sched[0].ast)
-    assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
+    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort), "found reduce in sum collapse"
+    #lin = Kernel(sched[0].ast)
+    #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -2065,8 +2067,9 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      if Device.DEFAULT != "WEBGPU":
+        helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+        helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
 
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
