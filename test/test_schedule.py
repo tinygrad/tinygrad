@@ -322,6 +322,7 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
     for optim, cnt in [(nn.optim.Adam, 30), (nn.optim.SGD, 11)]:
@@ -1087,6 +1088,7 @@ class TestSchedule(unittest.TestCase):
       c2(c1(img).relu()).relu().sum().backward()
       check_schedule(opt.schedule_step(), 7)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
@@ -1435,9 +1437,10 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 

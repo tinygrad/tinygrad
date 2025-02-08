@@ -21,6 +21,7 @@ class TestSpecific(unittest.TestCase):
     (x @ w).reshape(1, 128, 4).contiguous().realize()
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Too large dimensions")
   def test_big_vec_mul(self):
     # from LLaMA
     #   0 buffer<4096, dtypes.float>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]
