@@ -2480,6 +2480,7 @@ class Tensor(SimpleMathTrait):
                      include_self:bool=True) -> Tensor:
     reduce_ops = {"sum", "prod", "mean", "amax", "amin"}
     if reduce not in reduce_ops: pass # TODO
+    src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
     # TODO implement reduction ops
     # TODO include_self
