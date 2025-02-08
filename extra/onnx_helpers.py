@@ -12,7 +12,9 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config):
       match dim:
         case int(): ret.append(dim)
         case "width" | "height": ret.append(224)
-        case "sequence_length" | "decoder_sequence_length" | "encoder_sequence_length": ret.append(20)
+        case "sequence_length": ret.append(20)
+        case "decoder_sequence_length" | "encoder_sequence_length": ret.append(20)
+        case "past_decoder_sequence_length" | "encoder_sequence_length_out": ret.append(20)
         case "batch_size": ret.append(1)
         case "num_channels": ret.append(config.get("in_channels", 3))
         case _: ret.append(1)

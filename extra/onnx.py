@@ -268,7 +268,7 @@ def get_onnx_ops():
   def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
   def ConstantOfShape(shape:list[int], value:Tensor|None=None):
     if value is None: value = Tensor(0, dtype=dtypes.float32)
-    return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
+    return Tensor.ones(*shape, dtype=value.dtype) if shape == [0] else value.expand(shape)
 
   def Size(data:Tensor): return data.numel()
   def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
@@ -547,7 +547,8 @@ def get_onnx_ops():
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
   def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
-    x = x + skip + bias
+    x = x + skip
+    if bias is not None: x = x + bias
     return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
   def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embedding:Tensor, position_embedding:Tensor,
                               segment_embedding:Tensor, gamma=None, beta=None, mask:Tensor|None=None,
