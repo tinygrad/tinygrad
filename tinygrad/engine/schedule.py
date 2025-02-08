@@ -66,6 +66,9 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
+  # assigns last
+  (UPat(GroupOp.All, name="root"),
+   lambda root: root.replace(src=n) if (n:=tuple(sorted(root.src, key=lambda x:0 if x.op is Ops.ASSIGN else -1))) != root.src else None),
   # remove CONST/BIND/BUFFER/VIEW from SINK
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
@@ -455,40 +458,26 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   graph_rewrite(sink, break_sched, ctx)
   # create the kernel graph
   sched_sink = sink
+  before_assign: dict[UOp, list[UOp]] = {}
   while 1:
     sched_sink = graph_rewrite(sched_sink, create_kernels, realize_map)
     rep: dict[UOp, UOp] = {}
     for u in sched_sink.toposort:
-      if u.op is not Ops.KERNEL: continue
-      for s in u.src:
+      if not is_kernel(u): continue
+      for s in u.src[1].src:
+        if s.op is Ops.BUFFER and s is not u.buf_uop: before_assign.setdefault(s, []).append(u)
         if s.op in DONT_PLACE_IN_KERNEL or is_kernel(s): continue
         # otherwise it becomes a new kernel
         rep[s] = init_kernel(realize_map, s)
+      # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
+      if (assign_src:=before_assign.get(u.buf_uop)):
+        if (new_src:=tuple(dedup(u.src+tuple(assign_src)))) != u.src: rep[u] = u.replace(src=new_src)
     if len(rep) == 0: break
     sched_sink = sched_sink.substitute(rep)
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depends on the kernel's assign
-  kernel_assigns: list[UOp] = []
-  for x in sched_sink.toposort:
-    if x.op is Ops.ASSIGN: kernel_assigns.append(x)
-  replacements = {}
-  for x in sched_sink.toposort:
-    if x.op is Ops.ASSIGN:
-      assigned_to = x.src[0]
-      new_srcs = []
-      for ka in kernel_assigns:
-        k = ka.src[1]
-        if k not in x.src and any(y is assigned_to for y in k.src): new_srcs.append(ka)
-      if len(new_srcs):
-        assert x not in replacements
-        replacements[x] = x.replace(src=x.src+tuple(new_srcs))
-  new_sched_sink = sched_sink.substitute(replacements)
-  type_verify(list(new_sched_sink.toposort), kernel_spec)
-  if getenv("VIZ"): graph_rewrite(new_sched_sink, PatternMatcher([]))
-
   # final toposort
-  schedule = [kernel_to_si(schedule_uop(u.src[1].arg.ast, ctx)) for u in new_sched_sink.toposort if u.op is Ops.ASSIGN]
+  schedule = [kernel_to_si(schedule_uop(u.src[1].arg.ast, ctx)) for u in sched_sink.toposort if u.op is Ops.ASSIGN]
 
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
