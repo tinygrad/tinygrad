@@ -386,7 +386,8 @@ class Kernel:
 
     if opt.op is OptOps.LOCAL:    # cyan
       # NOTE: LLVM/CLANG can use locals too, but they are treated the same as globals (still helpful for L1 cache)
-      #check(self.opts.has_local, "target does not support local")
+      # it's disabled for now since it makes BEAM slow for little gain
+      check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1

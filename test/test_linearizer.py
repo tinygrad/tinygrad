@@ -981,6 +981,8 @@ class TestLinearizer(unittest.TestCase):
     assert len(stores) == 1
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
 
+  # NOTE: can reenable, it does work. it just makes BEAM slow
+  @unittest.expectedFailure
   @unittest.skipUnless(Device.DEFAULT == "CLANG", "test only for CLANG")
   def test_upcast_with_locals_clang(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
