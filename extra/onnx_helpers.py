@@ -14,7 +14,7 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue]):
     ret.update({name:value})
   return ret
 
-def slice_model(onnx_file, limit:int):
+def truncate_model(onnx_file, limit:int):
   model = onnx.load(onnx_file, load_external_data=False)
   nodes_up_to_limit = list(model.graph.node)[:limit+1]
   new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
@@ -28,7 +28,7 @@ def slice_model(onnx_file, limit:int):
   return new_onnx_file
 
 def validate(onnx_file, inputs:dict|None=None, limit:int=-1, rtol=1e-5, atol=1e-5):
-  if limit != -1: onnx_file = slice_model(onnx_file, limit)
+  if limit != -1: onnx_file = truncate_model(onnx_file, limit)
   run_onnx = OnnxRunner(onnx.load(onnx_file))
   if inputs is None: inputs = get_example_inputs(run_onnx.graph_inputs)
   tinygrad_out = run_onnx(inputs)
