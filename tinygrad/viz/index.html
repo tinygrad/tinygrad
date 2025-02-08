@@ -366,7 +366,6 @@
           else {
             // TODO: this shouldn't exist after the viz api refactor
             for (const [k,v] of Object.entries(chunk)) {
-              if (["uops", "graphs"].includes(k)) v.splice(0, 1);
               if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
             }
           }

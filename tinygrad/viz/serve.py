@@ -2,7 +2,7 @@
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, TypedDict, cast
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -71,7 +71,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, o
   ret:GraphRewriteDetails = {"uops":[pcall(str, sink:=ctx.sink)], "graphs":[uop_to_json(sink)], "code_line":lines(ctx.loc[0])[ctx.loc[1]-1].strip(),
                              "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "diffs":[], "upats":[], "changed_nodes":[], **metadata}
   replaces: dict[UOp, UOp] = {}
-  for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches[offset:offset+limit])):
+  for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches)):
     replaces[u0] = u1
     new_sink = sink.substitute(replaces)
     ret["graphs"].append(new_sink_js:=uop_to_json(new_sink))
@@ -80,6 +80,9 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, o
     ret["upats"].append((upat.location, upat.printable()))
     # TODO: this is O(n^2)!
     ret["uops"].append(str(sink:=new_sink))
+  # if the client requested a chunk we only send that chunk
+  # TODO: is there a way to cache the replaces dict here?
+  if offset != 0: ret = cast(GraphRewriteDetails, {k:v[offset:offset+limit] if isinstance(v,list) else v for k,v in ret.items()})
   return ret
 
 # Profiler API
