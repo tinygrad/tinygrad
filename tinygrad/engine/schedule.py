@@ -477,9 +477,28 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     sched_sink = sched_sink.substitute(rep)
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # final toposort
-  schedule = [kernel_to_si(schedule_uop(u.src[1].arg.ast, ctx)) for u in sched_sink.toposort if u.op is Ops.ASSIGN]
+  # final toposort (bfs)
+  children: dict[UOp, list[UOp]] = {}
+  in_degree: dict[UOp, int] = {}
+  for u in sched_sink.toposort:
+    if u.op is not Ops.ASSIGN: continue
+    in_degree[u] = 0
+    for s in u.src[1].src:
+      if s.op is not Ops.ASSIGN: continue
+      children.setdefault(s, []).append(u)
+      in_degree[u] += 1
 
+  queue = deque(k for k,v in in_degree.items() if v == 0)
+  schedule: list[ScheduleItem] = []
+  while queue:
+    u = queue.popleft()
+    schedule.append(kernel_to_si(schedule_uop(u.src[1].arg.ast, ctx)))
+    for x in children.get(u, []):
+      in_degree[x] -= 1
+      if in_degree[x] == 0: queue.append(x)
+
+  # confirm everything was scheduled correctly
+  if len(schedule) != (groups:=len(in_degree)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
