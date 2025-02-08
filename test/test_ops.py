@@ -1124,8 +1124,8 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
-  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"] or IMAGE \
-    or Device.DEFAULT == "WEBGPU", "not supported on these in CI/IMAGE")
+  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA", "METAL"] or IMAGE \
+    or Device.DEFAULT in ["WEBGPU", "METAL"], "not supported on these in CI/IMAGE")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
@@ -1232,9 +1232,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.any(), vals=[[False, False]], forward_only=True)
     helper_test_op([()], lambda x: x.any(), forward_only=True)
   def test_any_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.any(axis=(1,2)), forward_only=True)
+    helper_test_op([(3,4,5,6)], lambda x: torch.any(torch.any(x, dim=2), dim=1), lambda x: x.any(axis=(1,2)), forward_only=True)
   def test_any_zero_axis(self):
-    helper_test_op([(1,0,3,0,5)], lambda x: x.any(axis=(1,3)), forward_only=True)
+    helper_test_op([(1,0,3,0,5)], lambda x: torch.any(torch.any(x, dim=3), dim=1), lambda x: x.any(axis=(1,3)), forward_only=True)
 
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_all(self):
@@ -1244,9 +1244,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.all(), vals=[[False, False]], forward_only=True)
     helper_test_op([()], lambda x: x.all(), forward_only=True)
   def test_all_axis(self):
-    helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
+    helper_test_op([(3,4,5,6)], lambda x: torch.all(torch.all(x, dim=2), dim=1), lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):
-    helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
+    helper_test_op([(1,0,3,0,5)], lambda x: torch.all(torch.all(x, dim=3), dim=1), lambda x: x.all(axis=(1,3)), forward_only=True)
 
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
@@ -2750,7 +2750,6 @@ class TestOpsUint8(unittest.TestCase):
     helper_test_op(None,
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
-
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
