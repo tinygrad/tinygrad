@@ -197,7 +197,7 @@ jobs:
         PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   bepython:
-    name: Linux (Python)
+    name: Python Backend
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -244,8 +244,6 @@ jobs:
       run: python -m pylint tinygrad/
     - name: Run mypy
       run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
-    - name: Repo line count < 11200 lines
-      run: MAX_LINE_COUNT=11200 python sz.py
 
   unittest:
     name: Unit Tests
@@ -258,13 +256,14 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: unittest
-        python-version: '3.10'
+        key: unittest-12
         deps: testing
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
+    - name: Repo line count < 11200 lines
+      run: MAX_LINE_COUNT=11200 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -310,7 +309,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopenpilot:
-    name: 'Openpilot Compile Tests'
+    name: 'openpilot Compile Tests'
     runs-on: ubuntu-20.04
     timeout-minutes: 10
     steps:
