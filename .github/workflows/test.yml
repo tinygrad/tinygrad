@@ -244,8 +244,6 @@ jobs:
       run: python -m pylint tinygrad/
     - name: Run mypy
       run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Repo line count < 11200 lines
       run: MAX_LINE_COUNT=11200 python sz.py
 
@@ -263,6 +261,8 @@ jobs:
         key: unittest
         python-version: '3.10'
         deps: testing
+    - name: Test README
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
 
