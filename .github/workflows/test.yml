@@ -342,14 +342,17 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: onnxopt
+          key: onnxoptl
           deps: testing,testing_tf
           python-version: '3.11'
           opencl: 'true'
+          llvm: 'true'
       - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (CLANG)
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX (LLVM)
+        run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CLANG CLOUD=1 python3 test/test_tiny.py
@@ -448,9 +451,6 @@ jobs:
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
         run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
-      - name: Run ONNX (only LLVM)
-        if: matrix.backend == 'llvm'
-        run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
@@ -464,8 +464,8 @@ jobs:
 
 # ****** OSX Tests ******
 
-  testmetal:
-    name: MacOS (metal)
+  testmetal2:
+    name: MacOS (unit)
     runs-on: macos-14
     timeout-minutes: 10
 
@@ -475,15 +475,9 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: metal
+        key: metal2
         deps: testing
         python-version: '3.11'
-    - name: Check Device.DEFAULT (METAL) and print some source
-      run: |
-        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
-        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    - name: Run metal test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Run ONNX
@@ -505,8 +499,31 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
+  testmetal:
+    name: MacOS (metal)
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: metal
+        deps: testing
+        python-version: '3.11'
+    - name: Check Device.DEFAULT (METAL) and print some source
+      run: |
+        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
+        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+    - name: Run metal test
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
   osxwebgpu:
-    name: MacOS (webgpu)
+    name: MacOS (WebGPU)
     runs-on: macos-14
     timeout-minutes: 10
     steps:
