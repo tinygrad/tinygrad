@@ -2478,18 +2478,18 @@ class Tensor(SimpleMathTrait):
 
   def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Union[None, Literal["sum", "prod", "mean", "amax", "amin"]]=None,
                      include_self:bool=True) -> Tensor:
-    reduce_ops = {"sum", "prod", "mean", "amax", "amin"}
-    if reduce not in reduce_ops: pass # TODO
+    # TODO include_self
+    reduce_ops = {
+      "sum": lambda src, mask: Tensor([]), # TODO
+      "prod": lambda src, mask: Tensor([]), # TODO
+      "mean": lambda src, mask: Tensor([]), # TODO
+      "amax": lambda src, mask: Tensor([]), # TODO
+      "amin": lambda src, mask: Tensor([]) # TODO
+    }
+    if reduce and reduce not in reduce_ops: raise TypeError() # TODO error msg
     src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
-    # TODO implement reduction ops
-    # TODO include_self
-    if reduce == "sum": return
-    if reduce == "prod": return
-    if reduce == "mean": return
-    if reduce == "amax": return
-    if reduce == "amin": return
-    return _masked_setitem(self, src, mask, (-1,))
+    return reduce_ops[reduce](src, mask) if reduce in reduce_ops else _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
 
