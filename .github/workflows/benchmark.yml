@@ -454,7 +454,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Remove amdgpu
-      run: sudo rmmod amdgpu
+      run: sudo rmmod amdgpu || true
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
