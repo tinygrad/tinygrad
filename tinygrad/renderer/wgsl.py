@@ -25,7 +25,7 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):
   val = (load.cast(dtypes.uint32) >> shift_am) & (0xFF if dtype.itemsize == 1 else 0xFFFF)
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
-def is_packed(dt:DType) -> bool: return (dt.itemsize < 4) and dt.base != dtypes.half
+def is_packed(dt:DType) -> bool: return dt.itemsize < 4 and dt.base != dtypes.half
 
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
@@ -59,7 +59,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"var<workgroup> {ctx[x]}: array<{ctx.buf_map(x.dtype.base)}, {x.dtype.size}>;"),
     (UPat(Ops.BITCAST, dtype=(dtypes.ushort, dtypes.short), name="x"),
      lambda ctx,x: f"(bitcast<{ctx.type_map[x.dtype]}>(vec2<f16>({ctx[x.src[0]]}))&0xFFFF)"if x.src[0].dtype == dtypes.half else None),
-    (UPat(Ops.BITCAST, dtype=(dtypes.half), name="x"), lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]" \
+    (UPat(Ops.BITCAST, dtype=dtypes.half, name="x"), lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]" \
      if x.src[0].dtype in [dtypes.short, dtypes.ushort] else None),
     (UPat(Ops.BITCAST, dtype=(dtypes.char, dtypes.uchar), name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]}&0xFF)"),
     (UPat(Ops.BITCAST, dtype=(dtypes.short, dtypes.ushort), name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]}&0xFFFF)"),
@@ -85,8 +85,7 @@ class WGSLRenderer(CStyleLanguage):
     bind_it = iter(range(len(bufs)))
     external_local_bufs = [line.lstrip() for line in kernel if "var<workgroup>" in line]
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
-    prg = "enable f16;\n"
-    prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    prg = "enable f16;\nfn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
     # trick to obfuscate compiler so that nan is detected properly
     prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
