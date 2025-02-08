@@ -356,9 +356,13 @@
       }
       else {
         const p = document.querySelector(".progress");
+        p.style.display = "none";
         const limit = 100;
         const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
-        p.style.display = pageCount == 1 ? "none" : "flex";
+        if (pageCount > 1) {
+          p.style.display = "flex";
+          d3.select("#graph-svg g").selectAll("*").remove();
+        }
         for (let i=0; i < pageCount; i++) {
           p.innerText = `fetching data ${i+1}/${pageCount}`;
           const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();

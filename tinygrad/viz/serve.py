@@ -83,8 +83,7 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, o
     ret["uops"].append(str(sink:=new_sink))
   # if the client requested a chunk we only send that chunk
   # TODO: is there a way to cache the replaces dict here?
-  if offset != 0: ret = cast(GraphRewriteDetails, {k:v[offset:offset+limit] if isinstance(v,list) else v for k,v in ret.items()})
-  return ret
+  return cast(GraphRewriteDetails, {k:v[offset:offset+limit] if isinstance(v,list) else v for k,v in ret.items()})
 
 # Profiler API
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
