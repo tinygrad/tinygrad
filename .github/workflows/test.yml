@@ -261,7 +261,8 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: fuzzing
+        key: fuzzing-minimal
+        deps: testing_minimal
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
