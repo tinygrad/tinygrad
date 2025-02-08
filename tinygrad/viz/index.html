@@ -373,7 +373,7 @@
         p.style.display = "none";
         cache[cacheKey] = ret;
       }
-      renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
+      renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
     }
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
@@ -401,8 +401,8 @@
         if (i === currentRewrite) {
           gUl.classList.add("active");
           if (i !== 0) {
-            const diff = ret.diffs[i-1];
-            const [loc, pattern] = ret.upats[i-1];
+            const diff = ret.diffs[i];
+            const [loc, pattern] = ret.upats[i];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             const link = vsCodeOpener(parts);

@@ -69,7 +69,8 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, offset=0, limit=200) -> GraphRewriteDetails:
   ret:GraphRewriteDetails = {"uops":[pcall(str, sink:=ctx.sink)], "graphs":[uop_to_json(sink)], "code_line":lines(ctx.loc[0])[ctx.loc[1]-1].strip(),
-                             "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "diffs":[], "upats":[], "changed_nodes":[], **metadata}
+                             "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, **metadata,
+                             "diffs":[[]], "upats":[[]], "changed_nodes":[[]]} # NOTE: the first graph just renders the input UOp
   replaces: dict[UOp, UOp] = {}
   for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches)):
     replaces[u0] = u1
