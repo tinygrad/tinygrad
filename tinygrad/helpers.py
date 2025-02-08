@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
 import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
 from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic
@@ -79,7 +79,7 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str, append_user:bool=False) -> str:
-  return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{os.getenv('USERNAME', os.getlogin())}" if append_user else x)).as_posix()
+  return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
