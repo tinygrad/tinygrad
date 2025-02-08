@@ -4,7 +4,7 @@ import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
-from tinygrad.ops import sym_infer, sint, Variable
+from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
 class HWInterface:
@@ -83,10 +83,10 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     """
 
     for v in values:
-      if isinstance(v, int): self._q.append(v)
-      else:
+      if isinstance(v, UOp):
         self.q_sints.append((len(self._q), self._new_sym(v)))
         self._q.append(0xbadc0ded)
+      else: self._q.append(v)
 
   # *** common commands  ***
 

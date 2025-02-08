@@ -485,6 +485,12 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
+  def test_no_attributeerror_after_apply_uop_exception(self):
+    try:
+      Tensor.arange(4).reshape(3,2)
+    except ValueError:
+      Tensor.zeros(2, 2).realize()
+
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"

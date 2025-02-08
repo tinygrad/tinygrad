@@ -1,12 +1,11 @@
-from __future__ import annotations
 from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple, resolve
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
-from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same, DEVECTORIZE
+from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
@@ -124,6 +123,7 @@ powers_of_two = {2**i:i for i in range(64)}
 def get_late_rewrite_patterns(ops, force_transcendental=False):
   pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
            ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
+  pat.append((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src)))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops:
     pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
@@ -420,7 +420,8 @@ expander = PatternMatcher([
          Ops.VECTORIZE, Ops.IF), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"),
+    lambda acc,v: acc.replace(dtype=v.dtype, src=(acc.src[0].broadcast(v.dtype.count),)+acc.src[1:])),
   # BARRIERs aren't actually expanded
   (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
    lambda ex: UOp(Ops.UNROLL, dtypes.void, (UOp(Ops.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
@@ -449,6 +450,12 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
+  (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
+])
+
+devectorize_load_store = PatternMatcher([
+  # TODO: add vectorized support to transcendental
+  (UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
@@ -507,9 +514,13 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   sink = graph_rewrite(sink, sym+expander)
 
-  # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
-  sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
-    mulacc_unrolled)
+  if DEVECTORIZE:
+    # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
+    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
+      mulacc_unrolled)
+  else:
+    # new devectorize only for load/store
+    sink = graph_rewrite(sink, sym+devectorize_load_store)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)

@@ -1,4 +1,3 @@
-from __future__ import annotations
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.ops import Ops, UOp, sint

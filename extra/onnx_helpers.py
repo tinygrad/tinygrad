@@ -36,13 +36,24 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config):
     ret.update({name:value})
   return ret
 
-def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
-  run_onnx = OnnxRunner(onnx.load(onnx_file))
+def slice_model(model:onnx.ModelProto, limit:int):
+  nodes_up_to_limit = list(model.graph.node)[:limit+1]
+  new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
+  model.graph.ClearField("node")
+  model.graph.node.extend(nodes_up_to_limit)
+  model.graph.ClearField("output")
+  model.graph.output.extend(new_output_values)
+  return model
+
+def validate(onnx_file, inputs:dict|None=None, limit:int=-1, rtol=1e-5, atol=1e-5):
+  model = onnx.load(onnx_file) if limit == -1 else slice_model(onnx.load(onnx_file), limit)
+  run_onnx = OnnxRunner(model)
+  if inputs is None: inputs = get_example_inputs(run_onnx.graph_inputs)
   tinygrad_out = run_onnx(inputs)
 
   ort_options = ort.SessionOptions()
   ort_options.log_severity_level = 3
-  ort_sess = ort.InferenceSession(onnx_file, ort_options, ["CPUExecutionProvider"])
+  ort_sess = ort.InferenceSession(model.SerializeToString(), ort_options, ["CPUExecutionProvider"])
   np_inputs = {k:v.numpy() if isinstance(v, Tensor) else v for k,v in inputs.items()}
   out_names = list(run_onnx.graph_outputs)
   out_values = ort_sess.run(out_names, np_inputs)
