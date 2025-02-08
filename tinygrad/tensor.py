@@ -2441,7 +2441,8 @@ class Tensor(SimpleMathTrait):
     src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
     mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
     # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    return (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    return src, mask
 
   def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']]=None) -> Tensor:
     """
