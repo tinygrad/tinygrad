@@ -542,6 +542,8 @@ def get_onnx_ops():
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
     mean = x.mean(axis=axes, keepdim=True)
     return x.layernorm(axes, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axes, keepdim=True).add(epsilon).rsqrt()
+  def SimplifiedLayerNormalization(x:Tensor, scale:Tensor, bias:Tensor=Tensor(0), axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
+    return LayerNormalization(x, scale, bias, axis, epsilon, stash_type)
   def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05):
     return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
@@ -621,9 +623,9 @@ def get_onnx_ops():
                 qkv_hidden_sizes:list[int]|None=None, scale:float|None=None, unidirectional:int|None=None):
     # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
     assert num_heads is not None  # required
-    assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
+    assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None), "Attention functionality not supoprted yet"
     assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
-      "functionality not supported yet"  # TODO strange params
+      "Attention functionality not supported yet"  # TODO strange params
     hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
     if unidirectional:  # gpt-style

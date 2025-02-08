@@ -1,7 +1,7 @@
 from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
 from extra.onnx import OnnxRunner, OnnxValue
-import onnx
+import onnx, os
 import numpy as np
 import onnxruntime as ort
 
@@ -27,7 +27,7 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config):
       case "attention_mask": val = np.random.randint(0, 2, shape)
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
       case "image_tensor": val = np.random.randint(0, 256, shape)
-      case _: val = np.random.uniform(size=shape) * 8 if shape else np.array(0)
+      case _: val = np.random.uniform(size=shape) * 8
     return val.astype(_to_np_dtype(dtype))
 
   ret: dict[str, Tensor] = {}
@@ -38,24 +38,28 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config):
     ret.update({name:value})
   return ret
 
-def slice_model(model:onnx.ModelProto, limit:int):
+def slice_model(onnx_file, limit:int):
+  model = onnx.load(onnx_file, load_external_data=False)
   nodes_up_to_limit = list(model.graph.node)[:limit+1]
   new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
   model.graph.ClearField("node")
   model.graph.node.extend(nodes_up_to_limit)
   model.graph.ClearField("output")
   model.graph.output.extend(new_output_values)
-  return model
+  base, ext = os.path.splitext(onnx_file)
+  new_onnx_file = f"{base}_limit_{limit}{ext}"
+  onnx.save_model(model, new_onnx_file)
+  return new_onnx_file
 
 def validate(onnx_file, inputs:dict|None=None, limit:int=-1, rtol=1e-5, atol=1e-5):
-  model = onnx.load(onnx_file) if limit == -1 else slice_model(onnx.load(onnx_file), limit)
-  run_onnx = OnnxRunner(model)
+  if limit != -1: onnx_file = slice_model(onnx_file, limit)
+  run_onnx = OnnxRunner(onnx.load(onnx_file))
   if inputs is None: inputs = get_example_inputs(run_onnx.graph_inputs)
   tinygrad_out = run_onnx(inputs)
 
   ort_options = ort.SessionOptions()
   ort_options.log_severity_level = 3
-  ort_sess = ort.InferenceSession(model.SerializeToString(), ort_options, ["CPUExecutionProvider"])
+  ort_sess = ort.InferenceSession(onnx_file, ort_options, ["CPUExecutionProvider"])
   np_inputs = {k:v.numpy() if isinstance(v, Tensor) else v for k,v in inputs.items()}
   out_names = list(run_onnx.graph_outputs)
   out_values = ort_sess.run(out_names, np_inputs)
@@ -66,3 +70,5 @@ def validate(onnx_file, inputs:dict|None=None, limit:int=-1, rtol=1e-5, atol=1e-
     tiny_v, onnx_v = tinygrad_out[k], ort_out[k]
     if tiny_v is None: assert tiny_v == onnx_v
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
+
+  if limit != -1: os.remove(onnx_file)

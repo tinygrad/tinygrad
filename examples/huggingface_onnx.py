@@ -6,6 +6,8 @@ from extra.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
 
 HUGGINGFACE_URL = "https://huggingface.co"
+SKIPPED_FILES = ["limit", "avx2", "arm64", "avx512", "avx512_vnni"]
+SKIPPED_REPOS = ["stabilityai/stable-diffusion-xl-base-1.0"]
 
 def huggingface_download_onnx_model(model_id:str):
   return Path(snapshot_download(repo_id=model_id, allow_patterns=["*.onnx", "*.onnx_data", "*config.json"], cache_dir=_ensure_downloads_dir()))
@@ -25,8 +27,9 @@ if __name__ == "__main__":
   if limit := getenv("LIMIT"):
     sort = "downloads"
     result = {"passed": 0, "failed": 0}
-    print(f"** Running benchmarks for top {limit} models ranked by '{sort}' on huggingface **")
+    print(f"** Running benchmarks on top {limit} models ranked by '{sort}' on huggingface **")
     for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
+      if model.id in SKIPPED_REPOS: continue  # skip these
       print(f"{i}: ({getattr(model, sort)} {sort}) ")
       url = f"{HUGGINGFACE_URL}/{model.id}"
       result[model.id] = {"url": url}
@@ -34,6 +37,7 @@ if __name__ == "__main__":
       root_path = huggingface_download_onnx_model(model.id)
       print(f"Saved: {root_path}")
       for onnx_model_path in root_path.rglob("*.onnx"):
+        if any(skip in onnx_model_path.stem for skip in SKIPPED_FILES): continue  # skip these
         relative_path = str(onnx_model_path.relative_to(root_path))
         print(f"Benchmarking {relative_path}")
         try:
