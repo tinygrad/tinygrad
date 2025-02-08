@@ -2430,6 +2430,19 @@ class Tensor(SimpleMathTrait):
         x = x.gather(i, index)
     return x.cast(self.dtype)
 
+  def _pre_scatter(self, dim:int, index:Tensor, src:Tensor):
+    index, dim = index.to(self.device), self._resolve_dim(dim)
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
+    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
+    # shrink src to index shape to shrink away the unused values
+    src = src.shrink(tuple((0,s) for s in index.shape))
+    # prepare src and mask for reduce with respect to dim
+    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
+    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
+    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
+    return (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+
   def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']]=None) -> Tensor:
     """
     Scatters `src` values along an axis specified by `dim`.
@@ -2455,20 +2468,25 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    index, dim = index.to(self.device), self._resolve_dim(dim)
+    # TODO stop allowing Tensor src with reduce arg? Or just deprecate
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
-    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
-    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
-      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
-    # shrink src to index shape to shrink away the unused values
-    src = src.shrink(tuple((0,s) for s in index.shape))
-    # prepare src and mask for reduce with respect to dim
-    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
-    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
-    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    src, mask = self._pre_scatter(dim, index, src)
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
+    return _masked_setitem(self, src, mask, (-1,))
+
+  def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Union[None, Literal["sum", "prod", "mean", "amax", "amin"]]=None,
+                     include_self:bool=True) -> Tensor:
+    reduce_ops = {"sum", "prod", "mean", "amax", "amin"}
+    if reduce not in reduce_ops: pass # TODO
+    src, mask = self._pre_scatter(dim, index, src)
+    # TODO implement reduction ops
+    # TODO include_self
+    if reduce == "sum": return
+    if reduce == "prod": return
+    if reduce == "mean": return
+    if reduce == "amax": return
+    if reduce == "amin": return
     return _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
