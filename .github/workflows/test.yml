@@ -220,7 +220,7 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
-    name: Linters+unit Tests
+    name: Linters
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -231,9 +231,9 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: linting
+        key: linting-only
         python-version: '3.10'
-        deps: linting,testing
+        deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
@@ -246,10 +246,25 @@ jobs:
       run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
-    - name: Run unit tests
-      run: PYTHONPATH="." python -m pytest -n=auto test/unit/
     - name: Repo line count < 11200 lines
       run: MAX_LINE_COUNT=11200 python sz.py
+
+  unittest:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: unittest
+        python-version: '3.10'
+        deps: testing
+    - name: Run unit tests
+      run: PYTHONPATH="." python -m pytest -n=auto test/unit/
 
   fuzzing:
     name: Fuzzing
@@ -271,18 +286,17 @@ jobs:
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
 
   testgpuimage:
-    name: 'GPU IMAGE+compile Tests'
+    name: 'GPU IMAGE Tests'
     runs-on: ubuntu-20.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: gpuimage
-          deps: testing
-          python-version: '3.11'
+          key: gpu-image
+          deps: testing_minimal
           opencl: 'true'
       - name: Run Kernel Count Test
         run: PYTHONPATH="." GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
@@ -292,6 +306,22 @@ jobs:
         run: |
           PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
           PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
+  testopenpilot:
+    name: 'Openpilot compile Tests'
+    runs-on: ubuntu-20.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: openpilot-compile
+          deps: testing_minimal
+          opencl: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
           PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2105 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
