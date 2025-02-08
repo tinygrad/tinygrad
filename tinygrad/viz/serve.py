@@ -29,7 +29,7 @@ class GraphRewriteDetails(GraphRewriteMetadata):
   changed_nodes: list[list[int]] # the changed UOp id + all its parents ids
   code_line: str                 # source code calling graph_rewrite
   kernel_code: str|None          # optionally render the final kernel code
-  upats: list[tuple[tuple[str, int], str]]
+  upats: list[tuple[tuple[str, int], str]|None]
 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
 def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
@@ -70,7 +70,7 @@ def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, offset=0, limit=200) -> GraphRewriteDetails:
   ret:GraphRewriteDetails = {"uops":[pcall(str, sink:=ctx.sink)], "graphs":[uop_to_json(sink)], "code_line":lines(ctx.loc[0])[ctx.loc[1]-1].strip(),
                              "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, **metadata,
-                             "diffs":[[]], "upats":[[]], "changed_nodes":[[]]} # NOTE: the first graph just renders the input UOp
+                             "diffs":[[]], "upats":[None], "changed_nodes":[[]]} # NOTE: the first graph just renders the input UOp
   replaces: dict[UOp, UOp] = {}
   for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches)):
     replaces[u0] = u1
