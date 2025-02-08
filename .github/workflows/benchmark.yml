@@ -453,8 +453,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Insert amdgpu
-      run: sudo modprobe amdgpu
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
