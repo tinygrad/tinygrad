@@ -107,7 +107,6 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
-limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
@@ -117,7 +116,7 @@ class OnnxRunner:
     Tensor.no_grad = False if self.is_training else True
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
-    self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
+    self.graph_outputs = tuple(x.name for x in model.graph.output)
     self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
@@ -172,9 +171,6 @@ class OnnxRunner:
 
       self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
-      if node.num == limit:
-        Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
-        return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
     return {name:self.graph_values[name] for name in self.graph_outputs}
 
@@ -205,8 +201,10 @@ def get_onnx_ops():
   def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
     if axis < 0: axis += x.ndim
     if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point, dtype=dtypes.uint8)._broadcast_to(scale.shape)
+    assert scale.shape == zero_point.shape, f"{scale}, {zero_point}"
+    if scale.numel() == 1 and zero_point.numel() == 1: return scale, zero_point
     if block_size == 0:
-      shape = (*[1]*axis, *scale.shape, *[1]*(x.ndim - axis - scale.ndim))
+      shape = [scale.shape[0] if dim == axis else 1 for dim in range(x.ndim)]
       return scale.reshape(shape), zero_point.reshape(shape)
     return scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
 
