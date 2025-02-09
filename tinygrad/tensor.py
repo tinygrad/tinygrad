@@ -2469,7 +2469,6 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    # TODO stop allowing Tensor src with reduce arg? Or just deprecate
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     src, mask = self._pre_scatter(dim, index, src)
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
