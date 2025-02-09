@@ -1,8 +1,8 @@
-import ctypes, subprocess
+import ctypes, os, subprocess, tempfile
+
 import tinygrad.runtime.autogen.comgr as comgr
-import tinygrad.runtime.autogen.llvm as llvm
-from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.ops_llvm import LLVMCompiler
+from tinygrad.device import Compiler, CompileError
 
 def check(status):
   if status != 0:
@@ -15,10 +15,6 @@ def _get_comgr_data(data_set, data_type):
   check(comgr.amd_comgr_get_data(data_exec, ctypes.byref(sz), (dat := ctypes.create_string_buffer(sz.value))))
   check(comgr.amd_comgr_release_data(data_exec))
   return bytes(dat)
-def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
-def expect(x, err, ret=None):
-  if x: raise RuntimeError(llvm.string_cast(err.contents) if not isinstance(err, str) else err)
-  return ret
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
 def compile_hip(prg:str, arch="gfx1100", llvm_backend=None, asm=False) -> bytes:
@@ -71,15 +67,21 @@ def compile_hip(prg:str, arch="gfx1100", llvm_backend=None, asm=False) -> bytes:
   check(comgr.amd_comgr_destroy_action_info(action_info))
   return ret
 
+def compile_llvm(prg:str, arch="gfx1100") -> bytes:
+  with tempfile.NamedTemporaryFile(delete=True) as f:
+    llvm_backend = LLVMCompiler("AMDGPU", True, triple="amdgcn-amd-amdhsa", arch=arch, feats="+cumode")
+    relo = llvm_backend.compile(prg.encode(), load=False)
+    f.write(relo)
+    f.flush()
+    args = [f.name, "--no-undefined", "-shared", "-o", "-"]
+    obj = subprocess.check_output(['/opt/rocm/llvm/bin/ld.lld', *args])
+    return obj
 class AMDCompiler(Compiler):
-  def __init__(self, arch:str, llvm=True):
+  def __init__(self, arch:str):
     self.arch = arch
-    self.llvm_backend = None
-    if llvm:
-      self.llvm_backend = LLVMCompiler("AMDGPU", True, triple="amdgcn-amd-amdhsa", arch=arch, feats="+cumode")
     super().__init__(f"compile_hip_{self.arch}")
   def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch, self.llvm_backend)
+    try: return compile_llvm(src, self.arch) if os.getenv("AMD_LLVM")=="1" else compile_hip(src, self.arch)
     except RuntimeError as e: raise CompileError(e) from e
   def disassemble(self, lib:bytes):
     asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)

@@ -4,12 +4,19 @@ from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 
+ww_dict = {"0": "x", "1": "y", "2": "z"}
+code_for_workitem = {
+  "g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{ww_dict[x]}()",
+  "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{ww_dict[x]}()",
+  "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"
+}
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
   return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
-          dtypes.float16: "half", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1", dtypes.void: "void"}[dt]
+          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1",
+          dtypes.void: "void"}[dt]
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
@@ -36,6 +43,29 @@ signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: 
 flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
+
+def llvm_rewrite_cast(ctx, x):
+  output_type = x.dtype
+  input_type = x.src[0].dtype
+  if x.src[0].dtype == dtypes.half and x.dtype == dtypes.bfloat16:
+    return f"  {ctx[x]}_ext = fpext {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to float\n" + \
+      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(x.dtype)}\n"
+  if x.src[0].dtype == dtypes.bfloat16 and x.dtype == dtypes.half:
+    return f"  {ctx[x]}_ext = fpext bfloat {ctx[x.src[0]]} to float\n" + \
+      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(x.dtype)}\n"
+  if dtypes.is_bool(input_type) and output_type == dtypes.bfloat16:
+    return f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n" + \
+      f"  {ctx[x]}     = uitofp i32 {ctx[x]}_ext to bfloat\n"
+  if input_type == dtypes.float and output_type == dtypes.bfloat16:
+    return f"  {ctx[x]}_i32 = bitcast float {ctx[x.src[0]]} to i32\n" + \
+      f"  {ctx[x]}_i32_1 = lshr i32 {ctx[x]}_i32, 16\n" + \
+      f"  {ctx[x]}_i16 = trunc i32 {ctx[x]}_i32_1 to i16\n" + \
+      f"  {ctx[x]} = bitcast i16 {ctx[x]}_i16 to bfloat\n"
+  return f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"
+
+string_rewrite = PatternMatcher([
+  (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
+])
 
 llvm_rewrite = PatternMatcher([
   # memory load/store
@@ -65,7 +95,7 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.SQRT, name="x"), lambda ctx,x:
    f"  {ctx[x]} = call{flags} {ldt(x.dtype)} @llvm.sqrt.{ldt(x.src[0].dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+  (UPat(Ops.CAST, name="x"), llvm_rewrite_cast),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
    f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
@@ -95,7 +125,6 @@ class LLVMRenderer(Renderer):
   supports_float4 = True
   has_local = False
   has_shared = False
-  global_max = None
 
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
@@ -110,7 +139,10 @@ class LLVMRenderer(Renderer):
 
   def __init__(self, abi:str|None=None):
     self.abi = abi
-
+    if self.abi and "amdgpu_kernel" in self.abi:
+      self.has_local = True
+    else:
+      self.global_max = None
   def render(self, name: str, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
     args: list[str] = []
@@ -145,7 +177,11 @@ class LLVMRenderer(Renderer):
           r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
-        if (l:=llvm_rewrite.rewrite(u, ctx=r)) is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        l = None
+        if u.op is Ops.SPECIAL:
+          l = string_rewrite.rewrite(u, ctx=r)
+        elif (l:=llvm_rewrite.rewrite(u, ctx=r)) is None:
+          raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
         # generate the phi nodes for the assigns

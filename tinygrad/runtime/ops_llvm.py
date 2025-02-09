@@ -26,7 +26,7 @@ class LLVMCompiler(Compiler):
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if opt:
-      self.passes = b'default<O2>'
+      self.passes = b'default<O3>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
