@@ -472,6 +472,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
       if (assign_src:=before_assign.get(u.buf_uop)):
         # now the ASSIGN becomes (BUF, KERNEL, ...more_assigns)
+        for x in assign_src.values():
+          if any(xp.op is Ops.ASSIGN and xp.buf_uop is u.buf_uop for xp in x.toposort):
+            raise RuntimeError(f"cycle detected in graph, kernel must either depend on ASSIGN or BUFFER for {u.buf_uop}")
         if (new_src:=(u.buf_uop,u.src[1])+tuple(assign_src.values())) != u.src: rep[u] = u.replace(src=new_src)
     if len(rep) == 0: break
     sched_sink = sched_sink.substitute(rep)
