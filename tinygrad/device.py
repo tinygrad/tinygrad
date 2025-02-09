@@ -208,7 +208,9 @@ class LRUAllocator(Allocator):
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
     # must be aligned to 0x20 for 256-bit ymm registers
-    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, 0x20)
+    # TODO: investigate if this is the cause of nondeterminism in speed
+    alignment = 0x1000 if size >= 0x1000 else 0x20
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, alignment)
   def _alloc_aligned(self, size:int, alignment:int):
     buffer = (ctypes.c_uint8 * (size + alignment))()
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
