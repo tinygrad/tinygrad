@@ -2,7 +2,7 @@
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, TypedDict, cast
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -12,7 +12,7 @@ from tinygrad.dtype import dtypes
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff",
+               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0"}
 
@@ -29,7 +29,7 @@ class GraphRewriteDetails(GraphRewriteMetadata):
   changed_nodes: list[list[int]] # the changed UOp id + all its parents ids
   code_line: str                 # source code calling graph_rewrite
   kernel_code: str|None          # optionally render the final kernel code
-  upats: list[tuple[tuple[str, int], str]]
+  upats: list[tuple[tuple[str, int], str]|None]
 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
 def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
@@ -44,8 +44,9 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   for u in (toposort:=x.toposort):
     # always exclude DEVICE/CONST
     if u.op in {Ops.DEVICE, Ops.CONST}: excluded.add(u)
-    # only exclude CONST VIEW source if it has no other children
-    if u.op is Ops.CONST and len(u.src) != 0 and all((cr:=c()) is None or cr.op is Ops.CONST for c in u.src[0].children): excluded.update(u.src)
+    # only exclude CONST VIEW source if it has no other children in the graph
+    if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
+      excluded.update(u.src)
   for u in toposort:
     if u in excluded: continue
     argst = str(u.arg)
@@ -68,9 +69,10 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
 def _prg(k:Kernel): return k.to_program().src
 def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, offset=0, limit=200) -> GraphRewriteDetails:
   ret:GraphRewriteDetails = {"uops":[pcall(str, sink:=ctx.sink)], "graphs":[uop_to_json(sink)], "code_line":lines(ctx.loc[0])[ctx.loc[1]-1].strip(),
-                             "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "diffs":[], "upats":[], "changed_nodes":[], **metadata}
+                             "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, **metadata,
+                             "diffs":[[]], "upats":[None], "changed_nodes":[[]]} # NOTE: the first graph just renders the input UOp
   replaces: dict[UOp, UOp] = {}
-  for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches[offset:offset+limit])):
+  for i,(u0,u1,upat) in enumerate(tqdm(ctx.matches)):
     replaces[u0] = u1
     new_sink = sink.substitute(replaces)
     ret["graphs"].append(new_sink_js:=uop_to_json(new_sink))
@@ -79,7 +81,9 @@ def get_details(k:Any, ctx:TrackedGraphRewrite, metadata:GraphRewriteMetadata, o
     ret["upats"].append((upat.location, upat.printable()))
     # TODO: this is O(n^2)!
     ret["uops"].append(str(sink:=new_sink))
-  return ret
+  # if the client requested a chunk we only send that chunk
+  # TODO: is there a way to cache the replaces dict here?
+  return cast(GraphRewriteDetails, {k:v[offset:offset+limit] if isinstance(v,list) else v for k,v in ret.items()})
 
 # Profiler API
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
