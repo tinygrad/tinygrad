@@ -2481,12 +2481,12 @@ class Tensor(SimpleMathTrait):
     src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
     def _inv_mask(neg_val:ConstType) -> Tensor:
-      return self.unsqueeze(-1) if include_self else mask.logical_not().where(self.unsqueeze(-1), neg_val)
-    if reduce == "sum": return (mask.where(src, 0) + _inv_mask(0)).sum(-1)
-    if reduce == "prod": return (mask.where(src, 1) * _inv_mask(1)).prod(-1)
+      return self if include_self else mask.any(-1).logical_not().where(self, neg_val)
+    if reduce == "sum": return mask.where(src, 0).sum(-1) + _inv_mask(0)
+    if reduce == "prod": return mask.where(src, 1).prod(-1) * _inv_mask(1)
     if reduce == "mean": return Tensor([]) # TODO
-    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).maximum(_inv_mask(m)).max(-1)
-    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).minimum(_inv_mask(m)).min(-1)
+    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(_inv_mask(m))
+    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).min(-1).minimum(_inv_mask(m))
     raise TypeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   # ***** unary ops *****
