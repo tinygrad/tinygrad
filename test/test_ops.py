@@ -1122,6 +1122,18 @@ class TestOps(unittest.TestCase):
     or Device.DEFAULT == "WEBGPU", "not supported on these in CI/IMAGE")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
+  @unittest.skipUnless("CUDA" in Device.get_available_devices(), "only if CUDA is available")
+  def test_gemm_fp8e4m3(self):
+    if not getenv("EMULATE_CUDA_SM89"): self.skipTest('test for emulated CUDA')
+    a = Tensor.rand((64, 64), dtype=dtypes.fp8e4m3)
+    b = Tensor.rand((64, 64), dtype=dtypes.fp8e4m3)
+    np.testing.assert_equal(a.matmul(b).numpy(), a.to("CUDA").matmul(b.to("CUDA")).numpy())
+  @unittest.skipUnless("CUDA" in Device.get_available_devices(), "only if CUDA is available")
+  def test_gemm_fp8e5m2(self):
+    if not getenv("EMULATE_CUDA_SM89"): self.skipTest('test for emulated CUDA')
+    a = Tensor.rand((64, 64), dtype=dtypes.fp8e5m2)
+    b = Tensor.rand((64, 64), dtype=dtypes.fp8e5m2)
+    np.testing.assert_equal(a.matmul(b).numpy(), a.to("CUDA").matmul(b.to("CUDA")).numpy())
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   def test_big_gemm(self):
