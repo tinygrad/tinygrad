@@ -491,7 +491,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       var, val = arg.unbind()
       return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
     # otherwise it's just a RESHAPE(BUFFER)
-    return UOp.new_buffer(device, prod([x.vmax if isinstance(x, UOp) else x for x in shape]), dtype).reshape(shape)
+    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
+    return UOp.new_buffer(device, size, dtype).reshape(shape)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False) -> UOp:
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
