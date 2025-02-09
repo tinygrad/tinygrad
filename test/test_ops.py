@@ -2559,12 +2559,6 @@ class TestOps(unittest.TestCase):
   def test_scatter_add(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    for dim in (0,1,2,-1,-2,-3):
-      helper_test_op([(4,5,6), (4,5,6)], lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="sum"),
-      lambda x,src: x.scatter(dim=dim, index=a, src=src, reduce="add"), forward_only=True)
-
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="add"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="add"), forward_only=True)
 
@@ -2577,10 +2571,6 @@ class TestOps(unittest.TestCase):
   def test_scatter_mul(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    for dim in (0,1,2,-1,-2,-3):
-      helper_test_op([(4,5,6), (4,5,6)], lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="prod"),
-      lambda x,src: x.scatter(dim=dim, index=a, src=src, reduce="multiply"), forward_only=True)
-
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="multiply"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="multiply"), forward_only=True)
 
@@ -2594,6 +2584,50 @@ class TestOps(unittest.TestCase):
     y = torch.zeros([4,5,6]).float()
     helper_test_op([(4,5,6)], lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
       lambda src: x.scatter(dim=1, index=a, src=src, reduce="multiply"), forward_only=True)
+
+  def test_scatter_reduce_sum(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    for dim in (0,1,2,-1,-2,-3):
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="sum"),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="sum"), forward_only=True)
+
+  def test_scatter_reduce_prod(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    for dim in (0,1,2,-1,-2,-3):
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="prod"),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="prod"), forward_only=True)
+
+  def test_scatter_reduce_mean(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    for dim in (0,1,2,-1,-2,-3):
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="mean"),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="mean"), forward_only=True)
+
+  def test_scatter_reduce_amax(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    for dim in (0,1,2,-1,-2,-3):
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="amax"),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="amax"), forward_only=True)
+
+  def test_scatter_reduce_amin(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    for dim in (0,1,2,-1,-2,-3):
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="amin"),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="amin"), forward_only=True)
+
+  def test_scatter_reduce_invalid_reduce_op(self):
+    with self.assertRaises(TypeError):
+      Tensor.ones(4).scatter_reduce(dim=0, index=Tensor([0]), src=Tensor.ones(4), reduce="INVALID")
 
   def test_scaled_dot_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
