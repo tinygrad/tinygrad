@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import time, mmap, sys, shutil, os, glob, subprocess
 from tinygrad.helpers import to_mv, DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc

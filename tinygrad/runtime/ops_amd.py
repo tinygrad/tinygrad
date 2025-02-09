@@ -505,7 +505,8 @@ class PCIIface:
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
     fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
-    return to_mv(fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz)
+    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
+    return to_mv(loc, sz)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
