@@ -70,9 +70,9 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   @patch('time.perf_counter')
   def test_tqdm_flippable_units_logic(self, mock_perf_counter, mock_terminal_size, mock_stderr):
-    timer_cases = [0.001, 0.2, 0.3, 0.4, 1.0, 2.0, 10.0, 10.1, 12.999, 100, 205, 245, 9000] #iterative size gains
+    timer_cases = [0.001, 0.2, 0.3, 0.4, 1.0, 1.5, 2.0, 10.0, 10.1, 12.999, 100, 205, 245, 9000] #iterative size gains
     timer_cases_iter = iter(timer_cases)
-    total, ncols = len(timer_cases[3:]), random.randint(*NCOLS_RANGE) # len(time_cases_iter is required as perfcounter is consumed 
+    total, ncols = len(timer_cases[3:]), random.randint(*NCOLS_RANGE) # time_cases[3:] is required as initialiation with current side_effect causes 3 consumptuions of iterable
     mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
     mock_stderr.truncate(0)
     mock_perf_counter.side_effect = lambda:  next(timer_cases_iter)
