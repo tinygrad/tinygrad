@@ -1,6 +1,5 @@
 import re, ctypes, sys
 
-from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 
 def parse_amdgpu_logs(log_content, register_names=None):

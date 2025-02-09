@@ -271,15 +271,11 @@ generate_qcom() {
   python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
 }
 
-generate_pciaccess() {
+generate_pci() {
   clang2py -k cdefstum \
-    /usr/include/pciaccess.h \
     /usr/include/linux/pci_regs.h \
-    -l /usr/lib/x86_64-linux-gnu/libpciaccess.so \
-    -o $BASE/libpciaccess.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libpciaccess.py
-  fixup $BASE/libpciaccess.py
-  sed -i "s/ctypes\.CDLL('\([^']*\)')/ctypes.CDLL('\1') if os.path.exists('\1') else None/g" $BASE/libpciaccess.py
+    -o $BASE/pci.py
+  fixup $BASE/pci.py
 }
 
 generate_vfio() {
@@ -382,7 +378,7 @@ elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "pci" ]; then generate_pciaccess
+elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
