@@ -154,10 +154,9 @@ class AMDComputeQueue(HWQueue):
     dev.compute_queue.write_ptr[0] = dev.compute_queue.put_value
     dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
 
-SDMA_MAX_COPY_SIZE = 0x400000
 class AMDCopyQueue(HWQueue):
-  def __init__(self):
-    self.internal_cmd_sizes = []
+  def __init__(self, max_copy_size=0x3fffffff):
+    self.internal_cmd_sizes, self.max_copy_size = [], max_copy_size
     super().__init__()
 
   def q(self, *arr):
@@ -165,10 +164,10 @@ class AMDCopyQueue(HWQueue):
     self.internal_cmd_sizes.append(len(arr))
 
   def copy(self, dest:sint, src:sint, copy_size:int):
-    copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    copied, copy_commands = 0, (copy_size + self.max_copy_size - 1) // self.max_copy_size
 
     for _ in range(copy_commands):
-      step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
+      step_copy_size = min(copy_size - copied, self.max_copy_size)
 
       self.q(amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
         amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied))
