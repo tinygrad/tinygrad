@@ -306,7 +306,8 @@ async function load_state_dict (data, device, progress) {
           device.queue.writeBuffer(state_dict[part.key].bytes, part.target_start_pos, part.bytes); // improves stability over mappedAtCreation writing
         }
         else if (window.BACKEND === "WASM") {
-          part.target_start_pos = state_dict[part.key].wasm_buf_start_pos + part.target_start_pos
+          const wasm_offsets = state_dict[part.key].wasm_offsets;
+          part.wasm_offsets = Object.entries(wasm_offsets).map(([wasm_idx, offset]) => [parseInt(wasm_idx), offset + part.target_start_pos]);
           const msg = await sendMessageToWorker(model, {header: "load_part", data: part});
         }
       }
