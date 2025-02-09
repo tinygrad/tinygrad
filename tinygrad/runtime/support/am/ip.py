@@ -18,7 +18,7 @@ class AM_GMC(AM_IP):
     super().__init__(adev)
 
     # Memory controller aperture
-    self.mc_base = self.adev.regMMMC_VM_FB_LOCATION_BASE.read() << 24
+    self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture

@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views, GroupOp
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same, temp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops, sym
@@ -559,15 +559,34 @@ class TestSchedule(unittest.TestCase):
     out = x.to('python')
     check_schedule(out, 0, filter_sink=False)
 
-  def test_pow_const_tensor_simplified(self):
-    x = Tensor([1,2,3,4])
-    # NOTE: this does not test ** Tensor(2) is simpler in ast than ** Tensor(2.5)
-    out = x ** Tensor(2)
-    check_schedule(out, 1)
+  def _alu_from_tensor(self, t:Tensor):
+    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    self.assertEqual(len(s), 1)
+    return [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
+
+  def test_2_pow_is_exp2(self):
+    t = 2.0 ** Tensor([1.0, 2.0, 3.0])
+    self.assertEqual(self._alu_from_tensor(t), [Ops.EXP2])
+
+  def test_pow_05_is_sqrt(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** 0.5
+    self.assertEqual(self._alu_from_tensor(t), [Ops.SQRT])
+
+  def test_pow_neg_05_is_rsqrt(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** -0.5
+    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIP, Ops.SQRT])
+
+  def test_pow_2_has_1_mul(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** Tensor(2.0)
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL])
+
+  def test_pow_8_has_3_muls(self):
+    t = Tensor([1.0, 2.0, 3.0]) ** 8
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
-    out = x ** Tensor(0)
+    out = x ** Tensor(0.0)
     # NOTE: this is ConstBuffer 0 + ConstBuffer 1
     check_schedule(out, 0)
 
@@ -2132,9 +2151,9 @@ class TestBigGraph(unittest.TestCase):
     a = Tensor.empty(4, 4, dtype=dtypes.int)
     sink = tensor_rewrite(a*0)
     assert UPat(Ops.CONST, arg=0).match(sink, {})
-    self.assertIs(tensor_rewrite(a*1), a.lazydata)
-    self.assertIs(tensor_rewrite(a+0), a.lazydata)
-    self.assertIs(tensor_rewrite(a//1), a.lazydata)
+    self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)
@@ -2291,7 +2310,7 @@ class TestCopyFolding(unittest.TestCase):
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
-    self.assertIs(b, a)
+    self.assertIs(b.base, a.base)
 
   def test_clone(self):
     a = Tensor.empty(4).lazydata
@@ -2496,6 +2515,16 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(b, 0)
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
     self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
+
+   # TODO: this fails because the shrink must be applied on top of the BUFFER
+   # currently it's a VIEW
+  @unittest.expectedFailure
+  def test_become_buf_with_mops(self):
+    a = Tensor.empty(2, 4, 2)
+    noop = a.shrink(((1, 2), (0, 4), (0, 2))).reshape(4, 2)*1+0
+    noop.realize()
+    late_add = noop+2
+    late_add.realize() # UOp verification error
 
   def test_become_const_in_base(self):
     a = Tensor.empty(4)

@@ -1,6 +1,6 @@
 import ctypes, platform, sys
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
-from tinygrad.helpers import getenv, capstone_flatdump
+from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
 import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.runtime.support.elf import jit_loader
@@ -11,12 +11,18 @@ def expect(x, err, ret=None):
   if x: raise RuntimeError(llvm.string_cast(err.contents) if not isinstance(err, str) else err)
   return ret
 
-HOST_ARCH = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
-HOST_TRIPLE = {'AArch64': 'aarch64', 'X86': 'x86_64'}[HOST_ARCH]
-REQUIRED_COMPONENTS = ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']
-
 class LLVMCompiler(Compiler):
-  def __init__(self, target_machine, opt):
+  def __init__(self, host_arch:str, opt:bool):
+    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
+
+    triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
+    target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
+    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
+    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
+    if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
+    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
+                                                       llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
+
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if opt:
       self.passes = b'default<O2>'
@@ -26,21 +32,21 @@ class LLVMCompiler(Compiler):
       llvm.LLVMPassBuilderOptionsSetVerifyEach(self.pbo, True)
     else:
       self.passes = b'default<O0>'
-    self.target_machine, self.opt = target_machine, opt
+
     super().__init__(f"compile_llvm_jit{'_opt' if opt else ''}")
 
-  def __del__(self):
-    llvm.LLVMDisposePassBuilderOptions(self.pbo)
+  def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
   def compile(self, src:str) -> bytes:
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
     expect(llvm.LLVMRunPasses(mod, self.passes, self.target_machine, self.pbo), 'failed to run passes')
+    if DEBUG >= 7: print(ctypes.string_at(llvm.LLVMPrintModuleToString(mod)).decode())
     obj_buf = expect(llvm.LLVMTargetMachineEmitToMemoryBuffer(self.target_machine, mod, llvm.LLVMObjectFile, err:=cerr(),
                                                               ctypes.pointer(buf:=llvm.LLVMMemoryBufferRef())), err, buf)
-    obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeModule(mod)
+    obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
     return jit_loader(obj)
 
@@ -48,14 +54,5 @@ class LLVMCompiler(Compiler):
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
-    for component in REQUIRED_COMPONENTS:
-      getattr(llvm, f'LLVMInitialize{HOST_ARCH}{component}')()
-
-    triple = f'{HOST_TRIPLE}-none-unknown-elf'.encode()
-    target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    features = b'+reserve-x18' if platform.machine() == 'arm64' else b''
-    target_machine = llvm.LLVMCreateTargetMachine(target, triple, b'', features, llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC,
-                                                  llvm.LLVMCodeModelDefault)
-
-    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None),
-                     LLVMCompiler(target_machine, getenv("LLVMOPT")), CPUProgram)
+    compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()], bool(getenv("LLVMOPT")))
+    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None), compiler, CPUProgram)

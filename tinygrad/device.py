@@ -207,7 +207,10 @@ class LRUAllocator(Allocator):
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
-    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, 16)
+    # must be aligned to 0x20 for 256-bit ymm registers
+    # TODO: investigate if this is the cause of nondeterminism in speed
+    alignment = 0x1000 if size >= 0x1000 else 0x20
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, alignment)
   def _alloc_aligned(self, size:int, alignment:int):
     buffer = (ctypes.c_uint8 * (size + alignment))()
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
@@ -224,7 +227,7 @@ MAP_JIT = 0x0800
 
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
-  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32' if sys.platform == "win32" else 'gcc_s'))
+  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
   def __init__(self, name:str, lib:bytes):
     if sys.platform == "win32":
       PAGE_EXECUTE_READWRITE = 0x40
