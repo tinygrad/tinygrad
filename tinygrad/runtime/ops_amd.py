@@ -532,8 +532,7 @@ class PCIIface:
     if self.dev in mem.meta.mapped_devs: return
     mem.meta.mapped_devs.append(self.dev)
 
-    owner_sys_base = mem.meta.owner.dev_iface.self.bar_info[0][0]
-    paddrs = [(paddr if mem.meta.mapping.system else (paddr + owner_sys_base), size) for paddr, size in mem.meta.mapping.paddrs]
+    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.dev_iface.bar_info[0][0]), size) for paddr,size in mem.meta.mapping.paddrs]
     self.adev.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
