@@ -38,19 +38,6 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
     ret.update({name:value})
   return ret
 
-def truncate_model(onnx_file, limit:int):
-  model = onnx.load(onnx_file, load_external_data=False)
-  nodes_up_to_limit = list(model.graph.node)[:limit+1]
-  new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
-  model.graph.ClearField("node")
-  model.graph.node.extend(nodes_up_to_limit)
-  model.graph.ClearField("output")
-  model.graph.output.extend(new_output_values)
-  base, ext = os.path.splitext(onnx_file)
-  new_onnx_file = f"{base}_limit_{limit}{ext}"
-  onnx.save_model(model, new_onnx_file)
-  return new_onnx_file
-
 def validate(onnx_file, inputs=None, rtol=1e-5, atol=1e-5):
   run_onnx = OnnxRunner(onnx.load(onnx_file))
   if inputs is None: inputs = get_example_inputs(run_onnx.graph_inputs)
@@ -69,3 +56,16 @@ def validate(onnx_file, inputs=None, rtol=1e-5, atol=1e-5):
     tiny_v, onnx_v = tinygrad_out[k], ort_out[k]
     if tiny_v is None: assert tiny_v == onnx_v
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
+
+def truncate_model(onnx_file, limit:int):
+  model = onnx.load(onnx_file, load_external_data=False)
+  nodes_up_to_limit = list(model.graph.node)[:limit+1]
+  new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
+  model.graph.ClearField("node")
+  model.graph.node.extend(nodes_up_to_limit)
+  model.graph.ClearField("output")
+  model.graph.output.extend(new_output_values)
+  base, ext = os.path.splitext(onnx_file)
+  new_onnx_file = f"{base}_limit_{limit}{ext}"
+  onnx.save_model(model, new_onnx_file)
+  return new_onnx_file

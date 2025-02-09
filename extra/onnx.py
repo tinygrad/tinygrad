@@ -582,7 +582,7 @@ def get_onnx_ops():
     # Scalar or Rank 1 tensor containing exactly one element
     depth = int(depth[0] if isinstance(depth, list) else depth)
     indices = (indices < 0).where(indices+depth, indices)
-    return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
+    return indices.unsqueeze(axis)._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
   def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
     return X.rearrange("b (c h1 w1) h w -> b c (h h1) (w w1)" if mode=="CRD" else "b (h1 w1 c) h w -> b c (h h1) (w w1)", h1=blocksize, w1=blocksize)
