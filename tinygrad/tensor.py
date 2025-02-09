@@ -2476,20 +2476,18 @@ class Tensor(SimpleMathTrait):
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
     return _masked_setitem(self, src, mask, (-1,))
 
-  def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Union[None, Literal["sum", "prod", "mean", "amax", "amin"]]=None,
+  def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
                      include_self:bool=True) -> Tensor:
-    reduce_ops = {None, "sum", "prod", "mean", "amax", "amin"}
-    if reduce not in reduce_ops: raise TypeError(f"{reduce=} must be one of None, 'sum', 'prod', 'mean', 'amax', 'amin'")
     src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
-    def _inv_mask(neg_val: ConstType) -> Tensor:
+    def _inv_mask(neg_val:ConstType) -> Tensor:
       return self.unsqueeze(-1) if include_self else mask.logical_not().where(self.unsqueeze(-1), neg_val)
     if reduce == "sum": return (mask.where(src, 0) + _inv_mask(0)).sum(-1)
     if reduce == "prod": return (mask.where(src, 1) * _inv_mask(1)).prod(-1)
     if reduce == "mean": return Tensor([]) # TODO
     if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).maximum(_inv_mask(m)).max(-1)
     if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).minimum(_inv_mask(m)).min(-1)
-    return _masked_setitem(self, src, mask, (-1,))
+    raise TypeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   # ***** unary ops *****
 
