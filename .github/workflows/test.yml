@@ -391,6 +391,8 @@ jobs:
         run: GPU=1 python -m pytest -n=auto test/models --durations=20
       - name: Test models (clang)
         run: CLANG=1 python -m pytest -n=auto test/models --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
 
   testdsp:
     name: Linux (DSP)
@@ -500,6 +502,8 @@ jobs:
         python-version: '3.11'
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+    - name: Test models (Metal)
+      run: METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Run ONNX
       run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
@@ -520,7 +524,7 @@ jobs:
       uses: ./.github/actions/process-replay
 
   testmetal:
-    name: MacOS (metal)
+    name: MacOS (Metal)
     runs-on: macos-14
     timeout-minutes: 10
 
