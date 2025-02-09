@@ -519,8 +519,6 @@ def get_onnx_ops():
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   # ***** Neural Network Ops *****
-  # TODO: try to factor out common implementations for these ops
-  # https://medium.com/@zljdanceholic/groupnorm-then-batchnorm-instancenorm-layernorm-e2b2a1d350a0
   def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
                         training_mode:int=0, spatial=1, is_test=0):
     if training_mode:
@@ -537,10 +535,8 @@ def get_onnx_ops():
     invstd = (input_var + epsilon).rsqrt()
     return X.batchnorm(scale, B, input_mean, invstd)
   def InstanceNormalization(x:Tensor, scale:Tensor, bias:Tensor, epsilon:float=1e-05):
-    axis = tuple(range(2, x.ndim))
-    mean = x.mean(axis=axis, keepdim=True)
-    invstd = x.sub(mean).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
-    return x.sub(mean).mul(scale.reshape(shape=[-1, 1, 1])).mul(invstd).add(bias.reshape(shape=[-1, 1, 1]))
+    x = x.reshape(x.shape[0], x.shape[1], -1).layernorm(eps=epsilon).reshape(x.shape)
+    return x * scale.reshape(1, -1, *[1] * (x.ndim-2)) + bias.reshape(1, -1, *[1] * (x.ndim-2))
   def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))

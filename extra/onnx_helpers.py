@@ -17,6 +17,8 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
         case "past_decoder_sequence_length" | "encoder_sequence_length_out": ret.append(20)
         case "batch_size": ret.append(1)
         case "num_channels": ret.append(config.get("in_channels", 3))
+        case "num_channels_latent": ret.append(config.get("latent_channels", 4))
+        case "height_latent" | "width_latent": ret.append(config.get("sample_size", 1024) // 8)
         case _: ret.append(1)
     return ret
   def _get_value(name, shape, dtype):
@@ -24,7 +26,7 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
       case "input_ids":
         vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 50265)
         val = np.random.randint(0, vocab_size, shape)
-      case "attention_mask": val = np.random.randint(0, 2, shape)
+      case "attention_mask": val = np.ones(shape)
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
       case "image_tensor": val = np.random.randint(0, 256, shape)
       case _: val = np.random.uniform(size=shape) * 8

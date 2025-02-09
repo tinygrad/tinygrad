@@ -9,10 +9,14 @@ HUGGINGFACE_URL = "https://huggingface.co"
 SKIPPED_FILES = [
   "avx2", "arm64", "avx512", "avx512_vnni", # hardware specific and DynamicDequantizeLinear gives numerically inaccurate values
   "q4", "q4f16", "bnb4", # other unimplemented quantization
-  "model_O4" # requires non cpu ort runner and MemcpyFromHost
+  "model_O4", # requires non cpu ort runner and MemcpyFromHost
+  "merged", # implement attribute with graph type
 ]
 SKIPPED_REPOS = [
-  "stabilityai/stable-diffusion-xl-base-1.0",  # has very large external data
+  "patrickjohncyh/fashion-clip", # works but occasionally Gather goes out of bounds maybe due to poor example inputs
+  "mangoapps/fb_zeroshot_mnli_onnx", # implement NonZero op
+  "HuggingFaceTB/SmolLM2-360M-Instruct", # implement GroupQueryAttention
+  "stabilityai/stable-diffusion-xl-base-1.0", # stabilityai/stable-diffusion-xl-base-1.0/unet/model.onnx crashed (memory)
 ]
 
 def huggingface_download_onnx_model(model_id:str):
@@ -27,7 +31,7 @@ def run_huggingface_benchmark(onnx_model_path, config):
   validate(onnx_model_path, inputs, rtol=1e-3, atol=1e-3)
 
 if __name__ == "__main__":
-  assert getenv("LIMIT") or getenv("MODELPATH", ""), "ex: LIMIT=25 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
+  assert getenv("LIMIT") or getenv("MODELPATH", ""), "usage: LIMIT=25 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
 
   # for running
   if limit := getenv("LIMIT"):
