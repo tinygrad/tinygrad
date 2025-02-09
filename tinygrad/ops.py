@@ -547,7 +547,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0].buf_uop
   @property
   def buffer(self) -> Buffer:
-    if self.op is Ops.VIEW:
+    if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
