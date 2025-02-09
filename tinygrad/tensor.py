@@ -2015,7 +2015,7 @@ class Tensor(SimpleMathTrait):
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
     if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
       # input size scaling factor to make sure shrink for stride is possible
-      f_ = [1 + int(resolve(o*s > i+d)) for o,s,i,d in zip(o_,s_,i_,d_)]
+      f_ = [1 + int(resolve(o*s > (i - d*(k-1)))) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
       # # repeats such that we don't need padding
       x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
       # handle dilation

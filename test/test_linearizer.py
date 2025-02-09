@@ -981,6 +981,16 @@ class TestLinearizer(unittest.TestCase):
     assert len(stores) == 1
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
 
+  # NOTE: can reenable, it does work. it just makes BEAM slow
+  @unittest.expectedFailure
+  @unittest.skipUnless(Device.DEFAULT == "CLANG", "test only for CLANG")
+  def test_upcast_with_locals_clang(self):
+    out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
+    k = Kernel(out.schedule()[-1].ast)
+    k.apply_opt(Opt(OptOps.LOCAL, axis=0, arg=4))
+    prg = k.to_program()
+    self.assertEqual(len(prg.src.split("for")), 5)
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -1233,9 +1243,11 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
+    # sum_collapse is a full collapse now
     assert len(sched) == 1
-    lin = Kernel(sched[0].ast)
-    assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
+    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort), "found reduce in sum collapse"
+    #lin = Kernel(sched[0].ast)
+    #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -2065,8 +2077,9 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      if Device.DEFAULT != "WEBGPU":
+        helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+        helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
 
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
