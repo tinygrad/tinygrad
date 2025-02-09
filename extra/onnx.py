@@ -542,8 +542,6 @@ def get_onnx_ops():
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
     mean = x.mean(axis=axes, keepdim=True)
     return x.layernorm(axes, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axes, keepdim=True).add(epsilon).rsqrt()
-  def SimplifiedLayerNormalization(x:Tensor, scale:Tensor, bias:Tensor=Tensor(0), axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
-    return LayerNormalization(x, scale, bias, axis, epsilon, stash_type)
   def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05):
     return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
