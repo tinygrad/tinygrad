@@ -3,14 +3,14 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp, CI
+from tinygrad.helpers import Timing, fetch, temp, CI, OSX
 from tinygrad.device import is_dtype_supported
 
 def compare_weights_both(url):
   import torch
   fn = fetch(url)
   tg_weights = get_state_dict(torch_load(fn))
-  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu'), weights_only=True), tensor_type=torch.Tensor)
+  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu'), weights_only=False), tensor_type=torch.Tensor)
   assert list(tg_weights.keys()) == list(torch_weights.keys())
   for k in tg_weights:
     if tg_weights[k].dtype == dtypes.bfloat16: tg_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
@@ -298,6 +298,7 @@ class TestDiskTensor(unittest.TestCase):
     ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
+  @unittest.skipIf(OSX, "new LLVM has an issue on OSX")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('dt_bf16_disk_write_read_f32')}").realize()
