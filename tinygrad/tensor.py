@@ -2483,8 +2483,8 @@ class Tensor(SimpleMathTrait):
     src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
     mask_inv = mask.logical_not()
-    if reduce == "sum": return mask.where(src, 0).sum(-1) + (self if include_self else mask_inv.where(self.unsqueeze(-1), 0).sum(-1))
-    if reduce == "prod": return mask.where(src, 1).prod(-1) * (self if include_self else mask_inv.where(self.unsqueeze(-1), 1).prod(-1))
+    if reduce == "sum": return (mask.where(src, 0) + (self if include_self else mask_inv.where(self.unsqueeze(-1), 0))).sum(-1)
+    if reduce == "prod": return (mask.where(src, 1) * (self if include_self else mask_inv.where(self.unsqueeze(-1), 1))).prod(-1)
     if reduce == "mean": return Tensor([]) # TODO
     if reduce == "amax": return (mask.where(src, m := dtypes.min(src.dtype)).max(-1)
                                  .maximum(self if include_self else mask_inv.where(self.unsqueeze(-1), m).max(-1)))
