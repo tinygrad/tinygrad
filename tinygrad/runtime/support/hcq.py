@@ -4,7 +4,7 @@ import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
-from tinygrad.ops import sym_infer, sint, Variable
+from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
 class HWInterface:
@@ -19,9 +19,11 @@ class HWInterface:
     if hasattr(self, 'fd'): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
-  def read(self, size=None, binary=False):
+  def read(self, size=None, binary=False, offset=None):
+    if offset is not None: self.seek(offset)
     with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
-  def write(self, content, binary=False):
+  def write(self, content, binary=False, offset=None):
+    if offset is not None: self.seek(offset)
     with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
@@ -83,10 +85,10 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     """
 
     for v in values:
-      if isinstance(v, int): self._q.append(v)
-      else:
+      if isinstance(v, UOp):
         self.q_sints.append((len(self._q), self._new_sym(v)))
         self._q.append(0xbadc0ded)
+      else: self._q.append(v)
 
   # *** common commands  ***
 
@@ -377,6 +379,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
     self.timeline_signal.value = 0
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
+
+  def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None) -> tuple[HCQBuffer, bool]:
+    if oldbuf is not None: self.allocator.free(oldbuf, oldbuf.size, options=options)
+    try: buf, realloced = self.allocator.alloc(new_size, options=options), True
+    except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
+    return buf, realloced
 
 class HCQBuffer:
   def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:HCQBuffer|None=None):

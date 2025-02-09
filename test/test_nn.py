@@ -309,6 +309,7 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_groupnorm(self):
     BS, H, W, C, G = 20, 10, 10, 6, 3
 
@@ -328,13 +329,14 @@ class TestNN(unittest.TestCase):
 
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      torch_z.sum().backward(retain_graph=True)
+      torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_layernorm(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -354,13 +356,14 @@ class TestNN(unittest.TestCase):
 
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      torch_z.sum().backward(retain_graph=True)
+      torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_layernorm_2d(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -380,13 +383,14 @@ class TestNN(unittest.TestCase):
 
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x.permute(0,2,3,1)).permute(0,3,1,2)
-      torch_z.sum().backward(retain_graph=True)
+      torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_instancenorm_2d(self):
     N, C, H, W = 20, 10, 10, 10
 
@@ -406,13 +410,14 @@ class TestNN(unittest.TestCase):
 
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      torch_z.sum().backward(retain_graph=True)
+      torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_instancenorm_3d(self):
     N, C, D, H, W = 20, 10, 10, 10, 10
 
@@ -432,13 +437,14 @@ class TestNN(unittest.TestCase):
 
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      torch_z.sum().backward(retain_graph=True)
+      torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_rmsnorm(self):
     class TorchRMSNorm(torch.nn.Module):
       # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
@@ -467,7 +473,7 @@ class TestNN(unittest.TestCase):
 
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
-      torch_z.sum().backward(retain_graph=True)
+      torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
