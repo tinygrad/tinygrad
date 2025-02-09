@@ -1095,7 +1095,7 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
   return None
 
 
-def fold_unrolled_divs(chain, x, denominator):
+def fold_unrolled_divs(chain, x, denominator, u):
   # div pattern in unrolled arange
   # example: x//4 + (x+1)//4 + (x+2)//4 + (x+3)//4 -> x
   # some (x+c)//d would have been folded, so we won't find them in the chain
@@ -1113,12 +1113,11 @@ def fold_unrolled_divs(chain, x, denominator):
   # we assume the chain is sorted in ascending order so we look for the highest c: (x+c)//d first
   # we go down the chain from the highest c to the lowest c and use the order to determine if we have passed the expected c
   for c in non_folded_c:
-    expected = x//denominator if c==0 else (x+c)//denominator
-    while True:
+    next_expected = x//denominator if c==0 else (x+c)//denominator
+    while u is not next_expected:
       if chain is None: return None
       chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
-      if u is expected: break
-      if u.order < expected.order: return None
+      if u.order < next_expected.order: return None
   return chain+x-offset if chain is not None else x-offset
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
@@ -1300,7 +1299,7 @@ symbolic = symbolic_simple+PatternMatcher([
     lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.order))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")))), fold_unrolled_divs),
+  (UPat((Ops.ADD, Ops.IDIV)).named("chain") + ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")).named("u"), fold_unrolled_divs),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
