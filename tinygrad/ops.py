@@ -280,11 +280,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return _toposort(self, cache=set())
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple:
-    if self.op in (Ops.ADD, Ops.MUL) and self.src[1].op in (Ops.CONST, Ops.VCONST): return self.src[0].tuplize + (self.op.value, self.src[1].arg)
-    if self.op is Ops.RECIP: return self.src[0].tuplize + (self.op.value,)
-    reverse_src = self.op is Ops.IDIV and self.src[1].op in (Ops.CONST, Ops.VCONST)
-    return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in (self.src[::-1] if reverse_src else self.src)))
+  def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
+
+  @functools.cached_property
+  def order(self:UOp) -> tuple[tuple[int, Any, Optional[DType], tuple], tuple]:
+    if self.op in GroupOp.Unary or (self.op in GroupOp.Binary and self.src[1].op in (Ops.CONST, Ops.VCONST)):
+      child = self.src[0].order
+      arg = self.arg if self.op in GroupOp.Unary else self.src[1].arg
+      return (child[0], (child[1], self.op.value, arg))
+    return (self.tuplize, ())
 
   # *** uop shape stuff ***
 
@@ -1106,12 +1110,15 @@ def fold_unrolled_divs(chain, x, denominator):
     non_folded_c = reversed(range(d-x.vmax%d, d-x.vmin%d))
     offset = (d-x.vmax%d)*q1 + (d - (d-x.vmin%d))*(q1+1)
 
-  # we assume the chain is sorted in ascending order so we look for (x+d-1)//d first
+  # we assume the chain is sorted in ascending order so we look for the highest c: (x+c)//d first
+  # we go down the chain from the highest c to the lowest c and use the order to determine if we have passed the expected c
   for c in non_folded_c:
-    if chain is None: return None
-    chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
     expected = x//denominator if c==0 else (x+c)//denominator
-    if u is not expected: return None
+    while True:
+      if chain is None: return None
+      chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
+      if u is expected: break
+      if u.order < expected.order: return None
   return chain+x-offset if chain is not None else x-offset
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
@@ -1198,7 +1205,7 @@ def simplify_valid(valid:UOp) -> UOp|None:
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
 def chain_insert(chain, b, op):
-  if chain.op is not op or b.tuplize > chain.src[1].tuplize: return chain.alu(op, b)
+  if chain.op is not op or b.order > chain.src[1].order: return chain.alu(op, b)
   return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
@@ -1245,7 +1252,7 @@ symbolic_simple = PatternMatcher([
 symbolic = symbolic_simple+PatternMatcher([
   # Commutative ordering, if its a chain, move the chain to the left
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
-      (x.src[1].op is x.op or (x.src[0].tuplize > x.src[1].tuplize)) else None),
+      (x.src[1].op is x.op or (x.src[0].order > x.src[1].order)) else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -1287,10 +1294,10 @@ symbolic = symbolic_simple+PatternMatcher([
    lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
   # swap terms if they are out of order (a+c)+b -> (a+b)+c
   *((UPat(op, src=(UPat(op, name="chain"), UPat(name="b"))),
-    lambda chain,b: chain_insert(chain,b,chain.op) if b.tuplize < chain.src[1].tuplize else None) for op in GroupOp.CommAssoc),
+    lambda chain,b: chain_insert(chain,b,chain.op) if b.order < chain.src[1].order else None) for op in GroupOp.CommAssoc),
   # merge two commutative+associative chains, generelization of (a+c)+(b+d) -> a+b+c+d
   *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op: functools.reduce(
-    lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.tuplize))) for op in GroupOp.CommAssoc),
+    lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.order))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
   (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")))), fold_unrolled_divs),

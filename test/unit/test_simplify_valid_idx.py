@@ -130,9 +130,15 @@ class TestImageSimplification(unittest.TestCase):
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
     idx0, idx1 = idx.src[0], idx.src[1]
-    self.assertEqual(idx0.render(simplify=False), sidx0)
-    self.assertEqual(idx1.render(simplify=False), sidx1)
-    if svalid is not None: self.assertEqual(load.src[2].render(simplify=False), svalid)
+    rendered_idx0 = idx0.render(simplify=False)
+    rendered_idx1 = idx1.render(simplify=False)
+
+    self.assertIn(rendered_idx0, sidx0) if isinstance(sidx0, tuple) else self.assertEqual(rendered_idx0, sidx0)
+    self.assertIn(rendered_idx1, sidx1) if isinstance(sidx1, tuple) else self.assertEqual(rendered_idx1, sidx1)
+
+    if svalid is not None:
+      rendered_valid = load.src[2].render(simplify=False)
+      self.assertIn(rendered_valid, svalid) if isinstance(svalid, tuple) else self.assertEqual(rendered_valid, svalid)
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -257,7 +263,8 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.check(load,
-               "((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
+               ("((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
+                "(((((idx1*8)+ridx1)<3)!=True)&(((idx2*2)+ridx0)<11))"),
                "((((idx0+(idx1*512))+(ridx1*64))+832)%1024)",
                "((((idx2*2)+(((idx1+((ridx1+5)//8))+1)//2))+ridx0)+-4)")
 
