@@ -368,8 +368,6 @@ generate_am() {
   fixup $BASE/am/smu_v13_0_0.py
 }
 
-
-
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
