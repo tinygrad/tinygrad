@@ -2486,8 +2486,8 @@ class Tensor(SimpleMathTrait):
     if reduce == "sum": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + (self if include_self else mask_inv.where(self, 0))
     if reduce == "prod": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * (self if include_self else mask_inv.where(self, 1))
     if reduce == "mean": return Tensor([]) # TODO
-    if reduce == "amax": return Tensor([]) # TODO
-    if reduce == "amin": return Tensor([]) # TODO
+    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else mask_inv.where(self, m))
+    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).min(-1).minimum(self if include_self else mask_inv.where(self, m))
     return _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
