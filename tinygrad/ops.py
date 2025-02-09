@@ -490,8 +490,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if op is Ops.BIND:
       var, val = arg.unbind()
       return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-    # otherwise it's just a VIEW(BUFFER)
-    return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
+    # otherwise it's just a RESHAPE(BUFFER)
+    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
+    return UOp.new_buffer(device, size, dtype).reshape(shape)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False) -> UOp:
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
@@ -547,7 +548,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0].buf_uop
   @property
   def buffer(self) -> Buffer:
-    if self.op is Ops.VIEW:
+    if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"

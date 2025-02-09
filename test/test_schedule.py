@@ -2151,9 +2151,9 @@ class TestBigGraph(unittest.TestCase):
     a = Tensor.empty(4, 4, dtype=dtypes.int)
     sink = tensor_rewrite(a*0)
     assert UPat(Ops.CONST, arg=0).match(sink, {})
-    self.assertIs(tensor_rewrite(a*1), a.lazydata)
-    self.assertIs(tensor_rewrite(a+0), a.lazydata)
-    self.assertIs(tensor_rewrite(a//1), a.lazydata)
+    self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)
@@ -2310,7 +2310,7 @@ class TestCopyFolding(unittest.TestCase):
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
-    self.assertIs(b, a)
+    self.assertIs(b.base, a.base)
 
   def test_clone(self):
     a = Tensor.empty(4).lazydata
@@ -2515,6 +2515,16 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(b, 0)
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
     self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
+
+   # TODO: this fails because the shrink must be applied on top of the BUFFER
+   # currently it's a VIEW
+  @unittest.expectedFailure
+  def test_become_buf_with_mops(self):
+    a = Tensor.empty(2, 4, 2)
+    noop = a.shrink(((1, 2), (0, 4), (0, 2))).reshape(4, 2)*1+0
+    noop.realize()
+    late_add = noop+2
+    late_add.realize() # UOp verification error
 
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
