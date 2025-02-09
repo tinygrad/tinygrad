@@ -8,11 +8,8 @@ class FakeGMC:
     self.address_space_mask = (1 << 44) - 1
   def flush_tlb(self, *args, **kwargs): pass
 
-class FakePCIRegion:
-  def __init__(self): self.base_addr = 0xc12300000000
-
 class FakePCIDev:
-  def __init__(self): self.regions = [FakePCIRegion()]
+  def __init__(self): self.regions = [(0xc12300000000, 0xc12400000000, 0x0)]
 
 class FakeAM:
   def __init__(self):
