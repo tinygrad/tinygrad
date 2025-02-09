@@ -2151,9 +2151,9 @@ class TestBigGraph(unittest.TestCase):
     a = Tensor.empty(4, 4, dtype=dtypes.int)
     sink = tensor_rewrite(a*0)
     assert UPat(Ops.CONST, arg=0).match(sink, {})
-    self.assertIs(tensor_rewrite(a*1), a.lazydata)
-    self.assertIs(tensor_rewrite(a+0), a.lazydata)
-    self.assertIs(tensor_rewrite(a//1), a.lazydata)
+    self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)
@@ -2310,7 +2310,7 @@ class TestCopyFolding(unittest.TestCase):
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
-    self.assertIs(b, a)
+    self.assertIs(b.base, a.base)
 
   def test_clone(self):
     a = Tensor.empty(4).lazydata
