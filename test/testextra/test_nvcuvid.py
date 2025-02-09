@@ -1,12 +1,15 @@
-# test_segment.hevc created with: ffmpeg -y -f lavfi -i color=c=gray:s=640x480:d=1 -vf "drawbox=x=200:y=150:w=240:h=180:color=red:t=fill" -pix_fmt nv12 -c:v libx265 -x265-params lossless=1 test_segment.hevc
+# test_segment.hevc created with:
+# ffmpeg -y -f lavfi -i color=c=gray:s=640x480:d=1 \
+#   -vf "drawbox=x=200:y=150:w=240:h=180:color=red:t=fill" \
+#   -pix_fmt nv12 -c:v libx265 -x265-params lossless=1 test_segment.hevc
 import unittest, numpy as np
 from pathlib import Path
 from tinygrad.device import Device
-from extra.nvcuvid import CUDAVideoDecoder
 
 @unittest.skipUnless(Device.DEFAULT=="CUDA", "CUDA required")
 class TestCUDAVideoDecoder(unittest.TestCase):
   def test_hevc_decoder(self):
+    from extra.nvcuvid import CUDAVideoDecoder
     dec = CUDAVideoDecoder(Device.default)
     with (Path(__file__).parent/"test_segment.hevc").open("rb") as f:
       for p in iter(lambda: f.read(4096), b""): dec.decode(p)
