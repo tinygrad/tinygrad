@@ -155,7 +155,7 @@ class AMDComputeQueue(HWQueue):
     dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
 
 class AMDCopyQueue(HWQueue):
-  def __init__(self, max_copy_size=0x3fffffff):
+  def __init__(self, max_copy_size=0x40000000):
     self.internal_cmd_sizes, self.max_copy_size = [], max_copy_size
     super().__init__()
 

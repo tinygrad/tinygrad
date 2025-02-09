@@ -237,7 +237,7 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_copy(self):
     struct = sdma_pkts.copy_linear.from_address(self.base + self.rptr[0] % self.size)
-    ctypes.memmove(struct.dst_addr, struct.src_addr, struct.count + 1)
+    ctypes.memmove(struct.dst_addr, struct.src_addr, (struct.DW_1_DATA & 0x3FFFFFFF) + 1)
     self.rptr[0] += ctypes.sizeof(struct)
 
 class AMDGPU(VirtGPU):
