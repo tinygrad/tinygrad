@@ -237,7 +237,7 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_copy(self):
     struct = sdma_pkts.copy_linear.from_address(self.base + self.rptr[0] % self.size)
-    count_cnt = to_mv(self.base + self.rptr[0], 4).cast('I')[0] & 0x3FFFFFFF
+    count_cnt = to_mv(self.base + self.rptr[0] + 4, 4).cast('I')[0] & 0x3FFFFFFF
     ctypes.memmove(struct.dst_addr, struct.src_addr, count_cnt + 1)
     self.rptr[0] += ctypes.sizeof(struct)
 
