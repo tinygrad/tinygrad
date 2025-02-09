@@ -59,7 +59,7 @@ def _to_np_dtype(dtype:DType) -> Optional[type]:
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
-  ret.base.buffer.allocate(x)
+  ret.buffer.allocate(x)
   return ret
 
 def get_shape(x) -> tuple[int, ...]:
@@ -76,7 +76,7 @@ def _frompy(x:Union[list, tuple, bytes], dtype:DType) -> UOp:
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
-  ret.base.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
+  ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:Union[str, tuple[str, ...]], dtype:DType) -> list[list[Tensor]]:
@@ -448,7 +448,7 @@ class Tensor(SimpleMathTrait):
     """
 
     r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
-    r.lazydata.base.buffer.allocate(external_ptr=ptr)
+    r.lazydata.buffer.allocate(external_ptr=ptr)
     return r
 
   @staticmethod
