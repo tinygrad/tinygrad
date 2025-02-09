@@ -437,8 +437,8 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}
-          deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
+          key: ${{ matrix.backend }}-minimal
+          deps: testing_minimal${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
           opencl: ${{ matrix.backend == 'gpu' && 'true' }}
           amd: ${{ matrix.backend == 'amd' && 'true' }}
           cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
@@ -553,8 +553,8 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: macos-clang
-          deps: testing
+          key: macos-clang-minimal
+          deps: testing_minimal
       - name: Run pytest (clang)
         env:
           CLANG: 1
