@@ -68,6 +68,36 @@ class TestProgressBar(unittest.TestCase):
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
+  @patch('time.perf_counter')
+  def test_tqdm_flippable_units_logic(self, mock_perf_counter, mock_terminal_size, mock_stderr):
+    timer_cases = [0.001, 0.2, 0.3, 0.4, 1.0, 2.0, 10.0, 10.1, 12.999, 100, 205, 245, 9000] #iterative size gains
+    timer_cases_iter = iter(timer_cases)
+    total, ncols = len(timer_cases[3:]), random.randint(*NCOLS_RANGE) # len(time_cases_iter is required as perfcounter is consumed 
+    mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+    mock_stderr.truncate(0)
+    mock_perf_counter.side_effect = lambda:  next(timer_cases_iter)
+    for n in (bar:=tinytqdm(range(total), desc="Test")): # drop multiple_values called for startup
+      if bar.i % bar.skip != 0: continue
+      tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+      timer_value_float = float(tinytqdm_output.split("it/s" if "it/s" in tinytqdm_output else "s/it")[-2].split(" ")[-1] ) if n>0 else 0
+      iters_per_sec = timer_value_float if "it/s" in tinytqdm_output else 1/timer_value_float
+      elapsed = n/iters_per_sec if n>0 else 0
+      tqdm_output = tqdm.format_meter(n=n, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
+      print(n, tinytqdm_output)
+      print(n, tqdm_output)
+      self._compare_bars(tinytqdm_output, tqdm_output)
+    tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+    timer_value_float = float(tinytqdm_output.split("it/s" if "it/s" in tinytqdm_output else "s/it")[-2].split(" ")[-1] ) if n>0 else 0
+    iters_per_sec = timer_value_float if "it/s" in tinytqdm_output else 1/timer_value_float
+    elapsed = total/iters_per_sec if n>0 else 0
+    tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
+    print(n, tinytqdm_output)
+    print(n, tqdm_output)
+    self._compare_bars(tinytqdm_output, tqdm_output)
+
+
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
   def test_unit_scale(self, mock_terminal_size, mock_stderr):
     for unit_scale in [True, False]:
       # NOTE: numpy comparison raises TypeError if exponent > 22
