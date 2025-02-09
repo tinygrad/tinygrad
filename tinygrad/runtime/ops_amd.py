@@ -8,7 +8,7 @@ from tinygrad.ops import sint
 from tinygrad.device import BufferSpec, CPUProgram
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
@@ -153,10 +153,9 @@ class AMDComputeQueue(HWQueue):
     dev.compute_queue.put_value += len(cmds)
     dev.compute_queue.signal_doorbell()
 
-SDMA_MAX_COPY_SIZE = 0x400000
 class AMDCopyQueue(HWQueue):
-  def __init__(self):
-    self.internal_cmd_sizes = []
+  def __init__(self, max_copy_size=0x40000000):
+    self.internal_cmd_sizes, self.max_copy_size = [], max_copy_size
     super().__init__()
 
   def q(self, *arr):
@@ -164,10 +163,10 @@ class AMDCopyQueue(HWQueue):
     self.internal_cmd_sizes.append(len(arr))
 
   def copy(self, dest:sint, src:sint, copy_size:int):
-    copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    copied, copy_commands = 0, (copy_size + self.max_copy_size - 1) // self.max_copy_size
 
     for _ in range(copy_commands):
-      step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
+      step_copy_size = min(copy_size - copied, self.max_copy_size)
 
       self.q(amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
         amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied))
@@ -278,8 +277,6 @@ class AMDProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
-  def __init__(self, dev:AMDDevice): super().__init__(dev, batch_size=SDMA_MAX_COPY_SIZE)
-
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
@@ -499,8 +496,8 @@ class PCIIface:
     self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
 
-    pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=libpciaccess.PCI_COMMAND), byteorder='little') | libpciaccess.PCI_COMMAND_MASTER
-    self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=libpciaccess.PCI_COMMAND)
+    pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
+    self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
     simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
