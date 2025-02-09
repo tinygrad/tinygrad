@@ -416,11 +416,15 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   becomes_map: dict[UOp, UOp] = {}
+  rev_tensor_map: dict[UOp, list[UOp]] = {}
+  for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
   for k,v in tensor_map.items():
     # NOOP
     if k.base is v.base: continue
     # NOTE: only the base tensors get a BUFFER UOp
-    if v.is_realized and k is k.base: becomes_map[k] = v.view(unwrap(k.st))
+    if v.is_realized and k is k.base:
+      # find all the realized tensors that map to this BUFFER, including all the movement ops
+      if len(buf_srcs:=[x for x in rev_tensor_map[v] if x.base is v.base and x.st == v.st]) != 0: becomes_map[k] = buf_srcs[-1]
     # otherwise if it simplified to a CONST the UOp just becomes that CONST
     elif v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 

@@ -2516,15 +2516,32 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
     self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
-   # TODO: this fails because the shrink must be applied on top of the BUFFER
-   # currently it's a VIEW
-  @unittest.expectedFailure
   def test_become_buf_with_mops(self):
     a = Tensor.empty(2, 4, 2)
     noop = a.shrink(((1, 2), (0, 4), (0, 2))).reshape(4, 2)*1+0
+    # before realizing, this tensor is base
+    assert noop.lazydata is noop.lazydata.base
     noop.realize()
+    # it becomes a realized view after realize
+    assert noop.lazydata is not noop.lazydata.base
+    assert noop.lazydata.is_realized
     late_add = noop+2
-    late_add.realize() # UOp verification error
+    late_add.realize()
+
+  def test_become_buf_with_mops_alt(self):
+    a = Tensor.empty(1, 4) # VIEW(BUFFER)
+    noop = a.reshape((4,))*1 # RESHAPE(VIEW(BUFFER)), which is just BUFFER
+    noop.realize()
+    assert noop.lazydata.op is Ops.BUFFER
+
+  @unittest.expectedFailure
+  def test_become_buf_with_mops_limitation(self):
+    a = Tensor.empty(4, 4)
+    noop1 = a.pad(((0, 1), (0, 2)))+0
+    noop2 = noop1.shrink(((0, 1), (0, 2)))+0
+    # TODO: this should become a SHRINK(PAD) followed by the BUFFER, but how do we remove that add in the middle?
+    noop2.realize()
+    assert noop2.lazydata.is_realized
 
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
