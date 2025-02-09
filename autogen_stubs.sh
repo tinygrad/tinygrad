@@ -161,12 +161,15 @@ nv_status_codes = {}
   python3 -c "import tinygrad.runtime.autogen.nv_gpu"
 }
 
-
 generate_nvcuvid() {
   clang2py \
     nvcuvid/cuviddec.h \
     nvcuvid/nvcuvid.h \
+    -l /lib/x86_64-linux-gnu/libnvcuvid.so \
+    --clang-args="-I/usr/local/cuda/include -D__CUVID_INTERNAL" \
     -o $BASE/nvcuvid.py
+
+  python3 -c "import tinygrad.runtime.autogen.nvcuvid"
 }
 
 generate_amd() {
