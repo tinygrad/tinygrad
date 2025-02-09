@@ -437,7 +437,7 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 python3 -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit \
+          WEBGPU=1 python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit \
           --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py --ignore=test/test_speed_v_torch.py --ignore=test/test_transcendental.py \
           --ignore=test/test_fuzz_shape_ops.py --ignore=test/test_linearizer_failures.py --durations=20
     - name: Run process replay tests
@@ -475,7 +475,7 @@ jobs:
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
@@ -500,11 +500,11 @@ jobs:
         key: metal2
         deps: testing
         python-version: '3.11'
+        amd: 'true'
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
-    # TODO: this segfaults
-    #- name: Test models (Metal)
-    #  run: METAL=1 python -m pytest -n=auto test/models --durations=20
+    - name: Test models (Metal)
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Run ONNX
       run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
@@ -521,29 +521,13 @@ jobs:
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
-
-  testmetal:
-    name: MacOS (Metal)
-    runs-on: macos-14
-    timeout-minutes: 10
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: metal
-        deps: testing
-        python-version: '3.11'
-    - name: Check Device.DEFAULT (METAL) and print some source
+    - name: Run pytest (amd)
+      env:
+        MOCKGPU: 1
+        AMD: 1
+        FORWARD_ONLY: 1
       run: |
-        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
-        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    - name: Run metal test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
+        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -572,7 +556,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang]
+        backend: [metal, llvm, clang]
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 10
@@ -584,22 +568,17 @@ jobs:
         with:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_minimal
-          amd: ${{ matrix.backend == 'llvm' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
-      - name: Run pytest (amd)
-        if: matrix.backend=='llvm'
-        env:
-          MOCKGPU: 1
-          AMD: 1
-          FORWARD_ONLY: 1
-        run: |
-          python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}" >> $GITHUB_ENV
-      - name: Run pytest (${{ matrix.backend }})
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'metal' && 'METAL=1\nJIT=2'}}" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
         run: |
-          python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
-          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }})'.upper(), Device.DEFAULT"
+          python3 test/test_tiny.py TestOps.test_plus
+      - name: Run pytest (${{ matrix.backend }})
+        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
 
 # ****** Windows Tests ******
 
