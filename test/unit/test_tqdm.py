@@ -66,7 +66,6 @@ class TestProgressBar(unittest.TestCase):
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
 
-
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   @patch('time.perf_counter')
@@ -94,7 +93,6 @@ class TestProgressBar(unittest.TestCase):
       elapsed = total/iters_per_sec if n>0 else 0
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tinytqdm_output, tqdm_output)
-
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
@@ -173,7 +171,6 @@ class TestProgressBar(unittest.TestCase):
       elapsed = total/iters_per_sec if n>0 else 0
       tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
       self._compare_bars(tiny_output, tqdm_output)
-
 
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
