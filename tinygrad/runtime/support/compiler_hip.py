@@ -17,8 +17,7 @@ def _get_comgr_data(data_set, data_type):
   return bytes(dat)
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
-def compile_hip(prg:str, arch="gfx1100", llvm_backend=None, asm=False) -> bytes:
-  data_relo = None
+def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
   check(comgr.amd_comgr_create_action_info(ctypes.byref(action_info := comgr.amd_comgr_action_info_t())))
   check(comgr.amd_comgr_action_info_set_language(action_info, comgr.AMD_COMGR_LANGUAGE_HIP))
   check(comgr.amd_comgr_action_info_set_isa_name(action_info, b"amdgcn-amd-amdhsa--" + arch.encode()))
@@ -48,21 +47,13 @@ def compile_hip(prg:str, arch="gfx1100", llvm_backend=None, asm=False) -> bytes:
     if status != 0:
       print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())
       raise RuntimeError("compile failed")
-    ir_bitcode = _get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_BC)
-    if llvm_backend:
-      relo = llvm_backend.compile(ir_bitcode, load=False)
-      check(comgr.amd_comgr_create_data(comgr.AMD_COMGR_DATA_KIND_RELOCATABLE, ctypes.byref(data_relo := comgr.amd_comgr_data_t())))
-      check(comgr.amd_comgr_set_data(data_relo, len(relo), relo))
-      check(comgr.amd_comgr_set_data_name(data_relo, b"DO"))
-      check(comgr.amd_comgr_data_set_add(data_set_reloc, data_relo))
-    else:
-      check(comgr.amd_comgr_action_info_set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
-      check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
+    check(comgr.amd_comgr_action_info_set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
+    check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
+
   check(comgr.amd_comgr_action_info_set_options(action_info, b""))
   check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, action_info, data_set_reloc, data_set_exec))
   ret = _get_comgr_data(data_set_exec, comgr.AMD_COMGR_DATA_KIND_EXECUTABLE)
   check(comgr.amd_comgr_release_data(data_src))
-  if data_relo: check(comgr.amd_comgr_release_data(data_relo))
   for x in [data_set_src, data_set_bc, data_set_reloc, data_set_exec]: check(comgr.amd_comgr_destroy_data_set(x))
   check(comgr.amd_comgr_destroy_action_info(action_info))
   return ret
