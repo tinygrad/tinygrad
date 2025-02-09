@@ -3,11 +3,11 @@ from pathlib import Path
 from huggingface_hub import list_models, snapshot_download
 from tinygrad.helpers import _ensure_downloads_dir, getenv
 from extra.onnx import OnnxRunner
-from extra.onnx_helpers import validate, get_example_inputs, truncate_model
+from extra.onnx_helpers import validate, get_example_inputs
 
 HUGGINGFACE_URL = "https://huggingface.co"
 SKIPPED_FILES = [
-  "avx2", "arm64", "avx512", "avx512_vnni", # hardware specific and dynamicdequantizelinear gives numerically inaccurate values
+  "avx2", "arm64", "avx512", "avx512_vnni", # hardware specific and DynamicDequantizeLinear gives numerically inaccurate values
   "q4", "q4f16", "bnb4", # other unimplemented quantization
   "model_O4" # requires non cpu ort runner and MemcpyFromHost
 ]
@@ -60,11 +60,8 @@ if __name__ == "__main__":
 
   # for debug
   if model_path := str(getenv("MODELPATH", "")):
-    limit = getenv("ONNXLIMIT", -1)
     model_id, relative_path = model_path.split("/", 2)[:2], model_path.split("/", 2)[2]
     model_id = "/".join(model_id)
     root_path = huggingface_download_onnx_model(model_id)
     onnx_model = root_path / relative_path
-    if limit != -1: onnx_model = truncate_model(onnx_model, limit)
     run_huggingface_benchmark(onnx_model, get_config(root_path))
-    if limit != -1: os.remove(onnx_model)

@@ -32,5 +32,5 @@ if __name__ == "__main__":
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
 
   if getenv("ORT"):
-    validate(onnx_file, rtol=1e-3, atol=1e-3)
+    validate(onnx_file, new_inputs, rtol=1e-3, atol=1e-3)
     print("model validated")

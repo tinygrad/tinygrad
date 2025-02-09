@@ -107,6 +107,7 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
+limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
@@ -171,6 +172,9 @@ class OnnxRunner:
 
       self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
+      if node.num == limit:
+        Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
+        return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training, Tensor.no_grad = self.old_training, self.old_no_grad
     return {name:self.graph_values[name] for name in self.graph_outputs}
 
