@@ -2580,10 +2580,9 @@ class TestOps(unittest.TestCase):
         lambda x: x.scatter(1, b, float("nan"), reduce="multiply"),
         lambda x: x.scatter(1, a, float("nan"), reduce="multiply"), forward_only=True,)
 
-    x = Tensor.zeros([4,5,6]).float()
-    y = torch.zeros([4,5,6]).float()
-    helper_test_op([(4,5,6)], lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
-      lambda src: x.scatter(dim=1, index=a, src=src, reduce="multiply"), forward_only=True)
+  def test_scatter_no_reduce_tensor_src(self):
+    with self.assertRaises(TypeError):
+      Tensor.ones(4).scatter(dim=1, index=Tensor([0]), src=Tensor.ones(4), reduce="add")
 
   def test_scatter_reduce_sum(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2600,6 +2599,12 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4,5,6), (4,5,6)],
         lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="prod"),
         lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="prod"), forward_only=True)
+
+    x = Tensor.zeros([4,5,6]).float()
+    y = torch.zeros([4,5,6]).float()
+    helper_test_op([(4,5,6)],
+      lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
+      lambda src: x.scatter_reduce(dim=1, index=a, src=src, reduce="prod"), forward_only=True)
 
   def test_scatter_reduce_mean(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
