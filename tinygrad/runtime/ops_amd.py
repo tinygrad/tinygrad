@@ -435,25 +435,21 @@ class PCIIface:
     self.dev = dev
 
     if first_dev:=len(PCIIface.gpus) == 0:
-      libpciaccess.pci_system_init()
-      pci_iter = libpciaccess.pci_id_match_iterator_create(None)
-      while pcidev:=libpciaccess.pci_device_next(pci_iter):
-        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id in PCIIface.supported_devs: PCIIface.gpus.append(pcidev.contents)
+      for pcibus in HWInterface("/sys/bus/pci/devices").listdir():
+        vendor = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
+        device = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
+        if vendor == 0x1002 and device in PCIIface.supported_devs: PCIIface.gpus.append(pcibus)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
       PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
 
-    self.pcidev = PCIIface.gpus[dev_id]
-    self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
+    self.pcibus = PCIIface.gpus[dev_id]
 
     # Unbind the device from the kernel driver
     if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
-
-    # Probe device
-    libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
+    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:
@@ -486,16 +482,20 @@ class PCIIface:
       irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
         argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
-    else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
+    else: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
     self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
-    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+    self.cfg_fd = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for bar in [0, 2, 5]}
+
+    bar_info = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
+    self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
     self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
 
-    libpciaccess.pci_device_cfg_read_u16(self.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
-    libpciaccess.pci_device_cfg_write_u16(self.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
+    pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=libpciaccess.PCI_COMMAND), byteorder='little') | libpciaccess.PCI_COMMAND_MASTER
+    self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=libpciaccess.PCI_COMMAND)
 
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
     simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
@@ -504,7 +504,7 @@ class PCIIface:
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
-    fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
+    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return to_mv(loc, sz)
 
@@ -532,8 +532,7 @@ class PCIIface:
     if self.dev in mem.meta.mapped_devs: return
     mem.meta.mapped_devs.append(self.dev)
 
-    owner_sys_base = mem.meta.owner.dev_iface.pcidev.regions[0].base_addr
-    paddrs = [(paddr if mem.meta.mapping.system else (paddr + owner_sys_base), size) for paddr, size in mem.meta.mapping.paddrs]
+    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.dev_iface.bar_info[0][0]), size) for paddr,size in mem.meta.mapping.paddrs]
     self.adev.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):

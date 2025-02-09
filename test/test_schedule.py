@@ -2519,6 +2519,16 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
     self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
+   # TODO: this fails because the shrink must be applied on top of the BUFFER
+   # currently it's a VIEW
+  @unittest.expectedFailure
+  def test_become_buf_with_mops(self):
+    a = Tensor.empty(2, 4, 2)
+    noop = a.shrink(((1, 2), (0, 4), (0, 2))).reshape(4, 2)*1+0
+    noop.realize()
+    late_add = noop+2
+    late_add.realize() # UOp verification error
+
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
     b = a*0
