@@ -2478,8 +2478,8 @@ class Tensor(SimpleMathTrait):
 
   def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Union[None, Literal["sum", "prod", "mean", "amax", "amin"]]=None,
                      include_self:bool=True) -> Tensor:
-    reduce_ops = {"sum", "prod", "mean", "amax", "amin"}
-    if reduce and reduce not in reduce_ops: raise TypeError() # TODO error msg
+    reduce_ops = {None, "sum", "prod", "mean", "amax", "amin"}
+    if reduce not in reduce_ops: raise TypeError(f"{reduce=} must be one of None, 'sum', 'prod', 'mean', 'amax', 'amin'")
     src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
     mask_inv = mask.squeeze(-1).logical_not()
