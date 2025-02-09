@@ -2482,12 +2482,14 @@ class Tensor(SimpleMathTrait):
     if reduce not in reduce_ops: raise TypeError(f"{reduce=} must be one of None, 'sum', 'prod', 'mean', 'amax', 'amin'")
     src = src.cast(self.dtype)
     src, mask = self._pre_scatter(dim, index, src)
-    mask_inv = mask.squeeze(-1).logical_not()
-    if reduce == "sum": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + (self if include_self else mask_inv.where(self, 0))
-    if reduce == "prod": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * (self if include_self else mask_inv.where(self, 1))
+    mask_inv = mask.logical_not()
+    if reduce == "sum": return mask.where(src, 0).sum(-1) + (self if include_self else mask_inv.where(self.unsqueeze(-1), 0).sum(-1))
+    if reduce == "prod": return mask.where(src, 1).prod(-1) * (self if include_self else mask_inv.where(self.unsqueeze(-1), 1).prod(-1))
     if reduce == "mean": return Tensor([]) # TODO
-    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else mask_inv.where(self, m))
-    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).min(-1).minimum(self if include_self else mask_inv.where(self, m))
+    if reduce == "amax": return (mask.where(src, m := dtypes.min(src.dtype)).max(-1)
+                                 .maximum(self if include_self else mask_inv.where(self.unsqueeze(-1), m).max(-1)))
+    if reduce == "amin": return (mask.where(src, m := dtypes.max(src.dtype)).min(-1)
+                                 .minimum(self if include_self else mask_inv.where(self.unsqueeze(-1), m).min(-1)))
     return _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
