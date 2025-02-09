@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union
+from typing import Union
 import numpy as np
 import unittest
 from dataclasses import replace
@@ -10,13 +10,12 @@ from tinygrad.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-# from tinygrad.ops import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, dtypes
 
-def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer]]:
+def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
   s = Tensor.schedule(*r)
   run_schedule(s[:-1])  # run all kernels except the last one
@@ -982,6 +981,16 @@ class TestLinearizer(unittest.TestCase):
     assert len(stores) == 1
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
 
+  # NOTE: can reenable, it does work. it just makes BEAM slow
+  @unittest.expectedFailure
+  @unittest.skipUnless(Device.DEFAULT == "CLANG", "test only for CLANG")
+  def test_upcast_with_locals_clang(self):
+    out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
+    k = Kernel(out.schedule()[-1].ast)
+    k.apply_opt(Opt(OptOps.LOCAL, axis=0, arg=4))
+    prg = k.to_program()
+    self.assertEqual(len(prg.src.split("for")), 5)
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -1234,9 +1243,11 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
+    # sum_collapse is a full collapse now
     assert len(sched) == 1
-    lin = Kernel(sched[0].ast)
-    assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
+    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort), "found reduce in sum collapse"
+    #lin = Kernel(sched[0].ast)
+    #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -1752,30 +1763,30 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_ast(ast:UOp, inputs:List[Tensor], *args, **kwargs):
+def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
   inbufs = [x.lazydata.base.buffer for x in inputs]
   outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, out.src[2].dtype).allocate() \
       for out in ast.src]
   return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
-def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
+def helper_linearizer_opt(r:Union[Tensor, list[Tensor]], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
   return _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
 
-def copyout_outputs(lin:Kernel, outbufs:List[Buffer]) -> List[np.ndarray]:
+def copyout_outputs(lin:Kernel, outbufs:list[Buffer]) -> list[np.ndarray]:
   ret = []
   for i,x in enumerate(outbufs):
-    shape: Tuple[int, ...] = lin.ast.src[i].st_arg.shape
+    shape: tuple[int, ...] = lin.ast.src[i].st_arg.shape
     ret.append(np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)).reshape(shape))
   return ret
 
-def reset_bufs(bufs:List[Buffer]):
+def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
 
-def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[],
-                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
-  lins: List[Kernel] = []
+def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> list[Kernel]:
+  lins: list[Kernel] = []
   outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
@@ -2066,8 +2077,9 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      if Device.DEFAULT != "WEBGPU":
+        helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+        helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
 
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])

@@ -35,6 +35,13 @@ setup(name='tinygrad',
             "types-tqdm",
         ],
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
+        'testing_minimal': [
+            "numpy",
+            "torch",
+            "pytest",
+            "pytest-xdist",
+            "hypothesis",
+        ],
         'testing': [
             "numpy",
             "torch",
@@ -60,7 +67,6 @@ setup(name='tinygrad',
             "ggml-python",
             "capstone"
         ],
-        'webgpu': ["wgpu"],
         'docs': [
             "mkdocs",
             "mkdocs-material",
@@ -73,6 +79,6 @@ setup(name='tinygrad',
         'testing_tf': [
             "tensorflow==2.15.1",
             "tensorflow_addons",
-        ]
+        ],
       },
       include_package_data=True)
