@@ -1,6 +1,5 @@
 import numpy as np
 import unittest
-from examples.benchmark_onnx import load_onnx_model
 from tinygrad import Tensor, Context, Device
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
@@ -42,6 +41,7 @@ def sexec(out:Tensor, opts:list[Opt]):
 class TestQuantizeOnnx(unittest.TestCase):
   def test_quant(self):
     from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader
+    from examples.benchmark_onnx import load_onnx_model
     class FakeDataReader(CalibrationDataReader):
       def __init__(self): self.cnt = 0
       def get_next(self) -> dict:
