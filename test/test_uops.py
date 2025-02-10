@@ -553,7 +553,7 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_flat(self):
     buffer = Tensor.arange(4).realize()
     a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat()))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat()))
     assert assign_pattern.match(a.lazydata, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
@@ -567,7 +567,7 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_reshaped(self):
     buffer = Tensor.ones((4,)).contiguous().realize()
     a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),),))), UPat()))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
     assert assign_pattern.match(a.lazydata, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])

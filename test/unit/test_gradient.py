@@ -102,14 +102,16 @@ class TestTensorGradient(unittest.TestCase):
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
-    self.assertEqual(x.lazydata.op, Ops.VIEW)
+    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata.is_realized
 
   #@unittest.expectedFailure
   # update: passing after delete_forced_realize
   def test_uniform_realizes(self):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
     print(x.lazydata)
-    self.assertEqual(x.lazydata.op, Ops.VIEW)
+    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata.is_realized
 
   # NOTE: even though it doesn't realize, this seems fine
   def test_uniform_gradient(self):

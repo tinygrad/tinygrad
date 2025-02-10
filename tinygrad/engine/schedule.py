@@ -422,9 +422,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # NOOP
     if k.base is v.base: continue
     # NOTE: only the base tensors get a BUFFER UOp
-    if v.is_realized and k is k.base:
-      # find all the realized tensors that map to this BUFFER, including all the movement ops
-      if len(buf_srcs:=[x for x in rev_tensor_map[v] if x.base is v.base and x.st == v.st]) != 0: becomes_map[k] = buf_srcs[-1]
+    if v.is_realized and k is k.base: becomes_map[k] = v.reshape(k.shape)
     # otherwise if it simplified to a CONST the UOp just becomes that CONST
     elif v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
@@ -443,7 +441,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # map buffers to realized tensors
   for buf_uop in realize_map:
-    for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
+    for tensor_uop in buf_tensors[buf_uop]:
+      # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
+      becomes_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
     buf_uop.buffer.ref(1)
 
   # create kernels, TODO: this should use the SINK from tensor_map
