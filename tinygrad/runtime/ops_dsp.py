@@ -9,30 +9,9 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
-from tinygrad.helpers import all_same
-from tinygrad.ops import PatternMatcher, UPat, GroupOp
-
-def revectorize(v:UOp):
-  if not all_same([x.op for x in v.src]) or any(dtypes.is_bool(x.dtype) for x in v.src[0].src): return None
-  new_srcs = [UOp(Ops.VECTORIZE, v.src[0].src[i].dtype.vec(v.dtype.count), tuple(x.src[i] for x in v.src)) for i in range(len(v.src[0].src))]
-  return UOp(v.src[0].op, v.dtype, tuple(new_srcs), v.src[0].arg)
-
-revectorize_pm = PatternMatcher([
-  (UPat(Ops.VECTORIZE, src=UPat((*GroupOp.ALU, Ops.ASSIGN, Ops.CAST)), name="v"), revectorize),
-  # vectorize DEFINE_ACC (similar to expander)
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC), name="v"),
-    lambda v: UOp(Ops.DEFINE_ACC, v.dtype,
-                  (UOp.broadcast(UOp.const(v.dtype.scalar(), v.src[0].src[0].arg), v.dtype.count),)+v.src[0].src[1:], v.src[0].arg)),
-  # vectorize increasing GEPs = nothing (wrong if dtypes don't match!)
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
-    lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and \
-    [x.arg[0] if len(x.arg) == 1 else None for x in v.src] == list(range(v.dtype.count)) else None),
-])
-
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
-  extra_matcher = revectorize_pm+ClangRenderer.extra_matcher
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }

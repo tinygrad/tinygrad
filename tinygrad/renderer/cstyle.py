@@ -59,6 +59,9 @@ extra_pm = PatternMatcher([
    lambda x: UOp(Ops.BITCAST, x.dtype, (UOp(Ops.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not Ops.NOOP else None),
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # cast VECTORIZED type isn't supported
+  (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(x.src[0].gep(i).cast(x.dtype.scalar()) for i in range(x.dtype.count))) \
+   if not isinstance(x.dtype, PtrDType) and x.dtype.count != 1 else None),
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))

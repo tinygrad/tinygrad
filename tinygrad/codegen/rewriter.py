@@ -511,10 +511,29 @@ pm_render = PatternMatcher([
 
 # *** uop graph ***
 
+def revectorize(v:UOp):
+  if not all_same([x.op for x in v.src]) or any(dtypes.is_bool(x.dtype) for x in v.src[0].src): return None
+  new_srcs = [UOp(Ops.VECTORIZE, v.src[0].src[i].dtype.vec(v.dtype.count), tuple(x.src[i] for x in v.src)) for i in range(len(v.src[0].src))]
+  return UOp(v.src[0].op, v.dtype, tuple(new_srcs), v.src[0].arg)
+
+revectorize_pm = PatternMatcher([
+  (UPat(Ops.VECTORIZE, src=UPat((*GroupOp.ALU, Ops.ASSIGN, Ops.CAST)), name="v"), revectorize),
+  # vectorize DEFINE_ACC (similar to expander)
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC), name="v"),
+    lambda v: UOp(Ops.DEFINE_ACC, v.dtype,
+                  (UOp.broadcast(UOp.const(v.dtype.scalar(), v.src[0].src[0].arg), v.dtype.count),)+v.src[0].src[1:], v.src[0].arg)),
+  # vectorize increasing GEPs = nothing (wrong if dtypes don't match!)
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
+    lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and \
+    [x.arg[0] if len(x.arg) == 1 else None for x in v.src] == list(range(v.dtype.count)) else None),
+])
+
 quant = PatternMatcher([
   # cast after add/mul
   (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32), lambda x,y: (x+y).cast(dtypes.float32)),
   (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32), lambda x,y: (x*y).cast(dtypes.float32)),
+  # int cast after mul
+  (UPat.var("x").cast(dtypes.int32) * UPat.var("y").cast(dtypes.int32), lambda x,y: (x*y).cast(dtypes.int32)),
   # MUL after reduce (TODO: bring back reduce op?)
   ((acc:=UPat(Ops.DEFINE_ACC, name="acc")).assign(UPat.var("x") * UPat.cvar("c") + acc), lambda x,c,acc: acc.assign(x+acc) * c),
   # CAST after reduce
@@ -544,6 +563,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   else:
     # new devectorize only for load/store
     sink = graph_rewrite(sink, sym+devectorize_load_store)
+
+  # revectorize on the DSP
+  if opts is not None and opts.device == "DSP": sink = graph_rewrite(sink, sym+revectorize_pm)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
