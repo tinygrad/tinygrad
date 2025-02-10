@@ -189,8 +189,6 @@ class AM_GFX(AM_IP):
     self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
     self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1)
     self._grbm_select()
-    self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=1, mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1,
-                                         mec_pipe0_active=0, mec_pipe1_active=0, mec_pipe2_active=0, mec_pipe3_active=0, mec_halt=1)
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
@@ -225,6 +223,8 @@ class AM_GFX(AM_IP):
     self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
   def set_clockgating_state(self):
+    if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
+
     self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1)
     self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
 
@@ -233,6 +233,7 @@ class AM_GFX(AM_IP):
     self.adev.regCP_RB_WPTR_POLL_CNTL.update(poll_frequency=0x100, idle_poll_count=0x90)
     self.adev.regCP_INT_CNTL.update(cntx_busy_int_enable=1, cntx_empty_int_enable=1, cmp_busy_int_enable=1, gfx_idle_int_enable=1)
     self.adev.regSDMA0_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
+    self.adev.regSDMA1_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
 
     self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=0, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
       grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0, gfxip_cgcg_override=0)
@@ -311,17 +312,16 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
-    self.adev.regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0)
-    self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
-    self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
-    self.adev.regSDMA0_UTCL1_PAGE.update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
-    self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
-    self.adev.regSDMA0_CNTL.update(ctxempty_int_enable=1, trap_enable=1)
+    for pipe in range(2):
+      self.adev.reg(f"regSDMA{pipe}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
+      self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
+      self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
+      self.adev.reg(f"regSDMA{pipe}_F32_CNTL").update(halt=0, th1_reset=0)
+      self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
 
   def fini(self):
     self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
     self.adev.regSDMA0_QUEUE0_IB_CNTL.update(ib_enable=0)
-    self.adev.regSDMA0_F32_CNTL.update(halt=1, th1_reset=1)
     self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
     time.sleep(0.01)
     self.adev.regGRBM_SOFT_RESET.write(0x0)

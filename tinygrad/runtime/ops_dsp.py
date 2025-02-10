@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time, struct
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
@@ -11,7 +11,7 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 
 class DSPRenderer(ClangRenderer):
   device = "DSP"
-  supports_float4 = False
+  supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
@@ -80,9 +80,10 @@ class DSPAllocator(Allocator):
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferSpec):
-    libc.munmap(opaque.va_addr, opaque.size)
-    os.close(opaque.share_info.fd)
-    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
+    if libc is not None and qcom_dsp is not None:
+      libc.munmap(opaque.va_addr, opaque.size)
+      os.close(opaque.share_info.fd)
+      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
@@ -231,12 +232,14 @@ class MockDSPRenderer(DSPRenderer):
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
+    # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
     msrc = ['''static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
-        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" : "=r" (retval)
-          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "i" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
+        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = %7; trap0(#1); %0 = r0" : "=r" (retval)
+          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "r" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
       static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
       static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
       static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
+      static unsigned int inscount(void) {{ unsigned int ret; __asm__ volatile(".word 0x6a15c000; %0 = R0" : "=r" (ret) : : "r0"); return ret; }}
       static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
         return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}''', 'void _start(void) {']
     for i,b in enumerate(bufs):
@@ -245,7 +248,9 @@ class MockDSPRenderer(DSPRenderer):
         msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
+    msrc.append("unsigned int st = inscount();")
     msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
+    msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
     msrc.append('exit(0); }')
@@ -259,13 +264,11 @@ class MockDSPProgram:
       dsp_lib.flush()
       os.chmod(dsp_lib.name, 0o0777)
       # NOTE: this timing includes a docker launch
-      start = time.perf_counter()
       proc = subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
                             "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)],
                             input=b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
-      elapsed = time.perf_counter() - start
-    offset = 0
+    offset = 4
     for x in bufs:
       x[:] = proc.stdout[offset:offset+len(x)]
       offset += len(x)
-    return elapsed
+    return struct.unpack("I", proc.stdout[0:4])[0] / 1e9  # pretend it's 1 Ghz, but this is an inscount, not a time

@@ -13,6 +13,10 @@ inputs:
     description: 'Extra dependency groups (comma separated)'
     required: false
     default: ''
+  pydeps:
+    description: 'Extra Python dependency groups (space separated)'
+    required: false
+    default: ''
   opencl:
     description: "Install OpenCL?"
     required: false
@@ -83,11 +87,11 @@ runs:
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies (without extra)
       if: inputs.deps == ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e .
+      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e . ${{ inputs.pydeps }}
 
     # **** OpenCL ****
 

@@ -2151,9 +2151,9 @@ class TestBigGraph(unittest.TestCase):
     a = Tensor.empty(4, 4, dtype=dtypes.int)
     sink = tensor_rewrite(a*0)
     assert UPat(Ops.CONST, arg=0).match(sink, {})
-    self.assertIs(tensor_rewrite(a*1), a.lazydata)
-    self.assertIs(tensor_rewrite(a+0), a.lazydata)
-    self.assertIs(tensor_rewrite(a//1), a.lazydata)
+    self.assertIs(tensor_rewrite(a*1).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a+0).base, a.lazydata.base)
+    self.assertIs(tensor_rewrite(a//1).base, a.lazydata.base)
 
   def test_cast_folding(self):
     a = Tensor(1.0).cast(dtypes.int)
@@ -2310,7 +2310,7 @@ class TestCopyFolding(unittest.TestCase):
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
-    self.assertIs(b, a)
+    self.assertIs(b.base, a.base)
 
   def test_clone(self):
     a = Tensor.empty(4).lazydata
@@ -2496,7 +2496,7 @@ class TestUOpBecome(unittest.TestCase):
     # NOTE: realized base is always a flat buffer
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
     # the Tensor UOp can optionally stack a VIEW on top of BUFFER
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(add.lazydata, {})
+    assert UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)).match(add.lazydata, {})
 
   def test_new_buffer_view(self):
     a = Tensor.empty(4, 4)
@@ -2513,18 +2513,20 @@ class TestUOpBecome(unittest.TestCase):
     b = a*1
     assert UPat(Ops.MUL).match(b.lazydata, {}) # before scheduling it's a mul
     check_schedule(b, 0)
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling replaces the tensor lazydata with a VIEW(BUFFER)
+    assert UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))).match(b.lazydata, {}) # scheduling backtracks to the movement op if the realized tensor becomes a view
     self.assertIs(a.lazydata.base.buffer, b.lazydata.base.buffer)
 
-   # TODO: this fails because the shrink must be applied on top of the BUFFER
-   # currently it's a VIEW
-  @unittest.expectedFailure
   def test_become_buf_with_mops(self):
     a = Tensor.empty(2, 4, 2)
     noop = a.shrink(((1, 2), (0, 4), (0, 2))).reshape(4, 2)*1+0
+    # before realizing, this tensor is base
+    assert noop.lazydata is noop.lazydata.base
     noop.realize()
+    # it becomes a realized view after realize
+    assert noop.lazydata is not noop.lazydata.base
+    assert noop.lazydata.is_realized
     late_add = noop+2
-    late_add.realize() # UOp verification error
+    late_add.realize()
 
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
@@ -2548,6 +2550,47 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.ADD).match(const_add.lazydata, {})
     check_schedule(const_add, 0)
     assert UPat(Ops.CONST, arg=3).match(const_add.lazydata.base, {})
+
+  # tensors can become another realized tensor source
+  def test_become_existing_buf_simple(self):
+    a = Tensor.empty(4, 4)
+    b = a+0
+    check_schedule(b, 0)
+    assert b.lazydata.is_realized
+    self.assertIs(a.lazydata, b.lazydata)
+
+  # they can also chain other movement ops on top of the tensor source
+  def test_become_existing_buf_view(self):
+    a = Tensor.empty(4, 4)
+    b = a.permute((1, 0))+0
+    check_schedule(b, 0)
+    self.assertIs(b.lazydata, a.lazydata.permute((1, 0)))
+
+  def test_become_existing_buf_view_alt(self):
+    a = Tensor.empty(4, 4)
+    b = a.permute((1, 0)).reshape((8, 2))+0
+    check_schedule(b, 0)
+    self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
+
+  # they can also have other base parents that simplified, in that case we just backtrack to the chained mops
+  def test_become_existing_buf_complex(self):
+    a = Tensor.empty(4, 4)
+    b = (a.permute((1, 0))+0).reshape((8, 2))+0
+    check_schedule(b, 0)
+    self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
+    assert b.lazydata.is_realized
+
+  def test_become_multiple_choices(self):
+    a = Tensor.empty(16)
+    b = (a.reshape(1, 1, 4, 1, 4)+0).reshape(1, 1, 4, 4).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
+    c = (a.reshape(1, 1, 4, 4)+0).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
+    check_schedule([b, c], 0)
+    assert all_same([x.lazydata.base.realized for x in [a,b,c]])
+    # these movement ops result in the same ShapeTracker
+    assert b.lazydata.st == c.lazydata.st
+    # the decision for which movement op to pick is local, we could also make this always pick the simplest one
+    assert UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)),)),)).match(b.lazydata, {})
+    assert UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)),)).match(c.lazydata, {})
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
