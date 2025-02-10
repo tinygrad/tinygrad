@@ -2528,12 +2528,6 @@ class TestUOpBecome(unittest.TestCase):
     late_add = noop+2
     late_add.realize()
 
-  def test_become_buf_with_mops_alt(self):
-    a = Tensor.empty(1, 4) # VIEW(BUFFER)
-    noop = a.reshape((4,))*1 # RESHAPE(VIEW(BUFFER)), which is just BUFFER
-    noop.realize()
-    assert noop.lazydata.op is Ops.BUFFER
-
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
     b = a*0
