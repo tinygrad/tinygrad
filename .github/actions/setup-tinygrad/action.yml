@@ -159,14 +159,14 @@ runs:
         cache-name: cache-gpuocelot-build
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
+        key: ubuntu22.04-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
     - name: Clone/compile gpuocelot
       if: inputs.cuda == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
-        git checkout 4524e34adb7eaccc6f71262f2e21d7052bb17c2f
+        git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
