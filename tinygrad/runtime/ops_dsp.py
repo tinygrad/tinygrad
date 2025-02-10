@@ -27,12 +27,6 @@ revectorize_pm = PatternMatcher([
   (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
     lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and \
     [x.arg[0] if len(x.arg) == 1 else None for x in v.src] == list(range(v.dtype.count)) else None),
-  #(UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
-  #  lambda v: UOp(Ops.GEP, v.dtype, v.src[0].src, tuple(x.arg[0] for x in v.src)) if all_same([x.src for x in v.src]) else None),
-  #(UPat(Ops.VECTORIZE, name="x"), lambda x: x.src[0] if all_same(x.src) else None),
-
-  #(UPat(Ops.DEFINE_ACC, dtype=dtypes.uchar.vec(128), name="d"),
-  # lambda d: d.replace(src=(UOp(Ops.CUSTOM, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]) if d.src[0].op is Ops.CONST else None),
 ])
 
 class DSPRenderer(ClangRenderer):
