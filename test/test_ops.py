@@ -2591,6 +2591,9 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4,5,6), (4,5,6)],
         lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="sum"),
         lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="sum"), forward_only=True)
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="sum", include_self=False),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="sum", include_self=False), forward_only=True)
 
   def test_scatter_reduce_prod(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2599,6 +2602,9 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4,5,6), (4,5,6)],
         lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="prod"),
         lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="prod"), forward_only=True)
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="prod", include_self=False),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="prod", include_self=False), forward_only=True)
 
     x = Tensor.zeros([4,5,6]).float()
     y = torch.zeros([4,5,6]).float()
@@ -2613,6 +2619,9 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4,5,6), (4,5,6)],
         lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="mean"),
         lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="mean"), forward_only=True)
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="mean", include_self=False),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="mean", include_self=False), forward_only=True)
 
   def test_scatter_reduce_amax(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2621,6 +2630,9 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4,5,6), (4,5,6)],
         lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="amax"),
         lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="amax"), forward_only=True)
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="amax", include_self=False),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="amax", include_self=False), forward_only=True)
 
   def test_scatter_reduce_amin(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2629,6 +2641,9 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4,5,6), (4,5,6)],
         lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="amin"),
         lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="amin"), forward_only=True)
+      helper_test_op([(4,5,6), (4,5,6)],
+        lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce="amin", include_self=False),
+        lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce="amin", include_self=False), forward_only=True)
 
   def test_scatter_reduce_invalid_reduce_op(self):
     with self.assertRaises(TypeError):
