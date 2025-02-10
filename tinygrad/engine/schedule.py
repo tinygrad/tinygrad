@@ -72,7 +72,7 @@ sym = symbolic_simple+PatternMatcher([
       if (new_src:=tuple(x.base for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
-remove_const_mops = merge_views+PatternMatcher([
+remove_movement_ops = merge_views+PatternMatcher([
   # NOTE: movement ops are only applied to CONST
   (UPat(GroupOp.Movement, name="mov", src=(UPat.any(UPat.cvar("x"), UPat.cvar("x").view()),)), lambda x,mov: x.view(unwrap(mov.st))),
   # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
@@ -413,7 +413,7 @@ create_kernels = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  tensor_map = graph_rewrite_map(big_sink, remove_const_mops+sym, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
