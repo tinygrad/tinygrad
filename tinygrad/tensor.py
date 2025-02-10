@@ -334,9 +334,14 @@ class Tensor(SimpleMathTrait):
   def tolist(self) -> Union[Sequence[ConstType], ConstType]:
     """
     Returns the value of this tensor as a nested list.
+    Returns single value for const tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
+    print(t.tolist())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor(5)
     print(t.tolist())
     ```
     """
