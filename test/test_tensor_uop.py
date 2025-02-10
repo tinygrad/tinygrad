@@ -61,8 +61,8 @@ class TestTensorUOp(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: UOp = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const_like(1).const_arg == 1
-    assert type(lb.const_like(1).const_arg) is int
+    assert lb.const_like(1).arg == 1
+    assert type(lb.const_like(1).arg) is int
 
     lb: UOp = Tensor([1], dtype=dtypes.float).lazydata
     assert lb.const_like(1).const_arg == 1.0
