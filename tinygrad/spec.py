@@ -126,8 +126,9 @@ spec = PatternMatcher([
 kernel_spec = PatternMatcher([
   (UPat(Ops.DEVICE, src=()), lambda: True),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
-  # TODO: currently kernel only has buffer parents, this is incomplete. it should be BUFFER and ASSIGN
-  (UPat(Ops.KERNEL, src=UPat(Ops.BUFFER)), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
+  # NOTE: assign always has a (BUF, KERNEL), it can also optionally depend on other assigns
+  (UPat(Ops.ASSIGN, src=[UPat(Ops.BUFFER), UPat((Ops.KERNEL, Ops.ASSIGN))], allow_any_len=True), lambda: True),
 ])
 
 # *** this is the UOp shape spec ***
