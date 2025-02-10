@@ -7,6 +7,8 @@ const kernelsReady = (async () => {
 async function initStateDict(event) {
   await kernelsReady;
   self.model = await self.transformer(event.data);
+  self.inputPtr = self.model.wasm._malloc(4);
+  self.outputPtr = self.model.wasm._malloc(4);
   self.addEventListener("message", loadStateDict);
   self.removeEventListener("message", initStateDict);
   self.postMessage(self.model.state_dict);
@@ -20,9 +22,7 @@ function loadStateDict(event) {
   }
   else {
     const part = event.data;
-    for (const [wasm_idx, wasm_offset] of part.wasm_offsets) {
-      self.model.wasm[wasm_idx].HEAPU8.set(part.bytes, wasm_offset);
-    }
+    self.model.wasm.HEAPU8.set(part.bytes, part.target_start_pos);
   }
   self.postMessage("success");
 }
@@ -31,7 +31,9 @@ function inference(event) {
   const [tok, start_pos] = event.data;
   const int32tok = new Int32Array([tok]);
   const uint8tok = new Uint8Array(int32tok.buffer);
-  const uint8nextTok = self.model.run(uint8tok, start_pos)[0];
+  self.model.wasm.HEAPU8.set(uint8tok, self.inputPtr);
+  self.model.wasm._net(self.outputPtr, self.inputPtr, start_pos);
+  const uint8nextTok = self.model.wasm.HEAPU8.slice(self.outputPtr, self.outputPtr + 4);
   const int32nextTok = new Int32Array(uint8nextTok.buffer);
   self.postMessage(int32nextTok[0]);
 }
