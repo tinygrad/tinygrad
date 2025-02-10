@@ -301,7 +301,6 @@ class AMDev:
 
   def fini(self):
     for ip in [self.sdma, self.gfx]: ip.fini()
-    self.smu.set_clocks(level=0)
 
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
