@@ -272,7 +272,7 @@ def get_onnx_ops():
   def OptionalGetElement(x:Tensor|None=None): return x if x is not None else Tensor([])
   def ConstantOfShape(shape:list[int], value:Tensor|None=None):
     if value is None: value = Tensor(0, dtype=dtypes.float32)
-    return Tensor.ones(*shape, dtype=value.dtype) if shape == [0] else value.expand(shape)
+    return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
 
   def Size(data:Tensor): return data.numel()
   def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
