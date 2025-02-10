@@ -223,7 +223,7 @@ class AM_GFX(AM_IP):
     self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
   def set_clockgating_state(self):
-    self.adev.regMM_ATC_L2_MISC_CG.write(0xc0200)
+    self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
 
     self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1)
     self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
