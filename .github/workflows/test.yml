@@ -42,8 +42,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
-    - name: Install capstone for CLANG disassembly
-      run: pip install capstone
+        pydeps: "capstone"
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -403,6 +402,9 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
+      with:
+        key: dsp
+        pydeps: "onnx onnxruntime"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -416,6 +418,8 @@ jobs:
         cache-to: type=gha,mode=min
     - name: Run test_tiny on DSP
       run: DEBUG=2 DSP=1 python test/test_tiny.py
+    - name: Test quantize onnx
+      run: DSP=1 python3 test/test_quantize_onnx.py
 
   testwebgpu:
     name: Linux (WebGPU)
