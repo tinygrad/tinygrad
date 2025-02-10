@@ -11,7 +11,7 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 
 class DSPRenderer(ClangRenderer):
   device = "DSP"
-  supports_float4 = False
+  supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }

@@ -1,6 +1,7 @@
 from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple, resolve
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
@@ -11,10 +12,16 @@ from tinygrad.renderer import Renderer
 # ***** float4/image store handling *****
 
 def fold_expanded(ex, buf):
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
   is_load, is_image = new_srcs[0].op is Ops.LOAD, isinstance(buf.dtype, ImageDType)
+
+  # TODO: get the device from the buffer somehow
+  if Device.DEFAULT == "DSP":
+    lengths = [128,4]
+  else:
+    if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
+    lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
 
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
@@ -30,7 +37,6 @@ def fold_expanded(ex, buf):
     offsets_rootsrc[root_src][arg] = i
 
   # then rewrite everything we can
-  lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
   used: set[tuple[UOp, UOp]] = set()
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
