@@ -2566,5 +2566,31 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(const_add, 0)
     assert UPat(Ops.CONST, arg=3).match(const_add.lazydata.base, {})
 
+  def test_become_1(self):
+    a = Tensor.empty(4, 4)
+    b = a+0
+    check_schedule(b, 0)
+    assert b.lazydata.is_realized
+    self.assertIs(a.lazydata, b.lazydata)
+
+  def test_become_2(self):
+    a = Tensor.empty(4, 4)
+    b = a.permute((1, 0))+0
+    check_schedule(b, 0)
+    self.assertIs(b.lazydata, a.lazydata.permute((1, 0)))
+
+  def test_become_3(self):
+    a = Tensor.empty(4, 4)
+    b = a.permute((1, 0)).reshape((8, 2))+0
+    check_schedule(b, 0)
+    self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
+
+  @unittest.expectedFailure
+  def test_become_4(self):
+    a = Tensor.empty(4, 4)
+    b = (a.permute((1, 0))+0).reshape((8, 2))+0
+    check_schedule(b, 0)
+    self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
