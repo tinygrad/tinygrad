@@ -3,7 +3,7 @@ from typing import List, cast
 import numpy as np
 from tinygrad.codegen.rewriter import full_graph_rewrite
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer, Device, is_dtype_supported
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, prod
@@ -64,6 +64,7 @@ class TestPTXFailures(unittest.TestCase):
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_gated_define_acc_with_half_dtype(self):
     a = Tensor.randn(32, 32, dtype=dtypes.half).realize()
     b = Tensor.randn(34, 32, dtype=dtypes.half).realize()
