@@ -749,7 +749,7 @@ class TestOps(unittest.TestCase):
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
-    helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5, forward_only=True)
+    helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5)
     helper_test_op([()], lambda x: x.tan())
     if not ((getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
@@ -1273,13 +1273,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3)))
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
-  # TODO: fix backward when correction >= n
   def test_var_one_in_axis(self):
-    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)), forward_only=True)
+    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=0))
-    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5), forward_only=True)
+    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4)))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=0))
+    # TODO: fix backward
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=5), forward_only=True)
   def test_var_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(keepdim=True))
