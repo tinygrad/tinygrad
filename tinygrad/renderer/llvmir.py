@@ -136,8 +136,8 @@ class LLVMRenderer(Renderer):
     vc = -1
 
     for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # aux buffers as AMX can only load from memory
-      for i, dt in enumerate(arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in arg[6]]):
-        kernel += [f"  %amx_{i} = alloca {ldt(dt)}, align {dt.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dt.ptr())} %amx_{i} to i64"]
+      for i, dtype in enumerate(arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in arg[6]]):
+        kernel += [f"  %amx_{i} = alloca {ldt(dtype)}, align {dtype.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dtype.ptr())} %amx_{i} to i64"]
 
     # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}
