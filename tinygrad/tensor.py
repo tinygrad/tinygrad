@@ -2088,7 +2088,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
-    def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: 
+    def pool(x:Tensor, padding_:Sequence[int]) -> Tensor:
       x = x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
       return x.reshape(*x.shape[:-len(k_)], -1)
     reg_pads = self._resolve_pool_pads(padding, len(k_))
