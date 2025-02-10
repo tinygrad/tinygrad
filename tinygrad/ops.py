@@ -1170,8 +1170,8 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # ** COMMUTATIVE flipping (only for ints) **
+  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
