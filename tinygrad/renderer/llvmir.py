@@ -135,7 +135,7 @@ class LLVMRenderer(Renderer):
     end_lines: dict[str, None] = {}
     vc = -1
 
-    for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
+    for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # aux buffers as AMX can only load from memory
       for i, dt in enumerate(arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in arg[6]]):
         kernel += [f"  %amx_{i} = alloca {ldt(dt)}, align {dt.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dt.ptr())} %amx_{i} to i64"]
 
