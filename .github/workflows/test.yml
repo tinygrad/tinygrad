@@ -404,7 +404,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: dsp
-        pydeps: "onnx onnxruntime"
+        pydeps: "onnx==1.16.0 onnxruntime"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
