@@ -1300,12 +1300,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3)))
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
-  # TODO: fix backward when correction >= n
   def test_std_one_in_axis(self):
-    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)), forward_only=True)
-    # TODO: this one broke too with correction=0 in new gradient
+    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)))
+    # TODO: this one broke with correction=0 in new gradient
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=0), forward_only=True)
-    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5), forward_only=True)
+    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5))
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4)))
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=0))
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=5))
