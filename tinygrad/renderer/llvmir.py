@@ -34,12 +34,12 @@ def render_wmma(ctx, wmma: UOp) -> str:
   def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0'
 
   return "\n".join([
-    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype)}* %amx_{i}, align {src.dtype.itemsize}' for i, src in enumerate(wmma.src)],
-      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0 ; AMX set',          # AMX set
-    *[f'  {ctx[wmma]}_ld_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(4, f"{ctx[wmma]}_ld_{i}")}' for i in range(16)],  # ld AMX regs
-      f'  {AMX(0, "%ptr_amx_1")}\n  {AMX(1, "%ptr_amx_0")}\n  {AMX(12, 0)}',                                                          # AMX fma
-    *[f'  {ctx[wmma]}_st_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(5, f"{ctx[wmma]}_st_{i}")}' for i in range(16)],  # st AMX regs
-      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0 ; AMX clr',          # AMX clr
+    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype.ptr())} %amx_{i}, align {src.dtype.itemsize}' for i, src in enumerate(wmma.src)],
+      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0 ; AMX set',         # AMX set
+    *[f'  {ctx[wmma]}_ld_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(4, f"{ctx[wmma]}_ld_{i}")}' for i in range(16)], # ld AMX acc regs
+      f'  {AMX(0, "%ptr_amx_1")}\n  {AMX(1, "%ptr_amx_0")}\n  {AMX(12, 0)}',                                                         # AMX fma
+    *[f'  {ctx[wmma]}_st_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(5, f"{ctx[wmma]}_st_{i}")}' for i in range(16)], # st AMX acc regs
+      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0 ; AMX clr',         # AMX clr
       f'  {ctx[wmma]} = load <256 x float>, ptr %amx_2, align 1024'])
 
 # llvm ops, lop[<dtype>][<op>]
