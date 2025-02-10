@@ -154,7 +154,8 @@ class LLVMRenderer(Renderer):
 
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
-        args.append(f"{ldt(u.dtype)}{' noalias' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
+        # NOTE: MallocAllocator promises 0x20 alignment
+        args.append(f"{ldt(u.dtype)}{' noalias align 32' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)

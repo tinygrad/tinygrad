@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
 import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
 from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic
@@ -79,7 +79,7 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str, append_user:bool=False) -> str:
-  return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{os.getenv('USERNAME', os.getlogin())}" if append_user else x)).as_posix()
+  return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
@@ -111,6 +111,7 @@ FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 PICKLE_BUFFERS, PROFILE, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROFILE", getenv("VIZ")), ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
+DONT_REALIZE_EXPAND = ContextVar("DONT_REALIZE_EXPAND", 0)
 
 @dataclass(frozen=True)
 class Metadata:

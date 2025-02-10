@@ -5,6 +5,7 @@ from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore, amx_tc
+from tinygrad.codegen.rewriter import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
@@ -17,7 +18,7 @@ base_rewrite = PatternMatcher([
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = {ctx[x.src[0]]}; {ctx[x]} < {ctx[x.src[1]]}; {ctx[x]}++) {{"),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
-    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device == "CLANG" else f"({','.join([ctx[y] for y in x.src])})")),
+    (f"{{{','.join([ctx[y] for y in x.src])}}}" if ctx.device in {'CLANG', 'DSP'} else f"({','.join([ctx[y] for y in x.src])})")),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(*(({ctx.buffer_prefix}{ctx.render_dtype(x.dtype)}*)&{ctx[x.src[0]]}))"),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
@@ -49,7 +50,8 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR} else ctx[v] for v in x.src]), x.dtype)),
   (UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
-    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if ctx.device in {"CUDA", "NV"} else 4) or ctx.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")),
+    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if ctx.device in {"CUDA", "NV"} else 4) or ctx.device in {'CLANG', 'DSP'} else \
+     f".{'xyzwabcd'[x.arg[0]]}")),
 ])
 
 extra_pm = PatternMatcher([
@@ -58,6 +60,10 @@ extra_pm = PatternMatcher([
    lambda x: UOp(Ops.BITCAST, x.dtype, (UOp(Ops.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not Ops.NOOP else None),
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # devectorize any bools
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
+  # CAST/WHERE can't be vectorized
+  (UPat((Ops.CAST, Ops.WHERE), name="alu"), no_vectorized_alu),
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
@@ -104,7 +110,8 @@ class CStyleLanguage(Renderer):
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
       return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
-    return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
+    if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
+    return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:list[UOp]) -> str:

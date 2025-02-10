@@ -1,6 +1,7 @@
 from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple, resolve
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
@@ -11,10 +12,17 @@ from tinygrad.renderer import Renderer
 # ***** float4/image store handling *****
 
 def fold_expanded(ex, buf):
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
   is_load, is_image = new_srcs[0].op is Ops.LOAD, isinstance(buf.dtype, ImageDType)
+
+  # TODO: get the device from the buffer somehow
+  if Device.DEFAULT == "DSP":
+    if buf.dtype.base == dtypes.bool: return None
+    lengths = [128,4]
+  else:
+    if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
+    lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
 
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
@@ -30,7 +38,6 @@ def fold_expanded(ex, buf):
     offsets_rootsrc[root_src][arg] = i
 
   # then rewrite everything we can
-  lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
   used: set[tuple[UOp, UOp]] = set()
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
@@ -123,7 +130,6 @@ powers_of_two = {2**i:i for i in range(64)}
 def get_late_rewrite_patterns(ops, force_transcendental=False):
   pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
            ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
-  pat.append((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src)))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops:
     pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
@@ -297,6 +303,8 @@ sym = symbolic_flat+PatternMatcher([
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
+  # ** pow **
+  ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"), UPat.load(UPat(Ops.INDEX, name="index")))),
