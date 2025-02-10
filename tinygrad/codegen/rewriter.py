@@ -1,7 +1,6 @@
 from typing import Optional, Any, Callable
 import functools, itertools, operator
 from collections import defaultdict
-from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple, resolve
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
@@ -17,7 +16,8 @@ def fold_expanded(ex, buf):
   is_load, is_image = new_srcs[0].op is Ops.LOAD, isinstance(buf.dtype, ImageDType)
 
   # TODO: get the device from the buffer somehow
-  if Device.DEFAULT == "DSP":
+  # NOTE: this can't be Device.DEFAULT because it opens devices
+  if getenv("DSP"):
     if buf.dtype.base == dtypes.bool: return None
     lengths = [128,4]
   else:
