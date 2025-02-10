@@ -509,7 +509,8 @@ pm_render = PatternMatcher([
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
   # devectorize any bools (late for max rewrite)
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
-  (UPat(Ops.WHERE, name="alu"), no_vectorized_alu),
+  # CAST/WHERE can't be vectorized
+  (UPat((Ops.CAST, Ops.WHERE), name="alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***
@@ -543,6 +544,8 @@ quant = PatternMatcher([
   ((acc:=UPat(Ops.DEFINE_ACC, name="acc")).assign(UPat.var("x").cast(dtypes.float32) + acc),
    lambda x,acc: (acci:=UOp(Ops.DEFINE_ACC, dtype=x.dtype, arg=acc.arg,
                             src=(acc.src[0].cast(x.dtype), *acc.src[1:]))).assign(x+acci).cast(dtypes.float32)),
+  # x*(y+c1) = x*y + x*c1 (FAKE)
+  #(UPat.var("x")*(UPat.var("y")+-127), lambda x,y: x*y),
   # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
   (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2"),
    lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None)

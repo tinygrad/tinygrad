@@ -51,7 +51,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     out_file = "/tmp/test_out.onnx"
     quantize_static(create_gemm_model("/tmp/test_in.onnx"), out_file,
                     FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False,
-                    activation_type=QuantType.QUInt8, weight_type=QuantType.QUInt8,
+                    activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
                     extra_options={"ActivationSymmetric": True})
     run_onnx_jit, _ = load_onnx_model(out_file)
     with Context(DONT_REALIZE_EXPAND=1):
