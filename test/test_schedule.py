@@ -2564,26 +2564,29 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(const_add, 0)
     assert UPat(Ops.CONST, arg=3).match(const_add.lazydata.base, {})
 
-  def test_become_1(self):
+  # tensors can become another realized tensor source
+  def test_become_existing_buf_simple(self):
     a = Tensor.empty(4, 4)
     b = a+0
     check_schedule(b, 0)
     assert b.lazydata.is_realized
     self.assertIs(a.lazydata, b.lazydata)
 
-  def test_become_2(self):
+  # they can also chain other movement ops on top of the tensor source
+  def test_become_existing_buf_view(self):
     a = Tensor.empty(4, 4)
     b = a.permute((1, 0))+0
     check_schedule(b, 0)
     self.assertIs(b.lazydata, a.lazydata.permute((1, 0)))
 
-  def test_become_3(self):
+  def test_become_existing_buf_view_alt(self):
     a = Tensor.empty(4, 4)
     b = a.permute((1, 0)).reshape((8, 2))+0
     check_schedule(b, 0)
     self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
 
-  def test_become_4(self):
+  # they can also have other base parents that simplified, in that case we just backtrack to the chained mops
+  def test_become_existing_buf_complex(self):
     a = Tensor.empty(4, 4)
     b = (a.permute((1, 0))+0).reshape((8, 2))+0
     check_schedule(b, 0)
