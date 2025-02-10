@@ -467,8 +467,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     rep: dict[UOp, UOp] = {}
     for u in sched_sink.toposort:
       if not is_kernel(u): continue
+      kernel_assign[u.buf_uop] = u
       for s in u.src[1].src:
-        kernel_assign[u.buf_uop] = u
         if s.op is Ops.BUFFER and s is not u.buf_uop: before_assign.setdefault(s, {})[u.buf_uop] = u
         if s.op in DONT_PLACE_IN_KERNEL or is_kernel(s): continue
         # otherwise it becomes a new kernel
