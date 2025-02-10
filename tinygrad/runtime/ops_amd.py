@@ -446,7 +446,9 @@ class PCIIface:
     # Unbind the device from the kernel driver
     if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
+
+    supported_sizes = int(HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
+    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:
