@@ -19,7 +19,7 @@ from tinygrad.helpers import fetch, getenv
 
 # QUANT=1 python3 examples/test_onnx_imagenet.py
 #   https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx
-# VIZ=1 DONT_REALIZE_EXPAND=1 python3 examples/benchmark_onnx.py /tmp/model.quant.onnx
+# VIZ=1 DEBUG=2 DSP=1 DONT_REALIZE_EXPAND=1 python3 examples/benchmark_onnx.py /tmp/model.quant.onnx
 
 def imagenet_dataloader(cnt=0):
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
@@ -57,7 +57,7 @@ if __name__ == "__main__":
             return None
           return {"input": img.numpy()}
       quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False,
-                      activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
+                      activation_type=QuantType.QUInt8, weight_type=QuantType.QUInt8,
                       extra_options={"ActivationSymmetric": True})
 
   run_onnx_jit, input_specs = load_onnx_model(fetch(fn))
