@@ -890,66 +890,69 @@ def launch_viz(env_str:str, data:str):
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
 
-class TreeAutomaton:
+class LazyAutomaton:
   def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
-    self.alphabet = set()
-    self.layers: dict[int, list[UPat]] = {}
-    self.table: dict[tuple, dict[tuple, int]] = {}
-    self.final: dict[int, list[tuple[int, list[tuple[str, tuple[int]]], bool, Callable]]] = {}
-    self.num_states: int = 0
+    self.ops = set()
+    self.forest: set[UPat] = set()
+    self.pats: dict[UPat, tuple[int, None, bool, Callable]] = {}
+    # these are lazily created during graph rewrite
+    self.table: dict[tuple[Ops, DType, Any], frozenset[UPat]] = {}
+    self.matchset: dict[UOp, frozenset[UPat]] = {}
+    self.final: dict[frozenset[UPat], list[tuple]] = {frozenset(): []}
 
-    def _build_alphabet(pat: UPat):
+    def _setup(pat: UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
-      for s in std_src: _build_alphabet(s)
-      ops = (pat.op,) if pat.op is None else pat.op
-      dtypes = (pat.dtype,) if pat.dtype is None else pat.dtype
-      self.alphabet.update(set((op, dt, pat.arg) for op in ops for dt in dtypes))
+      for s in std_src: _setup(s)
+      self.ops.update((pat.op,) if pat.op is None else pat.op)
+      self.forest.add(pat)
 
-    def _build_layers(pat: UPat):
-      std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
-      height = max(_build_layers(s) for s in std_src) if std_src else 0
-      self.layers.setdefault(height, []).append(pat)
-      return height+1
-
-    def _match(sym, pat: UPat):
-      return (pat.op is None or sym[0] in pat.op) and (pat.dtype is None or sym[1] in pat.dtype) and (pat.arg is None or sym[2] == pat.arg)
-
-    for pat,_ in self.patterns:
-      _build_alphabet(pat)
-      _build_layers(pat)
-
-    # build deterministic automaton with minimal number of states
-    states = {None: ()}
-    for layer in self.layers.values():
-      # record where each matching symbol appears
-      sym_indices, pat_syms = defaultdict(set), {}
-      for i,pat in enumerate(layer):
-        std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) or pat._in_src is None else pat._in_src
-        srcs = tuple(itertools.product(*tuple(states[s] for s in std_src)))
-        # src permutations are valid
-        if isinstance(pat._in_src, list): srcs = tuple(p for s in srcs for p in itertools.permutations(s))
-        srcs = srcs or ((),)
-        pat_syms[pat] = set((sym, s) for sym in self.alphabet if _match(sym, pat) for s in srcs)
-        for sym in pat_syms[pat]: sym_indices[sym].add(i)
-
-      # group symbols that always appear together
-      sym_groups = defaultdict(set)
-      for sym,i in sym_indices.items(): sym_groups[frozenset(i)].add(sym)
-      # add new state transitions to the table of each matching symbol in the alphabet
-      for i,syms in enumerate(sym_groups.values()):
-        for sym in syms: self.table.setdefault((sym[0]), {})[sym[1]] = i+self.num_states
-      # set possible states for each pat in layer
-      for pat in layer: states[pat] = tuple(i+self.num_states for i,syms in enumerate(sym_groups.values()) if syms.issubset(pat_syms[pat]))
-      self.num_states += len(sym_groups.values())
-
+    for pat,_ in self.patterns: _setup(pat)
+    # patterns that match a given op
+    self.candidates: dict[Union[Ops, None], tuple[UPat]] = {op:tuple(pat for pat in self.forest if pat.op is None or op in pat.op) for op in self.ops}
     # set final states
     for i,(pat,fxn) in enumerate(self.patterns):
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
-      # TODO: figure out how to do name assignment
-      for st in states[pat]: self.final.setdefault(st, []).append((i, None, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters))
+      self.pats[pat] = (i, None, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters)
+
+# TODO: allow_any_len and any src
+# TODO: name assignment will be done top down once a full pattern is matched, patterns can't have permutations for this
+# TODO: bottleneck is tuple hashing speed
+class NewRewriteContext:
+  def __init__(self, pm, ctx):
+    self.pm: LazyAutomaton = pm
+    self.ctx = ctx
+    self.replace: dict[UOp, UOp] = {}
+
+  def match(self, uop:UOp) -> frozenset[UPat]:
+    srcs = tuple([self.pm.matchset[s] for s in uop.src])
+    table = self.pm.table.setdefault((uop.op, uop.dtype, uop.arg), {})
+    # if transition doesn't exist create new matchset and sort functions to run
+    if srcs not in table:
+      matchset = frozenset(pat for pat in self.pm.candidates.get(uop.op, self.pm.candidates[None]) \
+        if (pat.dtype is None or uop.dtype in pat.dtype) and (pat.arg is None or uop.arg == pat.arg) \
+        and (pat.src is None or any(all(s in ss for s,ss in zip(src, srcs)) for src in pat.src)))
+      if matchset not in self.pm.final:
+        self.pm.final[matchset] = sorted([self.pm.pats[pat] for pat in matchset if pat in self.pm.pats], key=lambda x: x[0])
+      table[srcs] = matchset
+    self.pm.matchset[uop] = table[srcs]
+    return self.pm.matchset[uop]
+
+  def rewrite_uop(self, uop:UOp) -> UOp|None:
+    matchset = self.match(uop)
+    return None
+  
+  def rewrite(self, n:UOp) -> UOp:
+    if (rn := self.replace.get(n)) is not None: return rn
+    new_src = tuple([self.rewrite(x) for x in n.src])
+    new_n = self.rewrite_uop(n) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+    self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
+    return ret
+
+def new_graph_rewrite(sink:UOp, pm:LazyAutomaton, ctx=None) -> UOp:
+  return NewRewriteContext(pm, ctx).rewrite(sink)
 
 # *** simple graph rewrite engine ***
 
