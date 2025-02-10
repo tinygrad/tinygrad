@@ -2593,5 +2593,17 @@ class TestUOpBecome(unittest.TestCase):
     self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
     assert b.lazydata.is_realized
 
+  def test_become_multiple_choices(self):
+    a = Tensor.empty(16)
+    b = (a.reshape(1, 1, 4, 1, 4)+0).reshape(1, 1, 4, 4).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
+    c = (a.reshape(1, 1, 4, 4)+0).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
+    check_schedule([b, c], 0)
+    assert all_same([x.lazydata.base.realized for x in [a,b,c]])
+    # these movement ops result in the same ShapeTracker
+    assert b.lazydata.st == c.lazydata.st
+    # the decision for which movement op to pick is local, we could also make this always pick the simplest one
+    assert UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)),)),)).match(b.lazydata, {})
+    assert UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)),)).match(c.lazydata, {})
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
