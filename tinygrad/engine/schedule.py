@@ -460,6 +460,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   graph_rewrite(sink, break_sched, ctx)
   # create the kernel graph
   sched_sink = sink
+  kernel_assign: dict[UOp, UOp] = {}
   before_assign: dict[UOp, dict[UOp, UOp]] = {}
   while 1:
     sched_sink = graph_rewrite(sched_sink, create_kernels, realize_map)
@@ -467,20 +468,24 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     for u in sched_sink.toposort:
       if not is_kernel(u): continue
       for s in u.src[1].src:
+        kernel_assign[u.buf_uop] = u
         if s.op is Ops.BUFFER and s is not u.buf_uop: before_assign.setdefault(s, {})[u.buf_uop] = u
         if s.op in DONT_PLACE_IN_KERNEL or is_kernel(s): continue
         # otherwise it becomes a new kernel
         rep[s] = init_kernel(realize_map, s)
-      # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
-      if (assign_src:=before_assign.get(u.buf_uop)):
-        # now the ASSIGN becomes (BUF, KERNEL, ...more_assigns)
-        for x in assign_src.values():
-          if any(xp.op is Ops.ASSIGN and xp.buf_uop is u.buf_uop for xp in x.toposort):
-            raise RuntimeError(f"cycle detected in graph, kernel must either depend on ASSIGN or BUFFER for {u.buf_uop}")
-        if (new_src:=(u.buf_uop,u.src[1])+tuple(assign_src.values())) != u.src: rep[u] = u.replace(src=new_src)
     if len(rep) == 0: break
     sched_sink = sched_sink.substitute(rep)
   type_verify(list(sched_sink.toposort), kernel_spec)
+
+  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
+  assign_deps: dict[UOp, UOp] = {}
+  for k,v in kernel_assign.items():
+    if (deps:=before_assign.get(k)) is None: continue
+    for x in deps.values():
+      if any(xp.op is Ops.ASSIGN and xp.buf_uop is k for xp in x.toposort):
+        raise RuntimeError(f"cycle detected in graph, kernel must either depend on ASSIGN or BUFFER for {k}")
+    assign_deps[v] = v.replace(src=v.src+tuple(deps.values()))
+  if assign_deps: sched_sink = sched_sink.substitute(assign_deps)
 
   # final toposort (bfs)
   children: dict[UOp, list[UOp]] = {}
