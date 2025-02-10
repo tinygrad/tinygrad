@@ -2448,6 +2448,8 @@ class Tensor(SimpleMathTrait):
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
 
+    NOTE: To use the `reduce` argument with a Tensor `src`, see `Tensor.scatter_reduce`.
+
     ```python exec="true" source="above" session="tensor" result="python"
     src = Tensor.arange(1, 11).reshape(2, 5)
     print(src.numpy())
@@ -2478,11 +2480,39 @@ class Tensor(SimpleMathTrait):
 
   def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
                      include_self:bool=True) -> Tensor:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `"sum"`, `"prod"`, `"mean"`, `"amax"`, or `"amin"` reduction operations with `reduce`.
+
+    Set `include_self=False` to exclude values in the `self` Tensor from the reduction.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    src = Tensor.arange(1, 11).cast(dtypes.float).reshape(2, 5)
+    print(src.numpy())
+    index = Tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    print(index.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='sum').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='prod').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='mean', include_self=False).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amax').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amin').numpy())
+    ```
+    """
     src = src.cast(self.dtype)
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
     def _mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.where(a, b)
-    def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.logical_not().where(a, b)
+    def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.any(-1).logical_not().where(a, b)
     if reduce == "sum": return _mask(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return _mask(src, 1).prod(-1, acc_dtype=self.dtype).mul(self if include_self else _inv_mask(self, 1))
     if reduce == "amax": return _mask(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
