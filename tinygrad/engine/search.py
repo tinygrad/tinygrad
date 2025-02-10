@@ -1,5 +1,5 @@
 from typing import cast, Optional, Callable
-import itertools, functools, random, math, time, multiprocessing, traceback, signal
+import itertools, functools, random, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
 from tinygrad.ops import UOp, Ops, Variable, sym_infer
@@ -141,6 +141,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL"} else 0
   if beam_pool is None and (workers := getenv("PARALLEL", default_parallel)):
     beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
+    @atexit.register
+    def close_pool(): beam_pool.close()
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")
