@@ -2087,15 +2087,17 @@ class Tensor(SimpleMathTrait):
     print(t.avg_pool2d(padding=1, count_include_pad=False).numpy())
     ```
     """
-    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
-    def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: 
+      x = x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+      return x.reshape(*x.shape[:-len(k_)], -1)
     reg_pads = self._resolve_pool_pads(padding, len(k_))
     ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
     if not count_include_pad:
       pads = ceil_pads if ceil_mode else reg_pads
-      return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
-    if not ceil_mode: return pool(self, reg_pads).mean(axis)
-    return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
+      return pool(self, pads).sum(-1) / pool(self.ones_like(), pads).sum(-1)
+    if not ceil_mode: return pool(self, reg_pads).mean(-1)
+    return pool(self, ceil_pads).sum(-1) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(-1)
 
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
