@@ -417,12 +417,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # NOOP
-    if k.base is v.base: continue
-    # NOTE: only the base tensors get a BUFFER UOp
-    if v.is_realized and k is k.base: becomes_map[k] = v.reshape(k.shape)
-    # otherwise if it simplified to a CONST the UOp just becomes that CONST
-    elif v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    if k is v: continue # NOOP
+    if v.base.op is Ops.BUFFER:
+      # backtrack to the realized tensor
+      buf_src = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st]
+      if k is not buf_src[0]: becomes_map[k] = buf_src[0]
+    if v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # we group the rest of UOps into ScheduleItems
   buffer_map: dict[UOp, UOp] = {}
