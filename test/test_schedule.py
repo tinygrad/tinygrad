@@ -2534,12 +2534,10 @@ class TestUOpBecome(unittest.TestCase):
     noop.realize()
     assert noop.lazydata.op is Ops.BUFFER
 
-  @unittest.expectedFailure
   def test_become_buf_with_mops_limitation(self):
     a = Tensor.empty(4, 4)
     noop1 = a.pad(((0, 1), (0, 2)))+0
     noop2 = noop1.shrink(((0, 1), (0, 2)))+0
-    # TODO: this should become a SHRINK(PAD) followed by the BUFFER, but how do we remove that add in the middle?
     noop2.realize()
     assert noop2.lazydata.is_realized
 
@@ -2585,12 +2583,12 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(b, 0)
     self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
 
-  @unittest.expectedFailure
   def test_become_4(self):
     a = Tensor.empty(4, 4)
     b = (a.permute((1, 0))+0).reshape((8, 2))+0
     check_schedule(b, 0)
     self.assertIs(b.lazydata, a.lazydata.permute((1, 0)).reshape((8, 2)))
+    assert b.lazydata.is_realized
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

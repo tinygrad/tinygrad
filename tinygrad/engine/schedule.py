@@ -420,7 +420,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     if k is v: continue # NOOP
     if v.base.op is Ops.BUFFER:
       # trackback to the realized tensor
-      buf_src = [x for x in k.toposort if x.base is v.base and x.st == v.st]
+      buf_src = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st]
       if k is not buf_src[0]: becomes_map[k] = buf_src[0]
     if v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
