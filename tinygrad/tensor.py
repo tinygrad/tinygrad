@@ -2431,7 +2431,6 @@ class Tensor(SimpleMathTrait):
     return x.cast(self.dtype)
 
   def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
-    index, dim = index.to(self.device), self._resolve_dim(dim)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
@@ -2471,6 +2470,7 @@ class Tensor(SimpleMathTrait):
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
     if reduce and isinstance(src, Tensor): raise TypeError("Tensor src is not supported with reduce arg. see scatter_reduce")
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
+    index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
@@ -2479,6 +2479,7 @@ class Tensor(SimpleMathTrait):
   def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
                      include_self:bool=True) -> Tensor:
     src = src.cast(self.dtype)
+    index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
     def _mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor:
       return mask.where(a, b)
