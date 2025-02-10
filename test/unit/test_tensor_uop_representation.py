@@ -118,5 +118,13 @@ class TestTensorUopRepresentation(unittest.TestCase):
     #is_pattern(c, UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)))
     is_pattern(c, UPat(Ops.VIEW, src=(UPat(Ops.COPY, src=(UPat(Ops.DEVICE), realized_pattern,)),)))
 
+  def test_empty_buf(self):
+    a = Tensor.empty(3, 3)
+    is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)))
+    vi = UOp.variable("i", 1, 3).bind(1)
+    a = Tensor.empty(3, vi)
+    is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)))
+    self.assertEqual(a.lazydata.base.realized.size, 9)
+
 if __name__ == '__main__':
   unittest.main()
