@@ -507,12 +507,15 @@ pm_render = PatternMatcher([
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
+  # devectorize any bools (late for max rewrite)
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
+  (UPat(Ops.WHERE, name="alu"), no_vectorized_alu),
 ])
 
 # *** uop graph ***
 
 def revectorize(v:UOp):
-  if not all_same([x.op for x in v.src]) or any(dtypes.is_bool(x.dtype) for x in v.src[0].src): return None
+  if not all_same([x.op for x in v.src]): return None
   new_srcs = [UOp(Ops.VECTORIZE, v.src[0].src[i].dtype.vec(v.dtype.count), tuple(x.src[i] for x in v.src)) for i in range(len(v.src[0].src))]
   return UOp(v.src[0].op, v.dtype, tuple(new_srcs), v.src[0].arg)
 
