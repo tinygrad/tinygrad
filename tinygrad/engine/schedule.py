@@ -3,8 +3,8 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
 from tinygrad.ops import can_pad, identity_element, resolve, symbolic_simple, view_left, merge_views
-from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap, flatten
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -133,7 +133,7 @@ def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs)
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
     return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, b, src)
   # early realize before expand
-  if resolve(prod(src.shape) < prod(st.shape)) and not getenv("DONT_REALIZE_EXPAND"): return realize(ctx, b, src)
+  if resolve(prod(src.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, b, src)
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, b, src)
 
@@ -420,7 +420,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # NOOP
     if k.base is v.base: continue
     # NOTE: only the base tensors get a BUFFER UOp
-    if v.is_realized and k is k.base: becomes_map[k] = v.view(unwrap(k.st))
+    if v.is_realized and k is k.base: becomes_map[k] = v.reshape(k.shape)
     # otherwise if it simplified to a CONST the UOp just becomes that CONST
     elif v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
@@ -439,7 +439,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # map buffers to realized tensors
   for buf_uop in realize_map:
-    for tensor_uop in buf_tensors[buf_uop]: becomes_map[tensor_uop] = buf_uop.view(unwrap(tensor_uop.st))
+    for tensor_uop in buf_tensors[buf_uop]:
+      # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
+      becomes_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
     buf_uop.buffer.ref(1)
 
   # create kernels, TODO: this should use the SINK from tensor_map

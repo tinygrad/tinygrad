@@ -1192,7 +1192,7 @@ symbolic_simple = PatternMatcher([
 
 symbolic = symbolic_simple+PatternMatcher([
   # Commutative ordering, if its a chain, move the chain to the left
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
+  (UPat(GroupOp.Commutative,dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
       (x.src[1].op is x.op or (x.src[0].order > x.src[1].order)) else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
