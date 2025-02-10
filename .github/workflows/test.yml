@@ -405,6 +405,7 @@ jobs:
       with:
         key: dsp
         pydeps: "onnx==1.16.0 onnxruntime"
+        llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -420,6 +421,10 @@ jobs:
       run: DEBUG=2 DSP=1 python test/test_tiny.py
     - name: Test quantize onnx
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
+    - name: Test LLVM=1 DEVECTORIZE=0
+      run: LLVM=1 DEVECTORIZE=0 pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    - name: Test CLANG=1 DEVECTORIZE=0
+      run: CLANG=1 DEVECTORIZE=0 pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
   testwebgpu:
     name: Linux (WebGPU)
