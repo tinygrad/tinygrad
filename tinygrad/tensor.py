@@ -2481,10 +2481,8 @@ class Tensor(SimpleMathTrait):
     src = src.cast(self.dtype)
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
-    def _mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor:
-      return mask.where(a, b)
-    def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor:
-      return mask.logical_not().where(a, b)
+    def _mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.where(a, b)
+    def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.logical_not().where(a, b)
     if reduce == "sum": return _mask(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return _mask(src, 1).prod(-1, acc_dtype=self.dtype).mul(self if include_self else _inv_mask(self, 1))
     if reduce == "amax": return _mask(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
