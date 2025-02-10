@@ -287,10 +287,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def order(self:UOp) -> tuple[tuple[int, Any, Optional[DType], tuple], tuple]:
-    if self.op in GroupOp.Unary or (self.op in GroupOp.Binary and self.src[1].op in (Ops.CONST, Ops.VCONST)):
-      child = self.src[0].order
-      arg = self.arg if self.op in GroupOp.Unary else self.src[1].arg
-      return (child[0], (child[1], self.op.value, arg))
+    if self.op in GroupOp.ALU:
+      const_srcs, srcs = partition(self.src, lambda x: x.op in (Ops.CONST, Ops.VCONST))
+      if len(srcs) == 1: return (srcs[0].order[0], (srcs[0].order[1], self.op.value, *[src.arg for src in const_srcs]))
     return (self.tuplize, ())
 
   # *** uop shape stuff ***
