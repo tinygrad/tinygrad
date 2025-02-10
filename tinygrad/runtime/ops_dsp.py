@@ -13,7 +13,7 @@ from tinygrad.helpers import all_same
 from tinygrad.ops import PatternMatcher, UPat, GroupOp
 
 def revectorize(v:UOp):
-  if not all_same([x.op for x in v.src]): return None
+  if not all_same([x.op for x in v.src]) or any(dtypes.is_bool(x.dtype) for x in v.src[0].src): return None
   new_srcs = [UOp(Ops.VECTORIZE, v.src[0].src[i].dtype.vec(v.dtype.count), tuple(x.src[i] for x in v.src)) for i in range(len(v.src[0].src))]
   return UOp(v.src[0].op, v.dtype, tuple(new_srcs), v.src[0].arg)
 

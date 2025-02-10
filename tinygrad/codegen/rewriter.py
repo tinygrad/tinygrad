@@ -18,6 +18,7 @@ def fold_expanded(ex, buf):
 
   # TODO: get the device from the buffer somehow
   if Device.DEFAULT == "DSP":
+    if buf.dtype.base == dtypes.bool: return None
     lengths = [128,4]
   else:
     if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
