@@ -23,7 +23,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"(*(({ctx.buffer_prefix}{ctx.render_dtype(x.dtype)}*)&{ctx[x.src[0]]}))"),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat((Ops.NOOP, Ops.BROADCAST), name="x"), lambda ctx,x: ctx[x.src[0]]),
+  (UPat(Ops.NOOP, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
   # const
   (UPat(Ops.CONST, arg=math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x.dtype, ctx.infinity)})"),
@@ -52,8 +52,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if ctx.device in {"CUDA", "NV"} else 4) or ctx.device in {'CLANG', 'DSP'} else \
      f".{'xyzwabcd'[x.arg[0]]}")),
-  # custom just passes through (TODO: add some prinfish syntax)
-  (UPat(Ops.CUSTOM, name="x"), lambda x: x.arg),
+  # custom passes through with format
+  (UPat(Ops.CUSTOM, name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
 ])
 
 extra_pm = PatternMatcher([
@@ -150,7 +150,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
-      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.BROADCAST} or \
+      if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOM} or \
         (u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:

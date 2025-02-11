@@ -12,7 +12,7 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 from tinygrad.ops import PatternMatcher, UPat
 
 dsp_pm = PatternMatcher([
-  (UPat(Ops.VECTORIZE, src=UPat.var("y"))*UPat.var("x"), lambda x,y: UOp(Ops.BROADCAST, x.dtype, (y,))*x),
+  (UPat(Ops.VECTORIZE, src=UPat.var("y"))*UPat.var("x"), lambda x,y: UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")*x),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOM, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]))
 ])
