@@ -10,7 +10,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.schedule import to_si
+from tinygrad.engine.schedule import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.rewriter import full_graph_rewrite, sym
@@ -487,7 +487,7 @@ class TestIndexingOrdering(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "rewriter.py")
-    self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
+    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
       test_upat = UPat(Ops.CONST, dtypes.bool)
