@@ -924,7 +924,7 @@ class RewriteContext:
   def bottom_up_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_n: UOp|None = n
-    while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
+    while new_n is not None and new_n != last_n: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
     new_src = tuple([self.bottom_up_rewrite(x) for x in last_n.src])
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
