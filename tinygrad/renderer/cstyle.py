@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.renderer import Renderer, TensorCore, amx_tc
+from tinygrad.renderer import Renderer, TensorCore
 from tinygrad.codegen.rewriter import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
@@ -171,6 +171,8 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
+  amx_tc = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt, swizzle=(None,((),(4,5,6,7,0,1,2,3))),
+                      opts=("u0","u0","u0","u0","u1","u1","u1","u1")) for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
   if AMX: tensor_cores = amx_tc
 
   # language options

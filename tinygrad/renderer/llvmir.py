@@ -1,6 +1,7 @@
 from typing import cast
 import math, struct
-from tinygrad.renderer import Renderer, amx_tc
+from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import dedup, prod, AMX
@@ -112,7 +113,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
-  if AMX: tensor_cores = amx_tc
+  if AMX: tensor_cores = ClangRenderer.amx_tc
 
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
