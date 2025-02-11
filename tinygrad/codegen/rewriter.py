@@ -461,10 +461,20 @@ devectorize = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
+def expand_index(buf:UOp, x:UOp, c:UOp):
+  print("HERE", c.arg, buf.dtype, x.dtype, c.dtype)
+  exit(0)
+  return None
+
 devectorize_load_store = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")), UPat.var("x")+UPat.cvar("c"))), expand_index),
   # TODO: add vectorized support to transcendental
-  (UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
+  #(UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
+  #(UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
+  # TODO: add vectorized support to transcendental
+  (UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
+  (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
+  #(UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
