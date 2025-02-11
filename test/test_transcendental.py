@@ -117,5 +117,14 @@ class TestTranscendentalSchedule(unittest.TestCase):
       c = c.exp2()
       check_schedule(c, 1)
 
+class TestVectorizedTranscendental(unittest.TestCase):
+  def test_sin_vectorized(self):
+    with Context(TRANSCENDENTAL=2):
+      arr = np.linspace(-100, 100, 1000).astype(np.float32)
+      ta = Tensor(arr)
+      out_ta = ta.sin().numpy()
+      out_np = np.sin(arr)
+      np.testing.assert_allclose(out_ta, out_np, rtol=1e-5, atol=1e-5)
+
 if __name__ == '__main__':
   unittest.main()

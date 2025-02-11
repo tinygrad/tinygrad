@@ -178,12 +178,19 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   # x_sign = sign(x)
   x_sign = x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
   x_abs = x * x_sign
-  r, q = (cody_waite_reduction if fast else payne_hanek_reduction)(x_abs)
-  if fast: result = sin_poly_small(r, q)
-  else:
-    # Payne Hanek Reduction assumes abs(x) >= pi/4, so for smaller values, use cody_waite_reduction.
+  if fast: # Entirely use Cody‐Waite for all elements (no domain split)
     r_small, q_small = cody_waite_reduction(x_abs)
-    result = (x_abs<switch_over).where(sin_poly_small(r_small, q_small), sin_poly_large(r, q))
+    result = sin_poly_small(r_small, q_small)
+  else:
+    # For big angles => payne_hanek, for small => cody_waite
+    r_small, q_small = cody_waite_reduction(x_abs)
+    r_big,   q_big   = payne_hanek_reduction(x_abs)
+    mask_small = (x_abs < switch_over)
+    # Evaluate polynomials on each path
+    sin_small = sin_poly_small(r_small, q_small)  # good for small angles
+    sin_big   = sin_poly_large(r_big,   q_big)    # includes shift by pi/2 for quadrant
+    # Merge piecewise
+    result = mask_small.where(sin_small, sin_big)
   # adjusts the sign for abs(x)
   result = result * x_sign
   # sin(Inf) = NaN, sin(-Inf) = NaN, sin(NaN) = NaN
