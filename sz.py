@@ -15,9 +15,9 @@ def gen_stats(base_path="."):
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
     for name in files:
       if not name.endswith(".py"): continue
-      if 'tinygrad/runtime/autogen' in path: continue
+      if 'tinygrad/runtime/autogen' in path.replace('\\', '/'): continue
       filepath = os.path.join(path, name)
-      relfilepath = os.path.relpath(filepath, base_path)
+      relfilepath = os.path.relpath(filepath, base_path).replace('\\', '/')
       with tokenize.open(filepath) as file_:
         tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST and not is_docstring(t)]
         token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
@@ -69,7 +69,8 @@ if __name__ == "__main__":
       print("```")
     else:
       print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", floatfmt=".1f")+"\n")
-      for dir_name, group in itertools.groupby(sorted([(x[0].rsplit("/", 1)[0], x[1], x[2]) for x in table]), key=lambda x:x[0]):
+      groups = sorted([('/'.join(x[0].rsplit("/", 1)[0].split("/")[0:2]), x[1], x[2]) for x in table])
+      for dir_name, group in itertools.groupby(groups, key=lambda x:x[0]):
         print(f"{dir_name:30s} : {sum([x[1] for x in group]):6d}")
       total_lines = sum([x[1] for x in table])
       print(f"\ntotal line count: {total_lines}")

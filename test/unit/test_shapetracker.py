@@ -5,14 +5,14 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
-from tinygrad.ops import UOp, UOps, graph_rewrite
-from tinygrad.codegen.uopgraph import sym
+from tinygrad.ops import UOp, Ops, graph_rewrite
+from tinygrad.codegen.rewriter import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
   idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.int, val)])
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
-  assert idx.op is UOps.CONST and valid.op is UOps.CONST
+  assert idx.op is Ops.CONST and valid.op is Ops.CONST
   return idx.arg, valid.arg
 
 class CheckingShapeTracker:
@@ -43,9 +43,9 @@ class CheckingShapeTracker:
     self.t = np.broadcast_to(self.t, new_shape)
     return self
 
-  def flip(self, axis):
-    self.st = self.st.stride(tuple(-1 if i in axis else 1 for i in range(len(self.shape))))
-    self.t = np.flip(self.t, axis)
+  def flip(self, arg):
+    self.st = self.st.flip(arg)
+    self.t = np.flip(self.t, tuple(i for i in range(len(arg)) if arg[i]))
     return self
 
   def shrink(self, arg):
@@ -56,11 +56,6 @@ class CheckingShapeTracker:
   def pad(self, arg):
     self.st = self.st.pad(arg)
     self.t = np.pad(self.t, arg, constant_values=-1)
-    return self
-
-  def stride(self, arg):
-    self.st = self.st.stride(arg)
-    self.t = self.t[tuple([slice(None, None, x) for x in arg])]
     return self
 
   def __getitem__(self, val):
@@ -118,15 +113,48 @@ class TestRealDoesntSimplify(unittest.TestCase):
     self.assertEqual(self.st.real_strides(), (None, 18, -3, -1))
 
 class TestRealStrides(unittest.TestCase):
-  @unittest.expectedFailure
   def test_1(self):
-    # TODO: find the correct rewrite rule to fix this
-    self.st = ShapeTracker((
+    st = ShapeTracker((
       View.create((2048,), (1,), 0, ((0, 512),)),
-      View.create((16, 32, 4), (128, 4, 1), 0, None)))
-    st = self.st.real_strides()
-    print(self.st, st)
-    assert st == (None, 4, 1)
+      View.create((16, 32, 4), (128, 4, 1), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (None, 4, 1))
+
+  def test_2(self):
+    # test/test_ops.py::TestOps::test_simple_padding_conv1d
+    st = ShapeTracker((
+      View.create((6, 2, 5, 14), (90, 45, 1, 5), 0, ((0, 6), (0, 2), (0, 5), (0, 9))),
+      View.create((6, 2, 78), (140, 70, 1), 0, ((0, 6), (0, 2), (0, 70))),
+      View.create((6, 2, 13, 6), (156, 78, 1, 13), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (90, 45, None, None))
+
+  def test_3(self):
+    # test/test_ops.py::TestOps::test_simple_cumsum
+    st = ShapeTracker((
+      View.create((4, 256, 512), (256, 0, 1), 0, ((0, 4), (0, 256), (0, 256))),
+      View.create((4, 131327), (131072, 1), 0, ((0, 4), (0, 131072))),
+      View.create((4, 511, 257), (131327, 1, 511), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (256, None, None))
+
+  def test_4(self):
+    # test/test_nn.py::TestNN::test_conv_transpose1d
+    st = ShapeTracker((
+      View.create((4, 16, 56, 2), (896, 56, 1, 0), 0, ((0, 4), (0, 16), (0, 56), (0, 1))),
+      View.create((1, 4, 1, 16, 8, 121), (0, 1792, 0, 112, 0, 1), -5, ((0, 1), (0, 4), (0, 1), (0, 16), (0, 8), (5, 116))),
+      View.create((4, 64, 115, 16, 7), (15488, 0, 1, 968, 122), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
+
+  def test_5(self):
+    # test/test_ops.py::TestOps::test_conv2d
+    st = ShapeTracker((
+      View.create((1, 3, 1, 12, 2, 8), (0, 132, 0, 12, 1, 2), 0, ((0, 1), (0, 3), (0, 1), (0, 11), (0, 2), (0, 6))),
+      View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
+      View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (132, None, None, None, None))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
@@ -546,20 +574,18 @@ class TestShapeTrackerFuzzFailures(unittest.TestCase):
     self.st.shrink(((1, 2), (1, 3), (1, 3)))
     self.st.reshape((1, 4))
     self.st.shrink(((0, 1), (1, 3)))
-    print(self.st.st)
     self.st = self.st.simplify()
-    print(self.st.st)
   def test_case_2(self):
-    self.st.stride( (1, 1, -2) )
-    self.st.reshape( (3, 6) )
+    self.st.flip( (True, False, True) )
+    self.st.reshape( (3, 9) )
     self.st.shrink( ((1, 2), (1, 5)) )
-    self.st.stride( (1, -1) )
+    self.st.flip( (True, True) )
   def test_case_3(self):
     self.st.shrink( ((0, 2), (0, 2), (0, 1)) )
     self.st.permute( (1, 0, 2) )
     self.st.reshape( (4,) )
     self.st.shrink( ((0, 3),) )
-    self.st.stride( (-1,) )
+    self.st.flip( (True, False) )
   def test_case_4(self):
     self.st.reshape( (3, 3, 3, 1) )
     self.st.pad( ((0, 0), (0, 0), (0, 0), (1, 1)) )
@@ -654,21 +680,13 @@ class TestShapeTracker(unittest.TestCase):
     self.st.reshape((9,6,1))
     self.st.expand((9,6,4))
 
-  def test_pad_stride(self):
+  def test_pad_flip(self):
     self.st.pad(((1,4), (1,3)))
-    self.st.stride((2,2))
+    self.st.flip((True, False))
 
-  def test_pad_stride_neg(self):
-    self.st.pad(((1,2), (1,0)))
-    self.st.stride((-1,-1))
-
-  def test_pad_stride_both(self):
-    self.st.pad(((1,2), (1,0)))
-    self.st.stride((-2,-2))
-
-  def test_shrink_pad(self):
-    self.st.shrink(((0,4), (0,4)))
-    self.st.pad(((1,1), (1,1)))
+  def test_pad_flip_int(self):
+    self.st.pad(((1,4), (1,3)))
+    self.st.flip((0, 1))
 
   def test_reshape(self):
     new_shape = self.st.shape[::-1]
@@ -689,13 +707,13 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.expand(tuple(new_shape)))
 
   def test_flip_0(self):
-    self.apply(lambda x: x.flip((0,)))
+    self.apply(lambda x: x.flip((True, False)))
 
   def test_flip_1(self):
-    self.apply(lambda x: x.flip((1,)))
+    self.apply(lambda x: x.flip((False, True)))
 
   def test_flip_01(self):
-    self.apply(lambda x: x.flip((0,1)))
+    self.apply(lambda x: x.flip((True, True)))
 
   def test_slice_0(self):
     self.apply(lambda x: x.shrink(((1, x.shape[0]), (0, x.shape[1]))))
@@ -721,16 +739,13 @@ class TestShapeTracker(unittest.TestCase):
     self.apply(lambda x: x.shrink(((0, 2), (3, 4))))
     self.apply(lambda x: x.expand((2, 10)))
 
-  def test_double_stride(self):
-    self.apply(lambda x: x.stride((1, 2)))
-    self.apply(lambda x: x.stride((2, 1)))
+  def test_double_flip(self):
+    self.apply(lambda x: x.flip((True, False)))
+    self.apply(lambda x: x.flip((True, False)))
 
-  def test_stride(self): self.apply(lambda x: x.stride((2,1)))
-  def test_stride_int(self): self.apply(lambda x: x.stride((1,2)))
-  def test_stride_2(self): self.apply(lambda x: x.stride((2,2)))
-  def test_stride_n(self): self.apply(lambda x: x.stride((-2,1)))
-  def test_stride_int_n(self): self.apply(lambda x: x.stride((-1,2)))
-  def test_stride_2_n(self): self.apply(lambda x: x.stride((-2,-2)))
+  def test_flip(self): self.apply(lambda x: x.flip((True, False)))
+  def test_flip2(self): self.apply(lambda x: x.flip((False, True)))
+  def test_flip3(self): self.apply(lambda x: x.flip((True, True)))
 
   def test_reshape_then_permute(self):
     self.test_reshape()
@@ -759,6 +774,12 @@ class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):
     st = ShapeTracker.from_shape((100, 100))
     self.assertEqual(st.real_size(), 100*100)
+
+  def test_0_in_shape_size(self):
+    st = ShapeTracker.from_shape((0, 100))
+    self.assertEqual(st.real_size(), 0)
+    st = ShapeTracker.from_shape((100, 0))
+    self.assertEqual(st.real_size(), 0)
 
   def test_expand_size(self):
     st = ShapeTracker.from_shape((100, 100))
@@ -794,6 +815,18 @@ class TestShapeTrackerSize(unittest.TestCase):
                                                                                strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
     self.assertEqual(st.real_size(), 8389632)
 
+  def test_pad_size_simple(self):
+    st = ShapeTracker.from_shape((10,)).pad(((2,4),))
+    self.assertEqual(st.real_size(), 10)
+
+  def test_pad_size_multiview(self):
+    st = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).reshape((16*14,))
+    self.assertEqual(st.real_size(), 100)
+
+  def test_flip_size(self):
+    st = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).flip((True, True))
+    self.assertEqual(st.real_size(), 100)
+
 class TestConsecutive(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -826,6 +859,18 @@ class TestConsecutive(unittest.TestCase):
     assert not self.ones[0, :].lazydata.st.consecutive
     # consecutive if sliced into size 1
     assert self.ones[0, 0].lazydata.st.consecutive
+
+class TestRender(unittest.TestCase):
+  def test_render(self):
+    st = ShapeTracker.from_shape((2, 3))
+    idx, valid = st.to_indexed_uops()
+    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
+    self.assertEqual(valid.render(), "True")
+
+    st = st.pad(((0, 1), (0, 0)))
+    idx, valid = st.to_indexed_uops()
+    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
+    self.assertEqual(valid.render(), "(ridx0<2)")
 
 if __name__ == '__main__':
   unittest.main()

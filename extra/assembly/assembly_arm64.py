@@ -3,7 +3,7 @@ from platform import system
 from typing import Tuple, Dict, List, Optional
 from tinygrad import dtypes
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
-from tinygrad.codegen.kernel import UOps, UOp
+from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad.helpers import CI
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
 
@@ -19,7 +19,7 @@ class ARM64Language(AssemblyLanguage): pass
 
 def specialize_to_arm64(fn_nm, asm):
   var_size = 16
-  prev_uop:Optional[UOps] = None
+  prev_uop:Optional[Ops] = None
   ins = []
   x_regs = ['x' + str(i) for i in reversed(range(12))]
   s_regs = ['s' + str(i) for i in reversed(range(3,32)) if i <= 7 or i >= 16]
@@ -81,7 +81,7 @@ def specialize_to_arm64(fn_nm, asm):
       ins.append(f"mov x15, {mem_vars[v.nm]}")
       ins.append(f"ldr {rtor[v.nm]}, [sp, x15]")
 
-    if uop == UOps.SPECIAL:
+    if uop == Ops.SPECIAL:
       if arg.startswith('data'):
         # data 8 to n into the stack
         if int(arg[4:]) >= 8:
@@ -90,7 +90,7 @@ def specialize_to_arm64(fn_nm, asm):
       else:
         ins.append(f"mov {rtor[out.nm]}, #0")
         ins.append(f"loop_{arg}:")
-    elif uop == UOps.CAST:
+    elif uop == Ops.CAST:
       if arg == BinaryOps.CMPLT:
         if rtor[out.nm][0] == 's':
           mov_imm(0.0, 's0')
@@ -102,7 +102,7 @@ def specialize_to_arm64(fn_nm, asm):
           ins.append(f"csel {rtor[out.nm]}, x15, x14, lt")
       else:
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
-    elif uop == UOps.ALU:
+    elif uop == Ops.ALU:
       if len(vin)==2 and vin[1].__class__ is int: mov_imm(vin[1], 'x15')
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
@@ -136,7 +136,7 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"msub {rtor[out.nm]}, x14, {rhs}, {rtor[vin[0].nm]}")
       else:
         ins.append(f"{'f' if dtypes.is_float(vin[0][1]) else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {', '.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
-    elif uop == UOps.LOAD:
+    elif uop == Ops.LOAD:
       if arg.__class__ in (int, float):
         mov_imm(arg, rtor[out.nm])
       else:
@@ -146,20 +146,20 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"add x15, {rtor[vin[0].nm]}, x15")
         ins.append(f"ldr{'sb' if arg[2] is not None and arg[2] in (dtypes.int8, dtypes.uint8, dtypes.bool) else ''} {reg_in}, [x15]")
         if arg[2] is not None: ins.append(f"{'fcvt' if arg[2] in [dtypes.half, dtypes.double] else 'scvtf'} {rtor[out.nm]}, {reg_in}")
-    elif uop == UOps.STORE:
+    elif uop == Ops.STORE:
       #NOTE: if need casting load var in s/h0 or x/w12 temp regs
       reg_out = (type_to_reg[arg[2]] + ('0' if dtypes.is_float(arg[2]) else '12') if arg[2] is not None else rtor[vin[1].nm])
       if arg[2] is not None: ins.append(f"fcvt{'zs' if arg[2] not in [dtypes.half, dtypes.double] else '' } {reg_out}, {rtor[vin[1].nm]}")
       ins.append(f"mov x15, #{arg[0]}")
       ins.append(f"str {reg_out}, [{rtor[vin[0].nm]}, x15, lsl #0]")
-    elif uop == UOps.COND_BRANCH:
+    elif uop == Ops.COND_BRANCH:
       #TODO: this is a hack it shouldn't always be a cmp before a cond branch?
-      if prev_uop == UOps.LOAD:
+      if prev_uop == Ops.LOAD:
         ins.append(f"cmp {rtor[vin[0].nm]}, #0")
       ins.append(f"b.{'lt' if arg[1] else 'ge'} {arg[0][1:]}")
-    elif uop == UOps.LABEL:
+    elif uop == Ops.LABEL:
       ins.append(f"{arg[1:]}:")
-    elif uop == UOps.ENDLOOP:
+    elif uop == Ops.ENDLOOP:
       mov_imm(arg[0], "x15")
       ins.append(f"add {rtor[vin[0].nm]}, {rtor[vin[0].nm]}, #1")
       ins.append(f"cmp {rtor[vin[0].nm]}, x15")

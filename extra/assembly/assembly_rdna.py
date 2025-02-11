@@ -2,7 +2,7 @@ import yaml
 from typing import Tuple, Set, Dict
 from tinygrad import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
-from tinygrad.codegen.kernel import UOps
+from tinygrad.codegen.kernel import Ops
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
 
@@ -61,7 +61,7 @@ class RDNACodegen(AssemblyCodegen):
     def reg_out(x):
       return rtor[x]
     for uop, out, vin, arg in asm:
-      if uop == UOps.DEFINE_REGISTER:
+      if uop == Ops.DEFINE_REGISTER:
         if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes.float.vec(4)]:
           for i in range(arg[2]):
             # TODO: Re-use gaps created by this to avoid wasting registers
@@ -86,7 +86,7 @@ class RDNACodegen(AssemblyCodegen):
             rtor[Register(f"%{arg[1]}{i}", *arg[0])] = reg_name
         else:
           raise NotImplementedError("DEFINE_REGISTER not implemented for arg: ", arg)
-      elif uop == UOps.SPECIAL:
+      elif uop == Ops.SPECIAL:
         if arg.startswith('buf'):
           i = int(arg[3:])
           ins.append(f's_load_b64 {reg_out(out)}, s[0:1], {i*8}')
@@ -106,7 +106,7 @@ class RDNACodegen(AssemblyCodegen):
           pend_regs.clear()
           ins.append(f'v_mul_i32_i24 {reg_out(out)}, {reg_out(out)}, s{2+int(arg[3])}')
           ins.append(f'v_add_nc_u32 {reg_out(out)}, v{int(arg[3])}, {reg_out(out)}')
-      elif uop == UOps.CONST:
+      elif uop == Ops.CONST:
         if arg == float('inf'): arg = "0x7f800000"
         elif arg == float('-inf'): arg = "0xff800000"
         if out.dtype == dtypes.float.vec(4):
@@ -114,7 +114,7 @@ class RDNACodegen(AssemblyCodegen):
             ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float, False, off=off))}, {arg}")
         else:
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
-      elif uop == UOps.ALU:
+      elif uop == Ops.ALU:
         if arg in [BinaryOps.CMPLT]:
           ins.append(f"{'s' if out.scalar else 'v'}_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
         else:
@@ -127,7 +127,7 @@ class RDNACodegen(AssemblyCodegen):
               ins.append(f"{'s_' if rr[0].scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[rr[0].dtype]} {reg_out(rr[0])}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in rr[1:])}")
           else:
             ins.append(f"{'s_' if out.scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[out.dtype] if arg != UnaryOps.NOOP else 'b32'}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
-      elif uop == UOps.LOAD:
+      elif uop == Ops.LOAD:
         if out.scalar:
           # swap arg order
           ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(vin[1])} offset:{arg[0]}')
@@ -135,13 +135,13 @@ class RDNACodegen(AssemblyCodegen):
           ins.append(f'global_load_{"b128" if out.dtype == dtypes.float.vec(4) else "b32"} {reg_out(out)}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
         pend_regs.add(out)
         for r in out.subregs(): pend_regs.add(r)
-      elif uop == UOps.STORE:
+      elif uop == Ops.STORE:
         ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes.float.vec(4) else "b32"} {reg_in(vin[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
-      elif uop == UOps.LABEL:
+      elif uop == Ops.LABEL:
         ins.append(f"{arg}:")
-      elif uop == UOps.COND_BRANCH:
+      elif uop == Ops.COND_BRANCH:
         ins.append(f"s_cbranch_scc{'1' if arg[1] else '0'} {arg[0]}")
-      elif uop == UOps.CAST:
+      elif uop == Ops.CAST:
         if vin[0].dtype == dtypes.bool:
           if out.dtype == dtypes.float32:
             ins.append(f"v_cndmask_b32 {reg_out(out)}, 0.0, 1.0, {reg_in(vin[0])}")

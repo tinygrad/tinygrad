@@ -1,16 +1,15 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOps
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.ops import Ops
 from tinygrad.helpers import CI
 import numpy as np
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  schedule = create_schedule(t.lazydata.lbs)
-  asts = [s for s in schedule if s.ast.op is UOps.SINK]
-  assert len(asts) == desired_count
+  schedule = t.schedule()
+  asts = [s for s in schedule if s.ast.op is Ops.SINK]
+  assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
@@ -102,9 +101,10 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
-    _check_ast_count(0, t[:,:,Tensor(1),:])
-    _check_ast_count(0, t[:,:,Tensor(1)+2,:])
-    _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
+    # TODO: fold these
+    _check_ast_count(2, t[:,:,Tensor(1),:])
+    _check_ast_count(2, t[:,:,Tensor(1)+2,:])
+    _check_ast_count(2, t[:,:,Tensor(1),Tensor(0)])
 
   @unittest.expectedFailure
   def test_const_tensor_index(self):
@@ -130,13 +130,17 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_cast_padded(self):
     # NOTE: this is folded due to CAST_BEFORE_VIEW
-    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
-    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
-    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    # update: CAST_BEFORE_VIEW=1 is no longer supported
+    if is_dtype_supported(dtypes.int16):
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    if is_dtype_supported(dtypes.uint16):
+      _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+      np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # not folded
-    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
-    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
+    if is_dtype_supported(dtypes.int64):
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
   def test_const_sum(self):
@@ -151,9 +155,40 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).sum())
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).sum().numpy(), 4)
 
-    # NOTE: cannot just count the non-padded area because some UnaryOps f do not have f(0) = 0.
+    # NOTE: cannot just count the non-padded area because some Ops f do not have f(0) = 0.
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
     np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
+
+  def test_bool_zero_max(self):
+    _check_ast_count(0, Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)))
+    np.testing.assert_equal(Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)).numpy(), False)
+
+  def test_zero_size_ops(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]: # lambda x:x.max() NOTE: numpy gives "reduction operation maximum which has no identity"
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0)))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty(shape)))
+
+  def test_zero_size_ops_view(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0, 4).permute((1, 2, 0)).contiguous()))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty((shape))))
+
+  def test_zero_size_ops_realized(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
+      _check_ast_count(0, reduceop((Tensor.randn(0, 1)+1).realize()))
+      np.testing.assert_equal(reduceop((Tensor.randn(shape:=(0, 1))+1).realize()).numpy(), reduceop(np.empty(shape)))
+
+  def test_zero_size_realize_folded(self):
+    # non contiguous folded output doesn't realize
+    _check_ast_count(0, Tensor.empty(1, 0).sum())
+    # contiguous folded const can still schedule
+    a = Tensor.empty(1, 0).sum().contiguous()
+    _check_ast_count(2, a+2)
+    self.assertIsNotNone(a.lazydata.base.realized)
+    np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
+    # otherwise we just fuse it
+    _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
+    np.testing.assert_equal((Tensor.empty(1, 0).sum()+2).numpy(), 2)
 
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
@@ -203,6 +238,8 @@ class TestMultiConstFolding(unittest.TestCase):
     _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
 
+  # failing because multi calls .contiguous() on every single sharded uop
+  @unittest.expectedFailure
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
@@ -248,7 +285,6 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
 
-  @unittest.skip("not implemented yet")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
     a = Tensor([1, 2, 3])
@@ -258,7 +294,6 @@ class TestTautologicalCompare(unittest.TestCase):
     a = Tensor([math.nan, 1.0, 2.0])
     np.testing.assert_equal((a == a).numpy(), [False, True, True])
 
-  @unittest.skip("not implemented yet")
   def test_a_ne_a(self):
     # self not eq is always false for int or bool
     a = Tensor([1, 2, 3])

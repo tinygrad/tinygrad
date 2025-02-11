@@ -1,19 +1,16 @@
-import os
 import pathlib, tempfile, unittest
-import tarfile
-
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
-from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract
-from tinygrad.helpers import Timing, fetch, temp, CI
-from test.helpers import is_dtype_supported
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
+from tinygrad.helpers import Timing, fetch, temp, CI, OSX
+from tinygrad.device import is_dtype_supported
 
 def compare_weights_both(url):
   import torch
   fn = fetch(url)
   tg_weights = get_state_dict(torch_load(fn))
-  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu'), weights_only=True), tensor_type=torch.Tensor)
+  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu'), weights_only=False), tensor_type=torch.Tensor)
   assert list(tg_weights.keys()) == list(torch_weights.keys())
   for k in tg_weights:
     if tg_weights[k].dtype == dtypes.bfloat16: tg_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
@@ -71,8 +68,8 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
-    with self.assertRaises(RuntimeError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16)
+    with self.assertRaises(NotImplementedError):
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
     with self.assertRaises(RuntimeError):
@@ -85,7 +82,7 @@ class TestRawDiskBuffer(unittest.TestCase):
 
     pathlib.Path(tmp).unlink()
 
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
+@unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")
 class TestSafetensors(unittest.TestCase):
   def test_real_safetensors(self):
     import torch
@@ -137,14 +134,22 @@ class TestSafetensors(unittest.TestCase):
       for k in f.keys():
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
-  def test_huggingface_enet_safetensors(self):
-    # test a real file
-    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+  def _test_huggingface_enet_safetensors(self, fn):
     state_dict = safe_load(fn)
     assert len(state_dict.keys()) == 244
     assert 'blocks.2.2.se.conv_reduce.weight' in state_dict
     assert state_dict['blocks.0.0.bn1.num_batches_tracked'].numpy() == 276570
     assert state_dict['blocks.2.0.bn2.num_batches_tracked'].numpy() == 276570
+
+  def test_huggingface_enet_safetensors(self):
+    # test a real file
+    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    self._test_huggingface_enet_safetensors(fn)
+
+  def test_huggingface_enet_safetensors_fromurl(self):
+    # test tensor input
+    t = Tensor.from_url("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    self._test_huggingface_enet_safetensors(t)
 
   def test_metadata(self):
     metadata = {"hello": "world"}
@@ -159,6 +164,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
+      if dtype in [dtypes.double] and Device.DEFAULT == "METAL": continue # not supported on METAL
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
@@ -292,6 +298,7 @@ class TestDiskTensor(unittest.TestCase):
     ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
+  @unittest.skipIf(OSX, "new LLVM has an issue on OSX")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('dt_bf16_disk_write_read_f32')}").realize()
@@ -336,63 +343,6 @@ class TestDiskTensor(unittest.TestCase):
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
-class TestTarExtract(unittest.TestCase):
-  def setUp(self):
-    self.test_dir = tempfile.mkdtemp()
-    self.test_files = {
-      'file1.txt': b'Hello, World!',
-      'file2.bin': b'\x00\x01\x02\x03\x04',
-      'empty_file.txt': b''
-    }
-    self.tar_path = os.path.join(self.test_dir, 'test.tar')
-    with tarfile.open(self.tar_path, 'w') as tar:
-      for filename, content in self.test_files.items():
-        file_path = os.path.join(self.test_dir, filename)
-        with open(file_path, 'wb') as f:
-          f.write(content)
-        tar.add(file_path, arcname=filename)
-
-    # Create invalid tar file
-    self.invalid_tar_path = os.path.join(self.test_dir, 'invalid.tar')
-    with open(self.invalid_tar_path, 'wb') as f:
-      f.write(b'This is not a valid tar file')
-
-  def tearDown(self):
-    for filename in self.test_files:
-      os.remove(os.path.join(self.test_dir, filename))
-    os.remove(self.tar_path)
-    os.remove(self.invalid_tar_path)
-    os.rmdir(self.test_dir)
-
-  def test_tar_extract_returns_dict(self):
-    result = tar_extract(self.tar_path)
-    self.assertIsInstance(result, dict)
-
-  def test_tar_extract_correct_keys(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(set(result.keys()), set(self.test_files.keys()))
-
-  def test_tar_extract_content_size(self):
-    result = tar_extract(self.tar_path)
-    for filename, content in self.test_files.items():
-      self.assertEqual(len(result[filename]), len(content))
-
-  def test_tar_extract_content_values(self):
-    result = tar_extract(self.tar_path)
-    for filename, content in self.test_files.items():
-      np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
-
-  def test_tar_extract_empty_file(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(len(result['empty_file.txt']), 0)
-
-  def test_tar_extract_non_existent_file(self):
-    with self.assertRaises(FileNotFoundError):
-      tar_extract('non_existent_file.tar')
-
-  def test_tar_extract_invalid_file(self):
-    with self.assertRaises(tarfile.ReadError):
-      tar_extract(self.invalid_tar_path)
 
 class TestPathTensor(unittest.TestCase):
   def setUp(self):
@@ -413,10 +363,10 @@ class TestPathTensor(unittest.TestCase):
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_with_device(self):
-    t = Tensor(self.test_file, device="CPU")
+    t = Tensor(self.test_file, device="CLANG")
     self.assertEqual(t.shape, (100,))
     self.assertEqual(t.dtype, dtypes.uint8)
-    self.assertEqual(t.device, "CPU")
+    self.assertEqual(t.device, "CLANG")
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_empty_file(self):
@@ -441,8 +391,8 @@ class TestPathTensor(unittest.TestCase):
 
   def test_path_tensor_copy_to_device(self):
     t = Tensor(self.test_file)
-    t_cpu = t.to("CPU")
-    self.assertEqual(t_cpu.device, "CPU")
+    t_cpu = t.to("CLANG")
+    self.assertEqual(t_cpu.device, "CLANG")
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
 if __name__ == "__main__":

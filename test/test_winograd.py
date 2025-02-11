@@ -1,9 +1,8 @@
 import unittest
-from tinygrad import Tensor, GlobalCounters
-from tinygrad.ops import UOps
+from tinygrad import Tensor, GlobalCounters, dtypes
+from tinygrad.ops import Ops
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.schedule import create_schedule
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
@@ -20,11 +19,11 @@ class TestWinograd(unittest.TestCase):
       out = Tensor.conv2d(x, w)
 
     with Timing("scheduling: "):
-      sched = create_schedule([out.lazydata])
+      sched = out.schedule()
 
     for i,s in enumerate(sched):
-      if s.ast.op is not UOps.SINK: continue
-      ops = s.ast.parents
+      if s.ast.op is not Ops.SINK: continue
+      ops = s.ast.toposort
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Kernel(s.ast)
         l.hand_coded_optimizations()
@@ -68,6 +67,14 @@ class TestWinograd(unittest.TestCase):
     print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")
     self.assertLess(ops_ratio, 2.6)  # TODO: there's issues with factorization now
     self.assertLess(mem_ratio, 10)
+
+  def test_dtype(self):
+    IC, OC, X, Y = 4,4,9,9
+    x,w = Tensor.empty(1,IC,Y,X), Tensor.empty(OC,IC,3,3)
+    self.assertEqual(Tensor.conv2d(x,w).dtype, dtypes.default_float)
+
+    x,w = Tensor.empty(1,IC,Y,X,dtype=dtypes.half), Tensor.empty(OC,IC,3,3,dtype=dtypes.half)
+    self.assertEqual(Tensor.conv2d(x,w).dtype, dtypes.half)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

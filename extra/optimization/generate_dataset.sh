@@ -1,6 +1,8 @@
 #!/bin/bash
+export PAGE_SIZE=1
+export PYTHONPATH=.
 export LOGOPS=/tmp/ops
-export RUN_PROCESS_REPLAY=1
+export CAPTURE_PROCESS_REPLAY=1
 rm $LOGOPS
 test/external/process_replay/reset.py
 
@@ -23,5 +25,5 @@ JIT=2 BIG=1 MPS=1 python -m pytest test/test_speed_v_torch.py
 
 # extract, sort and uniq
 extra/optimization/extract_dataset.py
-sort -u /tmp/ops > /tmp/sops	
+sort -u /tmp/ops > /tmp/sops
 ls -lh /tmp/ops /tmp/sops	

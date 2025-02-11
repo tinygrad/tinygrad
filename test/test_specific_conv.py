@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.helpers import CI
 from tinygrad import Tensor, Device, dtypes
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 # similar to test/external/external_test_gpu_ast.py, but universal
 
 @unittest.skipIf(Device.DEFAULT in {"CUDA", "NV"} and CI, "slow on CUDA CI")

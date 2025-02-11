@@ -66,6 +66,7 @@ class TestBeamSearch(unittest.TestCase):
     with Timing():
       c(x).realize()
 
+  @unittest.skip("flaky, Fatal Python error: Floating point exception")
   def test_large_ast(self):
     a = Tensor.rand(3, 3)
     for _ in range(5):

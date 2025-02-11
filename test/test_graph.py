@@ -3,7 +3,6 @@ import unittest, ctypes
 
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import Context, CI, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
@@ -21,7 +20,7 @@ def helper_exec_op(device, outbuf, inbufs):
       s = fst[0]
       for i in range(1, len(inbufs)): s = s.xor(fst[i])
 
-      si = create_schedule([s.lazydata])[-1]
+      si = s.schedule()[-1]
       prg = get_runner(device, si.ast)
     cached_prgs[(device, len(inbufs))] = prg
 
@@ -36,7 +35,7 @@ def helper_alloc_rawbuffer(device, fill=False):
   if fill:
     with Context(DEBUG=0):
       data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data).realize().lazydata.realized.as_buffer())
+      rawbuf.copyin(Tensor(data).realize().lazydata.base.realized.as_buffer())
   return rawbuf
 
 def helper_run_jit(jis, bufs, out_buffers):
@@ -54,8 +53,7 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   out_buffers = set()
   for graph in graphs:
     for ji in graph:
-      writable_buffers = ji.prg.p.outcount if isinstance(ji.prg, CompiledRunner) else 1
-      out_buffers.update(ji.bufs[:writable_buffers])
+      out_buffers.update([ji.bufs[i] for i in (ji.prg.p.outs if isinstance(ji.prg, CompiledRunner) else [0])])
       bufs += ji.bufs
       reg_ji.append(ji)
   bufs = dedup(bufs)

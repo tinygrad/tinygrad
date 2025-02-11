@@ -1,5 +1,7 @@
 from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
+from tinygrad.device import is_dtype_supported
+from tinygrad import dtypes
 import numpy as np
 from itertools import chain
 from pathlib import Path
@@ -8,6 +10,7 @@ from collections import defaultdict
 import time, sys
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import safe_load, load_state_dict
+import json
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/tinygrad/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
@@ -61,7 +64,7 @@ def compute_nms(boxes, scores, iou_threshold):
     if order.size == 1:
       break
     iou = box_iou(boxes[i][None, :], boxes[order[1:]])
-    inds = np.where(iou.squeeze() <= iou_threshold)[0]
+    inds = np.where(np.atleast_1d(iou.squeeze()) <= iou_threshold)[0]
     order = order[inds + 1]
   return np.array(keep)
 
@@ -282,7 +285,7 @@ class SPPF:
     self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
 
     # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% difference in prediction which does not make a difference visually.
-    self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
+    self.maxpool = lambda x : x.pad((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
 
   def __call__(self, x):
     x = self.cv1(x)
@@ -385,6 +388,32 @@ class YOLOv8:
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
 
+def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
+  with open(input_file, 'rb') as f:
+    metadata_length = int.from_bytes(f.read(8), 'little')
+    metadata = json.loads(f.read(metadata_length).decode())
+    float32_values = np.fromfile(f, dtype=np.float16).astype(np.float32)
+
+  for v in metadata.values():
+    if v["dtype"] == "F16": v.update({"dtype": "F32", "data_offsets": [offset * 2 for offset in v["data_offsets"]]})
+
+  with open(output_file, 'wb') as f:
+    new_metadata_bytes = json.dumps(metadata).encode()
+    f.write(len(new_metadata_bytes).to_bytes(8, 'little'))
+    f.write(new_metadata_bytes)
+    float32_values.tofile(f)
+
+def get_weights_location(yolo_variant: str) -> Path:
+  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
+  fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
+
+  if not is_dtype_supported(dtypes.half):
+    f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
+    if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
+    weights_location = f32_weights
+
+  return weights_location
+
 if __name__ == '__main__':
 
   # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
@@ -410,8 +439,7 @@ if __name__ == '__main__':
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
-
-  state_dict = safe_load(fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors'))
+  state_dict = safe_load(get_weights_location(yolo_variant))
   load_state_dict(yolo_infer, state_dict)
 
   st = time.time()

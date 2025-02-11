@@ -87,7 +87,7 @@ class TestUOpResolve(unittest.TestCase):
   def test_max(self):
     x = UOp.variable("x", 1, 10)
     y = UOp.variable("y", 5, 10)
-    u = x.max(y)
+    u = x.maximum(y)
     self.assertTrue(u < 20)
     self.assertFalse(u < 3)
 
@@ -115,6 +115,11 @@ class TestUOpResolve(unittest.TestCase):
     with self.assertRaises(ValueError):
       u = UOp.variable("i", 1, 10) < 5
       self.assertFalse(u)
+
+  def test_plus_ordering_lt(self):
+    i = UOp.variable("i", 1, 10)
+    j = UOp.variable("j", 1, 10)
+    self.assertFalse((i+j) < (j+i))
 
 if __name__ == '__main__':
   unittest.main()

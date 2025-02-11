@@ -88,6 +88,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [AMD](tinygrad/runtime/ops_amd.py)
 - [x] [NV](tinygrad/runtime/ops_nv.py)
 - [x] [QCOM](tinygrad/runtime/ops_qcom.py)
+- [x] [WEBGPU](tinygrad/runtime/ops_webgpu.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of ~25 low level ops.
 
@@ -125,8 +126,8 @@ y = Tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad.numpy())  # dz/dx
-print(y.grad.numpy())  # dz/dy
+print(x.grad.tolist())  # dz/dx
+print(y.grad.tolist())  # dz/dy
 ```
 
 The same thing but in PyTorch:
@@ -138,8 +139,8 @@ y = torch.tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad.numpy())  # dz/dx
-print(y.grad.numpy())  # dz/dy
+print(x.grad.tolist())  # dz/dx
+print(y.grad.tolist())  # dz/dy
 ```
 
 ## Contributing
@@ -150,7 +151,7 @@ We'll start with what will get your PR closed with a pointer to this section:
 
 - No code golf! While low line count is a guiding light of this project, anything that remotely looks like code golf will be closed. The true goal is reducing complexity and increasing readability, and deleting `\n`s does nothing to help with that.
 - All docs and whitespace changes will be closed unless you are a well-known contributor. The people writing the docs should be those who know the codebase the absolute best. People who have not demonstrated that shouldn't be messing with docs. Whitespace changes are both useless *and* carry a risk of introducing bugs.
-- Anything you claim is a "speedup" must be benchmarked. In general, the goal is simplicity, so even if your PR makes things marginally faster, you have to consider the tradeoff with maintainablity and readablity.
+- Anything you claim is a "speedup" must be benchmarked. In general, the goal is simplicity, so even if your PR makes things marginally faster, you have to consider the tradeoff with maintainability and readability.
 - In general, the code outside the core `tinygrad/` folder is not well tested, so unless the current code there is broken, you shouldn't be changing it.
 - If your PR looks "complex", is a big diff, or adds lots of lines, it won't be reviewed or merged. Consider breaking it up into smaller PRs that are individually clear wins. A common pattern I see is prerequisite refactors before adding new functionality. If you can (cleanly) refactor to the point that the feature is a 3 line change, this is great, and something easy for us to review.
 
@@ -178,4 +179,4 @@ python3 -m pytest test/                 # whole test suite
 
 #### Process replay tests
 
-[Process replay](https://github.com/tinygrad/tinygrad/blob/master/test/external/process_replay/process_replay.py) compares your PR's generated kernels against master. If your PR is a refactor or speedup without any expected behavior change, It should include [pr] in the pull request title, [example](https://github.com/tinygrad/tinygrad/pull/4995). Note that you should keep your branch up-to-date with master.
+[Process replay](https://github.com/tinygrad/tinygrad/blob/master/test/external/process_replay/README.md) compares your PR's generated kernels against master. If your PR is a refactor or speedup without any expected behavior change, It should include [pr] in the pull request title.

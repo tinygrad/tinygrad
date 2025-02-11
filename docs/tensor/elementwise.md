@@ -13,10 +13,15 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.sin
 ::: tinygrad.Tensor.cos
 ::: tinygrad.Tensor.tan
+::: tinygrad.Tensor.asin
+::: tinygrad.Tensor.acos
+::: tinygrad.Tensor.atan
 ::: tinygrad.Tensor.trunc
 ::: tinygrad.Tensor.ceil
 ::: tinygrad.Tensor.floor
 ::: tinygrad.Tensor.round
+::: tinygrad.Tensor.isinf
+::: tinygrad.Tensor.isnan
 ::: tinygrad.Tensor.lerp
 ::: tinygrad.Tensor.square
 ::: tinygrad.Tensor.clamp
@@ -29,8 +34,10 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 
 ::: tinygrad.Tensor.relu
 ::: tinygrad.Tensor.sigmoid
+::: tinygrad.Tensor.hardsigmoid
 ::: tinygrad.Tensor.elu
 ::: tinygrad.Tensor.celu
+::: tinygrad.Tensor.selu
 ::: tinygrad.Tensor.swish
 ::: tinygrad.Tensor.silu
 ::: tinygrad.Tensor.relu6
@@ -42,6 +49,7 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.asinh
 ::: tinygrad.Tensor.acosh
 ::: tinygrad.Tensor.hardtanh
+::: tinygrad.Tensor.erf
 ::: tinygrad.Tensor.gelu
 ::: tinygrad.Tensor.quick_gelu
 ::: tinygrad.Tensor.leakyrelu
@@ -55,6 +63,8 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.sub
 ::: tinygrad.Tensor.mul
 ::: tinygrad.Tensor.div
+::: tinygrad.Tensor.idiv
+::: tinygrad.Tensor.mod
 ::: tinygrad.Tensor.xor
 ::: tinygrad.Tensor.lshift
 ::: tinygrad.Tensor.rshift
