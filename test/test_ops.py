@@ -641,9 +641,12 @@ class TestOps(unittest.TestCase):
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
+    helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.sqrt())
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
+    # TODO: fix backward
+    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]], forward_only=True)
     helper_test_op([()], lambda x: x.rsqrt())
 
   def test_xor(self):
@@ -1274,6 +1277,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
     helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
   def test_var_one_in_axis(self):
+    helper_test_op([(1,)], lambda x: x.var(axis=(0,), correction=0))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=0))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5))
@@ -1301,8 +1305,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
     helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
   def test_std_one_in_axis(self):
+    # TODO: fix backward
+    helper_test_op([(1,)], lambda x: x.std(axis=(0,), correction=0), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)))
-    # TODO: this one broke with correction=0 in new gradient
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=0), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5))
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4)))
