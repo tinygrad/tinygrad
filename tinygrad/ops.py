@@ -94,7 +94,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); PRELOAD = auto(); KERNEL = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -163,7 +163,7 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-  Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
@@ -343,13 +343,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
     return unwrap(self.st)
   @property
-  def const_arg(self) -> ConstType:
-    match self.base.op:
-      case Ops.CONST: ret = self.base.arg
-      case op: raise AssertionError(f"const_arg called on {op}")
-    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
-    return ret
-  @property
   def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
     ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
@@ -507,7 +500,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
-  def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
+  def metadata(self) -> Metadata|None: return all_metadata.get(self, None)
 
   # *** uop movement ops ***
 
@@ -1170,8 +1163,8 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # ** COMMUTATIVE flipping (only for ints) **
+  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
