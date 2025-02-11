@@ -42,8 +42,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
-    - name: Install capstone for CLANG disassembly
-      run: pip install capstone
+        pydeps: "capstone"
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -403,6 +402,11 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
+      with:
+        key: dsp-minimal
+        deps: testing_minimal
+        pydeps: "onnx==1.16.0 onnxruntime"
+        llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -416,6 +420,12 @@ jobs:
         cache-to: type=gha,mode=min
     - name: Run test_tiny on DSP
       run: DEBUG=2 DSP=1 python test/test_tiny.py
+    - name: Test quantize onnx
+      run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
+    - name: Test LLVM=1 DEVECTORIZE=0
+      run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    #- name: Test CLANG=1 DEVECTORIZE=0
+    #  run: CLANG=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
   testwebgpu:
     name: Linux (WebGPU)
@@ -475,7 +485,7 @@ jobs:
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
