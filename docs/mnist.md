@@ -18,6 +18,7 @@ print(Device.DEFAULT)
 ```
 
 You will see `CUDA` here on a GPU instance, or `CLANG` here on a CPU instance.
+>If you see `GPU` instead of `CUDA`, you likely don't have the correct CUDA drivers installed. See [CUDA Installation Guide for Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html).
 
 ## A simple model
 
