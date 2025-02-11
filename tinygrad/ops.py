@@ -916,14 +916,20 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
-  def bottom_up_rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_n: UOp|None = n
-    while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
-    new_src = tuple([self.bottom_up_rewrite(x) for x in last_n.src])
-    self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
-    return ret
-
+def bottom_up_rewrite(self, uop: UOp) -> UOp:
+    stack, rebuilt = [(uop, False)], {}
+    while stack:
+      node, processed = stack.pop()
+      if not processed:
+        stack.append((node, True))
+        stack.extend((src, False) for src in node.src)
+        continue
+      new_node = node
+      while (rewritten := self.pm.rewrite(new_node, self.ctx)): new_node = rewritten
+      new_node = new_node.copy(src=tuple(rebuilt.get(src, src) for src in new_node.src)) if (new_src := tuple(rebuilt.get(s, s) for s in new_node.src)) != new_node.src else new_node
+      rebuilt[node] = new_node
+    return rebuilt.get(uop, uop)
+    
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
     tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
