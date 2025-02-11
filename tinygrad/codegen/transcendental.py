@@ -1,5 +1,4 @@
 import math
-from typing import Tuple
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import polyN
 from tinygrad.ops import UOp
@@ -49,7 +48,7 @@ def ldexp2k(d:UOp, e:UOp) -> UOp:
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
   return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
 
-def frexp(v:UOp) -> Tuple[UOp, UOp]:
+def frexp(v:UOp) -> tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent) assuming v != 0"""
   assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
@@ -63,7 +62,7 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   return mantissa, exp
 
 # *** reduction algorithms for sine ***
-def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
+def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   """
   Performs Payne-Hanek Reduction: computes the remainder of `d` modulo pi/2 for the values `d` where
     39800.0 <= d <= +Inf
@@ -112,7 +111,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   # if fraction >= 0.5, r -= pi/2, q += 1
   return (f<0.5).where(r, r - math.pi/2), (f<0.5).where(q, q + 1)
 
-def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
+def cody_waite_reduction(d:UOp) -> tuple[UOp, UOp]:
   """
   Performs Cody-Waite Reduction: computes the reminder of `d` modulo pi/2 for the values `d` where
       0 <= abs(d) <= 39800.0
@@ -255,3 +254,13 @@ def xlog2(d:UOp) -> UOp:
   r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
   return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+
+def xpow(base:UOp, exponent:UOp) -> UOp:
+  # start with b ** e = exp2(e * log2(b))
+  ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
+  # negative base adjustment: nan for non-integer exponent and -1 for odd exponent
+  adj = (base < 0).where((exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)).where(
+    ret.const_like(math.nan),
+    (exponent.cast(dtypes.int32).cast(dtypes.uint32)%2).eq(1).where(ret.const_like(-1), ret.const_like(1))), ret.const_like(1))
+  # fix 0 ** 0 = 1
+  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * adj)

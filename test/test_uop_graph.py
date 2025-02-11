@@ -1,11 +1,11 @@
 from typing import List
 import unittest, time
 from tinygrad import dtypes, Device
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, AMX
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, graph_rewrite, expander, sym
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
@@ -397,7 +397,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(local=True), (), ("temp", 1))
+    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=1, local=True), (), "temp")
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -602,6 +602,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 1
 
+  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
   def test_two_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)]
@@ -661,7 +662,7 @@ class TestLoadStoreFolder(unittest.TestCase):
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 4))
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -680,7 +681,7 @@ class TestIFUOps(unittest.TestCase):
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 16))
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))

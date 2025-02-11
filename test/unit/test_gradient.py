@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, Ops
 from tinygrad.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
@@ -14,7 +14,7 @@ class TestGradient(unittest.TestCase):
 
   def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
-    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), [x])[x]
+    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), set([x]))[x]
     gf = jax.grad(f if jf is None else jf)
 
     for val in [-5., -2.0, 0.0, 2.0, 5.]:
@@ -24,7 +24,7 @@ class TestGradient(unittest.TestCase):
   def _test_two_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
-    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), [x, y])
+    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), set([x, y]))
     gx, gy = grads[x], grads[y]
     gf = jax.grad(f if jf is None else jf, argnums=(0, 1))
 
@@ -92,6 +92,32 @@ class TestTensorGradient(unittest.TestCase):
     dz = Tensor([1.0, 1.0, 1.0])
     dx = z.gradient(x, gradient=dz)[0]
     self.assertListEqual(dx.tolist(), [2.0, 4.0, 6.0])
+
+  def test_cast_before_view(self):
+    x = Tensor([1.0, 1, 1, 1])
+    x_reshaped = x.reshape(2,2)
+    x_casted = x_reshaped.cast(dtypes.float16)
+    x_casted.mean().gradient(x_reshaped)
+
+class TestRealizeMeansRealize(unittest.TestCase):
+  def test_randn_realizes(self):
+    x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
+    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata.is_realized
+
+  #@unittest.expectedFailure
+  # update: passing after delete_forced_realize
+  def test_uniform_realizes(self):
+    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    print(x.lazydata)
+    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata.is_realized
+
+  # NOTE: even though it doesn't realize, this seems fine
+  def test_uniform_gradient(self):
+    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    y = x * 2
+    y.sum().gradient(x)[0].realize()
 
 if __name__ == '__main__':
   unittest.main()

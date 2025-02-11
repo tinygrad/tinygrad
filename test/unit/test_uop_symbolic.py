@@ -1,15 +1,14 @@
 #!/usr/bin/env python
 import unittest, pickle
-from typing import Tuple
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
 
-def render(self) -> Tuple[str, ConstType, ConstType]:
+def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
   uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink()))
@@ -91,11 +90,16 @@ class TestSymbolic(unittest.TestCase):
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
+    self.helper_test_variable(b+a*2+a*3, 0, 8*6, "(b+(a*5))")
 
   def test_factorize_no_mul(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+    self.helper_test_variable((a+b)+a*3, 0, 8*5, "(b+(a*4))")
+    self.helper_test_variable((a*3+b)+b*3, 0, 8*7, "((a*3)+(b*4))")
 
   def test_neg(self):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
@@ -108,7 +112,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_self(self):
     a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
+    self.helper_test_variable((a+b)+b, 0, 24, "(a+(b*2))")
 
   def test_sub_self(self):
     a = Variable("a", 0, 8)
@@ -133,6 +139,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_1(self):
     self.helper_test_variable(Variable("a", 0, 8)%1, 0, 0, "0")
+
+  def test_max_folds(self):
+    self.helper_test_variable(Variable("a", 0, 20).maximum(10).maximum(11), 11, 20, "max(a, 11)")
 
   def test_add_min_max(self):
     self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
@@ -392,6 +401,17 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((idx0*v+idx1)//v, 0, 2, "(idx0)")
     self.helper_test_variable((idx0*v+idx1)%v, 0, start_pos, "idx1")
 
+  def test_divmod_variable_denom_fold_to_const(self):
+    x = Variable("x", 20, 23)
+    y = Variable("y", 8, 10)
+    self.helper_test_variable(x//y, 2, 2, "2")
+    self.helper_test_variable(x%y, 0, 7, "(x+(y*-2))")
+    # ensure all 4 corners are checked
+    x = Variable("x", -10, 10)
+    y = Variable("y", -8, 9)
+    self.helper_test_variable(x//y, -2147483648, 2147483647, "(x//y)")
+    self.helper_test_variable(x%y, -2147483648, 2147483647, "(x%y)")
+
   # TODO: simplify the expression
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
@@ -510,6 +530,20 @@ class TestSymbolic(unittest.TestCase):
 
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
+
+  def test_where_cast(self):
+    s = Variable("s", 0, 3)
+    cond = s < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond.where(a, b).cast(dtypes.half)
+
+    # TODO: copied from render, render does not support cast
+    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink()))
+    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
+
+    self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
 
   def test_symbolic_div(self):
     # from symbolic arange
