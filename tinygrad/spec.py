@@ -115,7 +115,7 @@ spec = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  (UPat(Ops.NOOP), lambda: True),
+  (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
