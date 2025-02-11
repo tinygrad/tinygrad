@@ -53,6 +53,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
     # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
     a = (a > 65504).where(65504, a)
+
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
 
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
@@ -89,7 +90,6 @@ class TestDType(unittest.TestCase):
       lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize == self.DTYPE.itemsize else None,
       get_available_cast_dtypes(self.DTYPE)
     ))
-
   def test_upcast_ops(self):
     list(map(
       lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
@@ -109,7 +109,7 @@ class TestDType(unittest.TestCase):
     ))
 
   def test_dtypes_fields(self):
-    fields = dtypes.fields()
+  fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
     self.assertEqual(len(fields), 26)

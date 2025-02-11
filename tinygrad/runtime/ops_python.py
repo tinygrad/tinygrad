@@ -71,8 +71,8 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           assert isinstance(dtype, PtrDType)
+          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
           if dtype.base in dtypes.fp8s: ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size
           else:
@@ -111,8 +111,7 @@ class PythonProgram:
           assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
           if dtp[0] in dtypes.fp8s: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
           else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
-          if dtype == dtypes.fp8e4m3: ul[i] = np.frombuffer(packed, dtype=float8_e4m3).tolist()
-          elif dtype == dtypes.fp8e5m2: ul[i] = np.frombuffer(packed, dtype=float8_e5m2).tolist()
+          if dtype in dtypes.fp8s: ul[i] = np.frombuffer(packed, dtype=truncate.get(dtype, lambda dt: dt)).tolist()
           else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
         elif uop is Ops.CAST:
           ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
