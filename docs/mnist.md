@@ -19,6 +19,12 @@ print(Device.DEFAULT)
 
 You will see `CUDA` here on a GPU instance, or `CLANG` here on a CPU instance.
 
+Check supported backends with:
+
+```python
+python -m tinygrad.device
+```
+
 ## A simple model
 
 We'll use the model from [the Keras tutorial](https://keras.io/examples/vision/mnist_convnet/).
