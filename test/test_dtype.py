@@ -109,7 +109,7 @@ class TestDType(unittest.TestCase):
     ))
 
   def test_dtypes_fields(self):
-  fields = dtypes.fields()
+    fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
     self.assertEqual(len(fields), 26)
