@@ -397,7 +397,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(local=True), (), ("temp", 1))
+    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=1, local=True), (), "temp")
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -662,7 +662,7 @@ class TestLoadStoreFolder(unittest.TestCase):
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 4))
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -681,7 +681,7 @@ class TestIFUOps(unittest.TestCase):
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 16))
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))

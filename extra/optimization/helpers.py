@@ -1,5 +1,4 @@
 # stuff needed to unpack a kernel
-from typing import Tuple
 from tinygrad import Variable
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.ops import UOp, Ops, KernelInfo

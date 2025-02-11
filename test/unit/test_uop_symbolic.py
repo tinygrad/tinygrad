@@ -140,6 +140,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_1(self):
     self.helper_test_variable(Variable("a", 0, 8)%1, 0, 0, "0")
 
+  def test_max_folds(self):
+    self.helper_test_variable(Variable("a", 0, 20).maximum(10).maximum(11), 11, 20, "max(a, 11)")
+
   def test_add_min_max(self):
     self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
 
@@ -527,6 +530,20 @@ class TestSymbolic(unittest.TestCase):
 
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
+
+  def test_where_cast(self):
+    s = Variable("s", 0, 3)
+    cond = s < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond.where(a, b).cast(dtypes.half)
+
+    # TODO: copied from render, render does not support cast
+    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink()))
+    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
+
+    self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
 
   def test_symbolic_div(self):
     # from symbolic arange

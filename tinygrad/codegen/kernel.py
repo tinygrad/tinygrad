@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-  graph_rewrite, track_rewrites, view_left
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
@@ -57,11 +57,8 @@ class Kernel:
     if ast.op is Ops.SINK: self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    try: verify_ast(self.ast)
-    except AssertionError as e:
-      print("INVALID AST")
-      print(self.ast)
-      raise e
+    # verify AST matches the spec
+    if __debug__: type_verify(list(self.ast.toposort), shape_spec)
 
     self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
 
@@ -388,6 +385,8 @@ class Kernel:
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
+      # NOTE: LLVM/CLANG can use locals too, but they are treated the same as globals (still helpful for L1 cache)
+      # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce)
@@ -412,7 +411,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
-      check(amt <= 16, "don't upcast more than 16")
+      check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.NOLOCALS:
@@ -428,7 +427,7 @@ class Kernel:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, set()), f"cannot pad {r}")
+      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, {}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
@@ -623,7 +622,7 @@ class Kernel:
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), (f"temp{i + 1}", st.real_size()))
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
@@ -651,7 +650,7 @@ class Kernel:
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_size = st_uop.arg.real_size()
-          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), (f"temp{self.reduceops.index(op)+1}", local_size))
+          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
           local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
@@ -673,7 +672,10 @@ class Kernel:
       if getenv("RAWAST"): print(self.ast)
       print(modified_ast)
       print(self.applied_opts)
-    verify_ast(modified_ast)
+    # verify AST matches the spec after applying opts
+    if __debug__: type_verify(list(modified_ast.toposort))
+    # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
+    #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
@@ -693,39 +695,3 @@ class Kernel:
                         key=lambda x: (x.op, x.src[0].arg)))
     return ProgramSpec(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
-
-# the living definition of intermediate UOps
-
-def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:dict[UOp, ShapeTracker]) -> None:
-  if uop in sts: return
-  # restore globals from the two stage reduce
-  # this is because this LOAD has an implicit movement op
-  if uop.op is Ops.LOAD and uop.src[0].op is Ops.DEFINE_LOCAL:
-    _assert_valid_uop(local_reduce:=uop.src[2].src[2], uop.st_arg, sts)
-    sts[uop] = sts[local_reduce]
-    return
-  for x in uop.src: _assert_valid_uop(x, st, sts)
-  # only reduceuop is allowed to change shape, limited to turning n to 1
-  if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
-  # movementops are pushed to VIEW
-  elif uop.op is Ops.VIEW:
-    # NOTE: we disallow VIEW in the middle of the AST, if it has a DEVICE source it's fine
-    assert len(uop.src) == 0 or uop.src[0].op is Ops.DEVICE, f"can't swizzle in kernel yet {uop}"
-    st = uop.arg
-  # everything else inherits shape
-  else:
-    if len(src_sts:=[sts[x] for x in uop.src if x in sts]) == 0: return None
-    st = src_sts[0]
-    if not all_same(shapes:=[x.shape for x in src_sts]):
-      if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
-      raise AssertionError(f"found implicit expand {sizes} {shapes}")
-  sts[uop] = st
-
-def verify_ast(ast:UOp) -> None:
-  assert ast.op is Ops.SINK and all(x.op is Ops.STORE for x in ast.src), "must be SINK"
-  assert all_same([x.st_arg.size for x in ast.src]), "outputs must be exactly the same size"
-  sts: dict[UOp, ShapeTracker] = {}
-  for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
-  assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
-  type_verify(list(sts))
