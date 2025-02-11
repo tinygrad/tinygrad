@@ -546,7 +546,7 @@ jobs:
         NV: 1
         FORWARD_ONLY: 1
       run: |
-        python3 -m pytest -n=1 test/test_hcq.py test/test_tiny.py --durations=20
+        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
