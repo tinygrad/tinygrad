@@ -118,7 +118,7 @@ class Ops(FastEnum):
   REDUCE_AXIS = auto()
 
   # helper ops
-  GEP = auto(); VECTORIZE = auto() # noqa: E702
+  GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
@@ -365,7 +365,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
-      if self.op is Ops.VECTORIZE and all(x.dtype.vcount == 1 for x in self.src): return self.src[i]
+      if self.op is Ops.VECTORIZE: return self.src[i]
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
