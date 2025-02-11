@@ -141,6 +141,7 @@ class NVComputeQueue(NVCommandQueue):
 
     self.bind_sints_to_ptr(*global_size, ptr=qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, fmt='I')
     self.bind_sints_to_ptr(*local_size, ptr=qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, fmt='H')
+    self.bind_sints_to_ptr(*local_size, *global_size, ptr=args_state.ptr, fmt='I')
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
 
     if self.active_qmd is None:
@@ -188,7 +189,7 @@ class NVCopyQueue(NVCommandQueue):
 
 class NVArgsState(CLikeArgsState):
   def __init__(self, ptr:int, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    if MOCKGPU: prg.constbuffer_0[0:2] = [len(bufs), len(vals)]
+    if MOCKGPU: prg.constbuffer_0[80:82] = [len(bufs), len(vals)]
     super().__init__(ptr, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
 
 class NVProgram(HCQProgram):
