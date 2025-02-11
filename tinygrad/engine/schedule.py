@@ -345,18 +345,19 @@ def check_load_st(glbl:UOp, view:UOp):
   raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
-fix_kernel_ops = PatternMatcher([
-  # BUFFER becomes DEFINE_GLOBAL
+to_si = PatternMatcher([
+  # BUFFER -> DEFINE_GLOBAL
   (UPat(Ops.BUFFER, name="x"), _append_buf),
-  # BIND in shapetracker becomes DEFINE_VAR
+  # simplify and unbind the final VIEWs
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  # remove SINK from COPY and BUFFER_VIEW
+  # don't need SINK on COPY or BUFFER_VIEW
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
-  # remove CONTIGUOUS/ASSIGN/DEVICE
+  # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
+  # don't need DEVICE anymore
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
-  # no ImageDType after load
+  # once images are loaded they become the base dtype
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
@@ -370,11 +371,11 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> ScheduleItem:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
-  # fix_kernel_ops
-  sink = graph_rewrite(sink, fix_kernel_ops, si_ctx:=KernelContext(ctx.var_vals))
+  # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
+  ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(ctx.var_vals))
   # NOTE: we only add the metadata for fused tensors
   metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
-  return ScheduleItem(sink, tuple(u.buffer for u in si_ctx.bufs), metadata)
+  return ScheduleItem(ast, tuple(u.buffer for u in si_ctx.bufs), metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
