@@ -31,6 +31,7 @@ def lcast(input_type:DType, output_type:DType):
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
+# https://github.com/corsix/amx
 def render_wmma(ctx, wmma: UOp) -> str:
   def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0; AMX'
 
