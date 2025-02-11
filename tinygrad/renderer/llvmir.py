@@ -4,7 +4,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
-from tinygrad.helpers import dedup, prod, AMX
+from tinygrad.helpers import prod, AMX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -35,13 +35,13 @@ def render_wmma(ctx, wmma: UOp) -> str:
   def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0'
 
   return "\n".join([
-    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype.ptr())} %amx_{i}, align {src.dtype.itemsize}' for i, src in enumerate(wmma.src)],
+    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype.ptr())} {ctx[wmma]}_amx{i}, align {src.dtype.itemsize}' for i,src in enumerate(wmma.src)],
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0 ; AMX set',         # AMX set
-    *[f'  {ctx[wmma]}_ld_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(4, f"{ctx[wmma]}_ld_{i}")}' for i in range(16)], # ld AMX acc regs
-      f'  {AMX(0, "%ptr_amx_1")}\n  {AMX(1, "%ptr_amx_0")}\n  {AMX(12, 0)}',                                                         # AMX fma
-    *[f'  {ctx[wmma]}_st_{i} = add i64 %ptr_amx_2, {i * 4 << 56 | i * 64}  \n  {AMX(5, f"{ctx[wmma]}_st_{i}")}' for i in range(16)], # st AMX acc regs
+    *[f'  {ctx[wmma]}_ld{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(4, f"{ctx[wmma]}_ld{i}")}' for i in range(16)], # ld AMX acc regs
+      f'  {AMX(0, f"{ctx[wmma]}_ptr_amx1")}\n  {AMX(1, f"{ctx[wmma]}_ptr_amx0")}\n  {AMX(12, 0)}',                                   # AMX fma
+    *[f'  {ctx[wmma]}_st{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(5, f"{ctx[wmma]}_st{i}")}' for i in range(16)], # st AMX acc regs
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0 ; AMX clr',         # AMX clr
-      f'  {ctx[wmma]} = load <256 x float>, ptr %amx_2, align 1024'])
+      f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
@@ -136,18 +136,19 @@ class LLVMRenderer(Renderer):
     end_lines: dict[str, None] = {}
     vc = -1
 
-    for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # aux buffers as AMX can only load from memory
-      for i, dtype in enumerate(arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in arg[6]]):
-        kernel += [f"  %amx_{i} = alloca {ldt(dtype)}, align {dtype.itemsize}\n  %ptr_amx_{i} = ptrtoint {ldt(dtype.ptr())} %amx_{i} to i64"]
-
-    # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.ASSIGN:
+      if u.op is Ops.ASSIGN: # prealloc all assigns
         vc += 1
         r[u] = r[u.src[1]] = f"%assign{vc}"
         assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
         acc_to_assign[u.src[0]] = u.src[1]
+      if u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
+        vc += 1
+        r[u] = f"%wmma{vc}"
+        for i, dtype in enumerate(u.arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in u.arg[6]]):
+          kernel += [f"  {r[u]}_amx{i} = alloca {ldt(dtype)}, align {dtype.itemsize}",
+                     f"  {r[u]}_ptr_amx{i} = ptrtoint {ldt(dtype.ptr())} {r[u]}_amx{i} to i64"]
 
     for u in uops:
       # hack for defining sqrt function (TODO: can we get a transcendental for this?)
