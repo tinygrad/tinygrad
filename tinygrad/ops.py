@@ -932,10 +932,10 @@ class LazyMatcher:
 
   def matches(self, uop:UOp) -> list[tuple[int, Callable, bool]]:
     srcs = tuple([self.uop_matchset[s] for s in uop.src])
-    state = ((uop.op, uop.dtype, uop.arg), srcs)
-    if not (matchset:=self.table.get(state)):
+    transition = ((uop.op, uop.dtype, uop.arg), srcs)
+    if not (matchset:=self.table.get(transition)):
       # if state doesn't exist create new matchset and sort functions to run
-      self.table[state] = matchset = frozenset(pat for pat in self.candidates.get(uop.op, self.candidates[None]) \
+      self.table[transition] = matchset = frozenset(pat for pat in self.candidates.get(uop.op, self.candidates[None]) \
         if (pat.dtype is None or uop.dtype in pat.dtype or uop.dtype.scalar() in pat.dtype) \
         and (pat.arg is None or uop.arg == pat.arg) and (pat.allowed_len == -1 or len(uop.src) == pat.allowed_len) \
         and (pat.src is None or any(all(s in sm for s,sm in zip(src, srcs)) for src in pat.src)))
