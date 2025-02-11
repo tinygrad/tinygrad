@@ -42,7 +42,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: install llvm
-      run: sudo brew install llvm
+      run: brew install llvm
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
