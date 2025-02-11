@@ -907,11 +907,11 @@ class LazyAutomaton:
     self.patterns = patterns
     self.ops = set()
     self.forest: set[UPat] = set()
-    self.pats: dict[UPat, tuple[int, None, bool, Callable]] = {}
+    self.pats: dict[UPat, tuple[int, Callable, bool]] = {}
     # these are lazily created during graph rewrite
-    self.table: dict[tuple[Ops, DType, Any], frozenset[UPat]] = {}
+    self.table: dict[tuple[tuple[Ops, DType, Any], tuple[frozenset[UPat]]], frozenset[UPat]] = {}
     self.matchset: dict[UOp, frozenset[UPat]] = {}
-    self.final: dict[frozenset[UPat], list[tuple]] = {frozenset(): []}
+    self.final: dict[frozenset[UPat], list[tuple[int, Callable, bool]]] = {}
 
     def _setup(pat: UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
@@ -927,9 +927,9 @@ class LazyAutomaton:
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
-      self.pats[pat] = (i, None, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters)
+      self.pats[pat] = (i, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters)
 
-# TODO: allow_any_len and any src
+# TODO: any src
 # TODO: name assignment will be done top down once a full pattern is matched, patterns can't have permutations for this
 # TODO: bottleneck is tuple hashing speed
 class NewRewriteContext:
@@ -938,24 +938,24 @@ class NewRewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def match(self, uop:UOp) -> frozenset[UPat]:
+  def uop_matchset(self, uop:UOp) -> frozenset[UPat]:
     srcs = tuple([self.pm.matchset[s] for s in uop.src])
-    table = self.pm.table.setdefault((uop.op, uop.dtype, uop.arg), {})
-    # if transition doesn't exist create new matchset and sort functions to run
-    if srcs not in table:
-      matchset = frozenset(pat for pat in self.pm.candidates.get(uop.op, self.pm.candidates[None]) \
-        if (pat.dtype is None or uop.dtype in pat.dtype) and (pat.arg is None or uop.arg == pat.arg) \
+    state = ((uop.op, uop.dtype, uop.arg), srcs)
+    if not (matchset:=self.pm.table.get(state)):
+      # if state doesn't exist create new matchset and sort functions to run
+      self.pm.table[state] = matchset = frozenset(pat for pat in self.pm.candidates.get(uop.op, self.pm.candidates[None]) \
+        if (pat.dtype is None or uop.dtype in pat.dtype or uop.dtype.scalar() in pat.dtype) \
+        and (pat.arg is None or uop.arg == pat.arg) and (pat.allowed_len == -1 or len(uop.src) == pat.allowed_len) \
         and (pat.src is None or any(all(s in ss for s,ss in zip(src, srcs)) for src in pat.src)))
       if matchset not in self.pm.final:
         self.pm.final[matchset] = sorted([self.pm.pats[pat] for pat in matchset if pat in self.pm.pats], key=lambda x: x[0])
-      table[srcs] = matchset
-    self.pm.matchset[uop] = table[srcs]
-    return self.pm.matchset[uop]
+    self.pm.matchset[uop] = matchset
+    return matchset
 
   def rewrite_uop(self, uop:UOp) -> UOp|None:
-    matchset = self.match(uop)
+    for _,fxn,has_ctx in self.pm.final[self.uop_matchset(uop)]: continue
     return None
-  
+
   def rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.rewrite(x) for x in n.src])
