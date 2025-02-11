@@ -263,9 +263,11 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.GEP, src=(UPat(Ops.GEP, name='g2'),), name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(g1.dtype.count)))),
   (UPat(Ops.GEP, src=(UPat(Ops.VECTORIZE, name="vec"),), name="gep"),
-   lambda gep, vec: UOp(Ops.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
+   lambda gep, vec: (UOp(Ops.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]) if all(x.dtype.vcount == 1 for x in vec.src) else None),
   (UPat(Ops.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(Ops.GEP, src=(UPat(Ops.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
+  # GEP all same is vectorize
+  #(UPat(Ops.GEP, name="g"), lambda g: g.src[0].gep(g.arg[0]).broadcast(len(g.arg)) if all_same(g.arg) and len(g.arg) > 1 else None),
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
@@ -444,6 +446,15 @@ def no_vectorized_load_store(ls:UOp):
   idx = ls.src[0]
   assert isinstance(idx.dtype, PtrDType)
   if idx.dtype.v == 1: return None
+  if idx.op is Ops.VECTORIZE:
+    loads = {}
+    geps = []
+    for s in idx.src:
+      assert s.op is Ops.GEP, f"src op is {s.op}"
+      if s.src[0] not in loads:
+        loads[s.src[0]] = UOp(ls.op, ls.dtype.scalar().vec(s.src[0].dtype.count), (s.src[0],))
+      geps.append(loads[s.src[0]].gep(s.arg))
+    return UOp(Ops.VECTORIZE, ls.dtype, tuple(geps))
   tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.v)]
   return UOp(Ops.VECTORIZE, ls.dtype, tuple(tv))
 
@@ -461,18 +472,47 @@ devectorize = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
-def expand_index(buf:UOp, x:UOp, c:UOp):
-  print("HERE", c.arg, buf.dtype, x.dtype, c.dtype)
-  exit(0)
-  return None
+def expand_index(buf:UOp, base_index:UOp, c:UOp):
+  ordered = sorted([(x,i) for i,x in enumerate(c.arg)])
+  groups = []
+  group = []
+  for x in ordered:
+    if len(group) == 0 or group[-1][0]+1 == x[0]: group.append(x)
+    else:
+      groups.append(group)
+      group = [x]
+  groups.append(group)
+  print(len(c.arg), len(groups), groups)
+  idxs = [UOp(Ops.INDEX, buf.dtype.vec(len(g)), (buf, base_index+g[0][0])) for g in groups]
+
+  big_gep = [None]*len(c.arg)
+  bj = 0
+  for g in groups:
+    for j,(_,i) in enumerate(g): big_gep[i] = bj+j
+    bj += len(g)
+  assert all(x is not None for x in big_gep)
+  return UOp(Ops.VECTORIZE, buf.dtype.vec(len(c.arg)), tuple(idxs)).gep(tuple(big_gep))
+
+  #srcs = [None]*len(c.arg)
+  #for g in groups:
+    #print(g[0][0], len(g))
+    #group_src = UOp(Ops.INDEX, buf.dtype.vec(len(g)), (buf, base_index+g[0][0]))
+    #for j,(_,i) in enumerate(g): srcs[i] = group_src.gep(j)
+  print([x is not None for x in srcs])
+  print(c.arg)
+  assert all(x is not None for x in srcs)
+  return UOp(Ops.VECTORIZE, buf.dtype.vec(len(c.arg)), tuple(srcs))
 
 devectorize_load_store = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")), UPat.var("x")+UPat.cvar("c"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")), UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
   # TODO: add vectorized support to transcendental
   #(UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
   #(UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
+  # GEP after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"), lambda gep, ld: ld.replace(src=ld.src[0].src).gep(gep.arg)),
+
   # TODO: add vectorized support to transcendental
-  (UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
+  #(UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
   (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
   #(UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])

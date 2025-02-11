@@ -365,7 +365,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
-      if self.op is Ops.VECTORIZE: return self.src[i]
+      if self.op is Ops.VECTORIZE and all(x.dtype.vcount == 1 for x in self.src): return self.src[i]
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
@@ -593,7 +593,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
     return 1
-  def divides(self, v) -> UOp|None:
+  def divides(self, v:int) -> UOp|None:
     if v==1: return self
     if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
     if self.op is Ops.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
