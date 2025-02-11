@@ -1,4 +1,3 @@
-from typing import List, Tuple
 from extra.models.resnet import ResNet50
 from extra.mcts_search import mcts_search
 from examples.mlperf.helpers import get_mlperf_bert_model
@@ -50,7 +49,7 @@ def get_sched_bert():
       # ignore grad norm and loss scaler for now
       loss.backward()
       targets += [x for x in optim.schedule_step()]
-    sched = Tensor.schedule(targets)
+    sched = Tensor.schedule(*targets)
     print(f"schedule length {len(sched)}")
   return sched
 
@@ -79,7 +78,7 @@ if __name__ == "__main__":
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
     # "linearize" the op into uops in different ways
-    lins: List[Tuple[Kernel, str]] = []
+    lins: list[tuple[Kernel, str]] = []
 
     # always try hand coded opt
     lin = Kernel(si.ast, opts=device.renderer)

@@ -1,7 +1,7 @@
 import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.helpers import GlobalCounters
+from tinygrad.helpers import GlobalCounters, ContextVar, Context
 from tinygrad.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
@@ -20,7 +20,7 @@ class TestPickle(unittest.TestCase):
     self.assertEqual(pm2.rewrite(sink).key, tt.key)
 
   def test_pickle_main_pattern_matcher(self):
-    from tinygrad.codegen.uopgraph import sym
+    from tinygrad.codegen.rewriter import sym
     pickle.dumps(sym)
 
   def test_pickle_realized_tensor(self):
@@ -47,6 +47,34 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t_values, t2.numpy())
     self.assertEqual(GlobalCounters.kernel_count-init, 0)
+
+  def test_pickle_realized_tensor_alt2(self):
+    print("** init")
+    t = Tensor.rand(10, 10).to("CLANG").realize()
+    tensor_uop = t.lazydata
+    assert tensor_uop.is_realized, f"expected {tensor_uop} to be realized"
+    t_values = t.numpy()
+    # pickle
+    st = pickle.dumps(t)
+    # free buffers
+    del t
+    del tensor_uop
+    print("** post pickle")
+    t2:Tensor = pickle.loads(st)
+    assert t2.lazydata.is_realized, f"expected {t2.lazydata} to be realized"
+    np.testing.assert_equal(t_values, t2.numpy())
+
+  # NOTE: currently Buffer exists on the uop, not tensor
+  def test_pickle_buffer_uop(self):
+    t = Tensor.arange(4).realize()
+    a = t.lazydata.buf_uop
+    self.assertIsNotNone(buffer:=a.realized)
+    s = pickle.dumps(a)
+    # free buffers
+    del a
+    del buffer
+    a2:UOp = pickle.loads(s)
+    self.assertListEqual(a2.realized.as_buffer().cast("I").tolist(), [0, 1, 2, 3])
 
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)
@@ -76,7 +104,7 @@ class TestPickle(unittest.TestCase):
     assert ref_value == vt2.tolist()
 
   def test_pickle_numpy(self):
-    t = Tensor(np.array([1,2,3,4.]))
+    t = Tensor(np.array([1,2,3,4.]), dtype=dtypes.float32)
     st = pickle.dumps(t)
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
@@ -94,6 +122,13 @@ class TestPickle(unittest.TestCase):
     print("post jit")
     out = add_fxn(x, y)
     np.testing.assert_equal(out.numpy(), 102)
+
+  def test_pickle_context_var(self):
+    v = ContextVar("test_var", 0)
+    with Context(test_var=1):
+      vs = pickle.dumps(v)
+    v2 = pickle.loads(vs)
+    self.assertEqual(v2.value, 1)
 
   def test_pickle_schedule(self):
     a = Tensor([1,2])

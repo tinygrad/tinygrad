@@ -1,4 +1,4 @@
-import ctypes, mmap, collections, functools
+import ctypes, mmap, collections, functools, os
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from typing import Any
 from tinygrad.helpers import to_mv
@@ -183,6 +183,15 @@ class NVDriver(VirtDriver):
     elif struct.cmd == nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE: pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_PERF_BOOST: pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE: pass
+    elif struct.cmd == nv_gpu.NV83DE_CTRL_CMD_DEBUG_READ_ALL_SM_ERROR_STATES:
+      params = nv_gpu.NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS.from_address(params_ptr)
+      params.mmuFault.valid = bool("MOCKGPU_EMU_FAULTADDR" in os.environ)
+    elif struct.cmd == nv_gpu.NV83DE_CTRL_CMD_DEBUG_READ_MMU_FAULT_INFO:
+      params = nv_gpu.struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS.from_address(params_ptr)
+      params.count = 1
+      params.mmuFaultInfoList[0].faultAddress = int(os.environ['MOCKGPU_EMU_FAULTADDR'], base=16)
+      params.mmuFaultInfoList[0].faultType = 1
+      params.mmuFaultInfoList[0].accessType = 1
     else: raise RuntimeError(f"Unknown {struct.cmd} to rm_control")
     return 0
 

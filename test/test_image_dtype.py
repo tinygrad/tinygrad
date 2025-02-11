@@ -46,6 +46,7 @@ class TestImageDType(unittest.TestCase):
     assert isinstance(it.lazydata.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
+  @unittest.expectedFailure # this isn't supported anymore, CAST to ImageDType stays ImageDType
   def test_image_cast_and_back_collapses(self):
     data = Tensor.randn(9*27*4).realize()
     tst = data.numpy()
@@ -112,6 +113,8 @@ class TestImageDType(unittest.TestCase):
     assert it.lazydata.base.realized._buf != b1
 
   # issue caused by: don't realize image to image casts. this is part of a larger problem
+  #@unittest.expectedFailure
+  # update: passing after tensor_map
   def test_lil_model(self):
     with Context(IMAGE=2):
       x = Tensor.zeros(1, 1)
@@ -120,6 +123,9 @@ class TestImageDType(unittest.TestCase):
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
       sched = unwrap(w1.grad).schedule()
+      # NOTE: the w1 grad must realize to a seperate kernel
+      assert w1.grad.lazydata.is_realized, f"never realized {w1.grad}"
+      self.assertEqual(w1.grad.lazydata.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
@@ -127,6 +133,40 @@ class TestImageDType(unittest.TestCase):
           lst = s.outputs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
+
+@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+class TestImageRealization(unittest.TestCase):
+  def test_image_dtype_expand(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
+    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous().realize()
+    self.assertEqual(it_expanded.dtype, dtypes.float32)
+
+  def test_image_dtype_expand_and_back(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
+    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4))
+    it2 = it_expanded.sum(3).realize()
+    self.assertEqual(it2.dtype, dtypes.imagef((9,27,4)))
+
+  def test_image_alu_children(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
+    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous()
+    alu1 = it_expanded+1
+    alu2 = it_expanded.sum(3)
+    it_expanded.realize()
+    # NOTE: the parent becomes float, but the alu child will stay image until its output cannot fit the image
+    self.assertEqual(alu1.dtype, dtypes.imagef((9,27,4)))
+    alu1.realize()
+    self.assertEqual(alu1.dtype, dtypes.float32)
+    # alu2 is back in image because it fits the dtype again
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
+    alu2.realize()
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
 
 if __name__ == '__main__':
   unittest.main()

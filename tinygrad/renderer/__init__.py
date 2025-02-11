@@ -79,6 +79,7 @@ class ProgramSpec:
   vars:list[Variable]=field(default_factory=list)
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
+  ins:list[int]=field(default_factory=list)
   _ran_post_init:bool=False  # NOTE: this is needed if you call replace on the Program
 
   def __post_init__(self):
@@ -88,6 +89,7 @@ class ProgramSpec:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
@@ -96,6 +98,7 @@ class ProgramSpec:
           special_size[int(u.arg[0][-1])] = u.arg[1]
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
+      self.ins = sorted(dedup(self.ins))
       self._ran_post_init = True
 
   @functools.cached_property
