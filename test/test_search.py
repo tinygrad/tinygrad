@@ -4,7 +4,7 @@ from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.ops import UOp, Ops
-from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
+from tinygrad.engine.search import bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
@@ -12,6 +12,7 @@ from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from extra.optimization.helpers import time_linearizer
 
 class TestTimeLinearizer(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WebGPU timestamps are low precision, tm is 0")
