@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context, getenv, CI
 from test.test_schedule import check_schedule
 from test.test_dtype_alu import ht, dtypes_float
 from tinygrad.device import is_dtype_supported
@@ -78,6 +78,7 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi * 2, unit=1.5)
 
   @given(strat.sampled_from(dtypes_float))
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan location mismatch on Vulkan, Metal works")
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
