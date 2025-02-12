@@ -37,6 +37,7 @@ wgsl_matcher = PatternMatcher([
   # TODO: why is this needed, and only for this MUL order
   (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("g").where(UPat.cvar("c1"), UPat.cvar("c2")))),
     lambda a,g,c1,c2: g.where(c1, a) if math.isnan(c1.arg) and c2.arg == 1.0 else None),
+  (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None)
   ]) + extra_pm
 
 class WGSLRenderer(CStyleLanguage):
@@ -58,7 +59,7 @@ class WGSLRenderer(CStyleLanguage):
      if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
     (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"var<workgroup> {ctx[x]}: array<{ctx.buf_map(x.dtype.base)}, {x.dtype.size}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x"), lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]" \
-     if x.src[0].dtype in [dtypes.short, dtypes.ushort] else None),
+     if x.src[0].dtype in [dtypes.short, dtypes.ushort, dtypes.uint32] else None),
     (UPat(Ops.BITCAST, dtype=(dtypes.char, dtypes.uchar), name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]}&0xFF)"),
     (UPat(Ops.BITCAST, dtype=(dtypes.short, dtypes.ushort), name="x"),lambda ctx,x:f"bitcast<{ctx.type_map[x.dtype]}>(vec2<f16>({ctx[x.src[0]]},0))" \
      if x.src[0].dtype == dtypes.half else f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]}&0xFFFF)"),
@@ -71,7 +72,7 @@ class WGSLRenderer(CStyleLanguage):
      f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b.src[0].dtype) \
       else f"{ctx[b]} = {ctx[v]};"),
     # fix nan check: 'a != a -> is_nan()'
-    (UPat.var("a") != UPat.var("a"), lambda ctx,a: f"is_nan({ctx[a]})"),
+    (UPat.var("a") != UPat.var("a"), lambda ctx,a: f"(min({ctx[a]}, 1.0) == 1.0 && max({ctx[a]}, -1.0) == -1.0)"),
   ]) + base_rewrite
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.type_map[dt]}({val})"
@@ -85,8 +86,7 @@ class WGSLRenderer(CStyleLanguage):
     external_local_bufs = [line.lstrip() for line in kernel if "var<workgroup>" in line]
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
     prg = "enable f16;\nfn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    # trick to obfuscate compiler so that nan is detected properly
-    prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
+    prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
       f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +
       f"{name}:{f'array<{self.buf_map(dtype.base)}>' if isinstance(dtype,PtrDType) else self.buf_map(dtype)};" for name,(dtype,_) in bufs])
