@@ -614,44 +614,85 @@ def get_onnx_ops():
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None,
-                relative_position_bias:Tensor|None=None, past_sequence_length:Tensor|None=None, do_rotary:int|None=None,
-                mask_filter_value:float|None=None, num_heads:int|None=None, past_present_share_buffer:int|None=None,
-                qkv_hidden_sizes:list[int]|None=None, scale:float|None=None, unidirectional:int|None=None):
-    # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
-    assert num_heads is not None  # required
-    assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None), "Attention functionality not supoprted yet"
-    assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
-      "Attention functionality not supported yet"  # TODO strange params
-    hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
+  def Attention(x:Tensor, weights:Tensor, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
+                past_sequence_length:Tensor|None=None,  do_rotary:int|None=None, mask_filter_value:float|None=None, num_heads:int|None=None,
+                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int|None=None):
+      # copied from extra/models/llama.py
+      def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+        freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+        freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+        return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
+      def complex_mult(A, c, d):
+        a,b = A[..., 0:1], A[..., 1:2]
+        ro = a*c - b*d
+        co = a*d + b*c
+        return ro.cat(co, dim=-1)
+      def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
+        assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
+        xq = xq.reshape(*xq.shape[0:-1], -1, 2)
+        xk = xk.reshape(*xk.shape[0:-1], -1, 2)
+        assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
+        c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+        xq_out = complex_mult(xq, c, d)
+        xk_out = complex_mult(xk, c, d)
+        return xq_out.flatten(3), xk_out.flatten(3)
 
-    if unidirectional:  # gpt-style
-      assert hidden_size == v_hidden_size
-      xqkv = x.linear(weights, bias)
-      xq, xk, xv = [xqkv.shrink([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
-    else:  # bert-style
-      wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
-      bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
-      xq, xk, xv = [x.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
-    xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
+      if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
+      hidden_size_q, hidden_size_k, v_hidden_size = qkv_hidden_sizes
+      head_size_q = hidden_size_q // num_heads
+      head_size_k = hidden_size_k // num_heads
+      head_size_v = v_hidden_size // num_heads
 
-    if past is not None:
-      xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
-      present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
+      # project x to q, k, v
+      qkv = x.linear(weights, bias)
+      q, k, v = qkv.split([hidden_size_q, hidden_size_k, v_hidden_size], dim=2)
 
-    def attn(query, key, value, attn_mask):
-      query_length, key_length = query.shape[-2], key.shape[-2]
-      cdim = max(query_length, key_length) + 1
-      attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
-      # This is where Tensor.scaled_dot_product_attention differs:
-      causal_mask = Tensor.ones((cdim, cdim), requires_grad=False, dtype=dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length]
-      masked = Tensor.where(causal_mask, attn_weights, -math.inf)
-      if attn_mask is not None: masked = masked + attn_mask
-      return masked.softmax(-1) @ value
+      # reshape to multi-head format
+      batch_size, seq_len, _ = x.shape
+      q = q.reshape(batch_size, seq_len, num_heads, head_size_q).transpose(1, 2)
+      k = k.reshape(batch_size, seq_len, num_heads, head_size_k).transpose(1, 2)
+      v = v.reshape(batch_size, seq_len, num_heads, head_size_v).transpose(1, 2)
 
-    bsz, _, seq_len, _ = xq.shape
-    out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
-    return out, present if past is not None else out
+      # apply rotary embeddings
+      if do_rotary:
+        rotary_dim = rotary_embedding_dim if rotary_embedding_dim is not None else head_size_q
+        past_seq_len = past_sequence_length.item() if past_sequence_length is not None else 0
+        end = past_seq_len + seq_len
+        freqs_cis = precompute_freqs_cis(rotary_dim, end)
+        freqs_cis = freqs_cis[:, past_seq_len:past_seq_len+seq_len]
+        q, k = apply_rotary_emb(q, k, freqs_cis)
+
+      # concatenate with past keys/values
+      if past is not None: k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
+
+      # compute attention scores
+      if scale is None: scale = 1.0 / math.sqrt(head_size_q)
+      attn_scores = q @ k.transpose(-1, -2) * scale
+
+      # apply attention bias
+      if attention_bias is not None: attn_scores += attention_bias
+
+      # apply attention masks
+      if mask_index is not None:
+        mask = None
+        if mask_index.ndim == 4: mask = mask_index
+        elif mask_index.ndim == 3: mask = mask_index.unsqueeze(1)
+        elif mask_index.ndim == 2: mask = mask_index.unsqueeze(1).unsqueeze(1)
+        elif mask_index.ndim == 1:
+          seq_range = Tensor.arange(seq_len)
+          mask = (seq_range.unsqueeze(0) < mask_index.unsqueeze(1)).cast(attn_scores.dtype)
+          mask = mask.unsqueeze(1).unsqueeze(1)
+        if mask is not None: attn_scores = attn_scores + (1.0 - mask) * mask_filter_value
+      if unidirectional:
+        mask = Tensor.ones(attn_scores.shape[-2], attn_scores.shape[-1]).tril().cast(attn_scores.dtype)
+        attn_scores = attn_scores.masked_fill(mask == 0, mask_filter_value)
+
+      # Softmax and attention output
+      attn_weights = attn_scores.softmax(axis=-1)
+      output = attn_weights.matmul(v).permute(0, 2, 1, 3).reshape(batch_size, seq_len, -1)
+
+      present = k.stack(v) if past is not None or past_present_share_buffer else None
+      return output, present
 
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
