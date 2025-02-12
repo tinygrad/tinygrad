@@ -61,12 +61,12 @@ class TestTensorUOp(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: UOp = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const_like(1).const_arg == 1
-    assert type(lb.const_like(1).const_arg) is int
+    assert lb.const_like(1).base.arg == 1
+    assert type(lb.const_like(1).base.arg) is int
 
     lb: UOp = Tensor([1], dtype=dtypes.float).lazydata
-    assert lb.const_like(1).const_arg == 1.0
-    assert type(lb.const_like(1).const_arg) is float
+    assert lb.const_like(1).base.arg == 1.0
+    assert type(lb.const_like(1).base.arg) is float
 
   def test_contiguous_alu(self):
     a = Tensor.randn(2, 2).realize()

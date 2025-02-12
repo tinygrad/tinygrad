@@ -214,8 +214,8 @@ class WebGpuDevice(Compiled):
     # Get supported features
     supported_features = webgpu.WGPUSupportedFeatures()
     webgpu.wgpuAdapterGetFeatures(adapter_result[1], supported_features)
-    timestamp_supported = webgpu.WGPUFeatureName_TimestampQuery in [supported_features.features[i] for i in range(supported_features.featureCount)]
-    features = [webgpu.WGPUFeatureName_TimestampQuery] if timestamp_supported else []
+    supported = [supported_features.features[i] for i in range(supported_features.featureCount)]
+    features = [feat for feat in [webgpu.WGPUFeatureName_TimestampQuery, webgpu.WGPUFeatureName_ShaderF16] if feat in supported]
     dev_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount=len(features),requiredFeatures=(webgpu.WGPUFeatureName * len(features))(*features))
 
     # Limits
@@ -236,4 +236,4 @@ class WebGpuDevice(Compiled):
       raise RuntimeError(f"Failed to request device: [{webgpu.WGPURequestDeviceStatus__enumvalues[device_result[0]]}] {device_result[2]}")
 
     super().__init__(device, WebGpuAllocator(device_result[1]), WGSLRenderer(), Compiler(),
-                     functools.partial(WebGPUProgram, (device_result[1], timestamp_supported)))
+      functools.partial(WebGPUProgram, (device_result[1], webgpu.WGPUFeatureName_TimestampQuery in supported)))
