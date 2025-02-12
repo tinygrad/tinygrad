@@ -598,7 +598,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang]
+        backend: [llvm, clang, cuda]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -612,7 +612,7 @@ jobs:
           key: windows-minimal
           deps: testing_minimal
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}"
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'cuda' && 'CUDA=1'}}"
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20

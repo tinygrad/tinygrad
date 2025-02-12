@@ -6,11 +6,12 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, ctypes.util
+import ctypes, ctypes.util, os, sys
 
+LIBVER = '_'+ os.path.basename(os.environ.get('CUDA_PATH', ''))[1:].split('.')[0] +'0_0' if sys.platform == 'win32' else ''
 
 _libraries = {}
-_libraries['libnvrtc.so'] = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
+_libraries['libnvrtc.so'] = ctypes.CDLL(ctypes.util.find_library('nvrtc64'+ LIBVER if sys.platform == 'win32' else 'nvrtc'))
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
     if value is not None and encoding is not None:
@@ -138,7 +139,7 @@ class Union(ctypes.Union, AsDictMixin):
 
 
 
-_libraries['libnvJitLink.so'] = ctypes.CDLL(ctypes.util.find_library('nvJitLink'))
+_libraries['libnvJitLink.so'] = ctypes.CDLL(ctypes.util.find_library('nvJitLink'+ LIBVER))
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
