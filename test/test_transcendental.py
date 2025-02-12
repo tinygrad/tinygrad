@@ -128,37 +128,36 @@ class TestTranscendentalSchedule(unittest.TestCase):
       c = c.exp2()
       check_schedule(c, 1)
 
+@unittest.skipIf(Device.DEFAULT=="WEBGPU", "dtypes.ulong unsupported on WEBGPU")
 class TestTranscendentalVectorized(unittest.TestCase):
-  def run_vectorized_test(self, op, np_op, min_val, max_val):
-    with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
-      for vec_size in (1, 2, 4, 8):
-        num_elements = (100 // vec_size) * vec_size
-        x_vals = np.linspace(min_val, max_val, num=num_elements).astype(np.float32).reshape(-1, vec_size)
-        t = Tensor(x_vals, dtype=dtypes.float32.vec(vec_size))
-        tg_result = op(t).numpy().reshape(-1)
-        np_result = np_op(x_vals.reshape(-1))
-        np.testing.assert_allclose(tg_result, np_result, atol=2e-5, rtol=1e-5)
+  def check_vectorized_op(self, op_func, np_func, x_vals, base_dtype, vec_sizes, atol, rtol):
+    for vec_size in vec_sizes:
+      num_elements = (100 // vec_size) * vec_size
+      x = np.linspace(x_vals[0], x_vals[1], num=num_elements).astype(np.float32).reshape(-1, vec_size)
+      t = Tensor(x, dtype=base_dtype.vec(vec_size))
+      result = op_func(t).numpy().reshape(-1)
+      expected = np_func(x.reshape(-1))
+      np.testing.assert_allclose(result, expected, atol=atol, rtol=rtol)
 
   def test_vectorized_sin(self):
-    self.run_vectorized_test(Tensor.sin, np.sin, -100, 100)
+    self.check_vectorized_op(Tensor.sin, np.sin, (-100, 100), dtypes.float32, (1, 2, 4, 8), 2e-5, 1e-5)
 
   def test_vectorized_log2(self):
-    self.run_vectorized_test(Tensor.log2, np.log2, 0.1, 100)
+    self.check_vectorized_op(Tensor.log2, np.log2, (0.1, 100), dtypes.float32, (1, 2, 4, 8), 2e-5, 1e-5)
 
   def test_vectorized_exp2(self):
-    self.run_vectorized_test(Tensor.exp2, np.exp2, -10, 10)
+    self.check_vectorized_op(Tensor.exp2, np.exp2, (-10, 10), dtypes.float32, (1, 2, 4, 8), 2e-5, 1e-5)
 
   def test_vectorized_pow(self):
-    with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
-      for vec_size in (1, 2, 4, 8):
-        num_elements = (100 // vec_size) * vec_size
-        bases = np.linspace(1.0, 10.0, num=num_elements).astype(np.float32).reshape(-1, vec_size)
-        exponents = np.linspace(0.0, 3.0, num=num_elements).astype(np.float32).reshape(-1, vec_size)
-        t_base = Tensor(bases, dtype=dtypes.float32.vec(vec_size))
-        t_exponent = Tensor(exponents, dtype=dtypes.float32.vec(vec_size))
-        tg_result = t_base.pow(t_exponent).numpy().reshape(-1)
-        np_result = np.power(bases, exponents).reshape(-1)
-        np.testing.assert_allclose(tg_result, np_result, atol=1e-5, rtol=1e-5)
+    for vec_size in (1, 2, 4, 8):
+      num_elements = (100 // vec_size) * vec_size
+      bases = np.linspace(1.0, 10.0, num=num_elements).astype(np.float32).reshape(-1, vec_size)
+      exponents = np.linspace(0.0, 3.0, num=num_elements).astype(np.float32).reshape(-1, vec_size)
+      t_base = Tensor(bases, dtype=dtypes.float32.vec(vec_size))
+      t_exponent = Tensor(exponents, dtype=dtypes.float32.vec(vec_size))
+      tg_result = t_base.pow(t_exponent).numpy().reshape(-1)
+      np_result = np.power(bases, exponents).reshape(-1)
+      np.testing.assert_allclose(tg_result, np_result, atol=1e-5, rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
