@@ -83,7 +83,7 @@ class OnnxNode:
 required_input_python_consts: dict[str, tuple[int, ...]] = {
   "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
   "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
-  "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
+  "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4), "Attention": (7,),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
@@ -615,8 +615,8 @@ def get_onnx_ops():
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
   def Attention(x:Tensor, weights:Tensor, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
-                past_sequence_length:Tensor|None=None,  do_rotary:int|None=None, mask_filter_value:float|None=None, num_heads:int|None=None,
-                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int|None=None):
+                past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
+                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
       # copied from extra/models/llama.py
       def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
         freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
@@ -656,7 +656,7 @@ def get_onnx_ops():
       # apply rotary embeddings
       if do_rotary:
         rotary_dim = rotary_embedding_dim if rotary_embedding_dim is not None else head_size_q
-        past_seq_len = past_sequence_length.item() if past_sequence_length is not None else 0
+        past_seq_len = past_sequence_length if past_sequence_length is not None else 0
         end = past_seq_len + seq_len
         freqs_cis = precompute_freqs_cis(rotary_dim, end)
         freqs_cis = freqs_cis[:, past_seq_len:past_seq_len+seq_len]
