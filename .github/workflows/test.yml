@@ -615,4 +615,6 @@ jobs:
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}"
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
-        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
+          python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
