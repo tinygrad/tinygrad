@@ -29,14 +29,15 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
       case "attention_mask": val = np.ones(shape)
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
       case "image_tensor": val = np.random.randint(0, 256, shape)
+      case "task_id": return Tensor(0, dtype=dtype)
       case _: val = np.random.uniform(size=shape) * 8
-    return val.astype(_to_np_dtype(dtype))
+    return Tensor(val.astype(_to_np_dtype(dtype))).realize()
 
   ret: dict[str, Tensor] = {}
   for name, spec in graph_inputs.items():
     assert not spec.is_optional and not spec.is_sequence, "only allow tensor input for now"
     shape = _get_shape(spec.shape)
-    value = Tensor(_get_value(name, shape, spec.dtype)).realize()
+    value = _get_value(name, shape, spec.dtype)
     ret.update({name:value})
   return ret
 
