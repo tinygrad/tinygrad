@@ -108,7 +108,7 @@ spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
-  #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
+  #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
