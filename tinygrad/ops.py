@@ -906,25 +906,20 @@ def launch_viz(env_str:str, data:str):
 class LazyMatcher:
   def __init__(self, patterns: list[tuple[UPat, Callable]]):
     self.patterns = patterns
-    self.ops = set()
-    self.forest: set[UPat] = set()
+    self.candidates: dict[Union[Ops, None], set[UPat]] = {}
     self.pats: dict[UPat, tuple[int, Callable, bool]] = {}
     # these are lazily created during graph rewrite
     self.table: dict[tuple[tuple[Ops, DType, Any], tuple[frozenset[UPat]]], frozenset[UPat]] = {}
     self.uop_matchset: dict[UOp, frozenset[UPat]] = {}
     self.final: dict[frozenset[UPat], list[tuple[int, Callable, bool]]] = {}
 
-    def _setup(pat: UPat):
+    def _add_candidates(pat: UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
-      for s in std_src: _setup(s)
-      self.ops.update((pat.op,) if pat.op is None else pat.op)
-      self.forest.add(pat)
+      for s in std_src: _add_candidates(s)
+      for op in ((pat.op,) if pat.op is None else pat.op): self.candidates.setdefault(op, set()).add(pat)
 
-    for pat,_ in self.patterns: _setup(pat)
-    # patterns that match a given op
-    self.candidates: dict[Union[Ops, None], tuple[UPat]] = {op:tuple(pat for pat in self.forest if pat.op is None or op in pat.op) for op in self.ops}
-    # set final states
     for i,(pat,fxn) in enumerate(self.patterns):
+      _add_candidates(pat)
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
@@ -934,8 +929,8 @@ class LazyMatcher:
     srcs = tuple([self.uop_matchset[s] for s in uop.src])
     transition = ((uop.op, uop.dtype, uop.arg), srcs)
     if not (matchset:=self.table.get(transition)):
-      # if state doesn't exist create new matchset and sort functions to run
-      self.table[transition] = matchset = frozenset(pat for pat in self.candidates.get(uop.op, self.candidates[None]) \
+      # if transition doesn't exist create new matchset and sort functions to run
+      self.table[transition] = matchset = frozenset(pat for op in (uop.op, None) for pat in self.candidates.get(op, set()) \
         if (pat.dtype is None or uop.dtype in pat.dtype or uop.dtype.scalar() in pat.dtype) \
         and (pat.arg is None or uop.arg == pat.arg) and (pat.allowed_len == -1 or len(uop.src) == pat.allowed_len) \
         and (pat.src is None or any(all(s in sm for s,sm in zip(src, srcs)) for src in pat.src)))
