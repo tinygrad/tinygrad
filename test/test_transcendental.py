@@ -6,6 +6,7 @@ from test.test_schedule import check_schedule
 from test.test_dtype_alu import ht, dtypes_float
 from tinygrad.device import is_dtype_supported
 import numpy as np
+import math
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -28,6 +29,8 @@ class TestTranscendentalMath(unittest.TestCase):
   @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
     ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float32(self, x, op):
+    # nan produces wrong results on Vulkan
+    if math.isnan(x) and CI and Device.DEFAULT == "WEBGPU": return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float32)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
@@ -37,6 +40,8 @@ class TestTranscendentalMath(unittest.TestCase):
   @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
     ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float16(self, x, op):
+    # nan produces wrong results on Vulkan
+    if math.isnan(x) and CI and Device.DEFAULT == "WEBGPU": return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float16)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
