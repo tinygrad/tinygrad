@@ -115,7 +115,7 @@ spec = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  (UPat(Ops.NOOP), lambda: True),
+  (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
@@ -126,9 +126,8 @@ spec = PatternMatcher([
 kernel_spec = PatternMatcher([
   (UPat(Ops.DEVICE, src=()), lambda: True),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
-  # NOTE: assign always has a (BUF, KERNEL), it can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, src=[UPat(Ops.BUFFER), UPat((Ops.KERNEL, Ops.ASSIGN))], allow_any_len=True), lambda: True),
+  # TODO: currently kernel only has buffer parents, this is incomplete. it should be BUFFER and ASSIGN
+  (UPat(Ops.KERNEL, src=UPat(Ops.BUFFER)), lambda: True),
 ])
 
 # *** this is the UOp shape spec ***
