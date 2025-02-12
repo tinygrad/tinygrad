@@ -1098,6 +1098,7 @@ class Tensor(SimpleMathTrait):
   # ***** movement high level ops *****
 
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
+    import numpy as np
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     x, indices = self, list(indices)
@@ -1114,7 +1115,7 @@ class Tensor(SimpleMathTrait):
       size = 1 if index is None else self.shape[dim]
       boundary, stride = [0, size], 1  # defaults
       match index:
-        case list() | tuple() | Tensor():
+        case list() | tuple() | np.ndarray() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
           index = (index.to(self.device) < 0).where(size, 0) + index # treat negative index values
