@@ -26,6 +26,8 @@ jobs:
         key: llvm-speed
         deps: testing_minimal
         llvm: 'true'
+    - name: External Benchmark Schedule
+      run: PYTHONPATH="." python3 test/external/external_benchmark_schedule.py
     - name: Speed Test
       run: LLVM=1 LLVMOPT=1 python3 test/test_speed_v_torch.py
     - name: Speed Test (BEAM=2)

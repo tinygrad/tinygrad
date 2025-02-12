@@ -92,7 +92,7 @@ class GPFIFO:
     qmd = qmd_struct_t.from_address(qmd_addr)
     prg_addr = qmd.program_address_lower + (qmd.program_address_upper << 32)
     const0 = to_mv(qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32), 0x160).cast('I')
-    args_cnt, vals_cnt = const0[0], const0[1]
+    args_cnt, vals_cnt = const0[80], const0[81]
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
     args = to_mv(args_addr, args_cnt*8).cast('Q')
     vals = to_mv(args_addr + args_cnt*8, vals_cnt*4).cast('I')
