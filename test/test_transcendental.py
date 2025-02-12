@@ -156,9 +156,9 @@ class TestTranscendentalVectorized(unittest.TestCase):
         exponents = np.linspace(0.0, 3.0, num=num_elements).astype(np.float32).reshape(-1, vec_size)
         t_base = Tensor(bases, dtype=dtypes.float32.vec(vec_size))
         t_exponent = Tensor(exponents, dtype=dtypes.float32.vec(vec_size))
-        result = t_base.pow(t_exponent).numpy().reshape(-1)
-        expected = np.power(bases, exponents).reshape(-1)
-        np.testing.assert_allclose(result, expected, atol=1e-5, rtol=1e-5)
+        tg_result = t_base.pow(t_exponent).numpy().reshape(-1)
+        np_result = np.power(bases, exponents).reshape(-1)
+        np.testing.assert_allclose(tg_result, np_result, atol=1e-5, rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
