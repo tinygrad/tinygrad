@@ -56,15 +56,10 @@ def llvm_rewrite_cast(ctx, x):
   if dtypes.is_bool(input_type) and output_type == dtypes.bfloat16:
     return f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n" + \
       f"  {ctx[x]}     = uitofp i32 {ctx[x]}_ext to bfloat\n"
-  if input_type == dtypes.float and output_type == dtypes.bfloat16:
-    return f"  {ctx[x]}_i32 = bitcast float {ctx[x.src[0]]} to i32\n" + \
-      f"  {ctx[x]}_i32_1 = lshr i32 {ctx[x]}_i32, 16\n" + \
-      f"  {ctx[x]}_i16 = trunc i32 {ctx[x]}_i32_1 to i16\n" + \
-      f"  {ctx[x]} = bitcast i16 {ctx[x]}_i16 to bfloat\n"
   return f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"
 
 string_rewrite = PatternMatcher([
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
+  (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
 ])
 
 llvm_rewrite = PatternMatcher([
@@ -141,6 +136,7 @@ class LLVMRenderer(Renderer):
     self.abi = abi
     if self.abi and "amdgpu_kernel" in self.abi:
       self.has_local = True
+      self.device = "AMD"
     else:
       self.global_max = None
   def render(self, name: str, uops: list[UOp]) -> str:
