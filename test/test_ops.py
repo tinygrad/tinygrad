@@ -2,13 +2,13 @@ import time, math, unittest, functools
 import numpy as np
 from typing import List, Callable
 import torch
+import warnings
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
 if CI:
-  import warnings
   warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
@@ -641,9 +641,14 @@ class TestOps(unittest.TestCase):
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
+    if Device.DEFAULT not in ("LLVM", "DSP"):
+      # TODO: fix backward
+      helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.sqrt())
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
+    # TODO: fix backward
+    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]], forward_only=True)
     helper_test_op([()], lambda x: x.rsqrt())
 
   def test_xor(self):
@@ -749,7 +754,7 @@ class TestOps(unittest.TestCase):
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
-    helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5, forward_only=True)
+    helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5)
     helper_test_op([()], lambda x: x.tan())
     if not ((getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
@@ -1270,17 +1275,22 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var(2, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var([1, 2], correction=0))
   def test_var_zero_in_axis(self):
-    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3)))
-    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
-    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
-  # TODO: fix backward when correction >= n
+    with warnings.catch_warnings():
+      warnings.filterwarnings("ignore", message="var\\(\\): degrees of freedom is <= 0")
+      helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3)))
+      helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
+      helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
   def test_var_one_in_axis(self):
-    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)), forward_only=True)
+    with warnings.catch_warnings():
+      warnings.filterwarnings("ignore", message="var\\(\\): degrees of freedom is <= 0")
+      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)))
+      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5))
+      # TODO: fix backward
+      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=5), forward_only=True)
+    helper_test_op([(1,)], lambda x: x.var(axis=(0,), correction=0))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=0))
-    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4)))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=0))
-    helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=5), forward_only=True)
   def test_var_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, keepdim=True, correction=0))
@@ -1297,18 +1307,22 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.std(2, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.std([1, 2], correction=0))
   def test_std_zero_in_axis(self):
-    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3)))
-    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
-    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
-  # TODO: fix backward when correction >= n
+    with warnings.catch_warnings():
+      warnings.filterwarnings("ignore", message="std\\(\\): degrees of freedom is <= 0")
+      helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3)))
+      helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
+      helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
   def test_std_one_in_axis(self):
-    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)), forward_only=True)
-    # TODO: this one broke too with correction=0 in new gradient
+    with warnings.catch_warnings():
+      warnings.filterwarnings("ignore", message="std\\(\\): degrees of freedom is <= 0")
+      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)))
+      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5))
+      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=5))
+    # TODO: fix backward
+    helper_test_op([(1,)], lambda x: x.std(axis=(0,), correction=0), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=0), forward_only=True)
-    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5), forward_only=True)
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4)))
     helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=0))
-    helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=5))
   def test_std_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, keepdim=True, correction=0))

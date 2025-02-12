@@ -23,4 +23,4 @@ else:
   if LLVM_PATH is None:
     raise FileNotFoundError("No LLVM library found on the system. Install it via your distro's package manager and ensure it's findable as 'LLVM'")
 
-if DEBUG>=2: print(f'Using LLVM at {repr(LLVM_PATH)}')
+if DEBUG>=3: print(f'Using LLVM at {repr(LLVM_PATH)}')
