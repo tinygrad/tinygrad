@@ -136,7 +136,7 @@ def train_resnet():
 
   # ** resume from checkpointing **
   start_epoch = 0
-  if ckpt:=getenv("RESUME", ""):
+  if (ckpt:=getenv("RESUME", "")):
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
@@ -145,7 +145,7 @@ def train_resnet():
   WANDB = getenv("WANDB")
   if WANDB:
     import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id:=getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args)
 
   BENCHMARK = getenv("BENCHMARK")
@@ -451,17 +451,17 @@ def train_retinanet():
   lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, lr_warmup_factor)
 
   # ** resume from checkpointing **
-  if ckpt := getenv("RESUME", ""):
+  if (ckpt:=getenv("RESUME", "")):
     load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
     start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
 
   # ** initialize wandb **
-  if WANDB := getenv("WANDB"):
+  if (WANDB:=getenv("WANDB")):
     import wandb
 
     wandb_args = {"project": "MLPerf-RetinaNet"}
-    if wandb_id := getenv("WANDB_RESUME", ""):
+    if (wandb_id:=getenv("WANDB_RESUME", "")):
       wandb_args["id"] = wandb_id
       wandb_args["resume"] = "must"
 
