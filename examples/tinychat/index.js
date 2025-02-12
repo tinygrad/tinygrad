@@ -213,7 +213,7 @@ function sendMessageToWorker(worker, message) {
     worker.addEventListener('error', onError);
 
     if (message.header === "token") {worker.postMessage(message.data);}
-    else if (message.header === "init_state_dict") worker.postMessage(Object.fromEntries(Object.entries(message.data).filter(([_, v]) => !v.empty)));
+    else if (message.header === "init_state_dict") worker.postMessage({files: message.files, totalSize: message.totalSize});
     else if (message.header === "load_part") worker.postMessage(message.data, message.data === "done" ? [] : [message.data.bytes.buffer]);
   });
 }
@@ -265,6 +265,30 @@ async function load_state_dict (data, device, progress) {
   const deletionPromises = notInCorrectHashes.map(async (hash) => deleteTensorFromDb(db, hash));
   //for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
 
+  // TODO: refactor/cleanup
+  // we are reordering the files so download order corresponds to memory order; does this matter for stability?
+  /*
+  const allIndices = new Array(74).fill(0).map((_, i) => i); 
+  const order = [14, 13, 7, 6, 5, 4, 3, 2, 1, 0, 12, 11, 10, 9, 8, 63]; // then the rest in any order
+  const missingIndices = [...Array(allIndices.length).keys()].filter(i => !order.includes(i));
+  const fullOrder = [...order, ...missingIndices];
+  data.metadata.files = fullOrder.map(index => data.metadata.files[index]);
+  */
+
+  await kernelsReady;
+  // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
+  let model;
+  if (window.BACKEND === "WebGPU") {
+    model = await transformer().setup(device, state_dict, progress);
+  }
+  else if (window.BACKEND === "WASM") {
+    progress(0.02 * progress.total, 'Loading model:');
+    model = new Worker(`./worker.js?version=${Date.now()}`);
+    progress(0.02 * progress.total, 'Loading model:');
+    data.metadata.files = await sendMessageToWorker(model, {header: "init_state_dict", files: data.metadata.files, totalSize: data.totalSize});
+    progress(0.11 * progress.total, 'Loading model:');
+  }
+
   const cachedFileHashes = new Set(dbKeys.filter(key => correctHashesSet.has(key)));
   const cachedFiles = data.metadata.files.filter(file => cachedFileHashes.has(file.hash));
   const toDownload = data.metadata.files.filter(file => !cachedFileHashes.has(file.hash));
@@ -282,44 +306,29 @@ async function load_state_dict (data, device, progress) {
   }
   for (let i=0; i<numDownloaders; i++) if (toDownload.length) chainDownload(toDownload.shift());
 
-  await kernelsReady;
-  // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
-  let model;
-  if (window.BACKEND === "WebGPU") {
-    model = await transformer().setup(device, state_dict, progress);
-  }
-  else if (window.BACKEND === "WASM") {
-    progress(0.02 * progress.total, 'Loading model:');
-    model = new Worker(`./worker.js?version=${Date.now()}`);
-    progress(0.02 * progress.total, 'Loading model:');
-    state_dict = await sendMessageToWorker(model, {header: "init_state_dict", data: state_dict});
-    progress(0.11 * progress.total, 'Loading model:');
-  }
-
   const valid_final_dtypes = new Set(["float32", "int8", "int32"]);
   const loadFileToStateDict = async(file) => {
-    for (const part of file.parts) {
-      if (part.empty) continue;
-      part.bytes = (part.size === file.bytes.length) ? file.bytes : file.bytes.slice(part.file_start_pos, part.file_start_pos + part.size);
-      if (valid_final_dtypes.has(part.dtype)) {
-        if (window.BACKEND === "WebGPU") {
-          device.queue.writeBuffer(state_dict[part.key].bytes, part.target_start_pos, part.bytes); // improves stability over mappedAtCreation writing
-        }
-        else if (window.BACKEND === "WASM") {
-          part.target_start_pos = state_dict[part.key].wasm_buf_start_pos + part.target_start_pos
-          const msg = await sendMessageToWorker(model, {header: "load_part", data: part});
-        }
+    if (window.BACKEND === "WebGPU") {
+      for (const part of file.parts) {
+        if (part.empty) continue;
+        part.bytes = (part.size === file.bytes.length) ? file.bytes : file.bytes.slice(part.file_start_pos, part.file_start_pos + part.size);
+        device.queue.writeBuffer(state_dict[part.key].bytes, part.target_start_pos, part.bytes); // improves stability over mappedAtCreation writing
+        part.bytes = null;
       }
-      else throw new Error(`unexpected dtype: ${part.dtype} in file: ${file.name}`);
-      part.bytes = null;
     }
+    else if (window.BACKEND === "WASM") {
+      //part.target_start_pos = state_dict[part.key].wasm_buf_start_pos + part.target_start_pos
+      const msg = await sendMessageToWorker(model, {header: "load_part", data: file});
+    }
+    else throw new Error(`unexpected dtype: ${part.dtype} in file: ${file.name}`);
     file.bytes = null;
     completed += 1;
   }
 
-  const loadDelay = window.isMobile ? 100 : 20 // hoping to improve stability on mobile
+  const loadDelay = window.isMobile ? 20 : 20 // hoping to improve stability on mobile
   await Promise.all(deletionPromises);
   while (completed < data.metadata.files.length) {
+    const start = performance.now();
     // prioritize files from downloaded queue, so we can continue downloading more files
     if (downloaded.length) {
       const file = downloaded.shift();
@@ -331,7 +340,9 @@ async function load_state_dict (data, device, progress) {
       file.bytes = await getPart(file.name, file.hash); // reads data from IndexedDB
       await loadFileToStateDict(file); // increments completed when done
     }
-    await new Promise(resolve => setTimeout(resolve, loadDelay));
+    const end = performance.now();
+    const elapsed = (end - start) / 1000;
+    if (elapsed < loadDelay) await new Promise(resolve => setTimeout(resolve, loadDelay - elapsed));
   }
 
   return model;
@@ -377,10 +388,13 @@ document.addEventListener("alpine:init", () => {
             part.key = k;
             part.dtype = v.dtype;
             if (!data.metadata.files[part.file].parts) data.metadata.files[part.file].parts = [];
+            data.metadata.files[part.file].size ??= 0;
+            data.metadata.files[part.file].size += part.size;
             data.metadata.files[part.file].parts.push(part);
           }
         }
       }
+      data.totalSize = totalSize;
       totalSize = totalSize / 0.8; // give space in progress bar for initializing model bufs, and tokenizer
       this.progress = makeProgress.call(this, totalSize); // creates closure with totalSize
 
