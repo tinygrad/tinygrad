@@ -1054,7 +1054,7 @@ class TestIndexing(unittest.TestCase):
     one = Tensor(1, dtype=dtypes.int64)
 
     # non-scalar indexed with scalars
-    a = Tensor.randn(2, 3)
+    a = Tensor.randn(2, 3).realize()
     numpy_testing_assert_equal_helper(a[0], a[zero])
     numpy_testing_assert_equal_helper(a[0][1], a[zero][one])
     numpy_testing_assert_equal_helper(a[0, 1], a[zero, one])
@@ -1066,7 +1066,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[1], a[one.cast(dtypes.int16)])
 
     # scalar indexed with scalar
-    r = Tensor.randn()
+    r = Tensor.randn().realize()
     with self.assertRaises(IndexError):
       r[:]
     with self.assertRaises(IndexError):

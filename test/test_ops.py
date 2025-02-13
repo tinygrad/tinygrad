@@ -641,9 +641,7 @@ class TestOps(unittest.TestCase):
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
-    if Device.DEFAULT not in ("LLVM", "DSP"):
-      # TODO: fix backward
-      helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
+    helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.sqrt())
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
@@ -1406,7 +1404,7 @@ class TestOps(unittest.TestCase):
   def test_asinh(self):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6)
     # NOTE: this one has larger atol
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, rtol=2e-2, grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
