@@ -1,4 +1,4 @@
-import unittest, math
+import unittest, math, itertools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.ops import Ops
 from tinygrad.helpers import CI
@@ -32,6 +32,15 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = Tensor.randn(32, 32)
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
+
+  def test_bitcast(self):
+    # Validate for one combination of types.
+    np.testing.assert_equal(Tensor.ones(1).bitcast(dtypes.int32).numpy(), np.array([1065353216]))
+
+    types = dtypes.fields().values()
+    for fr, to in itertools.product(types, types):
+      if fr.itemsize == to.itemsize and not None in (fr.fmt, to.fmt): 
+        _check_ast_count(0, Tensor.ones(1, dtype=fr).bitcast(to))
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):

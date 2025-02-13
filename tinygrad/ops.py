@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, struct, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -1120,6 +1120,12 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
+def bitcast_to(root:UOp, c:UOp):
+  print(f"HELLOHERE {root=}, {c=}")
+  fr, to = c.dtype.fmt, root.dtype.fmt
+  if fr is None or to is None: return None
+  else: return root.const_like(struct.unpack(to, struct.pack(fr, c.arg))[0])
+
 symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -1157,6 +1163,8 @@ symbolic_simple = PatternMatcher([
   # *** cast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+  # *** bitcast ***
+  (UPat(Ops.BITCAST, name="root", src=UPat.cvar("c")), lambda root, c: bitcast_to(root, c)),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
