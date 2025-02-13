@@ -57,13 +57,12 @@ class MockHWInterface(HWInterface):
   def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
     self.path = path
     self.fd = fd or _open(path, flags)
-    assert self.fd is not None
 
   def __del__(self):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].close(self.fd)
       tracked_fds.pop(self.fd)
-    else: os.close(self.fd)
+    elif self.fd: os.close(self.fd)
 
   def ioctl(self, request, arg):
     if self.fd in tracked_fds:
