@@ -691,14 +691,9 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
   alu = python_alu[op](*operands)
 
-  if dtype == dtypes.uint8:
-    alu = alu & 0xFF
-  elif dtype == dtypes.uint16:
-    alu = alu & 0xFFFF
-  elif dtype == dtypes.uint32:
-    alu = alu & 0xFFFF_FFFF
-  elif dtype == dtypes.uint64:
-    alu = alu & 0xFFFF_FFFF_FFFF_FFFF
+  if dtype in dtypes.uints:
+    mask = 2 ** (8 * dtype.itemsize) - 1
+    alu = alu & mask
 
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 
