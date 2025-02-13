@@ -1121,9 +1121,7 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
 def bitcast_to(root:UOp, c:UOp):
-  print(f"HELLOHERE {root=}, {c=}")
-  fr, to = c.dtype.fmt, root.dtype.fmt
-  if fr is None or to is None: return None
+  if None in (fr := c.dtype.fmt, to := root.dtype.fmt): return None
   else: return root.const_like(struct.unpack(to, struct.pack(fr, c.arg))[0])
 
 symbolic_simple = PatternMatcher([
