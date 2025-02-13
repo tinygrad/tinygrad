@@ -1,7 +1,7 @@
 import math
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import polyN
-from tinygrad.ops import UOp,Ops
+from tinygrad.ops import UOp
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = tuple(dtype.vec(i) for dtype in (dtypes.float16, dtypes.float32, dtypes.float64) for i in (1, 2, 4, 8))
 
@@ -172,7 +172,6 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
-  if d.dtype.count > 1: return UOp(Ops.VECTORIZE, d.dtype, tuple(xsin(d.gep(i), fast, switch_over) for i in range(d.dtype.count)))
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
@@ -195,7 +194,6 @@ def xexp2(d:UOp) -> UOp:
   Implements a 1.0 ULP approximation for Ops.EXP2
   - Paper: https://arxiv.org/pdf/2001.09258
   """
-  if d.dtype.count > 1: return UOp(Ops.VECTORIZE, d.dtype, tuple(xexp2(d.gep(i)) for i in range(d.dtype.count)))
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # mask +=inf/nan as zero.
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
@@ -222,7 +220,6 @@ def xlog2(d:UOp) -> UOp:
   Implements a 1.0 ULP approximation for Ops.LOG2
   Paper: https://arxiv.org/pdf/2001.09258 5.5
   """
-  if d.dtype.count > 1: return UOp(Ops.VECTORIZE, d.dtype, tuple(xlog2(d.gep(i)) for i in range(d.dtype.count)))
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # TODO: float16 denormal need float32 to achieve precision
   if d.dtype == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
@@ -259,7 +256,6 @@ def xlog2(d:UOp) -> UOp:
   return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
 
 def xpow(base:UOp, exponent:UOp) -> UOp:
-  if base.dtype.count > 1: return UOp(Ops.VECTORIZE, base.dtype, tuple(xpow(base.gep(i), exponent.gep(i)) for i in range(base.dtype.count)))
   # start with b ** e = exp2(e * log2(b))
   ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
   # negative base adjustment: nan for non-integer exponent and -1 for odd exponent
