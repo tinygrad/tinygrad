@@ -32,6 +32,7 @@
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
 ::: tinygrad.Tensor.scatter
+::: tinygrad.Tensor.scatter_reduce
 
 ## Neural Network (functional)
 
