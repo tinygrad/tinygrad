@@ -1918,7 +1918,7 @@ class Tensor(SimpleMathTrait):
     x_reshaped = x.reshape(-1, last_dim_size)
     x_cummax = x_reshaped.cummax(-1).unsqueeze(-1)
     x_expand = x_reshaped.unsqueeze(1).expand(*x_reshaped.shape, last_dim_size)
-    mask = Tensor.ones(last_dim_size, last_dim_size).tril().unsqueeze(0)
+    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril().unsqueeze(0)
     ret = ((x_expand - x_cummax).exp() * mask).sum(-1).log() + x_cummax.squeeze(-1)
     return ret.reshape(*x.shape).transpose(-1, axis)
 
