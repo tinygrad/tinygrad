@@ -71,13 +71,10 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          assert isinstance(dtype, PtrDType)
+          assert isinstance(dtype, PtrDType) and (dtype.fmt is not None or dtype.base in dtypes.fp8s)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          if dtype.base in dtypes.fp8s: ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size
-          else:
-            assert dtype.fmt is not None
-            ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size if dtype.base in dtypes.fp8s else ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
@@ -113,8 +110,7 @@ class PythonProgram:
           else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
           if dtype in dtypes.fp8s: ul[i] = np.frombuffer(packed, dtype=truncate.get(dtype, lambda dt: dt)).tolist()
           else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
-        elif uop is Ops.CAST:
-          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+        elif uop is Ops.CAST: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
@@ -136,11 +132,8 @@ class PythonProgram:
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
                   (c_i, c_j) = c_map(lane_id, elem_idx)
-                  if dtp[0].scalar() in dtypes.fp8s:
-                    out[elem_idx][goff+lane_id] += sum((a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff)).astype(np.float32)
-                                                        for _k in range(K))
-                  else:
-                    out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
+                  cast_fn = lambda x: x.astype(np.float32) if dtp[0].scalar() in dtypes.fp8s else x
+                  out[elem_idx][goff+lane_id] += sum(cast_fn(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff)) for _k in range(K))
             return out
 
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
