@@ -1911,8 +1911,19 @@ class Tensor(SimpleMathTrait):
     print(t.logcumsumexp(axis=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().cumsum(axis=axis).log() + m
+    x = self.unsqueeze(0) if self.ndim == 0 else self
+    if axis not in (-1, x.ndim - 1):
+      x = x.transpose(axis, -1)
+    last_dim_size = x.shape[-1]
+    x_reshaped = x.reshape(-1, last_dim_size)
+    x_cummax = x_reshaped.cummax(-1).reshape(*x_reshaped.shape, 1)
+    x_expand = x_reshaped.unsqueeze(1).expand(*x_reshaped.shape, last_dim_size)
+    mask = Tensor.ones(last_dim_size, last_dim_size).tril().unsqueeze(0)
+    ret = ((x_expand - x_cummax).exp() * mask).sum(-1).log() + x_cummax.reshape(*x_reshaped.shape)
+    ret = ret.reshape(*x.shape)
+    if axis not in (-1, x.ndim - 1):
+      ret = ret.transpose(-1, axis)
+    return ret if self.ndim != 0 else ret.squeeze(0)
 
   def argmax(self, axis=None, keepdim=False):
     """
