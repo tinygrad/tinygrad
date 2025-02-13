@@ -391,14 +391,14 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
 def schedule_uop(sink:UOp, ctx:ScheduleContext) -> ScheduleItem:
-  assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be assign to kernel"
+  assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
+  # start by loading buffers
   with Context(TRACK_MATCH_STATS=0): ast = graph_rewrite(sink.src[1].arg.ast.sink(), load_bufs, bufs:=[sink.buf_uop], bottom_up=True)
   # add_stores + unbind_vars + push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, add_stores+unbind_vars+view_left, si_ctx:=KernelContext(ctx.var_vals)), view_right)
+  ast = graph_rewrite(graph_rewrite(ast, add_stores+unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # fix_kernel_ops
-  ast = graph_rewrite(ast, fix_kernel_ops, si_ctx:=KernelContext(ctx.var_vals))
-  # NOTE: we only add the metadata for fused tensors
-  return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].metadata)
+  ast = graph_rewrite(ast, fix_kernel_ops, KernelContext(ctx.var_vals))
+  return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].arg.metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
