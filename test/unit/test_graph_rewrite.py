@@ -2,7 +2,7 @@ import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
 from tinygrad.ops import GroupOp, UOp, Ops, exec_alu
-from tinygrad.codegen.rewriter import full_graph_rewrite, mulacc_unrolled
+from tinygrad.codegen.rewriter import full_graph_rewrite, mulacc_unrolled, get_late_rewrite_patterns
 
 # Helper function to apply the graph rewrite
 def apply_rewrite(expr):
@@ -310,13 +310,24 @@ class TestMulaccUnrolledAcc(unittest.TestCase):
     expected = acc.assign(acc + a[0]*3.0 + a[1]*4.0 + a[2]*5.0 + a[3]*6.0)
     self.assertIs(expr_with_mulacc, expected)
 
-
 class TestVectorizedTranscendental(unittest.TestCase):
-  def test_exp2(self):
-    sink = UOp(Ops.EXP2, dtypes.float.vec(3), arg=None, src=(UOp(Ops.CONST, dtypes.float.vec(3), arg=6),))
-    sink = apply_rewrite(sink)
-    print(sink)
+  def test_exp2_vectorized(self):
+    exp2_uop = UOp(Ops.EXP2, dtypes.float.vec(3), arg=None, src=(UOp(Ops.CONST, dtypes.float.vec(3), arg=3),))
+    optimized_uop = graph_rewrite(exp2_uop, get_late_rewrite_patterns(()))
+    self.assertEqual(optimized_uop.op, Ops.WHERE)
+    self.assertEqual(optimized_uop.dtype, exp2_uop.dtype)
 
+  def test_log2_vectorized(self):
+    log2_uop = UOp(Ops.LOG2, dtypes.float.vec(3), arg=None, src=(UOp(Ops.CONST, dtypes.float.vec(3), arg=3),))
+    optimized_uop = graph_rewrite(log2_uop, get_late_rewrite_patterns(()))
+    self.assertEqual(optimized_uop.op, Ops.WHERE)
+    self.assertEqual(optimized_uop.dtype, log2_uop.dtype)
+
+  def test_sin_vectorized(self):
+    sin_uop = UOp(Ops.SIN, dtypes.float.vec(3), arg=None, src=(UOp(Ops.CONST, dtypes.float.vec(3), arg=3),))
+    optimized_uop = graph_rewrite(sin_uop, get_late_rewrite_patterns(()))
+    self.assertEqual(optimized_uop.op, Ops.WHERE)
+    self.assertEqual(optimized_uop.dtype, sin_uop.dtype)
 
 if __name__ == '__main__':
   unittest.main()
