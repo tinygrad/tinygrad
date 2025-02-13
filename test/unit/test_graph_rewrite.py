@@ -310,5 +310,13 @@ class TestMulaccUnrolledAcc(unittest.TestCase):
     expected = acc.assign(acc + a[0]*3.0 + a[1]*4.0 + a[2]*5.0 + a[3]*6.0)
     self.assertIs(expr_with_mulacc, expected)
 
+
+class TestVectorizedTranscendental(unittest.TestCase):
+  def test_exp2(self):
+    sink = UOp(Ops.EXP2, dtypes.float.vec(3), arg=None, src=(UOp(Ops.CONST, dtypes.float.vec(3), arg=6),))
+    sink = apply_rewrite(sink)
+    print(sink)
+
+
 if __name__ == '__main__':
   unittest.main()
