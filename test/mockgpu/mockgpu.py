@@ -57,6 +57,7 @@ class MockHWInterface(HWInterface):
   def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
     self.path = path
     self.fd = fd or _open(path, flags)
+    assert self.fd is not None
 
   def __del__(self):
     if self.fd in tracked_fds:
