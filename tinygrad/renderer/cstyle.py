@@ -349,25 +349,20 @@ class CUDARenderer(CStyleLanguage):
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
   type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
 
-  extra_matcher = PatternMatcher([
-    # cast float8 alus to float
-    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e4m3), UPat.var("y", dtype=dtypes.fp8e4m3))),
-      lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.float, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.fp8e4m3)),
-    (UPat(GroupOp.ALU, dtype=dtypes.fp8e4m3, name="x"),
-      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e4m3)),
-    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.fp8e4m3), UPat.var("y", dtype=dtypes.fp8e4m3))),
-      lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
-    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e4m3, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e4m3))),
-    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
-      lambda b, x, y: UOp(Ops.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtypes.fp8e5m2)),
-    (UPat(GroupOp.ALU, dtype=dtypes.fp8e5m2, name="x"),
-      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e5m2)),
-    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtypes.fp8e5m2), UPat.var("y", dtype=dtypes.fp8e5m2))),
-      lambda alu, x, y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
-    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.fp8e5m2, name="x"),
-      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.fp8e5m2))),
-    ]) + extra_pm
+  def __create_fp8_patterns(dtype):
+    patterns = [
+        (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtype), UPat.var("y", dtype=dtype))),
+            lambda b, x, y, dtype=dtype: UOp(Ops.WHERE, dtype=dtypes.float, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtype)),
+        (UPat(GroupOp.ALU, dtype=dtype, name="x"),
+            lambda x, dtype=dtype: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtype)),
+        (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dtype), UPat.var("y", dtype=dtype))),
+            lambda alu, x, y, dtype=dtype: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg)),
+        (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtype, name="x"),
+            lambda x, dtype=dtype: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtype)),
+    ]
+    return patterns
+
+  extra_matcher = PatternMatcher(__create_fp8_patterns(dtypes.fp8e4m3) + __create_fp8_patterns(dtypes.fp8e5m2)) + extra_pm
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
