@@ -513,6 +513,7 @@ jobs:
         deps: testing
         python-version: '3.11'
         amd: 'true'
+        cuda: 'true'
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
@@ -537,6 +538,14 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
+        FORWARD_ONLY: 1
+      run: |
+        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+    - name: Run pytest (ptx)
+      env:
+        MOCKGPU: 1
+        PTX: 1
+        NV: 1
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
