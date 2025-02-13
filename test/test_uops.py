@@ -233,6 +233,7 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
 
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=True), 244)
     # test no truncate
     self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
 
