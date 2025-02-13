@@ -528,7 +528,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       mulacc_unrolled)
   else:
     # new devectorize only for load/store
-    sink = graph_rewrite(sink, sym+devectorize_load_store)
+    sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
