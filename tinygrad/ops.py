@@ -842,6 +842,7 @@ match_stats:dict[UPat, list[Union[int, float]]] = dict()
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: UOp                                                                                  # the sink input to graph_rewrite
+  bottom_up: bool
   matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
@@ -926,16 +927,15 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).top_down_rewrite(sink)
 
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> dict[UOp, UOp]:
-  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
   rewrite_ctx = RewriteContext(pm, ctx)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
-
 
 # *** most of symbolic lives here now ***
 
