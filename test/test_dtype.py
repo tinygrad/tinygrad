@@ -213,11 +213,13 @@ class TestFp8sDType(unittest.TestCase):
     back_to_float32 = test_tensor.cast(dtypes.float32)
     np.testing.assert_equal(tuple(back_to_float32.numpy().tolist()), expected_values)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8e4m3 not supported")
   def test_float_to_fp8e4m3_conversion(self):
     self._float_to_fp8_conversion_test(dtypes.fp8e4m3,
                                   [10000000.0, -1.0, 402.0, -300.0, -10000000.0, 20.0, 1.4123, 0.0, math.inf, math.nan],
                                   [448.0, -1.0, 416.0, -288.0, -448.0, 20.0, 1.375, 0.0, 448.0, math.nan])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "fp8e5m2 not supported")
   def test_float_to_fp8e5m2_conversion(self):
     self._float_to_fp8_conversion_test(dtypes.fp8e5m2,
                                   [10000000.0, -1.0, 402.0, -300.0, -10000000.0, 20.0, 1.4123, 0.0, math.inf, math.nan],
