@@ -346,7 +346,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
   type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
   @staticmethod
-  def __create_fp8_patterns(dtype): [(UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtype), UPat.var("y", dtype=dtype))),
+  def __create_fp8_patterns(dtype) -> list: return [(UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtype), UPat.var("y", dtype=dtype))),
                   lambda b, x, y, dtype=dtype: UOp(Ops.WHERE, dtype=dtypes.float, src=(b, x.cast(dtypes.float), y.cast(dtypes.float))).cast(dtype)),
                 (UPat(GroupOp.ALU, dtype=dtype, name="x"),
                     lambda x, dtype=dtype: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtype)),
