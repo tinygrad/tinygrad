@@ -5,8 +5,9 @@ from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.ops import Ops, sym_infer
 from tinygrad.device import Compiled
-from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv, colored, TRACEMETA
+from extra.optimization.helpers import time_linearizer
 
 def get_sched_resnet():
   mdl = ResNet50()
