@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
 from tinygrad.ops import can_pad, identity_element, resolve, symbolic_simple, view_left, merge_views
 from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, getenv
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -409,9 +409,13 @@ create_kernels = PatternMatcher([
 
 # **** schedule creation and toposort
 
-@track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
+  return _schedule_with_map(big_sink, tensor_map)
+
+@track_rewrites(named=True)
+def _schedule_with_map(big_sink, tensor_map:dict[UOp, UOp]):
+  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]))
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
