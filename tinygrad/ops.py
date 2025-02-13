@@ -224,6 +224,10 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, _buffer:Buffer|None=None):
+    # Implement modular arithmetic wraparound behavior
+    if op == Ops.CONST: arg = truncate.get(dtype, lambda x: x)(arg)
+    if op == Ops.VCONST: arg = tuple(truncate.get(dtype, lambda x: x)(v) for v in arg)
+
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
@@ -685,11 +689,10 @@ python_alu: dict[Ops, Callable]  = {
   Ops.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], Ops.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0,
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
+def exec_alu(op:Ops, dtype:DType, operands):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
-  alu = python_alu[op](*operands)
-  return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
+  return python_alu[op](*operands)
 
 # ***** uop helpers *****
 
@@ -1149,7 +1152,7 @@ symbolic_simple = PatternMatcher([
   # ** constant folding **
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))),
-   lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False)) if a.op is not Ops.THREEFRY else None),
+   lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src])) if a.op is not Ops.THREEFRY else None),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),

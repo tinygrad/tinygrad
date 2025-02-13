@@ -233,9 +233,6 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (1, 1)), 2)
     self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
 
-    # test no truncate
-    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
-
 class TestConstantFolding(unittest.TestCase):
   def test_cast_const(self):
     t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)

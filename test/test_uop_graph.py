@@ -1,6 +1,7 @@
 from typing import List
 import unittest, time
 from tinygrad import dtypes, Device
+from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, AMX
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
@@ -92,6 +93,41 @@ class TestGraphRewriteConst(unittest.TestCase):
     self.assertEqual(ret.op, Ops.CONST)
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(ret.arg, 2)
+
+class TestOverflow(unittest.TestCase):
+  def _test(self, uop:UOp, expected:int):
+    results = to_uops_list([uop])
+    self.assertEqual(len(results), 1)
+    self.assertEqual(results[0].op, Ops.CONST)
+    self.assertEqual(results[0].dtype, uop.dtype)
+    self.assertEqual(results[0].arg, expected)
+
+  def test_cast(self):
+    t = self._test
+    t(UOp.const(dtypes.uint, 0xABCD17D6).cast(dtypes.uint8), 0xD6)
+    t(UOp.const(dtypes.uint, 0xABCD17D6).cast(dtypes.uint8).cast(dtypes.uint), 0xD6)
+
+  def test_mul(self):
+    t = self._test
+    t(UOp.const(dtypes.uint, 0xABCD17D6) * 0xAABBCCDD, 1147018174)
+    t(UOp.const(dtypes.int, 0xABCD17D6) * 10, -1241321892)
+
+  def test_div(self):
+    t = self._test
+    t(UOp.const(dtypes.uint, 0xABCD17D6) * 0xAABBCCDD // 11, 104274379)
+    t(UOp.const(dtypes.int, 0xABCD17D6) * 10 // 11, -112847444)
+
+  def test_neg(self):
+    t = self._test
+    t(-UOp.const(dtypes.uint8, 1), 0xFF)
+    t(-UOp.const(dtypes.uint16, 1), 0xFFFF)
+    t(-UOp.const(dtypes.uint32, 1), 0xFFFFFFFF)
+    t(-UOp.const(dtypes.uint64, 1), 0xFFFFFFFFFFFFFFFF)
+
+    t(-UOp.const(dtypes.int8, 2**7), -2**7)
+    t(-UOp.const(dtypes.int16, 2**15), -2**15)
+    t(-UOp.const(dtypes.int32, 2**31), -2**31)
+    t(-UOp.const(dtypes.int64, 2**63), -2**63)
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
