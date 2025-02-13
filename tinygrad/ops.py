@@ -290,8 +290,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def order(self:UOp) -> tuple[tuple[int, Any, Optional[DType], tuple], tuple]:
     if self.op in GroupOp.ALU:
       const_srcs, srcs = partition(self.src, lambda x: x.op in (Ops.CONST, Ops.VCONST))
-      if len(srcs) == 1: return (srcs[0].order[0], (srcs[0].order[1], self.op.value, *[src.arg for src in const_srcs]))
-    return (self.tuplize, ())
+      if len(srcs) == 1: return srcs[0].order + ((self.op.value, *[src.arg for src in const_srcs]),)
+    return (self.tuplize,)
 
   # *** uop shape stuff ***
 
@@ -1024,6 +1024,7 @@ def fold_unrolled_divs(chain, x, denominator, u):
   # example: x//4 + (x+1)//4 + (x+2)//4 + (x+3)//4 -> x
   # some (x+c)//d would have been folded, so we won't find them in the chain
   # we have to account for the constants the folded terms would have added, and subtract that
+  if denominator.arg < 0: return None
   if x.vmax - x.vmin > (d:=denominator.arg):
     non_folded_c: Iterator[int] = reversed(range(d))
     offset = 0
@@ -1037,8 +1038,10 @@ def fold_unrolled_divs(chain, x, denominator, u):
   # we assume the chain is sorted in ascending order so we look for the highest c: (x+c)//d first
   # we go down the chain from the highest c to the lowest c and use the order to determine if we have passed the expected c
   for c in non_folded_c:
-    next_expected = x//denominator if c==0 else (x+c)//denominator
-    while u is not next_expected:
+    if c == 0:
+      offset += x//denominator
+      break
+    while u is not (next_expected := (x+c)//denominator):
       if chain is None: return None
       chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
       if u.order < next_expected.order: return None
@@ -1234,7 +1237,7 @@ symbolic = symbolic_simple+PatternMatcher([
     lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.order))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat((Ops.ADD, Ops.IDIV)).named("chain") + ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")).named("u"), fold_unrolled_divs),
+  (UPat().var("chain") + ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")).named("u"), fold_unrolled_divs),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
