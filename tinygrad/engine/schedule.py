@@ -245,7 +245,7 @@ def create_kernel(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
   # only create kernels if we're realizing this op
   if b not in ctx.realizes: return x
-  return b.assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, ())))
+  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, ())))
 
 DONT_PLACE_IN_KERNEL = {Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(x:UOp):
@@ -373,9 +373,9 @@ def load_buf(ctx:list[UOp], x:UOp):
   ctx.append(x)
   return UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), len(ctx)-1), unwrap(x.st).to_uop(), dtype=x.dtype)
 
-load_bufs = remove_movement_ops+PatternMatcher([
+load_bufs = PatternMatcher([
   # KERNEL parents get loaded
-  (UPat(Ops.BUFFER, name="x").assign(UPat(Ops.KERNEL, name="k")), lambda x,k: x.reshape(k.shape)),
+  (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat(Ops.KERNEL))), lambda x: x),
   # BUFFER becomes LOAD
   (UPat(Ops.BUFFER, name="x"), load_buf),
 ])

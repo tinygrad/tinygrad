@@ -122,7 +122,7 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.DEVICE, src=()), lambda: True),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
-  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
 ])
 
 # *** this is the UOp shape spec ***
