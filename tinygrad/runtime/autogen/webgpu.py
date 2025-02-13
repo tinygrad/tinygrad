@@ -145,15 +145,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-lib = ctypes.util.find_library('webgpu_dawn')
-if lib is None:
-  import platform
-  if platform.system().lower() == 'darwin':
-    install_instructions = 'brew tap wpmed92/dawn && brew install dawn'
-  else:
-    install_instructions = 'sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so'
-  raise RuntimeError(f"Cannot find dawn library. Install it with '{install_instructions}'")
-_libraries['libwebgpu_dawn.so'] = ctypes.CDLL(lib)
+_libraries['libwebgpu_dawn.so'] = ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))
 
 
 WGPUFlags = ctypes.c_uint64
