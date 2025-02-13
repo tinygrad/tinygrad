@@ -32,11 +32,6 @@ tensor_uop_spec = PatternMatcher([
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
-  # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
-  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
-   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
-
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
    lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
@@ -113,9 +108,9 @@ spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
-  #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
+  #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  (UPat(Ops.NOOP), lambda: True),
+  (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
@@ -126,9 +121,8 @@ spec = PatternMatcher([
 kernel_spec = PatternMatcher([
   (UPat(Ops.DEVICE, src=()), lambda: True),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
-  # NOTE: assign always has a (BUF, KERNEL), it can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, src=[UPat(Ops.BUFFER), UPat((Ops.KERNEL, Ops.ASSIGN))], allow_any_len=True), lambda: True),
+  # TODO: currently kernel only has buffer parents, this is incomplete. it should be BUFFER and ASSIGN
+  (UPat(Ops.KERNEL, src=UPat(Ops.BUFFER)), lambda: True),
 ])
 
 # *** this is the UOp shape spec ***
