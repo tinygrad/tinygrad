@@ -369,13 +369,11 @@ def load_buf(ctx:list[UOp], x:UOp):
   if x.base not in ctx: ctx.append(x.base)
   return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.base.size), (), ctx.index(x.base)), unwrap(x.st).to_uop()))
 
-load_bufs = PatternMatcher([
+add_buffer_ops = PatternMatcher([
+  # LOAD
   (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat(Ops.KERNEL))), load_buf),
   (UPat(Ops.BUFFER, name="x"), load_buf),
-])
-
-add_stores = PatternMatcher([
-  # SINK parents get stored (except for COPY/BUFFER_VIEW)
+  # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
@@ -388,10 +386,10 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 
 def schedule_uop(sink:UOp, ctx:ScheduleContext) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
-  # start by loading buffers
-  ast = graph_rewrite(sink.src[1].arg.ast, load_bufs, bufs:=[sink.buf_uop], bottom_up=True)
-  # add_stores + unbind_vars + push views to edges
-  ast = graph_rewrite(graph_rewrite(ast.sink(), add_stores+unbind_vars+view_left, ctx=ctx.var_vals), view_right)
+  # start by adding buffer ops
+  ast = graph_rewrite(sink.src[1].arg.ast.sink(), add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
+  # unbind_vars + push views to edges
+  ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # fix_kernel_ops
   ast = graph_rewrite(ast, fix_kernel_ops, ctx.var_vals)
   return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].arg.metadata)
