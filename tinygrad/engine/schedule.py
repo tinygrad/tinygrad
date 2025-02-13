@@ -246,11 +246,11 @@ def create_kernel(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if b not in ctx.realizes: return x
   return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, ())))
 
-DONT_PLACE_IN_KERNEL = {Ops.ASSIGN, Ops.BUFFER}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.BUFFER}
 def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL): new_srcs.append(s)
     else: new_srcs.extend(s.src)
   return x.replace(src=n) if (n:=tuple(dedup(new_srcs))) != x.src else None
 
@@ -368,8 +368,8 @@ fix_kernel_ops = PatternMatcher([
 ])
 
 def load_buf(ctx:list[UOp], x:UOp):
-  ctx.append(x)
-  return UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), len(ctx)-1), unwrap(x.st).to_uop(), dtype=x.dtype)
+  if x not in ctx: ctx.append(x)
+  return UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop(), dtype=x.dtype)
 
 load_bufs = PatternMatcher([
   # KERNEL parents get loaded
