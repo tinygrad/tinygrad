@@ -409,9 +409,15 @@ create_kernels = PatternMatcher([
 
 # **** schedule creation and toposort
 
+reorder_expand = PatternMatcher([
+  # put UnaryOps before EXPANDs
+  (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
+    lambda inp, v, alu: inp.alu(alu.op).view(v.arg) if prod(alu.shape) > v.arg.real_size() else None),
+])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
+  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+reorder_expand+sym, ctx={})
   # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
