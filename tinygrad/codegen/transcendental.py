@@ -38,7 +38,7 @@ def ilogb2k(d:UOp) -> UOp:
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
-  dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()]
+  dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.count)
   m1 = d.bitcast(dtype)
   m2 = shl(e.cast(dtype), mantissa_bits(d.dtype))
   return (m1 + m2).bitcast(d.dtype).cast(d.dtype)
