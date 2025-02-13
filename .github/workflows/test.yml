@@ -513,6 +513,7 @@ jobs:
         deps: testing
         python-version: '3.11'
         amd: 'true'
+        cuda: 'true'
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
@@ -537,6 +538,14 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
+        FORWARD_ONLY: 1
+      run: |
+        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+    - name: Run pytest (ptx)
+      env:
+        MOCKGPU: 1
+        PTX: 1
+        NV: 1
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
@@ -612,7 +621,10 @@ jobs:
           key: windows-minimal
           deps: testing_minimal
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}"
+        shell: bash
+        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}" >> $GITHUB_ENV
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
-        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
+          python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
