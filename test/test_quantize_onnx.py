@@ -66,7 +66,6 @@ class TestQuantizeOnnx(unittest.TestCase):
 
   def test_prequant_gemm(self):
     N = 512
-    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     out = X.matmul(W, acc_dtype=X.dtype)
@@ -75,12 +74,21 @@ class TestQuantizeOnnx(unittest.TestCase):
 
   def test_prequant_gemm_intacc(self):
     N = 512
-    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     out = X.matmul(W)
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
+
+  def test_prequant_gemm_intacc_wi(self):
+    N = 512
+    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
+    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
+    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.int8))
+    with Context(DONT_REALIZE_EXPAND=1):
+      out = X.matmul(W)
+      opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+      sexec(out, opts)
 
   def test_prequant_gemv(self):
     N = 2048
