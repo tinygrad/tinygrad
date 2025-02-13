@@ -5,7 +5,7 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
-from tinygrad.device import BufferSpec
+from tinygrad.device import BufferSpec, CPUProgram
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
@@ -151,8 +151,7 @@ class AMDComputeQueue(HWQueue):
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
-    dev.compute_queue.write_ptr[0] = dev.compute_queue.put_value
-    dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
+    dev.compute_queue.signal_doorbell()
 
 class AMDCopyQueue(HWQueue):
   def __init__(self, max_copy_size=0x40000000):
@@ -236,8 +235,7 @@ class AMDCopyQueue(HWQueue):
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
-    dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
-    dev.sdma_queue.doorbell[0] = dev.sdma_queue.put_value
+    dev.sdma_queue.signal_doorbell()
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -297,6 +295,13 @@ class AMDQueueDesc:
   write_ptr: memoryview
   doorbell: memoryview
   put_value: int = 0
+
+  def signal_doorbell(self):
+    self.write_ptr[0] = self.put_value
+
+    # Ensure all prior writes are visible to the GPU.
+    if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+    self.doorbell[0] = self.put_value
 
 class KFDIface:
   kfd:HWInterface|None = None
@@ -446,7 +451,9 @@ class PCIIface:
     # Unbind the device from the kernel driver
     if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
+
+    supported_sizes = int(HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
+    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:

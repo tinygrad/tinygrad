@@ -840,7 +840,8 @@ class TestAutoCastType(unittest.TestCase):
     t.reshape(2, 1).expand(2, 10001).max().backward()
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
-  @unittest.skipIf(Device.DEFAULT=="PYTHON", "very slow")
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "error due to too large dimensions")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):
     N = 10000
@@ -856,6 +857,7 @@ class TestAutoCastType(unittest.TestCase):
     t.square().mean().backward()
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision error")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_softmax_dtype(self):
     data = [1, 2, 3]

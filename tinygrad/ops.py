@@ -118,7 +118,7 @@ class Ops(FastEnum):
   REDUCE_AXIS = auto()
 
   # helper ops
-  GEP = auto(); VECTORIZE = auto() # noqa: E702
+  GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
@@ -152,6 +152,7 @@ class Ops(FastEnum):
   # device
   DEVICE = auto()
   MULTI = auto()
+  CUSTOM = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -342,13 +343,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def st_arg(self) -> ShapeTracker:
     assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
     return unwrap(self.st)
-  @property
-  def const_arg(self) -> ConstType:
-    match self.base.op:
-      case Ops.CONST: ret = self.base.arg
-      case op: raise AssertionError(f"const_arg called on {op}")
-    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
-    return ret
   @property
   def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
@@ -600,7 +594,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
     return 1
-  def divides(self, v) -> UOp|None:
+  def divides(self, v:int) -> UOp|None:
     if v==1: return self
     if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
     if self.op is Ops.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
@@ -644,7 +638,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.UNROLL, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
-    # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
+    # TODO: Ops.SPECIAL is Ops.DEFINE_VAR
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
@@ -1170,8 +1164,8 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # ** COMMUTATIVE flipping (only for ints) **
+  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
