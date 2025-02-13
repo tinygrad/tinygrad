@@ -74,7 +74,7 @@ class PythonProgram:
           assert isinstance(dtype, PtrDType) and (dtype.fmt is not None or dtype.base in dtypes.fp8s)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size if dtype.base in dtypes.fp8s else ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          ul[i] = [np.frombuffer(buf, dtype=dtype.name)] * warp_size if dtype.base in dtypes.fp8s else [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
