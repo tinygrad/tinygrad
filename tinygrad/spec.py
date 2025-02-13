@@ -32,11 +32,6 @@ tensor_uop_spec = PatternMatcher([
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
-  # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
-  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
-   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
-
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
    lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
@@ -113,7 +108,7 @@ spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
-  #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
+  #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
