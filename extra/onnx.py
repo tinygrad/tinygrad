@@ -691,9 +691,10 @@ def get_onnx_ops():
       else: raise NotImplementedError("reduction doesn't support max or min")
     return x
 
-  def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul"]="none"):
+  def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
-    return x.scatter(axis, indices, updates, {"none":None, "mul": "multiply"}.get(reduction, reduction))
+    if reduction == "none": return x.scatter(axis, indices, updates)
+    return x.scatter_reduce(axis, indices, updates, {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}.get(reduction))
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     return x.gather(axis, indices)
