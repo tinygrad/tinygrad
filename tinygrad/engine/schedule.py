@@ -232,7 +232,7 @@ def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
     if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
   return ctx.realizes
 
-# break the sink into kernels
+# break the SINK into kernels
 
 @dataclass(frozen=True)
 class Kernel:
@@ -242,25 +242,21 @@ class Kernel:
 
 def create_kernel(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
-  # only create kernels if we're realizing this op
-  if b not in ctx.realizes: return x
-  metadata = (m,) if m is not None else ()
-  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, metadata)))
+  if b not in ctx.realizes: return x # collapse BUFFER
+  # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
+  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, (m,) if m is not None else ())))
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.BUFFER}
 def append_to_kernel(ctx:ScheduleContext, x:UOp):
   new_srcs: list[UOp] = []
   new_metadata: dict[Metadata, None] = dict.fromkeys(x.arg.metadata)
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL): new_srcs.append(s)
-    # fuse this op!
+    if s.op is Ops.BUFFER or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL): new_srcs.append(s)
     else:
-      if (m:=ctx.ops_metadata.get(s)) is not None: new_metadata[m] = None
       new_srcs.extend(s.src)
-  new_kernel = x.replace(src=tuple(dedup(new_srcs)), arg=Kernel(x.arg.ast, tuple(new_metadata)))
-  return new_kernel if new_kernel is not x else None
+      if (m:=ctx.ops_metadata.get(s)) is not None: new_metadata[m] = None
+  return x.replace(src=n, arg=Kernel(x.arg.ast, tuple(new_metadata))) if (n:=tuple(dedup(new_srcs))) != x.src else None
 
-create_kernels = PatternMatcher([
+create_kernels = merge_views+PatternMatcher([
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), create_kernel),
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
 ])
@@ -284,10 +280,6 @@ class ScheduleItem:
   def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
 
 # **** Kernel creation
-
-@dataclass(frozen=True)
-class KernelContext:
-  var_vals: dict[Variable, int]
 
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
@@ -341,11 +333,11 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def _append_st_vars(ctx:KernelContext, x:UOp) -> UOp|None:
+def _append_st_vars(ctx:dict[Variable, int], x:UOp) -> UOp|None:
   st = unwrap(x.st).simplify()
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
-    ctx.var_vals.update(var_vals)
+    ctx.update(var_vals)
   return st.to_uop() if st != x.st else None
 
 def check_load_st(glbl:UOp, view:UOp):
@@ -374,13 +366,11 @@ fix_kernel_ops = PatternMatcher([
 ])
 
 def load_buf(ctx:list[UOp], x:UOp):
-  if x not in ctx: ctx.append(x)
-  return UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop(), dtype=x.dtype)
+  if x.base not in ctx: ctx.append(x.base)
+  return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.base.size), (), ctx.index(x.base)), unwrap(x.st).to_uop()))
 
 load_bufs = PatternMatcher([
-  # KERNEL parents get loaded
-  (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat(Ops.KERNEL))), lambda x: x),
-  # BUFFER becomes LOAD
+  (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat(Ops.KERNEL))), load_buf),
   (UPat(Ops.BUFFER, name="x"), load_buf),
 ])
 
@@ -399,11 +389,11 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 def schedule_uop(sink:UOp, ctx:ScheduleContext) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
   # start by loading buffers
-  with Context(TRACK_MATCH_STATS=0): ast = graph_rewrite(sink.src[1].arg.ast.sink(), load_bufs, bufs:=[sink.buf_uop], bottom_up=True)
+  ast = graph_rewrite(sink.src[1].arg.ast, load_bufs, bufs:=[sink.buf_uop], bottom_up=True)
   # add_stores + unbind_vars + push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, add_stores+unbind_vars+view_left, ctx=ctx.var_vals), view_right)
+  ast = graph_rewrite(graph_rewrite(ast.sink(), add_stores+unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # fix_kernel_ops
-  ast = graph_rewrite(ast, fix_kernel_ops, KernelContext(ctx.var_vals))
+  ast = graph_rewrite(ast, fix_kernel_ops, ctx.var_vals)
   return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].arg.metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
