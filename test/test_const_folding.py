@@ -1,4 +1,4 @@
-import unittest, math
+import unittest, itertools, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.ops import Ops
 from tinygrad.helpers import CI
@@ -96,6 +96,19 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
+
+class TestBitcastConstFolding(unittest.TestCase):
+  def test_bitcast(self):
+    dtypes_by_size = [
+      [dtypes.char, dtypes.uchar, dtypes.bool],
+      [dtypes.short, dtypes.ushort, dtypes.half],
+      [dtypes.int, dtypes.uint, dtypes.float],
+      [dtypes.long, dtypes.ulong, dtypes.double],
+    ]
+    for group in dtypes_by_size:
+      for from_dt, to_dt in itertools.product(group, group):
+        _check_ast_count(0, Tensor.ones(4, dtype=from_dt).bitcast(to_dt))
+        # TODO: Validate actual converted value
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):

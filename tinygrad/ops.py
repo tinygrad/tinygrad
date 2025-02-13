@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, struct
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -1120,6 +1120,10 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
+def fold_bitcast(x:UOp, c:UOp) -> UOp|None:
+  if (fr:=c.dtype.fmt) is None or (to:=x.dtype.fmt) is None: return None
+  return x.const_like(struct.unpack(to, struct.pack(fr, c.arg))[0])
+
 symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -1150,6 +1154,7 @@ symbolic_simple = PatternMatcher([
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))),
    lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False)) if a.op is not Ops.THREEFRY else None),
+  (UPat(Ops.BITCAST, name="x", src=(UPat(Ops.CONST, name="c"),)), fold_bitcast),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
