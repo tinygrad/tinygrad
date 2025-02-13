@@ -66,10 +66,10 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
-  # remove CONST/BIND/BUFFER/VIEW from SINK
+  # remove CONST/BIND/BUFFER from SINK
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
-      if (new_src:=tuple(x.base for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
+      if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
@@ -356,21 +356,19 @@ def check_load_st(glbl:UOp, view:UOp):
   raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
-to_si = PatternMatcher([
-  # BUFFER -> DEFINE_GLOBAL
+fix_kernel_ops = PatternMatcher([
+  # BUFFER becomes DEFINE_GLOBAL
   (UPat(Ops.BUFFER, name="x"), _append_buf),
-  # simplify and unbind the final VIEWs
+  # BIND in shapetracker becomes DEFINE_VAR
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  # don't need SINK on COPY or BUFFER_VIEW
+  # remove SINK from COPY and BUFFER_VIEW
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x")),)), lambda b,x: x.replace(src=(b, *x.src))),
-  # don't need contiguous or assign anymore
+  # remove CONTIGUOUS/ASSIGN/DEVICE/PRELOAD
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
-  # don't need DEVICE anymore
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
-  # PRELOAD becomes LOAD
-  (UPat(Ops.PRELOAD, name="root"), lambda root:root.replace(op=Ops.LOAD)),
-  # once images are loaded they become the base dtype
+  (UPat(Ops.PRELOAD, name="x"), lambda x: x.replace(op=Ops.LOAD)),
+  # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
@@ -384,19 +382,19 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 def schedule_uop(pre:UOp, ctx:ScheduleContext) -> UOp:
   # unbind_vars + push views to edges
   sink = graph_rewrite(graph_rewrite(pre, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
-  # remove extra uops from SINK + substitue BUFFER with DEFINE_GLOBAL
-  ast = graph_rewrite(sink, to_si, si_ctx:=KernelContext(ctx.var_vals))
   # deal with ASSIGN
   if len(ctx.assigns) != 0:
-    assign_preloads = ctx.preloads[si_ctx.bufs[0].buffer]
+    assign_preloads = ctx.preloads[pre.src[0].buf_uop.buffer]
     for x in list(sink.toposort)[::-1]:
       # we only allow a kernel to depend on either the before ASSIGN or after ASSIGN version of a BUFFER
       if x.op is Ops.LOAD and x.buf_uop in assign_preloads: raise RuntimeError("cycle detected in graph")
       # PRELOAD tells the toposort this kernel should run before ASSIGN
       if x.op is Ops.PRELOAD: assign_preloads[x.buf_uop] = None
+  # fix_kernel_ops
+  sink = graph_rewrite(sink, fix_kernel_ops, si_ctx:=KernelContext(ctx.var_vals))
   # NOTE: we only add the metadata for fused tensors
   metadata = tuple(dedup(m for x in pre.toposort if x.op is not Ops.BUFFER and (m:=ctx.ops_metadata.get(x)) is not None))
-  return UOp(Ops.KERNEL, src=tuple(si_ctx.bufs), arg=Kernel(ast, metadata))
+  return UOp(Ops.KERNEL, src=tuple(si_ctx.bufs), arg=Kernel(sink, metadata))
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:

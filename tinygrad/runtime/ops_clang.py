@@ -1,5 +1,5 @@
 import platform, subprocess, sys
-from tinygrad.helpers import capstone_flatdump
+from tinygrad.helpers import capstone_flatdump, getenv
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -13,7 +13,7 @@ class ClangJITCompiler(Compiler):
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     args = ['-march=native', f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib']
     arch_args = ['-ffixed-x18'] if target == 'arm64' else []
-    obj = subprocess.check_output(['clang', '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
+    obj = subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
     return jit_loader(obj)
 
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)

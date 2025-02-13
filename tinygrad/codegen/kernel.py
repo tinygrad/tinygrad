@@ -325,8 +325,8 @@ class Kernel:
       -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
       [0-N]: uses only the n'th tensor core available; useful for search
     tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
-      0: applies to only kernels with a single reduce axis and direct UOps.LOAD into Ops.MUL
-      1: allows kernels with multiple reduce axes and also multiplication of UOps.CAST'd buffers
+      0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
+      1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
     if tc_select is None: tc_select = TC_SELECT.value
@@ -339,7 +339,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
-          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
+          if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
           for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
             szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
