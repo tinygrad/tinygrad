@@ -4,8 +4,6 @@ from tinygrad.helpers import polyN
 from tinygrad.ops import UOp
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
-FLOAT_TO_INT = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
-INT_TO_FLOAT = {v: k for k, v in FLOAT_TO_INT.items()}
 
 def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
@@ -19,32 +17,30 @@ def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32:
 # **** utils ****
 def shr(x:UOp, y:int) -> UOp: return x // (2**y)
 def shl(x:UOp, y:int) -> UOp: return x * (2**y)
-def _out_dtype(d: UOp, no_vec: bool=False):
-  cast_map = FLOAT_TO_INT if d.dtype.scalar() in FLOAT_TO_INT else INT_TO_FLOAT
-  return cast_map[d.dtype.scalar()] if d.dtype.vec == 1 or no_vec else cast_map[d.dtype.scalar()].vec(d.dtype.vcount)
 
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
-  return (d + (d<0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(_out_dtype(d))
+  out_dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.vcount)
+  return (d + (d<0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(out_dtype)
 
 def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
-  out_dtype = _out_dtype(q)
+  out_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype}[q.dtype.scalar()].vec(q.dtype.vcount)
   return shl(q + exponent_bias(out_dtype), mantissa_bits(out_dtype)).bitcast(out_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
-  dint = d.bitcast(_out_dtype(d, no_vec=True))
+  dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()])
   # -1 <= ilog2bk(d) <= 128
   return (shr(dint, mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
-  out_dtype = _out_dtype(d, no_vec=True)
-  m1 = d.bitcast(out_dtype)
-  m2 = shl(e.cast(out_dtype), mantissa_bits(d.dtype))
+  dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()]
+  m1 = d.bitcast(dtype)
+  m2 = shl(e.cast(dtype), mantissa_bits(d.dtype))
   return (m1 + m2).bitcast(d.dtype).cast(d.dtype)
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
