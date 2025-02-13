@@ -128,5 +128,36 @@ class TestTranscendentalSchedule(unittest.TestCase):
       c = c.exp2()
       check_schedule(c, 1)
 
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "Vectorized dtypes unsupported on WEBGPU")
+class TestVectorizedTranscendentals(unittest.TestCase):
+  def _test_vectorized_op(self, op_func, np_func, value_range, vec_sizes=[1,2,4,8]):
+    for vec_size in vec_sizes:
+      num_elements = (100 // vec_size) * vec_size
+      x = np.linspace(value_range[0], value_range[1], num=num_elements, dtype=np.float32).reshape(-1, vec_size)
+      t = Tensor(x, dtype=dtypes.float32.vec(vec_size))
+      result = op_func(t).numpy().reshape(-1)
+      expected = np_func(x.reshape(-1))
+      np.testing.assert_allclose(result, expected, atol=2e-5, rtol=1e-5)
+
+  def test_vectorized_sin(self):
+    self._test_vectorized_op(Tensor.sin, np.sin, (-100, 100))
+
+  def test_vectorized_log2(self):
+    self._test_vectorized_op(Tensor.log2, np.log2, (0.1, 100))
+
+  def test_vectorized_exp2(self):
+    self._test_vectorized_op(Tensor.exp2, np.exp2, (-10, 10))
+
+  def test_vectorized_pow(self):
+    for vec_size in [1, 2, 4, 8]:
+      num_elements = (100 // vec_size) * vec_size
+      bases = np.linspace(1.0, 10.0, num=num_elements, dtype=np.float32).reshape(-1, vec_size)
+      exponents = np.linspace(0.0, 3.0, num=num_elements, dtype=np.float32).reshape(-1, vec_size)
+      t_base = Tensor(bases, dtype=dtypes.float32.vec(vec_size))
+      t_exp = Tensor(exponents, dtype=dtypes.float32.vec(vec_size))
+      tg_result = t_base.pow(t_exp).numpy().reshape(-1)
+      np_result = np.power(bases, exponents).reshape(-1)
+      np.testing.assert_allclose(tg_result, np_result, atol=1e-5, rtol=1e-5)
+
 if __name__ == '__main__':
   unittest.main()
