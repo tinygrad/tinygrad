@@ -40,7 +40,7 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     types = dtypes.fields().values()
     for fr, to in itertools.product(types, types):
       if fr.itemsize == to.itemsize and None not in (fr.fmt, to.fmt):
-        _check_ast_count(0, Tensor.ones(1, dtype=fr.fmt).bitcast(to.fmt))
+        _check_ast_count(0, Tensor.ones(1, dtype=fr).bitcast(to))
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
