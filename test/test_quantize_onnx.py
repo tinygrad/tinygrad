@@ -4,24 +4,27 @@ from tinygrad import Tensor, Context, Device
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 
-N = 1024
+N = 512
 
-def create_gemm_model(model_path:str, in_size=N, out_size=N):
+def create_gemm_model(model_path:str, in_size=N, out_size=N, bias=False):
   import onnx
   from onnx import helper, numpy_helper, TensorProto
   # Define input and output
-  input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, in_size])
-  output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, out_size])
+  input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [N, in_size])
+  output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [N, out_size])
 
   # Create random weights and bias
   W_data = np.random.randn(in_size, out_size).astype(np.float32)
-  B_data = np.random.randn(out_size).astype(np.float32)
-
   W_init = numpy_helper.from_array(W_data, name="W")
-  B_init = numpy_helper.from_array(B_data, name="B")
 
-  gemm_node = helper.make_node("Gemm", inputs=["input", "W", "B"], outputs=["output"], alpha=1.0, beta=1.0, transB=0)
-  graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init, B_init])
+  if bias:
+    B_data = np.random.randn(out_size).astype(np.float32)
+    B_init = numpy_helper.from_array(B_data, name="B")
+    gemm_node = helper.make_node("Gemm", inputs=["input", "W", "B"], outputs=["output"], alpha=1.0, beta=1.0, transB=0)
+    graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init, B_init])
+  else:
+    gemm_node = helper.make_node("Gemm", inputs=["input", "W"], outputs=["output"], alpha=1.0, beta=1.0, transB=0)
+    graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init])
 
   # Create and save the model
   model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
@@ -47,15 +50,15 @@ class TestQuantizeOnnx(unittest.TestCase):
       def get_next(self) -> dict:
         self.cnt += 1
         if self.cnt == 100: return None
-        return {"input": np.random.uniform(size=(1, N)).astype(np.float32)}
+        return {"input": np.random.uniform(size=(N, N)).astype(np.float32)}
     out_file = "/tmp/test_out.onnx"
     quantize_static(create_gemm_model("/tmp/test_in.onnx"), out_file,
                     FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False,
                     activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
                     extra_options={"ActivationSymmetric": True})
     run_onnx_jit, _ = load_onnx_model(out_file)
-    with Context(NOOPT=1):
-      run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
+    with Context(DONT_REALIZE_EXPAND=1):
+      run_onnx_jit(input=Tensor(np.random.uniform(size=(N, N)).astype(np.float32)))
 
   def test_prequant_conv2d_1x1(self):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
@@ -71,6 +74,16 @@ class TestQuantizeOnnx(unittest.TestCase):
     out = X.matmul(W, acc_dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
+
+  # TODO: this has to work
+  def test_prequant_gemm_intacc_early(self, xi=np.int8, wi=np.int8):
+    N = 512
+    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(xi))
+    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
+    with Context(DONT_REALIZE_EXPAND=1):
+      out = X.cast("int").matmul(W.cast("int"))
+      opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+      sexec(out, opts)
 
   def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8):
     N = 512

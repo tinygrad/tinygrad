@@ -136,6 +136,7 @@ pm_lowerer = PatternMatcher([
 ])
 
 # early symbolic
+# test with: CNT=100 CLANG=1 VIZ=1 DONT_REALIZE_EXPAND=1 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
 from tinygrad.ops import symbolic
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
@@ -148,7 +149,13 @@ pm_quant = symbolic+PatternMatcher([
     lambda x,r: r.replace(dtype=x.dtype, src=(x,)).cast(r.dtype) if dtypes.is_float(r.dtype) else None),
   # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
   (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),
-   lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None)
+   lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None),
+  # cast int after mul (breaks it! but needed for speed)
+  #(UPat.var("x").cast(dtypes.int) * UPat.var("y").cast(dtypes.int), lambda x,y: (x*y).cast(dtypes.int)),
+  # no float divide (breaks it!)
+  #((UPat.var("x").cast(dtypes.float)*UPat.cvar("c")).cast(dtypes.char), lambda x,c: x.cast(dtypes.char)),
+  # float divide is int divide (breaks it!)
+  #((UPat.var("x").cast(dtypes.float)*UPat.cvar("c")).cast(dtypes.char), lambda x,c: (x//(1/c.arg)).cast(dtypes.char)),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
