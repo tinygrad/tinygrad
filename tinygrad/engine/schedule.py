@@ -244,16 +244,21 @@ def create_kernel(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
   # only create kernels if we're realizing this op
   if b not in ctx.realizes: return x
-  metadata = tuple(dedup(m for u in x.toposort if u.base.op not in {Ops.BUFFER, Ops.ASSIGN} and (m:=ctx.ops_metadata.get(u)) is not None))
+  metadata = (m,) if m is not None else ()
   return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, metadata)))
 
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.BUFFER}
-def append_to_kernel(x:UOp):
+def append_to_kernel(ctx:ScheduleContext, x:UOp):
   new_srcs: list[UOp] = []
+  new_metadata: dict[Metadata, None] = dict.fromkeys(x.arg.metadata)
   for s in x.src:
     if s.op in DONT_PLACE_IN_KERNEL or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL): new_srcs.append(s)
-    else: new_srcs.extend(s.src)
-  return x.replace(src=n) if (n:=tuple(dedup(new_srcs))) != x.src else None
+    # fuse this op!
+    else:
+      if (m:=ctx.ops_metadata.get(s)) is not None: new_metadata[m] = None
+      new_srcs.extend(s.src)
+  new_kernel = x.replace(src=tuple(dedup(new_srcs)), arg=Kernel(x.arg.ast, tuple(new_metadata)))
+  return new_kernel if new_kernel is not x else None
 
 create_kernels = PatternMatcher([
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), create_kernel),
