@@ -1,4 +1,4 @@
-import ctypes, platform, sys
+import ctypes, platform
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -12,21 +12,20 @@ def expect(x, err, ret=None):
   return ret
 
 class LLVMCompiler(Compiler):
-  def __init__(self, host_arch:str, opt:bool, triple="", arch="", feats=""):
+  def __init__(self, host_arch:str, opt:bool, arch:str|None=None):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
-
-    triple = triple.encode() or ({'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf')
+    triple = b"amdgcn-amd-amdhsa" if host_arch == "AMDGPU" else ({'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf')
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
-    cpu = arch.encode() or ctypes.string_at(llvm.LLVMGetHostCPUName())
-    feats = feats.encode() or ((b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()))
+    cpu = arch.encode() if host_arch == "AMDGPU" else ctypes.string_at(llvm.LLVMGetHostCPUName())
+    feats = b"+cumode" if host_arch == "AMDGPU" else ((b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()))
     if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if opt:
-      self.passes = b'default<O3>'
+      self.passes = b'default<O2>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
@@ -38,9 +37,8 @@ class LLVMCompiler(Compiler):
 
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
-  def compile(self, src:str|bytes, load=True) -> bytes:
-    src_bytes = src if isinstance(src, bytes) else src.encode()
-    src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes), len(src_bytes), b'src')
+  def compile(self, src:str, load=True) -> bytes:
+    src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
     expect(llvm.LLVMRunPasses(mod, self.passes, self.target_machine, self.pbo), 'failed to run passes')
@@ -57,4 +55,4 @@ class LLVMCompiler(Compiler):
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
     compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()], bool(getenv("LLVMOPT")))
-    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None), compiler, CPUProgram)
+    super().__init__(device, MallocAllocator, LLVMRenderer(), compiler, CPUProgram)

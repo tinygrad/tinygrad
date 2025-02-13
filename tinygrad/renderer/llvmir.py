@@ -1,15 +1,9 @@
 from typing import cast
-import math, struct
+import math, struct, sys
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 
-ww_dict = {"0": "x", "1": "y", "2": "z"}
-code_for_workitem = {
-  "g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{ww_dict[x]}()",
-  "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{ww_dict[x]}()",
-  "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"
-}
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
@@ -47,20 +41,17 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 def llvm_rewrite_cast(ctx, x):
   output_type = x.dtype
   input_type = x.src[0].dtype
-  if x.src[0].dtype == dtypes.half and x.dtype == dtypes.bfloat16:
-    return f"  {ctx[x]}_ext = fpext {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to float\n" + \
-      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(x.dtype)}\n"
-  if x.src[0].dtype == dtypes.bfloat16 and x.dtype == dtypes.half:
+  if input_type == dtypes.half and output_type == dtypes.bfloat16:
+    return f"  {ctx[x]}_ext = fpext {ldt(input_type)} {ctx[x.src[0]]} to float\n" + \
+      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(output_type)}\n"
+  if input_type == dtypes.bfloat16 and output_type == dtypes.half:
     return f"  {ctx[x]}_ext = fpext bfloat {ctx[x.src[0]]} to float\n" + \
-      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(x.dtype)}\n"
+      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(output_type)}\n"
   if dtypes.is_bool(input_type) and output_type == dtypes.bfloat16:
     return f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n" + \
       f"  {ctx[x]}     = uitofp i32 {ctx[x]}_ext to bfloat\n"
-  return f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"
+  return f"  {ctx[x]} = {lcast(input_type, output_type)} {ldt(input_type)} {ctx[x.src[0]]} to {ldt(output_type)}"
 
-string_rewrite = PatternMatcher([
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
-])
 
 llvm_rewrite = PatternMatcher([
   # memory load/store
@@ -117,10 +108,11 @@ def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
+  abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
   has_local = False
   has_shared = False
-
+  string_rewrite = llvm_rewrite
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
     (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
@@ -131,14 +123,6 @@ class LLVMRenderer(Renderer):
     # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
     (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
-
-  def __init__(self, abi:str|None=None):
-    self.abi = abi
-    if self.abi and "amdgpu_kernel" in self.abi:
-      self.has_local = True
-      self.device = "AMD"
-    else:
-      self.global_max = None
   def render(self, name: str, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
     args: list[str] = []
@@ -173,10 +157,7 @@ class LLVMRenderer(Renderer):
           r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
-        l = None
-        if u.op is Ops.SPECIAL:
-          l = string_rewrite.rewrite(u, ctx=r)
-        elif (l:=llvm_rewrite.rewrite(u, ctx=r)) is None:
+        if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
@@ -197,3 +178,13 @@ define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(ar
 {chr(10).join(end_lines.keys())}
 attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
 '''
+
+code_for_workitem = { "g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
+                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+class AMDLLVMRenderer(LLVMRenderer):
+  device = "AMD"
+  has_local = True
+  abi = "protected amdgpu_kernel"
+  string_rewrite = llvm_rewrite + PatternMatcher([
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
+  ])

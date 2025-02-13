@@ -14,7 +14,7 @@ from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
-from tinygrad.renderer.llvmir import LLVMRenderer
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
 
@@ -590,7 +590,7 @@ class AMDDevice(HCQCompiled):
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
-    super().__init__(device, AMDAllocator(self), LLVMRenderer("protected amdgpu_kernel") if os.getenv("AMD_LLVM")=="1" else AMDRenderer(),
+    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer() if os.getenv("AMD_LLVM")=="1" else AMDRenderer(),
                      AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 

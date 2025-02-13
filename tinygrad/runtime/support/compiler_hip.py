@@ -60,8 +60,8 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
 
 def compile_llvm(prg:str, arch="gfx1100") -> bytes:
   with tempfile.NamedTemporaryFile(delete=True) as f:
-    llvm_backend = LLVMCompiler("AMDGPU", True, triple="amdgcn-amd-amdhsa", arch=arch, feats="+cumode")
-    relo = llvm_backend.compile(prg.encode(), load=False)
+    llvm_backend = LLVMCompiler("AMDGPU", True, arch=arch)
+    relo = llvm_backend.compile(prg, load=False)
     f.write(relo)
     f.flush()
     args = [f.name, "--no-undefined", "-shared", "-o", "-"]
