@@ -688,7 +688,18 @@ python_alu: dict[Ops, Callable]  = {
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
+
   alu = python_alu[op](*operands)
+
+  if dtype == dtypes.uint8:
+    alu = alu & 0xFF
+  elif dtype == dtypes.uint16:
+    alu = alu & 0xFFFF
+  elif dtype == dtypes.uint32:
+    alu = alu & 0xFFFF_FFFF
+  elif dtype == dtypes.uint64:
+    alu = alu & 0xFFFF_FFFF_FFFF_FFFF
+
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 
 # ***** uop helpers *****
@@ -1124,6 +1135,13 @@ def bitcast_to(root:UOp, c:UOp):
   if None in (fr := c.dtype.fmt, to := root.dtype.fmt): return None
   else: return root.const_like(struct.unpack(to, struct.pack(fr, c.arg))[0])
 
+def do_it(a):
+
+  if dtypes.ulong in [x.dtype for x in a.src]:
+    print(f"do_it {a=}")
+
+  return a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False))
+
 symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -1153,7 +1171,7 @@ symbolic_simple = PatternMatcher([
   # ** constant folding **
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))),
-   lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False)) if a.op is not Ops.THREEFRY else None),
+   lambda a: do_it(a) if a.op is not Ops.THREEFRY else None),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
