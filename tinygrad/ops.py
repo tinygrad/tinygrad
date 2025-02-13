@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args, Set
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -922,12 +922,62 @@ class RewriteContext:
     self.replace[n] = ret = n if new_n is None else self.top_down_rewrite(new_n)
     return ret
   def bottom_up_rewrite(self, n:UOp) -> UOp:
-    if (rn := self.replace.get(n)) is not None: return rn
-    new_n: UOp|None = n
-    while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
-    new_src = tuple([self.bottom_up_rewrite(x) for x in last_n.src])
-    self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
-    return ret
+    # Use self.replace as memoization. If the node is already in process
+    # (indicated by a None value), then a cyclic substitution is detected:
+    # simply leave the node unchanged.
+    if n in self.replace:
+      if self.replace[n] is None:
+        return n
+      return self.replace[n]
+    # Build a postorder list of nodes with an iterative DFS.
+    postorder = []
+    visited = set()
+    stack = [(n, False)]
+    while stack:
+      node, visited_flag = stack.pop()
+      if visited_flag:
+        postorder.append(node)
+      else:
+        if node not in visited:
+          visited.add(node)
+          stack.append((node, True))
+          for child in node.src:
+            stack.append((child, False))
+
+    # Process nodes in postorder (children before parents).
+    for node in postorder:
+      current = node
+      # Iteratively apply rewriting until fixpoint.
+      while True:
+        new_current = self.pm.rewrite(current, self.ctx)
+        if new_current is None:
+          break
+        current = new_current
+      # Replace children with their rewritten versions, if any.
+      if current.src:
+        new_src = []
+        changed = False
+        for child in current.src:
+          # If a child is still in process (i.e. no final replacement available)
+          # then simply leave that child unchanged.
+          if child in self.replace and self.replace[child] is None:
+            rewritten_child = child
+          else:
+            rewritten_child = self.replace.get(child, child)
+          new_src.append(rewritten_child)
+          if rewritten_child is not child:
+            changed = True
+        if changed:
+          current = UOp(current.op, current.dtype, tuple(new_src), current.arg)
+          # Once again apply rewriting on the updated node until fixpoint.
+          while True:
+            new_current = self.pm.rewrite(current, self.ctx)
+            if new_current is None:
+              break
+            current = new_current
+      self.replace[node] = current
+    return self.replace[n]
+
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
@@ -1199,7 +1249,7 @@ symbolic = symbolic_simple+PatternMatcher([
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
   ((UPat.cvar("c0") + UPat.var("x")) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
-  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
+  ((UPat.var("x", dtype=dtypes.ints) // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # ** lt **
   # c0*x<c1 for positive int c0,c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
@@ -1238,7 +1288,31 @@ symbolic_flat = symbolic+PatternMatcher([
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])
 
-_substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+def uop_contains(u: UOp, target: UOp, visited: Optional[Set[UOp]] = None) -> bool:
+  """Return True if target is found in the UOp tree rooted at u."""
+  visited = visited or set()
+  # Use object identity to compare nodes.
+  if u is target:
+    return True
+  if u in visited:
+    return False
+  visited.add(u)
+  for c in u.src:
+    if uop_contains(c, target, visited):
+      return True
+  return False
+
+def cyclic_safe_substitution(ctx, x):
+  sub = ctx.get(x, None)
+  if sub is None:
+    return None
+  # If the replacement sub already contains the original x,
+  # then this mapping is cyclic – return None to skip substitution.
+  if uop_contains(sub, x):
+    return None
+  return sub
+
+_substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), cyclic_safe_substitution)])
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
@@ -1284,3 +1358,10 @@ view_left = merge_views+PatternMatcher([
   (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.Buffer, name="b"),)),
    lambda b,vm: b.replace(src=tuple((s.st+vm.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
 ])
+
+@track_rewrites()
+def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]):
+  return graph_rewrite(uop, _substitute, rel, bottom_up=True)
+
+def substitute(uop:UOp, rel:dict[UOp, UOp]):
+  return named_substitute(inspect.stack()[1].function, uop, rel)

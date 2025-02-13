@@ -250,14 +250,11 @@ class TestSubstitute(unittest.TestCase):
     ret = substitute(ret, {a.sin():b})
     self.assertIs(ret, b.sin())
 
-  # broken due to infinite recursion
-  # NOTE: VIZ hangs and doesn't recover if you click this one
-  def test_assert_inf_recurse(self):
+  def test_skip_cyclic_substitution(self):
     a = UOp.variable('a', 0, 10)
     n1 = a.sin()
-    ret = n1
-    with self.assertRaises(RecursionError):
-      ret = substitute(ret, {n1:n1.sqrt()})
+    ret = substitute(n1, {n1: n1.sqrt()})
+    self.assertIs(ret, n1)
 
   def test_sin_to_sqrt(self):
     a = UOp.variable('a', 0, 10)
