@@ -244,7 +244,8 @@ def create_kernel(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
   # only create kernels if we're realizing this op
   if b not in ctx.realizes: return x
-  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, ())))
+  metadata = tuple(dedup(m for u in x.toposort if u.base.op not in {Ops.BUFFER, Ops.ASSIGN} and (m:=ctx.ops_metadata.get(u)) is not None))
+  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, metadata)))
 
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.BUFFER}
 def append_to_kernel(x:UOp):
@@ -379,8 +380,8 @@ load_bufs = PatternMatcher([
 ])
 
 add_stores = PatternMatcher([
-  # SINK parents get stored (except for COPY)
-  (UPat(Ops.SINK, src=(UPat(Ops.COPY, name="x"),)), lambda x:x),
+  # SINK parents get stored (except for COPY/BUFFER_VIEW)
+  (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
 ])
