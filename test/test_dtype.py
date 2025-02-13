@@ -55,7 +55,6 @@ def _test_cast(a:Tensor, target_dtype:DType):
     a = (a > 65504).where(65504, a)
 
   _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(_to_np_dtype(target_dtype))))
-
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if target_dtype == dtypes.bfloat16: raise unittest.SkipTest("no test for bf16 bitcast yet")
   if target_dtype in [dtypes.fp8e4m3, dtypes.fp8e5m2]: raise unittest.SkipTest("no test for fp8s bitcast yet")
@@ -208,30 +207,21 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
-@unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8e4m3 not supported")
-@unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), "fp8e5m2 not supported")
 class TestFp8sDType(unittest.TestCase):
-  def test_float_to_fp8_conversion(self):
-    t = Tensor([10000000.0, -1.0, 402.0, -300.0, -10000000.0, 20.0, 1.4123, 0.0, math.inf, math.nan]).cast(dtypes.fp8e4m3)
-    t.realize()
-    back = t.cast(dtypes.float32)
-    # saturation to finite is performed
-    np.testing.assert_equal(tuple(back.numpy().tolist()), (448.0, -1.0, 416.0, -288.0, -448.0, 20.0, 1.375, 0.0, 448.0, math.nan))
+  def _float_to_fp8_conversion_test(self, dtype, input_values, expected_values):
+    test_tensor = Tensor(input_values).cast(dtype).realize()
+    back_to_float32 = test_tensor.cast(dtypes.float32)
+    np.testing.assert_equal(tuple(back_to_float32.numpy().tolist()), expected_values)
 
-    t = Tensor([10000000, -1, 402, -300, -10000000, 20, 1.4123, 0.0, math.inf, math.nan]).cast(dtypes.fp8e5m2)
-    t.realize()
-    back = t.cast(dtypes.float32)
-    # saturation to finite is performed
-    np.testing.assert_equal(tuple(back.numpy().tolist()), (57344.0, -1, 384, -320, -57344.0, 20, 1.5, 0.0, 57344.0, math.nan))
+  def test_float_to_fp8e4m3_conversion(self):
+    self._float_to_fp8_conversion_test(dtypes.fp8e4m3,
+                                  [10000000.0, -1.0, 402.0, -300.0, -10000000.0, 20.0, 1.4123, 0.0, math.inf, math.nan],
+                                  [448.0, -1.0, 416.0, -288.0, -448.0, 20.0, 1.375, 0.0, 448.0, math.nan])
 
-  def test_fp8_to_half_conversion(self):
-    t = Tensor([448, -1, 416, -448, 20, 1.25, 0.0, 448.], dtype=dtypes.fp8e4m3)
-    converted = t.cast(dtypes.half)
-    np.testing.assert_equal(converted.numpy(), t.numpy())
-
-    t = Tensor([10240, -1, 384, -10240, 20, 1.25, 0.0, 10240.], dtype=dtypes.fp8e5m2)
-    converted = t.cast(dtypes.half)
-    np.testing.assert_equal(converted.numpy(), t.numpy())
+  def test_float_to_fp8e5m2_conversion(self):
+    self._float_to_fp8_conversion_test(dtypes.fp8e5m2,
+                                  [10000000.0, -1.0, 402.0, -300.0, -10000000.0, 20.0, 1.4123, 0.0, math.inf, math.nan],
+                                  [57344.0, -1, 384, -320, -57344.0, 20, 1.5, 0.0, 57344.0, math.nan])
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
