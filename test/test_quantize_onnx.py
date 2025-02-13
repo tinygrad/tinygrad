@@ -81,7 +81,8 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(xi))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
     with Context(DONT_REALIZE_EXPAND=1):
-      out = X.cast("int").matmul(W.cast("int"))
+      # this divide is interesting and forces the accumulator to actually be an int
+      out = (X.cast("int").matmul(W.cast("int"))//1000).cast("int8")
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
       sexec(out, opts)
 
