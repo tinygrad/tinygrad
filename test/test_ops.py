@@ -645,8 +645,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.sqrt())
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
-    # TODO: fix backward
-    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]], forward_only=True)
+    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.rsqrt())
 
   def test_xor(self):
