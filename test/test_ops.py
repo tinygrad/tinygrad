@@ -2771,7 +2771,7 @@ class TestOpsFp8s(unittest.TestCase):
     a = Tensor.rand(shp_a, dtype=dtype)
     b = Tensor.rand(shp_b, dtype=dtype)
     np.testing.assert_equal(op(a, b).numpy(), op(a.to("CUDA"), b.to("CUDA")).numpy())
-        
+
   def test_gemm_fp8e4m3(self): self._compare_to_cuda((64, 64), (64, 64), lambda x, y: x.matmul(y), dtypes.fp8e4m3)
   def test_gemm_fp8e5m2(self): self._compare_to_cuda((64, 64), (64, 64), lambda x, y: x.matmul(y), dtypes.fp8e5m2)
 
