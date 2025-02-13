@@ -358,7 +358,17 @@ generate_webgpu() {
   clang2py -l /usr/local/lib/libwebgpu_dawn.so extra/webgpu/webgpu.h -o $BASE/webgpu.py
   fixup $BASE/webgpu.py
   sed -i 's/import ctypes/import ctypes, ctypes.util/g' $BASE/webgpu.py
-  sed -i "s|ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))|g" $BASE/webgpu.py
+  sed -i "s|_libraries\['libwebgpu_dawn.so'\] = ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|lib = ctypes.util.find_library('webgpu_dawn')|g" $BASE/webgpu.py
+  sed -i "149i\\
+if lib is None:\\
+  import platform\\
+  if platform.system().lower() == 'darwin':\\
+    install_instructions = 'brew tap wpmed92/dawn && brew install dawn'\\
+  else:\\
+    install_instructions = 'sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so'\\
+  raise RuntimeError(f\"Cannot find dawn library. Install it with '{install_instructions}'\")\\
+_libraries['libwebgpu_dawn.so'] = ctypes.CDLL(lib)" $BASE/webgpu.py
+
   python3 -c "import tinygrad.runtime.autogen.webgpu"
 }
 
