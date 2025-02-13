@@ -7,6 +7,7 @@ from tinygrad.viz.serve import get_metadata, uop_to_json, to_perfetto
 
 # NOTE: VIZ tests always use the tracked PatternMatcher instance
 symbolic = TrackedPatternMatcher(symbolic.patterns)
+substitute = TrackedPatternMatcher(_substitute.patterns)
 
 class TestViz(unittest.TestCase):
   def setUp(self):
@@ -94,7 +95,7 @@ class TestViz(unittest.TestCase):
     b = UOp.variable("b", 0, 10)
     c = UOp.variable("c", 0, 10)
     @track_rewrites(named=True)
-    def fxn(sink): return graph_rewrite(sink, _substitute, ctx={a+b:c}, bottom_up=True)
+    def fxn(sink): return graph_rewrite(sink, substitute, ctx={a+b:c}, bottom_up=True)
     fxn(a+b)
     #UOp.substitute(a+b, {a+b:c})
     ret = get_metadata(keys, contexts)
