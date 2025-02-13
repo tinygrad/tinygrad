@@ -9,8 +9,8 @@ import ctypes
 try:
   instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable = True)))
 except AttributeError:
-  raise RuntimeError(f"Cannot find dawn library. Install it with '{'brew tap wpmed92/dawn && brew install dawn' \
-  if OSX else 'sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so'}'")
+  raise RuntimeError("Cannot find dawn library. Install it with: " + ("brew tap wpmed92/dawn && brew install dawn" if OSX else
+  "sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so"))
 
 def to_c_string(_str): return ctypes.create_string_buffer(_str.encode('utf-8'))
 
