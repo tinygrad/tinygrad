@@ -1,18 +1,16 @@
 import functools, struct
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
-from tinygrad.helpers import round_up
+from tinygrad.helpers import round_up, OSX
 from tinygrad.runtime.autogen import webgpu
 from typing import List, Any
 import ctypes
-import platform
 
 try:
   instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable = True)))
 except AttributeError:
-  raise RuntimeError(f"Cannot find dawn library. Install it with: " f"{'brew tap wpmed92/dawn && brew install dawn' \
-    if platform.system().lower() == 'darwin' else \
-    'sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so'}")
+  raise RuntimeError(f"Cannot find dawn library. Install it with '{'brew tap wpmed92/dawn && brew install dawn' \
+  if OSX else 'sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/lib/libwebgpu_dawn.so'}'")
 
 def to_c_string(_str): return ctypes.create_string_buffer(_str.encode('utf-8'))
 
