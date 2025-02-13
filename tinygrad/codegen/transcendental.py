@@ -35,13 +35,13 @@ def pow2if(q:UOp, float_dtype:DType):
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
-  dint = _out_dtype(d, no_vec=True)
+  dint = d.bitcast(_out_dtype(d, no_vec=True))
   # -1 <= ilog2bk(d) <= 128
   return (shr(dint, mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
   out_dtype = _out_dtype(d, no_vec=True)
   m1 = d.bitcast(out_dtype)
   m2 = shl(e.cast(out_dtype), mantissa_bits(d.dtype))
@@ -54,11 +54,11 @@ def ldexp2k(d:UOp, e:UOp) -> UOp:
 
 def frexp(v:UOp) -> tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent) assuming v != 0"""
-  assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert v.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype.scalar()]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype.scalar()]
-  bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype])
+  bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype.scalar()])
   exponent = shr(bits, mantissa_bits(v.dtype)) & exponent_mask(v.dtype)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   mantissa = ((bits & m1) | m2).bitcast(v.dtype)
@@ -252,7 +252,7 @@ def xlog2(d:UOp) -> UOp:
   r = (d<-0.0).where(r.const_like(math.nan), r)
   # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
   # log2_zero = the value of unmasked xlog2(0.0).
-  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79}[d.dtype]
+  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79}[d.dtype.scalar()]
   r = r.ne(log2_zero).where(r, r.const_like(-math.inf))
   # log2(NaN) = NaN
   r = d.ne(d).where(r.const_like(math.nan), r)
