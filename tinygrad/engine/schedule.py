@@ -443,20 +443,16 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
-  before_assign: dict[UOp, dict[UOp, UOp]] = {}
+  assign_rep: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
-      if s.op is Ops.BUFFER and s is not u.buf_uop: before_assign.setdefault(s, {})[u.buf_uop] = u
-  assign_deps: dict[UOp, UOp] = {}
-  for k,v in kernel_assign.items():
-    if (deps:=before_assign.get(k)) is None: continue
-    for x in deps.values():
-      if any(xp.op is Ops.ASSIGN and xp.buf_uop is k for xp in x.toposort):
+      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
+      if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort):
         raise RuntimeError(f"cycle detected in graph, kernel must either depend on ASSIGN or BUFFER for {k}")
-    assign_deps[v] = v.replace(src=v.src+tuple(deps.values()))
-  if assign_deps: sched_sink = sched_sink.substitute(assign_deps)
+      assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
+  if assign_rep: sched_sink = sched_sink.substitute(assign_rep)
 
   # final toposort (bfs)
   children: dict[UOp, list[UOp]] = {}
