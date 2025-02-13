@@ -437,7 +437,7 @@ def train_retinanet():
   step_times, start_epoch = [], 0
 
   # ** optimizer **
-  optim = Adam(params, lr=lr)
+  optim = Adam([p for p in params if p.requires_grad is None] , lr=lr)
 
   # ** dataset **
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
