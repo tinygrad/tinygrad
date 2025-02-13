@@ -543,32 +543,12 @@ pm_render = PatternMatcher([
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
 ])
 
-quant = PatternMatcher([
-  # cast after add/mul
-  (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32), lambda x,y: (x+y).cast(dtypes.float32)),
-  (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32), lambda x,y: (x*y).cast(dtypes.float32)),
-  # int cast after mul
-  (UPat.var("x").cast(dtypes.int32) * UPat.var("y").cast(dtypes.int32), lambda x,y: (x*y).cast(dtypes.int32)),
-  # MUL after reduce (TODO: bring back reduce op?)
-  ((acc:=UPat(Ops.DEFINE_ACC, name="acc")).assign(UPat.var("x") * UPat.cvar("c") + acc), lambda x,c,acc: acc.assign(x+acc) * c),
-  # CAST after reduce
-  ((acc:=UPat(Ops.DEFINE_ACC, name="acc")).assign(UPat.var("x").cast(dtypes.float32) + acc),
-   lambda x,acc: (acci:=UOp(Ops.DEFINE_ACC, dtype=x.dtype, arg=acc.arg,
-                            src=(acc.src[0].cast(x.dtype), *acc.src[1:]))).assign(x+acci).cast(dtypes.float32)),
-  # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
-  (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2"),
-   lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None)
-])
-
 # *** uop graph ***
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
-
-  # quant
-  #sink = graph_rewrite(sink, sym+(migrate_indexing+quant if opts is not None and opts.device == "DSP" else migrate_indexing))
 
   # initial symbolic + migrate indexing (remove this)
   sink = graph_rewrite(sink, sym+migrate_indexing)

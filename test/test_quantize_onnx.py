@@ -51,8 +51,8 @@ class TestQuantizeOnnx(unittest.TestCase):
     out_file = "/tmp/test_out.onnx"
     quantize_static(create_gemm_model("/tmp/test_in.onnx"), out_file,
                     FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False,
-                    activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
-                    extra_options={"ActivationSymmetric": False})
+                    activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
+                    extra_options={"ActivationSymmetric": True})
     run_onnx_jit, _ = load_onnx_model(out_file)
     with Context(NOOPT=1):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(1, N)).astype(np.float32)))
@@ -72,23 +72,18 @@ class TestQuantizeOnnx(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
 
-  def test_prequant_gemm_intacc(self):
+  def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8):
     N = 512
-    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
-    out = X.matmul(W)
-    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-    sexec(out, opts)
-
-  def test_prequant_gemm_intacc_wi(self):
-    N = 512
+    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(xi))
+    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
-    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.int8))
     with Context(DONT_REALIZE_EXPAND=1):
       out = X.matmul(W)
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
       sexec(out, opts)
+
+  def test_prequant_gemm_intacc_wi(self): self.test_prequant_gemm_intacc(wi=np.int8)
+  def test_prequant_gemm_intacc_xiwi(self): self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8)
 
   def test_prequant_gemv(self):
     N = 2048
