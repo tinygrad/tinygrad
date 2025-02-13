@@ -373,9 +373,9 @@ def load_buf(ctx:list[UOp], x:UOp):
   ctx.append(x)
   return UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), len(ctx)-1), unwrap(x.st).to_uop(), dtype=x.dtype)
 
-load_bufs = PatternMatcher([
+load_bufs = remove_movement_ops+PatternMatcher([
   # KERNEL parents get loaded
-  (UPat(Ops.BUFFER, name="x").assign(UPat(Ops.KERNEL)), load_buf),
+  (UPat(Ops.BUFFER, name="x").assign(UPat(Ops.KERNEL, name="k")), lambda x,k: x.reshape(k.shape)),
   # BUFFER becomes LOAD
   (UPat(Ops.BUFFER, name="x"), load_buf),
 ])
@@ -394,7 +394,7 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 
 def schedule_uop(sink:UOp, ctx:ScheduleContext) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be assign to kernel"
-  ast = graph_rewrite(sink.src[1].arg.ast.sink(), load_bufs, bufs:=[sink.buf_uop], bottom_up=True)
+  with Context(TRACK_MATCH_STATS=0): ast = graph_rewrite(sink.src[1].arg.ast.sink(), load_bufs, bufs:=[sink.buf_uop], bottom_up=True)
   # add_stores + unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, add_stores+unbind_vars+view_left, si_ctx:=KernelContext(ctx.var_vals)), view_right)
   # fix_kernel_ops
