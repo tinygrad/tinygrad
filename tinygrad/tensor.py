@@ -2652,7 +2652,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
     ```
     """
-    return self.reciprocal().sqrt()
+    return self.sqrt().reciprocal()
   def sin(self):
     """
     Computes the sine of the tensor element-wise.
