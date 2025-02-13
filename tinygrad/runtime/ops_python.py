@@ -132,7 +132,7 @@ class PythonProgram:
               for lane_id in range(WARP_THREADS):
                 for elem_idx in range(NUM_C): # calculate new muls and add to acc
                   (c_i, c_j) = c_map(lane_id, elem_idx)
-                  cast_fn = lambda x: x.astype(np.float32) if dtp[0].scalar() in dtypes.fp8s else x
+                  def cast_fn(x): return x.astype(np.float32) if dtp[0].scalar() in dtypes.fp8s else x
                   out[elem_idx][goff+lane_id] += sum(cast_fn(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff)) for _k in range(K))
             return out
 
