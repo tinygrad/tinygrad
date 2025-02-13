@@ -2474,6 +2474,7 @@ class Tensor(SimpleMathTrait):
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
+    # TODO: should not overwrite acc_dtype here?
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
     return _masked_setitem(self, src, mask, (-1,))
@@ -2512,6 +2513,7 @@ class Tensor(SimpleMathTrait):
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
     def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.any(-1).logical_not().where(a, b)
+    # TODO: should not overwrite acc_dtype here?
     if reduce == "sum": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype).mul(self if include_self else _inv_mask(self, 1))
     if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
@@ -2519,7 +2521,7 @@ class Tensor(SimpleMathTrait):
     if reduce == "mean":
       count = mask.where(1, 0).sum(-1, acc_dtype=self.dtype).add(1 if include_self else _inv_mask(1, 0))
       return mask.where(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
-    raise TypeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
+    raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   # ***** unary ops *****
 
