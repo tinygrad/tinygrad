@@ -407,7 +407,7 @@ jobs:
       with:
         key: dsp-minimal
         deps: testing_minimal
-        pydeps: "onnx==1.16.0 onnxruntime"
+        pydeps: "onnx==1.16.0 onnxruntime pillow"
         llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -427,7 +427,7 @@ jobs:
     - name: Test LLVM=1 DEVECTORIZE=0
       run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
     - name: Test LLVM=1 DEVECTORIZE=0 for model
-      run: LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
+      run: PYTHONPATH="." LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     #- name: Test CLANG=1 DEVECTORIZE=0
     #  run: CLANG=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
