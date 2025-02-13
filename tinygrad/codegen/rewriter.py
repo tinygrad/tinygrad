@@ -271,6 +271,9 @@ sym = symbolic_flat+PatternMatcher([
     if not isinstance(gep.dtype, PtrDType) else None),
   # push some GEPs through WMMAs
   (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
+  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
+  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+   if not isinstance(x.dtype, PtrDType) else None),
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(Ops.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),
@@ -484,19 +487,6 @@ def expand_index(buf:UOp, base_index:UOp, c:UOp):
   assert all(x is not None for x in big_gep)
   return loads.gep(tuple(cast(list[int], big_gep)))
 
-def gep_on_cat(gep:UOp, cat:UOp):
-  idxs = []
-  offsets = []
-  offset = 0
-  for i,c in enumerate(cat.src):
-    offsets.append(offset)
-    idxs += [i]*c.dtype.count
-    offset += c.dtype.count
-  gep_idxs = [idxs[x] for x in gep.arg]
-  if not all_same(gep_idxs): return None
-  # if all in the same cat group, replace it with a single gep
-  return cat.src[gep_idxs[0]].gep(tuple(x-offsets[gep_idxs[0]] for x in gep.arg))
-
 devectorize_load_store = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
                         UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
@@ -504,11 +494,9 @@ devectorize_load_store = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"), lambda gep, ld: ld.replace(src=ld.src[0].src).gep(gep.arg)),
   # GEP on data of STORE
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("x"))), lambda gep, x: UOp(Ops.STORE, src=(gep.src[0], x.gep(gep.arg)))),
-  # CAT after LOAD
+  # put CAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
-  # GEP on CAT
-  (UPat(Ops.GEP, src=(UPat(Ops.CAT, name="cat"),), name="gep"), gep_on_cat),
   # TODO: add vectorized support to transcendental
   (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
 ])
@@ -553,8 +541,6 @@ pm_render = PatternMatcher([
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
-  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
-  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count)))),
 ])
 
 # *** uop graph ***
