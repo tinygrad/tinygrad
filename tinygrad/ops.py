@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, struct
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -1150,6 +1150,9 @@ symbolic_simple = PatternMatcher([
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))),
    lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False)) if a.op is not Ops.THREEFRY else None),
+  # ** bitcast const folding **
+  (UPat.cvar("c", vec=False).bitcast().named("x"),
+    lambda x, c: None if None in (x.dtype.fmt, c.dtype.fmt) else x.const_like(struct.unpack(x.dtype.fmt, struct.pack(c.dtype.fmt, c.arg))[0])),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),

@@ -22,6 +22,11 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
 
+  def test_bitcast(self):
+    _check_ast_count(0, Tensor.ones(4, dtype=dtypes.int16).bitcast(dtypes.uint16))
+    _check_ast_count(0, Tensor.ones(4, dtype=dtypes.float32).bitcast(dtypes.uint32))
+    _check_ast_count(0, Tensor.ones(4, dtype=dtypes.int16).bitcast(dtypes.half))
+
   @unittest.expectedFailure  # no two level fold at lazybuffer
   def test_neg_folding(self):
     _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())

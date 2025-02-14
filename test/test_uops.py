@@ -245,9 +245,7 @@ class TestConstantFolding(unittest.TestCase):
   def test_bitcast_const(self):
     t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
     si = t.schedule()
-    assert len(si) == 1
-    ji = lower_schedule_item(si[-1])
-    assert any(uop.op is Ops.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
+    assert len(si) == 0
 
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
