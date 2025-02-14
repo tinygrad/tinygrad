@@ -544,6 +544,7 @@ jobs:
         AMD: 1
         FORWARD_ONLY: 1
       run: |
+        brew --prefix lld
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run pytest (amd llvm)
       env:

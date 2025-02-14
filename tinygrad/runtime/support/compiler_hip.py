@@ -1,5 +1,5 @@
 import ctypes, os, subprocess, tempfile
-
+from tinygrad.helpers import OSX
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.runtime.ops_llvm import LLVMCompiler
 from tinygrad.device import Compiler, CompileError
@@ -65,7 +65,8 @@ def compile_llvm(prg:str, arch="gfx1100") -> bytes:
     f.write(relo)
     f.flush()
     args = [f.name, "--no-undefined", "-shared", "-o", "-"]
-    obj = subprocess.check_output(['/opt/rocm/llvm/bin/ld.lld', *args])
+    lld_path = 'ld.lld' if OSX else '/opt/rocm/llvm/bin/ld.lld'
+    obj = subprocess.check_output([lld_path, *args])
     return obj
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):
