@@ -683,8 +683,14 @@ def train_bert():
 
   # ** init model **
 
-  model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
-  
+  model = get_mlperf_bert_model()
+  if RUNMLPERF:
+    model.load_from_pretrained(init_ckpt)
+  else:
+    # for init, zero out all weights
+    for p in get_parameters(model):
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
+
   parameters = get_parameters(model)
   for p in parameters:
     p.to_(GPUS)
@@ -801,7 +807,7 @@ def train_bert():
             f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
 
     # ** eval loop **
-    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
+    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
       if getenv("RESET_STEP", 0): train_step_bert.reset()
