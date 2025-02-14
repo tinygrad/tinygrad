@@ -409,13 +409,12 @@ def train_retinanet():
     return out.realize()
 
   # ** hyperparameters **
-  # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  config["bs"] = BS = getenv("BS", 128)
+  config["bs"] = BS = getenv("BS", 30)
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
-  config["lr"] = lr = 1e-4 * (BS / 256)
-  config["lr_warmup_epochs"] = lr_warmup_epochs = 1
-  config["lr_warmup_factor"] = lr_warmup_factor = 1e-3
+  config["lr"] = lr = getenv("LR", 0.000085)
+  config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 0)
+  config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
 
   if SEED:
     Tensor.manual_seed(SEED)

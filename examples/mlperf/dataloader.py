@@ -413,7 +413,7 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
 
-  shm_imgs, imgs = _setup_shared_mem("retinanet_imgs", (batch_size * batch_count, 800, 800, 3), dtypes.float32)
+  shm_imgs, imgs = _setup_shared_mem("retinanet_imgs", (batch_size * batch_count, 800, 800, 3), dtypes.uint8)
 
   if val:
     boxes, labels, matches, anchors = None, None, None, None
