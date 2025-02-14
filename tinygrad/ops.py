@@ -287,7 +287,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   @functools.cached_property
-  def order(self:UOp) -> tuple[tuple[int, Any, Optional[DType], tuple], tuple]:
+  def order(self:UOp) -> tuple:
     if self.op in GroupOp.ALU:
       const_srcs, srcs = partition(self.src, lambda x: x.op in (Ops.CONST, Ops.VCONST))
       if len(srcs) == 1: return srcs[0].order + ((self.op.value, *[src.arg for src in const_srcs]),)
