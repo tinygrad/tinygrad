@@ -16,7 +16,7 @@ if __name__=="__main__":
   model_size="1B"
   Tensor.no_grad = True
   max_context=1024
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=1024)
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=max_context)
   model.output.weight = model.tok_embeddings.weight
   model.output.scale = model.tok_embeddings.scale
 
