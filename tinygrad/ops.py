@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Literal, get_args
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, struct
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -1114,6 +1114,11 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
   return None
 
+def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
+  if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
+  def convert(v:Any): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
+  return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
+
 # def max_var_const(x:UOp, c1:UOp, c2:UOp):
 #   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
 #   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
@@ -1154,9 +1159,10 @@ symbolic_simple = PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
-  # *** cast ***
+  # *** cast/bitcast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+  (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
