@@ -292,7 +292,7 @@ async function load_state_dict (data, device, progress) {
       .then(async (arraybuf) => { 
         downloaded.push({ ...file, bytes: new Uint8Array(arraybuf)});
         // pause downloads if further processing is a bottleneck
-        while (toDownload.length && downloaded.length >= numDownloaders) await new Promise(resolve => setTimeout(resolve, 200));
+        while (toDownload.length && downloaded.length >= numDownloaders) await new Promise(resolve => setTimeout(resolve, 5));
         if (toDownload.length && downloaded.length < numDownloaders) chainDownload(); // start next download
       })
     }
@@ -330,7 +330,7 @@ async function load_state_dict (data, device, progress) {
     const toDownload = files.filter(file => !cachedFileHashes.has(file.hash));
     triggerChainDownload(toDownload);
 
-    const loadDelay = window.isMobile ? 20 : 20 // hoping to improve stability on mobile
+    const loadDelay = 5;
     await Promise.all(deletionPromises);
 
     while (completed < files.length) {
@@ -351,7 +351,7 @@ async function load_state_dict (data, device, progress) {
         completed += 1;
       }
       const end = performance.now();
-      const elapsed = (end - start) / 1000;
+      const elapsed = end - start;
       if (elapsed < loadDelay) await new Promise(resolve => setTimeout(resolve, loadDelay - elapsed));
     }
     if (contiguous) {
