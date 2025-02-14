@@ -40,7 +40,7 @@ def _fit_to_max(dims, max_sizes):
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
-  if len(dims) > len(max_sizes): limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
+  if max_sizes is not None and len(dims) > len(max_sizes): limited = _limit_dims(dims, max_sizes)
   else: limited = _fit_to_max(dims, max_sizes) if max_sizes is not None else dims
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
