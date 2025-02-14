@@ -171,23 +171,28 @@ class TestQuantizeOnnx(unittest.TestCase):
 
   def test_prequant_gemm_intacc_128(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128)
   def test_prequant_gemm_intacc_256(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=256)
-  def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512):
+  def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512, clip=True):
     X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
     W = Tensor(m2:=(np.random.uniform(0, 255, size=(N,N)).astype(wi))).realize()
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     tg_dtype = dtypes.int8 if xi == np.int8 else dtypes.uint8
     with Context(DONT_REALIZE_EXPAND=1):
-      out = (X.int().matmul(W.int())//1000).clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype)).cast(tg_dtype)
+      out = (X.int().matmul(W.int())//1000)
+      if clip: out = out.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+      out = out.cast(tg_dtype)
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
       sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
-    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000).clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype)).astype(xi)
+    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000)
+    if clip: mout = mout.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+    mout = mout.astype(xi)
     print(tout)
     print(mout)
     np.testing.assert_equal(tout, mout)
 
   def test_prequant_gemm_intacc_wi(self): self.test_prequant_gemm_intacc(wi=np.int8)
   def test_prequant_gemm_intacc_xiwi(self): self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8)
+  def test_prequant_gemm_intacc_xiwi_noclip(self): self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8, clip=False)
 
   def test_prequant_gemv(self):
     N = 2048
