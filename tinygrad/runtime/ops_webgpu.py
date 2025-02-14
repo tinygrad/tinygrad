@@ -241,3 +241,10 @@ class WebGpuDevice(Compiled):
 
     super().__init__(device, WebGpuAllocator(device_result[1]), WGSLRenderer(), Compiler(),
       functools.partial(WebGPUProgram, (device_result[1], webgpu.WGPUFeatureName_TimestampQuery in supported)))
+
+  def synchronize(self):
+    result: List[Any] = []
+    def cb(status, u1, u2): result[:] = [status]
+    cb_info = create_cb_info(webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2, cb)
+    wgpu_wait(webgpu.wgpuQueueOnSubmittedWorkDone2(webgpu.wgpuDeviceGetQueue(self.runtime.args[0][0]), cb_info))
+    if result[0] != webgpu.WGPUQueueWorkDoneStatus_Success: raise RuntimeError(webgpu.WGPUQueueWorkDoneStatus__enumvalues[result[0]])
