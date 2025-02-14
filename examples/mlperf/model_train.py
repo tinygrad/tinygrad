@@ -683,8 +683,14 @@ def train_bert():
 
   # ** init model **
 
-  model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
-  
+  model = get_mlperf_bert_model()
+  if RUNMLPERF:
+    model.load_from_pretrained(init_ckpt)
+  else:
+    # for init, zero out all weights
+    for p in get_parameters(model):
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
+
   parameters = get_parameters(model)
   for p in parameters:
     p.to_(GPUS)
