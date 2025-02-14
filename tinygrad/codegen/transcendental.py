@@ -54,7 +54,7 @@ def frexp(v:UOp) -> tuple[UOp, UOp]:
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype.scalar()]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype.scalar()]
-  bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype.scalar()])
+  bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype.scalar()].vec(v.dtype.count))
   exponent = shr(bits, mantissa_bits(v.dtype)) & exponent_mask(v.dtype)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   mantissa = ((bits & m1) | m2).bitcast(v.dtype)
