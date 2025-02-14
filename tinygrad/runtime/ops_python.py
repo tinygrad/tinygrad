@@ -111,7 +111,7 @@ class PythonProgram:
           assert (dtp[0].fmt and dtype.fmt) or (dtp[0] in dtypes.fp8s and dtype) or (dtype in dtypes.fp8s and dtp[0])
           if dtp[0] in dtypes.fp8s: packed = b''.join([truncate.get(dtp[0], lambda dt: dt)(z).tobytes() for z in inp[0]])
           else: packed = struct.pack(str(warp_size) + str(dtp[0].fmt), *inp[0])
-          if dtype in dtypes.fp8s and isinstance(dt:=truncate.get(dtype, lambda x: x),type(np.dtype)): ul[i] = np.frombuffer(packed,dtype=dt).tolist()
+          if dtype in dtypes.fp8s: ul[i] = np.frombuffer(packed,dtype=truncate.get(dtype, lambda x: x)).tolist()
           else: ul[i] = list(struct.unpack(str(warp_size) + str(dtype.fmt), packed))
         elif uop is Ops.CAST: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
