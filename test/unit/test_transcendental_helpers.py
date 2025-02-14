@@ -1,7 +1,7 @@
 import unittest, math
 import numpy as np
 from tinygrad import dtypes
-from tinygrad.ops import UOp, Ops
+from tinygrad.ops import UOp
 from tinygrad.codegen.transcendental import payne_hanek_reduction, cody_waite_reduction, frexp, rintk, pow2if
 from test.helpers import eval_uop
 
