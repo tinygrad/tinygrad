@@ -531,7 +531,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
     sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
   else:
     # new devectorize only for load/store
-    sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
+    sink = graph_rewrite(sink, sym+devectorize_load_store)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, mulacc_unrolled)
