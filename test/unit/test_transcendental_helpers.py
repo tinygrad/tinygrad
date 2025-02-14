@@ -1,7 +1,7 @@
 import unittest, math
 import numpy as np
 from tinygrad import dtypes
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.transcendental import payne_hanek_reduction, cody_waite_reduction, frexp, rintk, pow2if
 from test.helpers import eval_uop
 
@@ -52,6 +52,9 @@ class TestTranscendentalFunctions(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(rintk(UOp.const(dtypes.float, -5.5))), -6)
     np.testing.assert_allclose(eval_uop(rintk(UOp.const(dtypes.float, -5.999))), -6)
 
+  def test_rintk_vectorized(self):
+    np.testing.assert_allclose(eval_uop(rintk(UOp(Ops.VCONST, dtypes.float.vec(3), arg=(0.0, 5.0, 5.5)))), (0, 5, 6))
+
   def test_pow2if(self):
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, 0), dtypes.float)), 1.0)
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, 1), dtypes.float)), 2.0)
@@ -62,6 +65,10 @@ class TestTranscendentalFunctions(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -2), dtypes.float)), 0.25)
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -10), dtypes.float)), 2**-10)
     np.testing.assert_allclose(eval_uop(pow2if(UOp.const(dtypes.int, -63), dtypes.float)), 2**-63)
+
+  def test_pow2if_vectorized(self):
+    vconst = UOp(Ops.VCONST, dtypes.int.vec(4), arg=(-2, 0, 1, 2))
+    np.testing.assert_allclose(eval_uop(pow2if(vconst, dtypes.float)), (0.25, 1.0, 2.0, 4.0))
 
 if __name__ == '__main__':
   unittest.main()
