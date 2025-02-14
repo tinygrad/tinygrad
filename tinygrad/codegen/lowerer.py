@@ -20,7 +20,7 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
 def _limit_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
   if not all_int(dims): return dims
-  while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
+  while len(dims) > len(max_sizes):
     for i,m in enumerate(max_sizes):
       if dims[i] * dims[i+1] <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
@@ -33,7 +33,7 @@ def _fit_to_max(dims, max_sizes):
   _dims = list(dims) + [1]*(3-len(dims))
   for i in range(len(_dims)):
     while _dims[i] > max_sizes[i]:
-      div = next((d for d in range(2, math.ceil(math.sqrt(_dims[i]))) if (_dims[i] % d) == 0), 1)
+      div = next((d for d in range(2, math.ceil(math.sqrt(_dims[i])) + 1) if (_dims[i] % d) == 0), 1)
       if div == 1: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
       _dims[i], _dims[(i+1)%len(_dims)] = _dims[i]//div, _dims[(i+1)%len(_dims)]*div
   return tuple(_dims[:2] if _dims[2] == 1 else _dims[0] if _dims[1:3] == [1,1] else _dims)
@@ -41,7 +41,7 @@ def _fit_to_max(dims, max_sizes):
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
   if len(dims) > len(max_sizes): limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
-  else: limited = _fit_to_max(dims, max_sizes)
+  else: limited = _fit_to_max(dims, max_sizes) if max_sizes is not None else dims
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
@@ -52,7 +52,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
         idx //= dims[c]
       ret.append(idx)
   elif len(limited) > len(dims):
-    a,b = len(limited), len(dims)
+    a, b = len(limited), len(dims)
     if a == 2 and b == 1: ret = [raw_idxs[0] * limited[1] + raw_idxs[1]]
     if a == 3 and b == 1: ret = [raw_idxs[0] * (limited[1] * limited[2]) + raw_idxs[1] * limited[2] + raw_idxs[2]]
     if a == 3 and b == 2: ret = [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]

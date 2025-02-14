@@ -1199,16 +1199,23 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (2,3), (16,16,16), True, [3,2])
     _assert_grouped_dims("gidx", (2,3,4), (16,16,16), False, [2,3,4])
 
-    # test splitting globals: len(dims) == len(max)
+    # test splitting globals:    len(dims) == len(max)
     _assert_grouped_dims("gidx", (64,3,4), (16,16,16), False, [16,12,4])
     _assert_grouped_dims("gidx", (64,3,4), (16,4,16), False, [16,3,16])
     _assert_grouped_dims("gidx", (64,3,4), (16,16,16), True, [16,3,16])
     _assert_grouped_dims("gidx", (128,3,4), (16,4,256), False, [16,3,32])
     _assert_grouped_dims("gidx", (4,4,512), (16,4,256), False, [8,4,256])
 
-    # test splitting globals len(dims) < len(max)
+    # test splitting globals:    len(dims) < len(max)
+    #                            len(dim)        ->          len(limited)
+    #                              1             ->             2
     _assert_grouped_dims("gidx", (128,), (16,16,256), False, [16,8], False)
+    #                              1             ->             3
+    _assert_grouped_dims("gidx", (65536,), (16,16,256), False, [16,16,256], False)
+    #                              2             ->             3
     _assert_grouped_dims("gidx", (128,128), (16,16,256), False, [16,16,64], False)
+    # test when the only divisor is the square root of dim
+    _assert_grouped_dims("gidx", (121,), (12,12,12), False, [11,11], False)
 
     # collapse on onto the left most axis
     _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), False, [6,4,5])
