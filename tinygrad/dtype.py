@@ -183,9 +183,16 @@ def truncate_fp16(x):
   try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
+def truncate_bf16(x):
+  max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
+  if x > max_bf16 or x < -max_bf16: return math.copysign(math.inf, x)
+  f32_int = struct.unpack('I', struct.pack('f', x))[0]
+  bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
+  return bf
+
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
+  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
