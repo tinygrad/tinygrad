@@ -128,5 +128,27 @@ class TestTranscendentalSchedule(unittest.TestCase):
       c = c.exp2()
       check_schedule(c, 1)
 
+class TestTranscendentalVectorized(unittest.TestCase):
+  def _test_vectorized_op(self, fxn, np_fxn, low, high, vec_size):
+    np_data = np.linspace(low, high, num=(128 // vec_size) * vec_size, dtype=np.float32).reshape(-1, vec_size)
+    data = Tensor(np_data, dtype=dtypes.float32.vec(vec_size))
+    out = fxn(data).numpy()
+    np_out = np_fxn(np_data)
+    np.testing.assert_allclose(out, np_out, rtol=1.5e-5)
+
+  def test_exp2_vectorized(self):
+    for vec_size in [1,2,3,4,5,32,33]: self._test_vectorized_op(Tensor.exp2, np.exp2, -100, 100, vec_size)
+
+  def test_log2_vectorized(self):
+    for vec_size in [1,2,3,4,5,32,33]: self._test_vectorized_op(Tensor.log2, np.log2, 0.001, 200, vec_size)
+
+  def test_sin_vectorized(self):
+    for vec_size in [1,2,3,4,5,32,33]: self._test_vectorized_op(Tensor.sin, np.sin, -100, 100, vec_size)
+
+  def test_pow_vectorized(self):
+    for vec_size in [1,2,3,4,5,32,33]:
+      for p in [-5.1, -5, 0, 5, 5.1]:
+        self._test_vectorized_op(lambda x: Tensor.pow(x, p), lambda x: np.pow(x, p), -100, 100, vec_size)
+
 if __name__ == '__main__':
   unittest.main()
