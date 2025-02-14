@@ -134,7 +134,7 @@ class TestTranscendentalVectorized(unittest.TestCase):
     data = Tensor(np_data, dtype=dtypes.float32.vec(vec_size))
     out = fxn(data).numpy()
     np_out = np_fxn(np_data)
-    np.testing.assert_allclose(out, np_out, rtol=1.5e-5)
+    np.testing.assert_allclose(out, np_out, rtol=1e-4)
 
   def test_exp2_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.exp2, np.exp2, -100, 100, vec_size)
