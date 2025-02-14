@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 from dataclasses import replace
-from tinygrad import Tensor, Context, Device
+from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 
@@ -104,7 +104,9 @@ class TestQuantizeOnnx(unittest.TestCase):
         unsigned_char128 hi128;
       };
     };
-    __attribute__((noinline)) void r_512_4_128_128_4(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(128))) data2) {
+    __attribute__((noinline)) void r_512_4_128_128_4(unsigned char* restrict __attribute__((align_value(128))) data0,
+                                                     unsigned char* restrict __attribute__((align_value(128))) data1,
+                                                     signed char* restrict __attribute__((align_value(128))) data2) {
       for (int ridx0 = 0; ridx0 < 512; ridx0++) {
         int alu0 = (ridx0<<9);
         for (int ridx1 = 0; ridx1 < 4; ridx1++) {
@@ -142,7 +144,7 @@ class TestQuantizeOnnx(unittest.TestCase):
             // sshi.hi128 = (x0[3], x1[3], x2[3], x3[3], x0[7], x1[7], ...)
             sshi.vec256 = __builtin_HEXAGON_V6_vdealvdd_128B(ss23.hi128, ss01.hi128, 2);
 
-            //unsigned_char128 w0 = (unsigned_char128){val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3]};
+            //unsigned_char128 w0 = (unsigned_char128){val0[0],val0[1],val0[2],val0[3],val0[0],val0[1],val0[2],val0[3],...
             unsigned_char128 w0 = __builtin_HEXAGON_V6_lvsplatw_128B(*((unsigned int*)&val0));
 
             acc0 = __builtin_HEXAGON_V6_vrmpybusv_acc_128B(acc0, w0, sslo.lo128);
@@ -155,7 +157,13 @@ class TestQuantizeOnnx(unittest.TestCase):
           acc2 /= 1000;
           acc3 /= 1000;
           // ','.join([f"acc{j}[{i}]" for i in range(32) for j in range(4)])
-          *((unsigned_char128*)((data0+(alu0+alu1)))) = (unsigned_char128){acc0[0],acc1[0],acc2[0],acc3[0],acc0[1],acc1[1],acc2[1],acc3[1],acc0[2],acc1[2],acc2[2],acc3[2],acc0[3],acc1[3],acc2[3],acc3[3],acc0[4],acc1[4],acc2[4],acc3[4],acc0[5],acc1[5],acc2[5],acc3[5],acc0[6],acc1[6],acc2[6],acc3[6],acc0[7],acc1[7],acc2[7],acc3[7],acc0[8],acc1[8],acc2[8],acc3[8],acc0[9],acc1[9],acc2[9],acc3[9],acc0[10],acc1[10],acc2[10],acc3[10],acc0[11],acc1[11],acc2[11],acc3[11],acc0[12],acc1[12],acc2[12],acc3[12],acc0[13],acc1[13],acc2[13],acc3[13],acc0[14],acc1[14],acc2[14],acc3[14],acc0[15],acc1[15],acc2[15],acc3[15],acc0[16],acc1[16],acc2[16],acc3[16],acc0[17],acc1[17],acc2[17],acc3[17],acc0[18],acc1[18],acc2[18],acc3[18],acc0[19],acc1[19],acc2[19],acc3[19],acc0[20],acc1[20],acc2[20],acc3[20],acc0[21],acc1[21],acc2[21],acc3[21],acc0[22],acc1[22],acc2[22],acc3[22],acc0[23],acc1[23],acc2[23],acc3[23],acc0[24],acc1[24],acc2[24],acc3[24],acc0[25],acc1[25],acc2[25],acc3[25],acc0[26],acc1[26],acc2[26],acc3[26],acc0[27],acc1[27],acc2[27],acc3[27],acc0[28],acc1[28],acc2[28],acc3[28],acc0[29],acc1[29],acc2[29],acc3[29],acc0[30],acc1[30],acc2[30],acc3[30],acc0[31],acc1[31],acc2[31],acc3[31]};
+          // acc0[0], acc0[1], acc0[2], ..... acc3[30], acc3[31]
+          unsigned_char128 packed = __builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B(acc3, acc2),
+                                                                           __builtin_HEXAGON_V6_vpackwh_sat_128B(acc1, acc0));
+          packed = __builtin_HEXAGON_V6_vshuffb_128B(packed);
+          packed = __builtin_HEXAGON_V6_vshuffb_128B(packed);
+          // acc0[0], acc1[0], acc2[0], ..... acc2[31], acc3[31]
+          *((unsigned_char128*)((data0+(alu0+alu1)))) = packed;
         }
       }
     }"""
@@ -167,12 +175,13 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
     W = Tensor(m2:=(np.random.uniform(0, 255, size=(N,N)).astype(wi))).realize()
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
+    tg_dtype = dtypes.int8 if xi == np.int8 else dtypes.uint8
     with Context(DONT_REALIZE_EXPAND=1):
-      out = (X.int().matmul(W.int())//1000).cast('int8' if xi == np.int8 else 'uint8')
+      out = (X.int().matmul(W.int())//1000).clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype)).cast(tg_dtype)
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
       sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
-    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000).astype(xi)
+    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000).clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype)).astype(xi)
     print(tout)
     print(mout)
     np.testing.assert_equal(tout, mout)
