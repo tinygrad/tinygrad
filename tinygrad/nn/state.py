@@ -297,6 +297,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
+@accept_filename
 def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`.
