@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - master
+      - no_comgr_1
   pull_request:
   workflow_dispatch:
 
