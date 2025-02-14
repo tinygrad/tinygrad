@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, temp
 
 #
 # checkpointing utils
@@ -230,11 +230,11 @@ def get_data_bert(GPUS:list[str], it):
 
 def get_fake_data_bert(GPUS:list[str], BS:int):
   return {
-    "input_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0).contiguous(),
-    "input_mask": Tensor.zeros((BS, 512), dtype=dtypes.default_float).shard_(GPUS, axis=0).contiguous(),
-    "segment_ids": Tensor.zeros((BS, 512), dtype=dtypes.float32).shard_(GPUS, axis=0).contiguous(),
-    "masked_lm_positions": Tensor.zeros((BS, 76), dtype=dtypes.float32).shard_(GPUS, axis=0).contiguous(),
-    "masked_lm_ids": Tensor.zeros((BS, 76), dtype=dtypes.float32).shard_(GPUS, axis=0).contiguous(),
-    "masked_lm_weights": Tensor.zeros((BS, 76), dtype=dtypes.float32).shard_(GPUS, axis=0).contiguous(),
-    "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.float32).shard_(GPUS, axis=0).contiguous(),
+    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.float32, device=f"DISK:{temp('input_ids')}").shard_(GPUS, axis=0),
+    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.default_float, device=f"DISK:{temp('input_mask')}").shard_(GPUS, axis=0),
+    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.float32, device=f"DISK:{temp('segment_ids')}").shard_(GPUS, axis=0),
+    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.float32, device=f"DISK:{temp('masked_lm_positions')}").shard_(GPUS, axis=0),
+    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.float32, device=f"DISK:{temp('masked_lm_ids')}").shard_(GPUS, axis=0),
+    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device=f"DISK:{temp('masked_lm_weights')}").shard_(GPUS, axis=0),
+    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32, device=f"DISK:{temp('next_sentence_labels')}").shard_(GPUS, axis=0),
   }
