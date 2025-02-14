@@ -449,11 +449,12 @@ def no_vectorized_load_store(ls:UOp):
   tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.v)]
   return UOp(Ops.VECTORIZE, ls.dtype, tuple(tv))
 
-def no_vectorized_acc(acc:UOp):
-  if acc.dtype.count == 1: return None
-  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
-    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
-  return UOp(Ops.VECTORIZE, acc.dtype, alus)
+def no_vectorized_acc(acc:UOp, sz=1):
+  if acc.dtype.count == sz or acc.dtype.count%sz != 0: return None
+  alus = tuple(UOp(acc.op, acc.dtype.scalar().vec(sz),
+                   tuple(s.gep(i if sz == 1 else tuple(range(i*sz, i*sz+sz))) if j == 0 else s for j,s in enumerate(acc.src)),
+                   acc.arg+(i,)) for i in range(acc.dtype.count//sz))
+  return UOp(Ops.VECTORIZE if sz == 1 else Ops.CAT, acc.dtype, alus)
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
@@ -563,6 +564,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   else:
     # new devectorize only for load/store
     sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
+
+  # optional pre matcher
+  if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)

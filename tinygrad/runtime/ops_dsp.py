@@ -3,27 +3,69 @@ import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, context
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.ops import Ops, UOp
+from tinygrad.ops import Ops, UOp, GroupOp
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
 from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.codegen.rewriter import no_vectorized_acc
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.ops import PatternMatcher, UPat
 
-dsp_pm = PatternMatcher([
-  (UPat(Ops.VECTORIZE, src=UPat.var("y"))*UPat.var("x"), lambda x,y: UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")*x),
-  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")),
-  (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
-   lambda d: d.replace(src=(UOp(Ops.CUSTOM, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]))
+late_pm = PatternMatcher([
+  (UPat(Ops.VECTORIZE, src=UPat.var("y"))*UPat.var("x"), lambda x,y: UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")*x),
+  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
 ])
+
+def split_cat(x:UOp, c:UOp):
+  offset = 0
+  ret = []
+  for u in c.src:
+    ret.append(x.gep(tuple(range(offset, offset+u.dtype.count))))
+    offset += u.dtype.count
+  return ret
+
+dsp_pm = PatternMatcher([
+  # fixup assign into cast
+  (UPat(Ops.DEFINE_ACC, name="acc"), lambda acc: no_vectorized_acc(acc, 32)),
+  (UPat.var("x")+UPat(Ops.CAT, name="c"), lambda x,c: UOp(Ops.CAT, x.dtype, src=tuple(a+b for a,b in zip(split_cat(x,c), c.src)))),
+  (UPat(Ops.CAT, name="c")//UPat.var("x"), lambda x,c: UOp(Ops.CAT, x.dtype, src=tuple(a//b for a,b in zip(c.src, split_cat(x,c))))),
+  (UPat(Ops.GEP, src=(UPat.cvar("c"),), name="g"), lambda g,c: c.replace(dtype=g.dtype)),
+  (UPat(Ops.CAST, dtype=dtypes.char.vec(128), src=(UPat(Ops.CAT, dtype=dtypes.int.vec(128), name="x"))),
+    lambda x: UOp(Ops.CUSTOM, dtype=dtypes.char.vec(128), src=x.src,
+    arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
+
+  # push all GEPs through ALUs (fix arange stuff)
+  (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
+   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
+    if not isinstance(gep.dtype, PtrDType) else None),
+
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.CAT, name="c1"), UPat(Ops.CAT, name="c2"))),
+   lambda c1,c2: UOp(Ops.CAT, c1.dtype, tuple(x.assign(y) for x,y in zip(c1.src,c2.src)))),
+  (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
+   lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+  (UPat(Ops.DEFINE_ACC, dtype=dtypes.int.vec(32), name="d", allow_any_len=True),
+   lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype,arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]) if d.src[0].op is not Ops.CUSTOMI else None),
+  (UPat.var("x").cast(dtypes.short.vec(128))*UPat.var("y").cast(dtypes.short.vec(128)),
+   lambda x,y: UOp(Ops.CUSTOM, dtypes.short.vec(128), src=(x,y), arg="__builtin_HEXAGON_V6_vmpybv_128B({0}, {1})")),
+  (UPat.var("x").cast(dtypes.short).broadcast(128),
+   lambda x: UOp(Ops.CUSTOM, dtypes.char.vec(128), src=(x,), arg="__builtin_HEXAGON_V6_lvsplatb_128B({0})").cast(dtypes.short.vec(128))),
+
+  # __builtins
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src,
+                      "__builtin_shufflevector({0}, {0}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 else None),
+  #(UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src,
+  #                    "__builtin_convertvector({0}, "+str(x.dtype)+")") if x.dtype.count > 1 and not isinstance(x.dtype, PtrDType) else None),
+])
+
 
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
-  extra_matcher = dsp_pm+ClangRenderer.extra_matcher
+  pre_matcher = dsp_pm
+  extra_matcher = late_pm+ClangRenderer.extra_matcher
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {**ClangRenderer.code_for_op, Ops.SIN: lambda x,dtype: f"__builtin_sin({x})",
                  Ops.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",

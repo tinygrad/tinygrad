@@ -152,7 +152,7 @@ class Ops(FastEnum):
   # device
   DEVICE = auto()
   MULTI = auto()
-  CUSTOM = auto()
+  CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -761,6 +761,9 @@ class UPat(MathTrait):
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
+  def broadcast(self, count:int):
+    assert len(self.dtype) == 1 and self.dtype[0].count == 1
+    return UPat(Ops.VECTORIZE, self.dtype[0].vec(count), (self,)*count)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):

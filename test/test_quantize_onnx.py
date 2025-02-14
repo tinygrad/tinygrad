@@ -57,8 +57,8 @@ class TestQuantizeOnnx(unittest.TestCase):
     # divide is ~1500-2000 without reduce_range, 750-900 with it
     quantize_static(create_gemm_model("/tmp/test_in.onnx"), out_file,
                     FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False, reduce_range=False,
-                    activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
-                    extra_options={"ActivationSymmetric": False})
+                    activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
+                    extra_options={"ActivationSymmetric": True})
     run_onnx_jit, _ = load_onnx_model(out_file)
     with Context(DONT_REALIZE_EXPAND=1):
       run_onnx_jit(input=Tensor(np.random.uniform(size=(N, N)).astype(np.float32)))

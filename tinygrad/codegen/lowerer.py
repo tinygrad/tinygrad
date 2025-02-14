@@ -150,6 +150,11 @@ pm_quant = symbolic+PatternMatcher([
   # CAST after reduce (doesn't work if it's a size change)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, src=(UPat.var("x"),)),), name="r"),
     lambda x,r: r.replace(dtype=x.dtype, src=(x,)).cast(r.dtype) if dtypes.is_float(r.dtype) else None),
+
+  # MUL is short
+  (UPat.var("x", dtype=dtypes.char).cast(dtypes.int) * UPat.var("y", dtype=dtypes.char).cast(dtypes.int),
+   lambda x,y: (x.cast(dtypes.short) * y.cast(dtypes.short)).cast(dtypes.int)),
+
   # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
   (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),
    lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None),
@@ -158,7 +163,7 @@ pm_quant = symbolic+PatternMatcher([
   # no float divide (breaks it!)
   #((UPat.var("x").cast(dtypes.float)*UPat.cvar("c")).cast(dtypes.char), lambda x,c: x.cast(dtypes.char)),
   # float divide is int divide (breaks it!)
-  #((UPat.var("x").cast(dtypes.float)*UPat.cvar("c")).cast(dtypes.char), lambda x,c: (x//(1/c.arg)).cast(dtypes.char)),
+  ((UPat.var("x").cast(dtypes.float)*UPat.cvar("c")).cast(dtypes.char), lambda x,c: (x//(1/c.arg)).cast(dtypes.char)),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:

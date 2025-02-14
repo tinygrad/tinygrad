@@ -711,11 +711,13 @@ def get_onnx_ops():
     out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     # clamp cast is required for uint8
-    return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
+    #return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
     # no clamp cast is okay
     #return ((x / y_scale).round() + y_zero_point).cast(out_dtype).contiguous()
     # no round isn't
     #return ((x / y_scale) + y_zero_point).cast(out_dtype).contiguous()
+    # nothing (testing)
+    return x.cast(out_dtype).contiguous()
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
