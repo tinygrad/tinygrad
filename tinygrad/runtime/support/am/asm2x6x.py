@@ -40,8 +40,9 @@ class Asm2x6x:
         return self.read(0x07f0, 6)
 
 class Asm236x(Asm2x6x):
-    def __init__(self, dev_path):
+    def __init__(self, dev_path, is_24=False):
         super().__init__(dev_path)
+        self.is_24 = is_24
 
     def flash_dump(self, read_len):
         data = bytearray(read_len)
@@ -69,26 +70,59 @@ class Asm236x(Asm2x6x):
 
     def read(self, start_addr, read_len, stride=255):
         data = bytearray(read_len)
+        if self.is_24:
+            for i in range(0, read_len, stride):
+                remaining = read_len - i
+                buf_len = min(stride, remaining)
 
-        for i in range(0, read_len, stride):
-            remaining = read_len - i
-            buf_len = min(stride, remaining)
+                current_addr = start_addr + i
+                assert current_addr >> 17 == 0
+                current_addr &= 0x01ffff
+                current_addr |= 0x500000
 
-            cdb = struct.pack('>BBBHB', 0xe4, buf_len, 0x00, start_addr + i, 0x00)
+                cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
 
-            buf = bytearray(buf_len)
-            ret = sgio.execute(self._file, cdb, None, buf)
-            assert ret == 0
+                buf = bytearray(buf_len)
+                ret = sgio.execute(self._file, cdb, None, buf)
+                assert ret == 0
 
-            data[i:i+buf_len] = buf
+                data[i:i+buf_len] = buf
+        else:
+            for i in range(0, read_len, stride):
+                remaining = read_len - i
+                buf_len = min(stride, remaining)
+
+                cdb = struct.pack('>BBBHB', 0xe4, buf_len, 0x00, start_addr + i, 0x00)
+
+                buf = bytearray(buf_len)
+                ret = sgio.execute(self._file, cdb, None, buf)
+                assert ret == 0
+
+                data[i:i+buf_len] = buf
 
         return bytes(data)
 
     def write(self, start_addr, data):
-        for offset, value in enumerate(data):
-            cdb = struct.pack('>BBBHB', 0xe5, value, 0x00, start_addr + offset, 0x00)
-            ret = sgio.execute(self._file, cdb, None, None)
-            assert ret == 0
+        if self.is_24:
+            for offset, value in enumerate(data):
+                current_addr = start_addr + offset
+                # Ensure the address fits the expected range
+                assert current_addr >> 17 == 0
+
+                # Mask and shift address for the ASM246x's addressing scheme
+                current_addr &= 0x01ffff
+                current_addr |= 0x500000
+
+                # Use command code 0xe5 similarly to ASM236x
+                cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
+                ret = sgio.execute(self._file, cdb, None, None)
+                assert ret == 0
+        else:
+            for offset, value in enumerate(data):
+                cdb = struct.pack('>BBBHB', 0xe5, value, 0x00, start_addr + offset, 0x00)
+                ret = sgio.execute(self._file, cdb, None, None)
+                assert ret == 0
+
 
     def reload(self):
         cdb = bytes.fromhex("e8 00 00 00 00 00 00 00 00 00 00 00")
@@ -179,14 +213,21 @@ class Asm236x(Asm2x6x):
             shifted_value = value << (8 * offset)
             self.write(0xB220, struct.pack('>I', shifted_value))
 
+        # https://www.intel.com/content/www/us/en/docs/programmable/683733/14-1/tlp-packet-formats-with-data-payload.html
+        print(fmt_type)
         self.write(0xB210, struct.pack('>III',
             0x00000001 | (fmt_type << 24),
             byte_enable,
             masked_address,
         ))
 
+        if self.is_24:
+            self.write(0xB216, bytes([0x20]))
+            self.write(0xB296, bytes([0x04]))
+
         # Clear timeout bit.
-        self.write(0xB296, bytes([0x01]))
+        else:
+            self.write(0xB296, bytes([0x01]))
 
         # Unknown
         self.write(0xB254, bytes([0x0f]))
@@ -203,10 +244,6 @@ class Asm236x(Asm2x6x):
             return
 
         # Wait for completion.
-        # print(self.read(0xB296, 1)[0])
-        # print(self.read(0xB212, 1)[0])
-        # print(self.read(0xB213, 1)[0])
-        # print(self.read(0xB23e, 1)[0])
         while self.read(0xB296, 1)[0] & 2 == 0:
             # print(self.read(0xB296, 1)[0])
             if self.read(0xB296, 1)[0] & 1:
