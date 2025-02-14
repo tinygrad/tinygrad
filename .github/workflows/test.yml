@@ -427,7 +427,7 @@ jobs:
     - name: Test LLVM=1 DEVECTORIZE=0
       run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
     - name: Test LLVM=1 DEVECTORIZE=0 for model
-      run: LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
+      run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/models/test_efficientnet.py
     #- name: Test CLANG=1 DEVECTORIZE=0
     #  run: CLANG=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
