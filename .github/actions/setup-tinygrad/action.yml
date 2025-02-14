@@ -227,7 +227,7 @@ runs:
         sudo apt install -y --no-install-recommends llvm-dev
 
     - name: Install LLVM (macOS)
-      if: inputs.llvm == 'true' && runner.os == 'macOS'
+      if: (inputs.llvm == 'true' || inputs.amd == 'true') && runner.os == 'macOS'
       shell: bash
       run: |
         brew install llvm
