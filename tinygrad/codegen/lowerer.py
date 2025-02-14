@@ -152,8 +152,8 @@ pm_quant = symbolic+PatternMatcher([
     lambda x,r: r.replace(dtype=x.dtype, src=(x,)).cast(r.dtype) if dtypes.is_float(r.dtype) else None),
 
   # MUL is short
-  (UPat.var("x", dtype=dtypes.char).cast(dtypes.int) * UPat.var("y", dtype=dtypes.char).cast(dtypes.int),
-   lambda x,y: (x.cast(dtypes.short) * y.cast(dtypes.short)).cast(dtypes.int)),
+  #(UPat.var("x", dtype=dtypes.char).cast(dtypes.int) * UPat.var("y", dtype=dtypes.char).cast(dtypes.int),
+  # lambda x,y: (x.cast(dtypes.short) * y.cast(dtypes.short)).cast(dtypes.int)),
 
   # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
   (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),

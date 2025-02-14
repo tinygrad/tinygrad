@@ -27,13 +27,13 @@ def split_cat(x:UOp, c:UOp):
 
 dsp_pm = PatternMatcher([
   # fixup assign into cast
-  (UPat(Ops.DEFINE_ACC, name="acc"), lambda acc: no_vectorized_acc(acc, 32)),
-  (UPat.var("x")+UPat(Ops.CAT, name="c"), lambda x,c: UOp(Ops.CAT, x.dtype, src=tuple(a+b for a,b in zip(split_cat(x,c), c.src)))),
-  (UPat(Ops.CAT, name="c")//UPat.var("x"), lambda x,c: UOp(Ops.CAT, x.dtype, src=tuple(a//b for a,b in zip(c.src, split_cat(x,c))))),
-  (UPat(Ops.GEP, src=(UPat.cvar("c"),), name="g"), lambda g,c: c.replace(dtype=g.dtype)),
-  (UPat(Ops.CAST, dtype=dtypes.char.vec(128), src=(UPat(Ops.CAT, dtype=dtypes.int.vec(128), name="x"))),
-    lambda x: UOp(Ops.CUSTOM, dtype=dtypes.char.vec(128), src=x.src,
-    arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
+  #(UPat(Ops.DEFINE_ACC, name="acc"), lambda acc: no_vectorized_acc(acc, 32)),
+  #(UPat.var("x")+UPat(Ops.CAT, name="c"), lambda x,c: UOp(Ops.CAT, x.dtype, src=tuple(a+b for a,b in zip(split_cat(x,c), c.src)))),
+  #(UPat(Ops.CAT, name="c")//UPat.var("x"), lambda x,c: UOp(Ops.CAT, x.dtype, src=tuple(a//b for a,b in zip(c.src, split_cat(x,c))))),
+  #(UPat(Ops.GEP, src=(UPat.cvar("c"),), name="g"), lambda g,c: c.replace(dtype=g.dtype)),
+  #(UPat(Ops.CAST, dtype=dtypes.char.vec(128), src=(UPat(Ops.CAT, dtype=dtypes.int.vec(128), name="x"))),
+  #  lambda x: UOp(Ops.CUSTOM, dtype=dtypes.char.vec(128), src=x.src,
+  #  arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
 
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
