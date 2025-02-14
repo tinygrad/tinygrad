@@ -1,15 +1,8 @@
 import transformerModule from './transformer.js'
 
-var transformer = async function(state_dict) {
+var transformer = async function() {
 
   const wasm = await transformerModule();
-  /*
-  for (const [i, name] of weightNames.entries()) {
-    const bufPtr = wasm._malloc(state_dict[name].size);
-    state_dict[name].wasm_buf_start_pos = bufPtr;
-    wasm._set_buf(i, bufPtr);
-  }
-    */
 
   return {
     run: (input0,start_pos) => {
@@ -22,8 +15,7 @@ var transformer = async function(state_dict) {
       wasm._free(inputPtr0);
       return [output0];
     },
-    wasm: wasm,
-    state_dict: state_dict
+    wasm: wasm
   }
 }
 export {transformer};

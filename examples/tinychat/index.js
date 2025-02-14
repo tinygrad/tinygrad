@@ -212,9 +212,12 @@ function sendMessageToWorker(worker, message) {
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 
-    if (message.header === "token") {worker.postMessage(message.data);}
-    else if (message.header === "init_state_dict") worker.postMessage({files: message.files, totalSize: message.totalSize});
-    else if (message.header === "load_part") worker.postMessage(message.data, message.data === "done" ? [] : [message.data.bytes.buffer]);
+    if (message.header === "token") worker.postMessage(message.data);
+    else if (message.header === "load_state_dict") {
+      if (message.data === "done") worker.postMessage(message.data);
+      else worker.postMessage(message.data, message.data.map(file => file.bytes.buffer));
+    }
+    else if (message.header === "init") worker.postMessage("init");
   });
 }
 
@@ -263,17 +266,6 @@ async function load_state_dict (data, device, progress) {
   const notInCorrectHashes = dbKeys.filter(key => !correctHashesSet.has(key));
   // await these right before starting to save new stuff
   const deletionPromises = notInCorrectHashes.map(async (hash) => deleteTensorFromDb(db, hash));
-  //for (const hash of notInCorrectHashes) {deleteTensorFromDb(db, hash);}
-
-  // TODO: refactor/cleanup
-  // we are reordering the files so download order corresponds to memory order; does this matter for stability?
-  /*
-  const allIndices = new Array(74).fill(0).map((_, i) => i); 
-  const order = [14, 13, 7, 6, 5, 4, 3, 2, 1, 0, 12, 11, 10, 9, 8, 63]; // then the rest in any order
-  const missingIndices = [...Array(allIndices.length).keys()].filter(i => !order.includes(i));
-  const fullOrder = [...order, ...missingIndices];
-  data.metadata.files = fullOrder.map(index => data.metadata.files[index]);
-  */
 
   await kernelsReady;
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
@@ -284,29 +276,29 @@ async function load_state_dict (data, device, progress) {
   else if (window.BACKEND === "WASM") {
     progress(0.02 * progress.total, 'Loading model:');
     model = new Worker(`./worker.js?version=${Date.now()}`);
+    await sendMessageToWorker(model, {header: "init"});
     progress(0.02 * progress.total, 'Loading model:');
-    data.metadata.files = await sendMessageToWorker(model, {header: "init_state_dict", files: data.metadata.files, totalSize: data.totalSize});
+    //data.metadata.files = await sendMessageToWorker(model, {header: "init_state_dict", files: data.metadata.files, totalSize: data.totalSize});
     progress(0.11 * progress.total, 'Loading model:');
   }
 
-  const cachedFileHashes = new Set(dbKeys.filter(key => correctHashesSet.has(key)));
-  const cachedFiles = data.metadata.files.filter(file => cachedFileHashes.has(file.hash));
-  const toDownload = data.metadata.files.filter(file => !cachedFileHashes.has(file.hash));
   const downloaded = [];
-  // to limit memory overhead, we pause downloads if we have this number of downloaded files waiting to be processed
-  const numDownloaders = window.isMobile ? 2 : toDownload.length; // TODO: dynamically base this on DL file size? current assumption is 16 MiB chunks
-  const chainDownload = async (file) => {
-    loadPart(`${window.MODEL_BASE_URL}/${file.name}`) // triggers download
-    .then(async (arraybuf) => { 
-      downloaded.push({ ...file, bytes: new Uint8Array(arraybuf)});
-      // pause downloads if further processing is a bottleneck
-      while (toDownload.length && downloaded.length >= numDownloaders) await new Promise(resolve => setTimeout(resolve, 200));
-      if (toDownload.length && downloaded.length < numDownloaders) chainDownload(toDownload.shift()); // start next download
-    })
-  }
-  for (let i=0; i<numDownloaders; i++) if (toDownload.length) chainDownload(toDownload.shift());
+  const triggerChainDownload = async (toDownload) => {
+    const numDownloaders = window.isMobile ? 2 : toDownload.length; // TODO: dynamically base this on DL file size? current assumption is 16 MiB chunks
 
-  const valid_final_dtypes = new Set(["float32", "int8", "int32"]);
+    const chainDownload = async() => {
+      const file = toDownload.shift();
+      loadPart(`${window.MODEL_BASE_URL}/${file.name}`) // triggers download
+      .then(async (arraybuf) => { 
+        downloaded.push({ ...file, bytes: new Uint8Array(arraybuf)});
+        // pause downloads if further processing is a bottleneck
+        while (toDownload.length && downloaded.length >= numDownloaders) await new Promise(resolve => setTimeout(resolve, 200));
+        if (toDownload.length && downloaded.length < numDownloaders) chainDownload(toDownload.shift()); // start next download
+      })
+    }
+    for (let i=0; i<numDownloaders; i++) if (toDownload.length) chainDownload();
+  }
+
   const loadFileToStateDict = async(file) => {
     if (window.BACKEND === "WebGPU") {
       for (const part of file.parts) {
@@ -317,32 +309,57 @@ async function load_state_dict (data, device, progress) {
       }
     }
     else if (window.BACKEND === "WASM") {
-      //part.target_start_pos = state_dict[part.key].wasm_buf_start_pos + part.target_start_pos
-      const msg = await sendMessageToWorker(model, {header: "load_part", data: file});
+      await sendMessageToWorker(model, {header: "load_state_dict", data: [file]});
     }
-    else throw new Error(`unexpected dtype: ${part.dtype} in file: ${file.name}`);
     file.bytes = null;
-    completed += 1;
   }
 
-  const loadDelay = window.isMobile ? 20 : 20 // hoping to improve stability on mobile
-  await Promise.all(deletionPromises);
-  while (completed < data.metadata.files.length) {
-    const start = performance.now();
-    // prioritize files from downloaded queue, so we can continue downloading more files
-    if (downloaded.length) {
-      const file = downloaded.shift();
-      await saveTensorToDb(db, file.hash, file.bytes); // prevent race between indexedDB and wasm
-      await loadFileToStateDict(file); // increments completed when done
+  if (window.BACKEND === "WebGPU") { // contiguous loading not needed for WebGPU stability
+    const files = data.tensor_file_groups.flatMap(obj => obj.files);
+    data.tensor_file_groups = [{contiguous: false, files: files}];
+  }
+
+  for (const group of data.tensor_file_groups) {
+    const contiguous = group.contiguous;
+    const files = group.files;
+    const tensor_file_indices = files.map(file => file.index);
+    const contiguousFiles = [];
+    const fileHashes = new Set(files.map(file => file.hash));
+    const cachedFileHashes = new Set(dbKeys.filter(key => fileHashes.has(key)));
+    const cachedFiles = files.filter(file => cachedFileHashes.has(file.hash));
+    const toDownload = files.filter(file => !cachedFileHashes.has(file.hash));
+    triggerChainDownload(toDownload);
+
+    const loadDelay = window.isMobile ? 20 : 20 // hoping to improve stability on mobile
+    await Promise.all(deletionPromises);
+
+    while (completed < files.length) {
+      const start = performance.now();
+      // prioritize files from downloaded queue, so we can continue downloading more files
+      if (downloaded.length) {
+        const file = downloaded.shift();
+        await saveTensorToDb(db, file.hash, file.bytes); // for wasm, must await to prevent race between indexedDB and transfer to worker
+        if (!contiguous) await loadFileToStateDict(file);
+        else contiguousFiles.push(file);
+        completed += 1;
+      }
+      else if (!downloaded.length && cachedFiles.length) {
+        const file = cachedFiles.shift();
+        file.bytes = await getPart(file.name, file.hash); // reads data from IndexedDB
+        if (!contiguous) await loadFileToStateDict(file);
+        else contiguousFiles.push(file);
+        completed += 1;
+      }
+      const end = performance.now();
+      const elapsed = (end - start) / 1000;
+      if (elapsed < loadDelay) await new Promise(resolve => setTimeout(resolve, loadDelay - elapsed));
     }
-    else if (!downloaded.length && cachedFiles.length) {
-      const file = cachedFiles.shift();
-      file.bytes = await getPart(file.name, file.hash); // reads data from IndexedDB
-      await loadFileToStateDict(file); // increments completed when done
+    if (contiguous) {
+      const orderMap = tensor_file_indices.reduce((acc, id, index) => {acc[id] = index; return acc;}, {});
+      contiguousFiles.sort((a, b) => orderMap[a.index] - orderMap[b.index]); // glue files together in the right order
+      await sendMessageToWorker(model, {header: "load_state_dict", data: contiguousFiles});
     }
-    const end = performance.now();
-    const elapsed = (end - start) / 1000;
-    if (elapsed < loadDelay) await new Promise(resolve => setTimeout(resolve, loadDelay - elapsed));
+    completed = 0;
   }
 
   return model;
@@ -376,14 +393,48 @@ document.addEventListener("alpine:init", () => {
       }
 
       const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
-      // TODO: cache metadata (and everything else) so tinychat works offline
+      // TODO: cache metadata (and everything else, including tokenizer)
+      // TODO: use service worker to reload page when offline
       const data = await response.json();
+      data.metadata.files = data.metadata.files.map((file, index) => ({...file, index}));
       const state_dict = data.metadata.state_dict;
+
+      /*
+      - allocating memory to WASM on mobile has longstanding issues: https://github.com/WebAssembly/design/issues/1397
+
+      - the below pattern, while yielding a succesfully-functioning model when it doesn't crash, causes regular crashes on iOS Safari (iphone 15 iOS 18.3):
+        - call WASM malloc (to fit all tensors, or one per tensor) for all tensors up front, then load tensor byte chunks into the buffers in random order
+
+      - the below pattern has been stable on iOS Safari (iphone 15 iOS 18.3):
+        - call only one WASM malloc at a time before filling the allocated bytes, as small as possible (malloc up to 256 MiB has been tested)
+        - fill the malloc'd memory in linear order from start to end (what has been tested is calling wasm.HEAPU8.set on 16 MiB chunks from start to end)
+        - use ALLOW_MEMORY_GROWTH=1 in wasm compilation, minimize initial memory
+
+      - additional considerations affecting loading design, for WASM:
+        - it seems that copying bytes into wasm memory cannot be zero-copy without sharedarraybuffer, which isn't currently used due to increased hosting complexity
+        - non-zero copies create memory pressure, which is not reliably capped because of lack of control over garbage collection
+        - to minimize peak memory pressure if GC is delayed, we process (i.e. download + copy into WASM) large tensors (> 16 MiB) one at a time, in descending size order
+
+      TODO (!!): when splitting weights, enforce that two split tensors cannot have any file overlap,
+        because then otherwise much larger WASM mallocs / more complex logic would be required,
+        because sequential WASM mallocs are typically not contiguous.
+      */
+      data.tensor_file_groups = []; // see above: for WASM, limit processing of multi-file Tensors to one at a time, in descending order based on Tensor size
+      const unsplit_tensors = [];
+      const sortedEntries = Object.entries(state_dict).sort(([, objA], [, objB]) => objB.size - objA.size);
+
       let totalSize = 0;
-      for (let [k,v] of Object.entries(state_dict)) {
+      const seen = new Set();
+      for (const [k,v] of sortedEntries) {
+        const files_in_tensor = [];
         for (const part of v.parts) {
           if (part.empty) state_dict[k].empty = true; // assumes no other parts of this weight exist and are non-empty
           else {
+            const file = data.metadata.files[part.file];
+            if (!seen.has(file.index)) {
+              seen.add(file.index);
+              files_in_tensor.push(file);
+            }
             totalSize += part.size;
             part.key = k;
             part.dtype = v.dtype;
@@ -393,7 +444,11 @@ document.addEventListener("alpine:init", () => {
             data.metadata.files[part.file].parts.push(part);
           }
         }
+        if (files_in_tensor.length > 1) data.tensor_file_groups.push({contiguous: true, files: files_in_tensor}); // [tensorN_file0, tensorN_file1, ...]
+        else if (files_in_tensor.length > 0) unsplit_tensors.push(files_in_tensor[0]);
       }
+      data.tensor_file_groups.push({contiguous: false, files: unsplit_tensors});
+
       data.totalSize = totalSize;
       totalSize = totalSize / 0.8; // give space in progress bar for initializing model bufs, and tokenizer
       this.progress = makeProgress.call(this, totalSize); // creates closure with totalSize
@@ -420,7 +475,7 @@ document.addEventListener("alpine:init", () => {
           this.nets = {"transformer": model};
         }
         else if (window.BACKEND === "WASM") {
-          const msg = await sendMessageToWorker(model, {header: "load_part", data: "done"});
+          const msg = await sendMessageToWorker(model, {header: "load_state_dict", data: "done"});
           this.nets = {"transformer": async (tok, start_pos) => sendMessageToWorker(model, {header: "token", data: [tok, start_pos]})};
         }
         this.progress(0.01 * totalSize, `Launching ${window.BACKEND} model:`);
