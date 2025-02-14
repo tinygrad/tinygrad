@@ -1018,7 +1018,6 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
     return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
   return None
 
-
 def fold_unrolled_divs(chain, x, denominator, u):
   # div pattern in unrolled arange
   # example: x//4 + (x+1)//4 + (x+2)//4 + (x+3)//4 -> x
