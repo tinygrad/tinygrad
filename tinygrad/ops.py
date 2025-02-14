@@ -108,6 +108,8 @@ class Ops(FastEnum):
   # movement ops!
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
 
+  MOD = auto(); IDIV = auto();
+
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
@@ -130,7 +132,7 @@ class Ops(FastEnum):
   WMMA = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); IDIV = auto(); MOD = auto(); MAX = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  ADD = auto(); MUL = auto(); MAX = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # UnaryOps
@@ -1037,10 +1039,7 @@ def fold_unrolled_divs(chain, x, denominator, u):
   # we assume the chain is sorted in ascending order so we look for the highest c: (x+c)//d first
   # we go down the chain from the highest c to the lowest c and use the order to determine if we have passed the expected c
   for c in non_folded_c:
-    if c == 0:
-      offset += x//denominator
-      break
-    while u is not (next_expected := (x+c)//denominator):
+    while u is not (next_expected := (x+c)//denominator if c!=0 else x//denominator):
       if chain is None: return None
       chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
       if u.order < next_expected.order: return None
