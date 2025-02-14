@@ -283,13 +283,13 @@ class TestPolyN(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 4.0), [1.0, -2.0, 1.0])), 9.0)
 
 class TestTimeToStr(unittest.TestCase):
-    def test_seconds(self):         self.assertEqual("1.10 s", time_to_str(1.1))
+    def test_seconds(self):         self.assertEqual("1.10 s ", time_to_str(1.1))
     def test_boundary_sec_ms(self):  self.assertEqual("1000.00 ms", time_to_str(1))
     def test_milliseconds(self):     self.assertEqual("500.00 ms", time_to_str(0.5))
     def test_boundary_ms_us(self):   self.assertEqual("1000.00 us", time_to_str(0.001))
     def test_microseconds(self):     self.assertEqual("100.00 us", time_to_str(0.0001))
     def test_zero(self):             self.assertEqual("0.00 us", time_to_str(0))
-    def test_width_formatting(self): self.assertEqual("  1.10 s", time_to_str(1.1, w=6))
+    def test_width_formatting(self): self.assertEqual("  1.10 s ", time_to_str(1.1, w=6))
 
 if __name__ == '__main__':
   unittest.main()
