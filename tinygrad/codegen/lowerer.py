@@ -33,11 +33,7 @@ def _fit_to_max(dims, max_sizes):
   _dims = list(dims) + [1]*(3-len(dims))
   for i in range(len(_dims)):
     while _dims[i] > max_sizes[i]:
-      div = 1
-      for d in range(2, int(math.sqrt(_dims[i])) + 1):
-        if (_dims[i] % d) == 0:
-          div = d
-          break
+      div = next((d for d in range(2, math.ceil(math.sqrt(_dims[i]))) if (_dims[i] % d) == 0), 1)
       if div == 1: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
       _dims[i], _dims[(i+1)%len(_dims)] = _dims[i]//div, _dims[(i+1)%len(_dims)]*div
   return tuple(_dims[:2] if _dims[2] == 1 else _dims[0] if _dims[1:3] == [1,1] else _dims)
