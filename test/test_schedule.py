@@ -2490,7 +2490,7 @@ class TestContiguous(unittest.TestCase):
     self.assertEqual(b.lazydata.base.buffer.size, 16)
 
 class TestUOpBecome(unittest.TestCase):
-  # the simplest case, if we create a new BUFFER for this UOp
+  # the simplest case, if we create a new BUFFER for this tensor UOp
   def test_new_buffer(self):
     a = Tensor.empty(4, 4)
     b = Tensor.empty(4, 4)
@@ -2498,8 +2498,10 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(add, 1)
     # NOTE: realized base is always a flat buffer
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
-    # the Tensor UOp can optionally stack a VIEW on top of BUFFER
+    # the Tensor UOp can optionally stack movement ops on top of BUFFER, in this case to preserve the (4, 4) shape of the tensor
     assert UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)).match(add.lazydata, {})
+    self.assertEqual(add.lazydata.size, 16)
+    self.assertEqual(add.lazydata.shape, (4, 4))
 
   def test_new_buffer_view(self):
     a = Tensor.empty(4, 4)
@@ -2507,9 +2509,27 @@ class TestUOpBecome(unittest.TestCase):
     add = (a+b).reshape(8, 2)
     check_schedule(add, 1)
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
-    # VIEW is preserverd after the becomes rewrite.
+    # the shape is preserverd in the becomes_map.
     self.assertEqual(add.lazydata.shape, (8, 2))
     assert add.lazydata is not add.lazydata.base
+
+  def test_new_flat_buffer(self):
+    a = Tensor.empty(4,)
+    b = Tensor.empty(4,)
+    add = a+b
+    check_schedule(add, 1)
+    # BUFFER already has a shape (4,), this tensor just becomes a contiguous BUFFER
+    assert UPat(Ops.BUFFER).match(add.lazydata, {})
+
+  # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
+
+  @unittest.expectedFailure
+  def test_new_buffer_mops(self):
+    a = Tensor.empty(4, 1)
+    b = a.expand(4, 4).reciprocal()
+    check_schedule(b, 1)
+    self.assertEqual(b.lazydata.base.realized.size, 4)
+    assert UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE),)).match(b.lazydata, {}), f"{b.lazydata}"
 
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)

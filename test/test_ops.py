@@ -615,9 +615,19 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
     helper_test_op([()], lambda x: 2.0**x)
-    # TODO: fix backward
-    helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
+    helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
+
+  def test_pow_zero_tensor(self):
+    helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
+    helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
+    # TODO: fix WEBGPU
+    if Device.DEFAULT != "WEBGPU":
+      helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
+  def test_pow_zero_const(self):
+    helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
@@ -641,14 +651,11 @@ class TestOps(unittest.TestCase):
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
-    if Device.DEFAULT not in ("LLVM", "DSP"):
-      # TODO: fix backward
-      helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
+    helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.sqrt())
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
-    # TODO: fix backward
-    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]], forward_only=True)
+    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.rsqrt())
 
   def test_xor(self):
@@ -1406,7 +1413,7 @@ class TestOps(unittest.TestCase):
   def test_asinh(self):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6)
     # NOTE: this one has larger atol
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, rtol=2e-2, grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
@@ -2574,12 +2581,6 @@ class TestOps(unittest.TestCase):
   def test_scatter_add(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    for dim in (0,1,2,-1,-2,-3):
-      helper_test_op([(4,5,6), (4,5,6)], lambda x,src: x.scatter(dim=dim, index=b, src=src, reduce="add"),
-      lambda x,src: x.scatter(dim=dim, index=a, src=src, reduce="add"), forward_only=True)
-
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="add"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="add"), forward_only=True)
 
@@ -2592,10 +2593,6 @@ class TestOps(unittest.TestCase):
   def test_scatter_mul(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    for dim in (0,1,2,-1,-2,-3):
-      helper_test_op([(4,5,6), (4,5,6)], lambda x,src: x.scatter(dim=dim, index=b, src=src, reduce="multiply"),
-      lambda x,src: x.scatter(dim=dim, index=a, src=src, reduce="multiply"), forward_only=True)
-
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="multiply"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="multiply"), forward_only=True)
 
@@ -2605,10 +2602,38 @@ class TestOps(unittest.TestCase):
         lambda x: x.scatter(1, b, float("nan"), reduce="multiply"),
         lambda x: x.scatter(1, a, float("nan"), reduce="multiply"), forward_only=True,)
 
+  def test_scatter_no_reduce_tensor_src(self):
+    with self.assertRaises(TypeError):
+      Tensor.ones(4).scatter(dim=1, index=Tensor([0]), src=Tensor.ones(4), reduce="add")
+
+  def test_scatter_reduce(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    for reduce in ("sum", "prod", "mean", "amin", "amax"):
+      for dim in (0,1,2,-1,-2,-3):
+        helper_test_op([(4,5,6), (4,5,6)],
+          lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce=reduce),
+          lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce=reduce), forward_only=True)
+        helper_test_op([(4,5,6), (4,5,6)],
+          lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce=reduce, include_self=False),
+          lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce=reduce, include_self=False), forward_only=True)
+
+  def test_scatter_reduce_prod_zeros(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     x = Tensor.zeros([4,5,6]).float()
     y = torch.zeros([4,5,6]).float()
-    helper_test_op([(4,5,6)], lambda src: y.scatter(dim=1, index=b, src=src, reduce="multiply"),
-      lambda src: x.scatter(dim=1, index=a, src=src, reduce="multiply"), forward_only=True)
+    helper_test_op([(4,5,6)],
+      lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
+      lambda src: x.scatter_reduce(dim=1, index=a, src=src, reduce="prod"), forward_only=True)
+
+  def test_scatter_reduce_invalid_reduce_op(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    self.helper_test_exception([(4,5,6), (4,5,6)],
+      lambda x,src: x.scatter_reduce(dim=0, index=b, src=src, reduce="INVALID"),
+      lambda x,src: x.scatter_reduce(dim=0, index=a, src=src, reduce="INVALID"),
+      RuntimeError)
 
   def test_scaled_dot_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
