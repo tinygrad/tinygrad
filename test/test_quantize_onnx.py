@@ -38,7 +38,7 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None):
   #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program()
-  if replace_src is not None: prg = replace(prg, src=replace_src + "\nstatic long syscall" + prg.src.split("static long syscall")[1])
+  if replace_src is not None: prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1])
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   for _ in range(3): ei.run(wait=True)
 
