@@ -108,7 +108,7 @@ class Ops(FastEnum):
   # movement ops!
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
 
-  MOD = auto(); IDIV = auto();
+  MOD = auto(); IDIV = auto() # noqa: E702
 
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
