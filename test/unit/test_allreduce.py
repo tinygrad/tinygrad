@@ -1,10 +1,12 @@
-import unittest
+import unittest, os
 from tinygrad import Tensor, Device
 from tinygrad.helpers import Context
 from tinygrad.ops import Ops
 
 class TestRingAllReduce(unittest.TestCase):
   def test_schedule_ring(self):
+    if len([d for d in os.environ.get('CUDA_VISIBLE_DEVICES','').split(",") if d.strip()]) < 6:
+      self.skipTest("Test requires at least 6 GPUs")
     with Context(RING=2):
       N = 6
       ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
