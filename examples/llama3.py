@@ -86,7 +86,7 @@ class Int8Linear:
         assert "weight" in name, name
         v = v.cast(dtypes.float32)
         scale = v.abs().max(axis=1) / 127.0
-        int8_weight = (v.T/scale).T.cast(dtype=dtypes.int8)
+        int8_weight = (v.T/scale).T.round().cast(dtype=dtypes.int8) # without round, cast truncates -34.9 to -34
         new_tensors[name] = int8_weight
         new_tensors[name.replace('weight', 'scale')] = scale
         if isinstance(device, tuple):
