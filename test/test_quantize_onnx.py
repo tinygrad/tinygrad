@@ -32,7 +32,7 @@ def create_gemm_model(model_path:str, in_size=N, out_size=N, bias=False):
   onnx.save_model(model_def, model_path)
   return model_path
 
-def sexec(out:Tensor, opts:list[Opt], replace_src=None):
+def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
   k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
   #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
@@ -40,7 +40,7 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None):
   prg = k.to_program()
   if replace_src is not None: prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1])
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
-  for _ in range(3): ei.run(wait=True)
+  for _ in range(run_count): ei.run(wait=True)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):
@@ -131,15 +131,21 @@ class TestQuantizeOnnx(unittest.TestCase):
     }"""
     self.test_prequant_gemm_intacc(np.uint8, np.int8, src)
 
-  def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None):
-    N = 512
-    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(xi))
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
+  def test_prequant_gemm_intacc_128(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128)
+  def test_prequant_gemm_intacc_256(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=256)
+  def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512):
+    X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
+    W = Tensor(m2:=(np.random.uniform(0, 255, size=(N,N)).astype(wi))).realize()
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     with Context(DONT_REALIZE_EXPAND=1):
       out = (X.int().matmul(W.int())//1000).cast('int8' if xi == np.int8 else 'uint8')
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-      sexec(out, opts, replace_src)
+      sexec(out, opts, replace_src, run_count=1)
+    tout = out.numpy()
+    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) / 1000).astype(xi)
+    print(tout)
+    print(mout)
+    np.testing.assert_equal(tout, mout)
 
   def test_prequant_gemm_intacc_wi(self): self.test_prequant_gemm_intacc(wi=np.int8)
   def test_prequant_gemm_intacc_xiwi(self): self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8)
@@ -147,8 +153,8 @@ class TestQuantizeOnnx(unittest.TestCase):
   def test_prequant_gemv(self):
     N = 2048
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
-    X = Tensor(np.random.uniform(0, 255, size=(1,N)).astype(np.uint8))
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
+    X = Tensor(np.random.uniform(0, 255, size=(1,N)).astype(np.uint8)).realize()
+    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8)).realize()
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     #out = X @ W
     out = X.matmul(W, acc_dtype=X.dtype)

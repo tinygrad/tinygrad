@@ -255,7 +255,8 @@ class MockDSPRenderer(DSPRenderer):
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType):
         sz = b[1][0].size*b[1][0].itemsize
-        msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
+        # for loop for big reads
+        msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); for(int rd = 0; rd < {sz}; rd += read(0, buf{i}+rd, {sz}-rd));")
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
     msrc.append("unsigned int st = inscount();")
@@ -281,4 +282,5 @@ class MockDSPProgram:
     for x in bufs:
       x[:] = proc.stdout[offset:offset+len(x)]
       offset += len(x)
+    assert offset == len(proc.stdout)
     return struct.unpack("I", proc.stdout[0:4])[0] / 1e9  # pretend it's 1 Ghz, but this is an inscount, not a time
