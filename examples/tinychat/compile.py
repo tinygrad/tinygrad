@@ -39,6 +39,7 @@ def prepare_browser_chunks(model):
       placed = False
       for file in files:
         if sum(i[0] for i in file) + info[0] <= chunk_size:
+          if info[3] and any(i[3] for i in file): continue # no two split tensors can touch the same file, due to wasm loading constraints
           file.append(info)
           placed = True
           break

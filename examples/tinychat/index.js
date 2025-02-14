@@ -414,10 +414,6 @@ document.addEventListener("alpine:init", () => {
         - it seems that copying bytes into wasm memory cannot be zero-copy without sharedarraybuffer, which isn't currently used due to increased hosting complexity
         - non-zero copies create memory pressure, which is not reliably capped because of lack of control over garbage collection
         - to minimize peak memory pressure if GC is delayed, we process (i.e. download + copy into WASM) large tensors (> 16 MiB) one at a time, in descending size order
-
-      TODO (!!): when splitting weights, enforce that two split tensors cannot have any file overlap,
-        because then otherwise much larger WASM mallocs / more complex logic would be required,
-        because sequential WASM mallocs are typically not contiguous.
       */
       data.tensor_file_groups = []; // see above: for WASM, limit processing of multi-file Tensors to one at a time, in descending order based on Tensor size
       const unsplit_tensors = [];

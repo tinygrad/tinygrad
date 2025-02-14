@@ -93,16 +93,13 @@ if __name__=="__main__":
 
     input_ptrs = OrderedDict((f"inputPtr{name.split("input")[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
     output_ptrs = OrderedDict((f"outputPtr{name.split("output")[1]}", (name, bufs[name][0])) for name in outputs)
-    top = f"import {step.name}Module from './{step.name}.js'\n"
-    prg = f"""\nvar {step.name} = async function{f"(state_dict)" if bufs_to_save else "()"} {{
+    top = f"""import {step.name}Module from './{step.name}.js'
+{f"""\nconst weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
+const {step.name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n""" if bufs_to_save else ""}"""
+
+    prg = f"""\nvar {step.name} = async function() {{
 
   const wasm = await {step.name}Module();
-  {f"""const weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
-  for (const [i, name] of weightNames.entries()) {{
-    const bufPtr = wasm._malloc(state_dict[name].size);
-    state_dict[name].wasm_buf_start_pos = bufPtr;
-    wasm._set_buf(i, bufPtr);
-  }}""" if bufs_to_save else ""}
 
   return {{
     run: ({",".join(name for name,_,_ in inputs)}) => {{
@@ -114,13 +111,15 @@ if __name__=="__main__":
       {"\n      ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
       return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}];
     }},
-    wasm: wasm{",\n    state_dict: state_dict" if bufs_to_save else ""}
+    wasm: wasm
   }}
 }}\n"""
+    exports.append(step.name)
+    if bufs_to_save: exports.append(f"{step.name}_name_to_id")
 
     return top, prg
 
-  top, prg = "", ""
+  top, prg, exports = "", "", []
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
@@ -129,7 +128,7 @@ if __name__=="__main__":
     top += step_top
     prg += step_prg
 
-  prg += f"export {{{", ".join(step.name for step in sub_steps)}}};"
+  prg += f"export {{ {", ".join(exports)} }};"
   with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as text_file:
     text_file.write(top + prg)
 
