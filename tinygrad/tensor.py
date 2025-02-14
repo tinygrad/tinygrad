@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
+from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
@@ -68,7 +68,7 @@ def get_shape(x) -> tuple[int, ...]:
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
-def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
+def _frompy(x:Union[list, tuple, bytes], dtype:DType) -> UOp:
   if isinstance(x, bytes): ret, data = UOp.metaop(Ops.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
   else:
     ret = UOp.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
@@ -131,7 +131,7 @@ class Tensor(SimpleMathTrait):
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, bytes, list, tuple, UOp, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
@@ -329,14 +329,19 @@ class Tensor(SimpleMathTrait):
     assert self.numel() == 1, "must have one element for item"
     return self.data()[(0,) * len(self.shape)]
 
-  # TODO: should be Tensor.tolist() -> Union[list[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
+  # TODO: should be Tensor.tolist() -> Union[list[ConstType], ConstType]. The list is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
   def tolist(self) -> Union[Sequence[ConstType], ConstType]:
     """
     Returns the value of this tensor as a nested list.
+    Returns single value for const tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
+    print(t.tolist())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor(5)
     print(t.tolist())
     ```
     """
@@ -1095,7 +1100,6 @@ class Tensor(SimpleMathTrait):
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    # turn scalar Tensors into const val for int indexing if possible
     x, indices = self, list(indices)
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -1186,7 +1190,7 @@ class Tensor(SimpleMathTrait):
     """
     Retrieve a sub-tensor using indexing.
 
-    Supported Index Types: `int | slice | Tensor | None | List | Tuple | Ellipsis`
+    Supported Index Types: `int | slice | Tensor | None | list | tuple | Ellipsis`
 
     Examples:
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1228,8 +1232,8 @@ class Tensor(SimpleMathTrait):
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
-    if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
-    if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self.realize()._getitem(indices, v)
@@ -2016,7 +2020,7 @@ class Tensor(SimpleMathTrait):
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
     if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
       # input size scaling factor to make sure shrink for stride is possible
-      f_ = [1 + int(resolve(o*s > i+d)) for o,s,i,d in zip(o_,s_,i_,d_)]
+      f_ = [1 + int(resolve(o*s > (i - d*(k-1)))) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
       # # repeats such that we don't need padding
       x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
       # handle dilation
@@ -2037,7 +2041,7 @@ class Tensor(SimpleMathTrait):
       raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
-  def _apply_ceil_mode(self, pads:Sequence[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> List[int]:
+  def _apply_ceil_mode(self, pads:Sequence[int], k_:tuple[sint, ...], s_:Union[tuple[int, ...], int], d_:Union[tuple[int, ...], int]) -> list[int]:
     (d_,s_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_)), self.shape[-len(k_):]
     pads, grouped_pads = list(pads), _flat_to_grouped(pads)
     # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
@@ -2060,10 +2064,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2107,10 +2111,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2145,10 +2149,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2218,10 +2222,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2426,10 +2430,25 @@ class Tensor(SimpleMathTrait):
         x = x.gather(i, index)
     return x.cast(self.dtype)
 
+  def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
+    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
+    # shrink src to index shape to shrink away the unused values
+    src = src.shrink(tuple((0,s) for s in index.shape))
+    # prepare src and mask for reduce with respect to dim
+    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
+    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
+    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
+    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    return src, mask
+
   def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']]=None) -> Tensor:
     """
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
+
+    NOTE: To use the `reduce` argument with a Tensor `src`, see `Tensor.scatter_reduce`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     src = Tensor.arange(1, 11).reshape(2, 5)
@@ -2451,21 +2470,58 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    index, dim = index.to(self.device), self._resolve_dim(dim)
+    if reduce and isinstance(src, Tensor): raise TypeError("Tensor src is not supported with reduce arg. see scatter_reduce")
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
-    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
-    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
-      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
-    # shrink src to index shape to shrink away the unused values
-    src = src.shrink(tuple((0,s) for s in index.shape))
-    # prepare src and mask for reduce with respect to dim
-    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
-    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
-    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    index, dim = index.to(self.device), self._resolve_dim(dim)
+    src, mask = self._pre_scatter(dim, index, src)
+    # TODO: should not overwrite acc_dtype here?
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
     return _masked_setitem(self, src, mask, (-1,))
+
+  def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
+                     include_self:bool=True) -> Tensor:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `"sum"`, `"prod"`, `"mean"`, `"amax"`, or `"amin"` reduction operations with `reduce`.
+
+    Set `include_self=False` to exclude values in the `self` Tensor from the reduction.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    src = Tensor.arange(1, 11).cast(dtypes.float).reshape(2, 5)
+    print(src.numpy())
+    index = Tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    print(index.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='sum').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='prod').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='mean', include_self=False).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amax').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amin').numpy())
+    ```
+    """
+    src = src.cast(self.dtype)
+    index, dim = index.to(self.device), self._resolve_dim(dim)
+    src, mask = self._pre_scatter(dim, index, src)
+    def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.any(-1).logical_not().where(a, b)
+    # TODO: should not overwrite acc_dtype here?
+    if reduce == "sum": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0))
+    if reduce == "prod": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype).mul(self if include_self else _inv_mask(self, 1))
+    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
+    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).min(-1).minimum(self if include_self else _inv_mask(self, m))
+    if reduce == "mean":
+      count = mask.where(1, 0).sum(-1, acc_dtype=self.dtype).add(1 if include_self else _inv_mask(1, 0))
+      return mask.where(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
+    raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   # ***** unary ops *****
 
@@ -2596,7 +2652,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
     ```
     """
-    return self.reciprocal().sqrt()
+    return self.sqrt().reciprocal()
   def sin(self):
     """
     Computes the sine of the tensor element-wise.
@@ -3308,9 +3364,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    # NOTE: the mid-point is for backward, revisit after new gradient API
-    if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
-    return (self<x).detach().where(x, self)
+    return self._apply_broadcasted_uop(UOp.maximum, x)
 
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """

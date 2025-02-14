@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Any, List
+from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -10,14 +10,14 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.schedule import to_si
+from tinygrad.engine.schedule import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.rewriter import full_graph_rewrite, sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
-def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
 def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
@@ -26,7 +26,7 @@ def _uops_to_prg(uops_list):
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
-def uop(uops:List[UOp], uop:Ops, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
+def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
   return uops[-1]
 
@@ -418,14 +418,6 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(const._device, None)
     with self.assertRaises(AssertionError): const.device
 
-  def test_const_arg(self):
-    var = UOp.variable("a", 1, 10)
-    with self.assertRaises(AssertionError): UOp.const(dtypes.int, var).const_arg
-    const = UOp.const(dtypes.int, 1)
-    self.assertEqual(const.const_arg, 1)
-    tensor_const = UOp.metaop(Ops.CONST, (), dtypes.int, Device.DEFAULT, 1)
-    self.assertEqual(tensor_const.const_arg, 1)
-
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(Ops.CONST, dtypes.float, (), 2.0) + UOp(Ops.CONST, dtypes.float, (), 3.0)
@@ -495,7 +487,7 @@ class TestIndexingOrdering(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "rewriter.py")
-    self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
+    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
       test_upat = UPat(Ops.CONST, dtypes.bool)
@@ -553,7 +545,7 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_flat(self):
     buffer = Tensor.arange(4).realize()
     a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)), UPat()))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat()))
     assert assign_pattern.match(a.lazydata, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
@@ -567,7 +559,7 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_reshaped(self):
     buffer = Tensor.ones((4,)).contiguous().realize()
     a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),),))), UPat()))
+    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
     assert assign_pattern.match(a.lazydata, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])

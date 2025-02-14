@@ -12,3 +12,4 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | [GPU (OpenCL)](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_gpu.py) | Accelerates computations using OpenCL on GPUs | OpenCL 2.0 compatible device |
 | [CLANG (C Code)](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_clang.py) | Runs on CPU using the clang compiler | `clang` compiler in system `PATH` |
 | [LLVM (LLVM IR)](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_llvm.py) | Runs on CPU using the LLVM compiler infrastructure | llvm libraries installed and findable |
+| [WEBGPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_webgpu.py) | Runs on GPU using the Dawn WebGPU engine (used in Google Chrome) | Dawn library installed and findable. Download binaries [here](https://github.com/wpmed92/pydawn/releases/tag/v0.1.6). |

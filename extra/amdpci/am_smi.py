@@ -1,4 +1,6 @@
-import time, mmap, sys, shutil, os, glob
+#!/usr/bin/env python3
+
+import time, mmap, sys, shutil, os, glob, subprocess
 from tinygrad.helpers import to_mv, DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import smu_v13_0_0
@@ -48,7 +50,10 @@ class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
     self.pcibus = pcibus
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.pci_state = self.read_pci_state()
+    if self.pci_state == "D0": self._init_from_d0()
 
+  def _init_from_d0(self):
     self._run_discovery()
     self._build_regs()
 
@@ -66,12 +71,21 @@ class AMSMI(AMDev):
     self.psp:AM_PSP = AM_PSP(self)
     self.smu:AM_SMU = AM_SMU(self)
 
+  def read_pci_state(self):
+    with open(f"/sys/bus/pci/devices/{self.pcibus}/power_state", "r") as f: return f.read().strip().rstrip()
+
 class SMICtx:
   def __init__(self):
     self.devs = []
     self.opened_pcidevs = []
     self.opened_pci_resources = {}
     self.prev_lines_cnt = 0
+
+    remove_parts = ["Advanced Micro Devices, Inc. [AMD/ATI]", "VGA compatible controller:"]
+    lspci = subprocess.check_output(["lspci"]).decode("utf-8").splitlines()
+    self.lspci = {l.split()[0]: l.split(" ", 1)[1] for l in lspci}
+    for k,v in self.lspci.items():
+      for part in remove_parts: self.lspci[k] = self.lspci[k].replace(part, "").strip().rstrip()
 
   def _open_am_device(self, pcibus):
     if pcibus not in self.opened_pci_resources:
@@ -98,13 +112,18 @@ class SMICtx:
         self._open_am_device(d)
 
     for d in self.devs:
-      if d.reg("regSCRATCH_REG7").read() != AM_VERSION:
+      if d.read_pci_state() != d.pci_state:
+        d.pci_state = d.read_pci_state()
+        if d.pci_state == "D0": d._init_from_d0()
+        os.system('clear')
+
+      if d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() != AM_VERSION:
         self.devs.remove(d)
         self.opened_pcidevs.remove(d.pcibus)
         os.system('clear')
         if DEBUG >= 2: print(f"Removed AM device {d.pcibus}")
 
-  def collect(self): return {d: d.smu.read_metrics() for d in self.devs}
+  def collect(self): return {d: d.smu.read_metrics() if d.pci_state == "D0" else None for d in self.devs}
 
   def draw(self):
     terminal_width, _ = shutil.get_terminal_size()
@@ -112,7 +131,12 @@ class SMICtx:
     dev_metrics = self.collect()
     dev_content = []
     for dev, metrics in dev_metrics.items():
-      device_line = [f"PCIe device: {bold(dev.pcibus)}"] + [""]
+      if dev.pci_state != "D0":
+        dev_content.append([f"{colored('(sleep)', 'yellow')} {bold(dev.pcibus)}: {self.lspci[dev.pcibus[5:]]}"] +
+                           [f"PCI State: {dev.pci_state}"] + [" "*107])
+        continue
+
+      device_line = [f"{bold(dev.pcibus)}: {self.lspci[dev.pcibus[5:]]}"] + [""]
       activity_line = [f"GFX Activity {draw_bar(metrics.SmuMetrics.AverageGfxActivity / 100, 50)}"] \
                     + [f"MEM Activity {draw_bar(metrics.SmuMetrics.AverageUclkActivity / 100, 50)}"] + [""]
 

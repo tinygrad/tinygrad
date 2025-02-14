@@ -89,7 +89,7 @@ class MathTrait(SimpleMathTrait):
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
-  def pow(self, x): return self.alu(Ops.POW, x)
+  def pow(self, x): return self.alu(Ops.POW, self.ufix(x))
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
@@ -118,7 +118,7 @@ class Ops(FastEnum):
   REDUCE_AXIS = auto()
 
   # helper ops
-  GEP = auto(); VECTORIZE = auto() # noqa: E702
+  GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
@@ -152,6 +152,7 @@ class Ops(FastEnum):
   # device
   DEVICE = auto()
   MULTI = auto()
+  CUSTOM = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -343,13 +344,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
     return unwrap(self.st)
   @property
-  def const_arg(self) -> ConstType:
-    match self.base.op:
-      case Ops.CONST: ret = self.base.arg
-      case op: raise AssertionError(f"const_arg called on {op}")
-    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
-    return ret
-  @property
   def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
     ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
@@ -490,8 +484,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if op is Ops.BIND:
       var, val = arg.unbind()
       return var.replace(src=(UOp(Ops.VIEW, dtypes.void, (UOp(Ops.DEVICE, arg=device),), ShapeTracker.from_shape(shape)),)).bind(val)
-    # otherwise it's just a VIEW(BUFFER)
-    return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype),), st)
+    # otherwise it's just a RESHAPE(BUFFER)
+    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
+    return UOp.new_buffer(device, size, dtype).reshape(shape)
   def copy_to_device(self, device:str|tuple[str, ...], clone:bool=False) -> UOp:
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
@@ -506,7 +501,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
-  def metadata(self): return all_metadata.get(self, None)
+  def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
 
   # *** uop movement ops ***
 
@@ -547,7 +542,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0].buf_uop
   @property
   def buffer(self) -> Buffer:
-    if self.op is Ops.VIEW:
+    if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
@@ -599,7 +594,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
     return 1
-  def divides(self, v) -> UOp|None:
+  def divides(self, v:int) -> UOp|None:
     if v==1: return self
     if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
     if self.op is Ops.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
@@ -643,7 +638,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.UNROLL, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
-    # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
+    # TODO: Ops.SPECIAL is Ops.DEFINE_VAR
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
@@ -846,6 +841,7 @@ match_stats:dict[UPat, list[Union[int, float]]] = dict()
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: UOp                                                                                  # the sink input to graph_rewrite
+  bottom_up: bool
   matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
@@ -930,16 +926,15 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
-  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).top_down_rewrite(sink)
 
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> dict[UOp, UOp]:
-  if TRACK_MATCH_STATS >= 2 and not bottom_up and len(tracked_ctxs) != 0: # TODO: make viz work with bottom_up=True
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+  if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
   rewrite_ctx = RewriteContext(pm, ctx)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
-
 
 # *** most of symbolic lives here now ***
 
@@ -1169,8 +1164,8 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
-  # ** COMMUTATIVE flipping **
-  (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  # ** COMMUTATIVE flipping (only for ints) **
+  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -1267,7 +1262,8 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 merge_views = PatternMatcher([
   # VIEW(VIEW) merges to a single VIEW
   (UPat(Ops.VIEW, name="vm1", src=(UPat(Ops.VIEW, name="vm2"),)), lambda vm1,vm2: vm2.replace(arg=vm2.st+vm1.st)),
-  (UPat(Ops.VIEW, name="vm", src=(UPat.var("x"),)), lambda vm,x: x if vm.st.contiguous and x.st is not None and x.shape == vm.shape else None),
+  # remove VIEW if it's contiguous and same as the base shape
+  (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.All-{Ops.DEVICE}, name="x"),)), lambda vm,x: x if vm.st.contiguous and x.shape == vm.shape else None),
   # merge unmasked const views
   (UPat(Ops.VIEW, name="view", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
    lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),

@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Any, List
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, time, struct
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
@@ -10,17 +9,26 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
+from tinygrad.ops import PatternMatcher, UPat
+
+dsp_pm = PatternMatcher([
+  (UPat(Ops.VECTORIZE, src=UPat.var("y"))*UPat.var("x"), lambda x,y: UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")*x),
+  (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
+   lambda d: d.replace(src=(UOp(Ops.CUSTOM, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]))
+])
+
 class DSPRenderer(ClangRenderer):
   device = "DSP"
-  supports_float4 = False
+  supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
+  extra_matcher = dsp_pm+ClangRenderer.extra_matcher
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {**ClangRenderer.code_for_op, Ops.SIN: lambda x,dtype: f"__builtin_sin({x})",
                  Ops.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
                  Ops.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
     msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
@@ -55,7 +63,7 @@ class DSPProgram:
   def __init__(self, dev:DSPDevice, name:str, lib:bytes):
     self.dev, self.lib = dev, lib
 
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
@@ -66,7 +74,7 @@ class DSPProgram:
     return timer[0] / 1e6
 
 class DSPBuffer:
-  def __init__(self, va_addr:int, size:int, share_info:Any, offset:int=0):
+  def __init__(self, va_addr:int, size:int, share_info, offset:int=0):
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator):
@@ -81,9 +89,10 @@ class DSPAllocator(Allocator):
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferSpec):
-    libc.munmap(opaque.va_addr, opaque.size)
-    os.close(opaque.share_info.fd)
-    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
+    if libc is not None and qcom_dsp is not None:
+      libc.munmap(opaque.va_addr, opaque.size)
+      os.close(opaque.share_info.fd)
+      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
@@ -99,7 +108,7 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+      subprocess.check_output([getenv("CC", 'clang'), *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
@@ -229,15 +238,17 @@ class RPCListener(threading.Thread):
 # ***** mock DSP *****
 
 class MockDSPRenderer(DSPRenderer):
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
+    # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
     msrc = ['''static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
-        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = #%7; trap0(#1); %0 = r0" : "=r" (retval)
-          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "i" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
+        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = %7; trap0(#1); %0 = r0" : "=r" (retval)
+          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "r" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
       static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
       static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
       static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
+      static unsigned int inscount(void) {{ unsigned int ret; __asm__ volatile(".word 0x6a15c000; %0 = R0" : "=r" (ret) : : "r0"); return ret; }}
       static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
         return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}''', 'void _start(void) {']
     for i,b in enumerate(bufs):
@@ -246,7 +257,9 @@ class MockDSPRenderer(DSPRenderer):
         msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); read(0, buf{i}, {sz});")
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
+    msrc.append("unsigned int st = inscount();")
     msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0], PtrDType) else f'val{i}') for i,b in enumerate(bufs)])});")
+    msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].size*b[1][0].itemsize});")
     msrc.append('exit(0); }')
@@ -254,19 +267,17 @@ class MockDSPRenderer(DSPRenderer):
 
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib
-  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()
       os.chmod(dsp_lib.name, 0o0777)
       # NOTE: this timing includes a docker launch
-      start = time.perf_counter()
       proc = subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
                             "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 3 else ''} /work/"+os.path.basename(dsp_lib.name)],
                             input=b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
-      elapsed = time.perf_counter() - start
-    offset = 0
+    offset = 4
     for x in bufs:
       x[:] = proc.stdout[offset:offset+len(x)]
       offset += len(x)
-    return elapsed
+    return struct.unpack("I", proc.stdout[0:4])[0] / 1e9  # pretend it's 1 Ghz, but this is an inscount, not a time
