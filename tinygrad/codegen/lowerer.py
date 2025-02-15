@@ -150,8 +150,11 @@ pm_quant = symbolic+PatternMatcher([
   # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
   (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),
    lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None),
+  # mul 0 * c1 is 0
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c1"), UPat(Ops.CONST, arg=0)) *
+   UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v"))).cast(dtypes.int).cast(dtypes.float).named("ld"), lambda ld,v,c1: ld*c1),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
-  if getenv("DSP"): ast = graph_rewrite(ast, pm_quant)
+  if opts.device in {"CLANG", "DSP"}: ast = graph_rewrite(ast, pm_quant)
   return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
