@@ -14,13 +14,13 @@ def expect(x, err, ret=None):
 class LLVMCompiler(Compiler):
   def __init__(self, target_arch:str, gpu:str|None=None):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{target_arch}{component}')()
-    if target_arch == "AMDGPU": triple, processor = b"amdgcn-amd-amdhsa", (gpu or "gfx1100").encode()
+    if target_arch == "AMDGPU": triple, processor, feats = b"amdgcn-amd-amdhsa", (gpu or "gfx1100").encode(), b"+cumode"
     else:
       triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[target_arch] + b'-none-unknown-elf'
       processor = ctypes.string_at(llvm.LLVMGetHostCPUName())
+      # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
+      feats = (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
-    feats = b"+cumode" if target_arch == "AMDGPU" else ((b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()))
     if DEBUG >= 2: print(f"LLVM init for {processor!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor, feats,
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
