@@ -1255,7 +1255,6 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   def test_failure_53(self):
-    # COMPILE_ERROR, val scope issue
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(), arg=0, src=()),
