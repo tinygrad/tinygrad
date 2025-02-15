@@ -514,7 +514,7 @@ class Kernel:
     for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
     # potentially do more upcasts of non reduce axes based on a heuristic
-    upcasted_axis = set()
+    upcasted_axis: set[int] = set()
     while resolve(prod(self.sts[0].shape[:self.first_reduce]) >= 1024):
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
@@ -669,8 +669,8 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      if getenv("RAWAST"): print(self.ast)
-      print(modified_ast)
+      for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
