@@ -1206,6 +1206,9 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (128,3,4), (16,4,256), False, [16,3,32])
     _assert_grouped_dims("gidx", (4,4,512), (16,4,256), False, [8,4,256])
 
+    # prefer group_dim strategy when possible
+    _assert_grouped_dims("gidx", (512,4,2), (8192,2,2), False, [2048,2])
+
     # test splitting globals:    len(dims) < len(max)
     #                            len(dim)        ->          len(limited)
     #                              1             ->             2

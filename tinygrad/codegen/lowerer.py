@@ -16,16 +16,15 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
 # ***** indexing *****
-
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
   if not all_int(dims): return dims
   while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
-      if dims[i] * dims[i+1] <= m:
+      if i < (len(dims)-1) and dims[i] * dims[i+1] <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
         break
-    else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+    else: return None
   return dims
 
 def _split_dims(dims, max_sizes):
@@ -40,8 +39,12 @@ def _split_dims(dims, max_sizes):
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
-  if max_sizes is not None and len(dims) > len(max_sizes): limited = _group_dims(dims, max_sizes)
-  else: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
+  # try to group first: (a, b, c, d) -> (ab, c, d)
+  limited = (grouped if (grouped := _group_dims(dims, max_sizes)) else dims) if max_sizes is not None else dims
+  # check if grouping failed
+  if max_sizes is not None and len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+  # try to split up dims: (a,) -> (b, c)
+  if limited == dims: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
