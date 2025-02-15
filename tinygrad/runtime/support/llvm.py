@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, os, shutil, sys, subprocess
+import ctypes, ctypes.util, functools, os, shutil, sys, subprocess
 from tinygrad.helpers import DEBUG, OSX, getenv
 
 if sys.platform == 'win32':
@@ -25,15 +25,15 @@ else:
 
 if DEBUG>=3: print(f'Using LLVM at {repr(LLVM_PATH)}')
 
-LLD_PATH: str|None = None
-if os.getenv("AMD_LLVM") == "1":
-  LLD_PATH= shutil.which('ld.lld')
+@functools.lru_cache(None)
+def get_lld_path():
+  lld_path = shutil.which('ld.lld')
   for ver in reversed(range(14, 19+1)):
-    if LLD_PATH is not None: break
-    LLD_PATH = shutil.which('ld.lld-{ver}')
-  if LLD_PATH is None:
-    LLD_PATH = "/opt/rocm/llvm/bin/ld.lld" # try rocm
-    if not os.path.exists(LLD_PATH):
-      raise FileNotFoundError("No lld found on the system.")
-
-if DEBUG>=3: print(f'Using LLVM LLD at {repr(LLD_PATH)}')
+    if lld_path is not None: break
+    lld_path = shutil.which('ld.lld-{ver}')
+  if lld_path is None:
+    lld_path = "/opt/rocm/llvm/bin/ld.lld" # try rocm
+    if not os.path.exists(lld_path ):
+      raise FileNotFoundError("No LLD found on the system.")
+  if DEBUG>=3: print(f'Using LLD at {repr(lld_path )}')
+  return lld_path
