@@ -497,6 +497,7 @@ document.addEventListener("alpine:init", () => {
 
     home: 0,
     generating: false,
+    cancelGeneration: false,
     endpoint: `${window.location.origin}/v1`,
 
     // performance tracking
@@ -522,6 +523,7 @@ document.addEventListener("alpine:init", () => {
       if (this.generating) return;
       // TODO: fix bug: if we switch to another chat session during generation, prompt bar locks up with "Generating..."
       this.generating = true;
+      this.cancelGeneration = false;
       if (this.home === 0) this.home = 1;
 
       // ensure that going back in history will go back to home
@@ -543,48 +545,53 @@ document.addEventListener("alpine:init", () => {
 
       // start receiving server sent events
       let gottenFirstChunk = false;
-      for await (
-        const chunk of this.openaiChatCompletion(this.cstate.messages)
-      ) {
-        if (!gottenFirstChunk) {
-          this.cstate.messages.push({ role: "assistant", content: "" });
-          gottenFirstChunk = true;
-        }
-
-        // add chunk to the last message
-        // TODO: handle errors with localStorage overflow
-        //   possible example: this.cstate.messages[...] was undefined when trying to prompt within an old cstate (chat session)
-        this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
-
-        // calculate performance tracking
-        tokens += 1;
-        this.total_tokens += 1;
-        if (start_time === 0) {
-          start_time = Date.now();
-          this.time_till_first = start_time - prefill_start;
-        } else {
-          const diff = Date.now() - start_time;
-          if (diff > 0) {
-            this.tokens_per_second = tokens / (diff / 1000);
+      try {
+        for await (
+          const chunk of this.openaiChatCompletion(this.cstate.messages)
+        ) {
+          if (!gottenFirstChunk) {
+            this.cstate.messages.push({ role: "assistant", content: "" });
+            gottenFirstChunk = true;
           }
+
+          // add chunk to the last message
+          // TODO: handle errors with localStorage overflow
+          //   possible example: this.cstate.messages[...] was undefined when trying to prompt within an old cstate (chat session)
+          this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
+
+          // calculate performance tracking
+          tokens += 1;
+          this.total_tokens += 1;
+          if (start_time === 0) {
+            start_time = Date.now();
+            this.time_till_first = start_time - prefill_start;
+          } else {
+            const diff = Date.now() - start_time;
+            if (diff > 0) {
+              this.tokens_per_second = tokens / (diff / 1000);
+            }
+          }
+          if (this.cancelGeneration) break;
         }
-      }
+      } finally {
+        //this.generating = false;
+        // update the state in histories or add it if it doesn't exist
+        const index = this.histories.findIndex((cstate) => {
+          return cstate.time === this.cstate.time;
+        });
+        this.cstate.time = Date.now();
+        if (index !== -1) {
+          // update the time
+          this.histories[index] = this.cstate;
+        } else {
+          this.histories.push(this.cstate);
+        }
+        // update in local storage
+        localStorage.setItem("histories", JSON.stringify(this.histories));
 
-      // update the state in histories or add it if it doesn't exist
-      const index = this.histories.findIndex((cstate) => {
-        return cstate.time === this.cstate.time;
-      });
-      this.cstate.time = Date.now();
-      if (index !== -1) {
-        // update the time
-        this.histories[index] = this.cstate;
-      } else {
-        this.histories.push(this.cstate);
+        this.generating = false;
+        if (this.cancelGeneration) this.cstate = { time: null, messages: [] };
       }
-      // update in local storage
-      localStorage.setItem("histories", JSON.stringify(this.histories));
-
-      this.generating = false;
     },
 
     async handleEnter(event) {
@@ -621,7 +628,7 @@ document.addEventListener("alpine:init", () => {
       }
       tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
       let startPos = 0
-      let prefillToks = tokens.slice(0, -1);
+      const prefillToks = tokens.slice(0, -1);
 
       // Skip the largest possible sequence of tokens already represented at the beginning of the model's kv caches
       for (let i=0; i <= prefillToks.length; i++) {
@@ -630,17 +637,22 @@ document.addEventListener("alpine:init", () => {
         if (i == this.lastSeenToks.length) break;
         if (prefillToks[i] !== this.lastSeenToks[i]) break;
       }
-      this.lastSeenToks = prefillToks;
-      prefillToks = prefillToks.slice(startPos);
+      //this.lastSeenToks = prefillToks;
+      //prefillToks = prefillToks.slice(startPos);
+      const unprocessedPrefillToks = prefillToks.slice(startPos);
+      this.lastSeenToks = prefillToks.slice(0, startPos);
 
-      for (const tok of prefillToks) {
+      for (const tok of unprocessedPrefillToks) {
+        if (this.cancelGeneration) return;
         if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), new Int32Array([startPos]));}
         else {await this.nets["transformer"](tok, startPos);}
+        this.lastSeenToks.push(tok)
         startPos += 1;
       }
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
+        //if (this.cancelGeneration) return;
         if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0];}
         else {var tok = await this.nets["transformer"](lastTok, startPos);}
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain

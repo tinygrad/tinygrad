@@ -36,8 +36,9 @@
       if (home === -1) setTimeout(() => home = 0, 100);
     " @popstate.window="
       if (home === 2) {
+        cancelGeneration = true;
+        if (!generating) cstate = { time: null, messages: [] };
         home = -1;
-        cstate = { time: null, messages: [] };
         time_till_first = 0;
         tokens_per_second = 0;
         total_tokens = 0;
