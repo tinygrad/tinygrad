@@ -7,12 +7,12 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem
 
 N = 512
 
-def create_gemm_model(model_path:str, in_size=N, out_size=N, bias=False):
+def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=False):
   import onnx
   from onnx import helper, numpy_helper, TensorProto
   # Define input and output
-  input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [N, in_size])
-  output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [N, out_size])
+  input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [batch_size, in_size])
+  output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [batch_size, out_size])
 
   # Create random weights and bias
   W_data = np.random.randn(in_size, out_size).astype(np.float32)
@@ -44,7 +44,8 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):
-  def test_quant(self):
+  def test_quant_128(self): self.test_quant(128)
+  def test_quant(self, sz=512):
     from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader
     from examples.benchmark_onnx import load_onnx_model
     class FakeDataReader(CalibrationDataReader):
@@ -52,16 +53,16 @@ class TestQuantizeOnnx(unittest.TestCase):
       def get_next(self) -> dict:
         self.cnt += 1
         if self.cnt == 100: return None
-        return {"input": np.random.uniform(size=(N, N)).astype(np.float32)}
+        return {"input": np.random.uniform(size=(sz, sz)).astype(np.float32)}
     out_file = "/tmp/test_out.onnx"
     # divide is ~1500-2000 without reduce_range, 750-900 with it
-    quantize_static(create_gemm_model("/tmp/test_in.onnx"), out_file,
+    quantize_static(create_gemm_model("/tmp/test_in.onnx", sz, sz, sz), out_file,
                     FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False, reduce_range=False,
                     activation_type=QuantType.QInt8, weight_type=QuantType.QInt8,
                     extra_options={"ActivationSymmetric": True})
     run_onnx_jit, _ = load_onnx_model(out_file)
     with Context(DONT_REALIZE_EXPAND=1):
-      run_onnx_jit(input=Tensor(np.random.uniform(size=(N, N)).astype(np.float32)))
+      run_onnx_jit(input=Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32)))
 
   def test_prequant_conv2d_1x1(self):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))

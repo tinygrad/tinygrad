@@ -2,10 +2,10 @@
 import functools, itertools, operator
 from dataclasses import dataclass
 from typing import cast
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
+from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, getenv
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -135,4 +135,23 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+from tinygrad.ops import symbolic
+pm_quant = symbolic+PatternMatcher([
+  # cast after add/mul
+  (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
+   lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))+y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+  (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32),
+   lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))*y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+  # MUL after reduce
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x") * UPat.cvar("c"),), name="r"), lambda x,c,r: r.replace(src=(x,))*c),
+  # CAST after reduce (doesn't work if it's a size change)
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, src=(UPat.var("x"),)),), name="r"),
+    lambda x,r: r.replace(dtype=x.dtype, src=(x,)).cast(r.dtype) if dtypes.is_float(r.dtype) else None),
+  # x*c1 + y*c2 -> (x+y)*c1 (if c1 and c2 are close floats)
+  (UPat.var("x")*UPat.cvar("c1", dtype=dtypes.floats) + UPat.var("y")*UPat.cvar("c2", dtype=dtypes.floats),
+   lambda x,y,c1,c2: (x+y)*c1 if abs(c1.arg-c2.arg) < 1e-9 else None),
+])
+
+def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  if getenv("DSP"): ast = graph_rewrite(ast, pm_quant)
+  return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
