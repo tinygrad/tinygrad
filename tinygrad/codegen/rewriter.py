@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple, resolve
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same, DEVECTORIZE
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same, DEVECTORIZE, argsort
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
@@ -504,7 +504,7 @@ devectorize_load_store = PatternMatcher([
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"), lambda gep, ld: ld.replace(src=ld.src[0].src).gep(gep.arg)),
   # GEP on data of STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("x"))), lambda gep, x: UOp(Ops.STORE, src=(gep.src[0], x.gep(gep.arg)))),
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("x"))), lambda gep, x: UOp(Ops.STORE, src=(gep.src[0], x.gep(argsort(gep.arg))))),
   # put CAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
