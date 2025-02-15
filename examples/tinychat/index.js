@@ -1,5 +1,4 @@
 window.TINYCHAT_ROOT = "/";
-window.MODEL_BASE_URL= ".";
 const queryParams = new URLSearchParams(window.location.search);
 const normalizedParams = Object.fromEntries([...queryParams].map(([key, value]) => [key.toUpperCase(), value.toUpperCase()]));
 window.BACKEND = (normalizedParams["BACKEND"] === "WASM") ? "WASM" : "WebGPU";
@@ -7,6 +6,11 @@ const isMobileAgent = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 window.isMobile = isMobileAgent || hasTouchScreen;
 if (window.isMobile) document.documentElement.classList.add('mobile'); // prevent annoying auto-zoom when entering prompt on mobile
+// MODEL_BASE_URL is where the weights are hosted, WEBGPU_EXPORT is the JS-wrapped WebGPU code exported from tinygrad
+window.PC_MODEL_BASE_URL = ".";
+window.PC_WEBGPU_EXPORT = './net.js'
+window.MOBILE_MODEL_BASE_URL = ".";
+window.MOBILE_WEBGPU_EXPORT = './net.js'
 
 const tiktokenReady = (async () => {
   const { init, get_encoding, Tiktoken, load } = await import('./tiktoken.js');
@@ -14,12 +18,6 @@ const tiktokenReady = (async () => {
   window.tiktokenInit = init;
   window.tiktokenGetEncoding = get_encoding;
   window.tiktokenLoad = load;
-})();
-
-const kernelsReady = (async () => {
-  if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);} // TODO: is cache-busting necessary
-  else if (window.BACKEND === "WebGPU") {var exports = await import(`./net.js?version=${Date.now()}`);}
-  Object.assign(self, exports);
 })();
 
 // copied from examples/webgpu/stable_diffusion/index.html
@@ -267,7 +265,6 @@ async function load_state_dict (data, device, progress) {
   // await these right before starting to save new stuff
   const deletionPromises = notInCorrectHashes.map(async (hash) => deleteTensorFromDb(db, hash));
 
-  await kernelsReady;
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
   let model;
   if (window.BACKEND === "WebGPU") {
@@ -392,6 +389,15 @@ document.addEventListener("alpine:init", () => {
         }
       }
 
+      window.MODEL_BASE_URL = (window.BACKEND === "WebGPU" && !window.isMobile) ? window.PC_MODEL_BASE_URL : window.MOBILE_MODEL_BASE_URL;
+
+      const kernelsReady = (async () => {
+        if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);} // TODO: is cache-busting necessary
+        else if (window.BACKEND === "WebGPU" && !window.isMobile) {var exports = await import(`${PC_WEBGPU_EXPORT}?version=${Date.now()}`);}
+        else if (window.BACKEND === "WebGPU" && window.isMobile) {var exports = await import(`${MOBILE_WEBGPU_EXPORT}?version=${Date.now()}`);}
+        Object.assign(self, exports);
+      })();
+
       const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);
       // TODO: cache metadata (and everything else, including tokenizer)
       // TODO: use service worker to reload page when offline
@@ -465,6 +471,7 @@ document.addEventListener("alpine:init", () => {
       } catch (error) {this.progress(-1, `Error launching tokenizer: ${error}`); console.log(error); return;}
 
       try {
+        await kernelsReady;
         const model = await load_state_dict(data, device, this.progress);
 
         if (window.BACKEND === "WebGPU") {
