@@ -2481,11 +2481,10 @@ class Tensor(SimpleMathTrait):
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
     if reduce and isinstance(src, Tensor): raise TypeError("Tensor src is not supported with reduce arg. see scatter_reduce")
-    if not isinstance(src, Tensor): src = Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
+    if not isinstance(src, Tensor): src = index.full_like(src, device=self.device, dtype=self.dtype)
+    if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
+    if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
     src, mask = self._pre_scatter(dim, index, src)
-    # TODO: should not overwrite acc_dtype here?
-    if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
-    if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
     return _masked_setitem(self, src, mask, (-1,))
 
   def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
