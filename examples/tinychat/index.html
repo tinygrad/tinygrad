@@ -37,6 +37,7 @@
     " @popstate.window="
       if (home === 2) {
         cancelGeneration = true;
+        if (maxContextReached) generating = false;
         if (!generating) cstate = { time: null, messages: [] };
         home = -1;
         time_till_first = 0;
@@ -151,7 +152,7 @@
       </div>
       <div class="input" x-show="loadingMessage === ''">
         <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows=1 x-autosize
-          :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
+          :placeholder="generating ? placeholderText : 'Say something'" :disabled="generating" @input="
             home = (home === 0) ? 1 : home
             if (cstate.messages.length === 0 && $el.value === '') home = -1;
 

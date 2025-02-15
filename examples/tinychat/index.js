@@ -9,8 +9,10 @@ if (window.isMobile) document.documentElement.classList.add('mobile'); // preven
 // MODEL_BASE_URL is where the weights are hosted, WEBGPU_EXPORT is the JS-wrapped WebGPU code exported from tinygrad
 window.PC_MODEL_BASE_URL = ".";
 window.PC_WEBGPU_EXPORT = './net.js'
+window.PC_MAX_CONTEXT = 4096;
 window.MOBILE_MODEL_BASE_URL = ".";
 window.MOBILE_WEBGPU_EXPORT = './net.js'
+window.MOBILE_MAX_CONTEXT = 1024;
 
 const tiktokenReady = (async () => {
   const { init, get_encoding, Tiktoken, load } = await import('./tiktoken.js');
@@ -366,6 +368,7 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
     // loadingMessage updates the user on page load progress, including weights download and decompression
     // if loadingMessage is not '', then prompt box will be hidden: this is default behavior on page load
+    placeholderText: "Generating...",
     loadingMessage: 'Loading...',
     // model
     nets: {},
@@ -390,6 +393,7 @@ document.addEventListener("alpine:init", () => {
       }
 
       window.MODEL_BASE_URL = (window.BACKEND === "WebGPU" && !window.isMobile) ? window.PC_MODEL_BASE_URL : window.MOBILE_MODEL_BASE_URL;
+      this.max_context = (window.BACKEND === "WebGPU" && !window.isMobile) ? window.PC_MAX_CONTEXT : window.MOBILE_MAX_CONTEXT;
 
       const kernelsReady = (async () => {
         if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);} // TODO: is cache-busting necessary
@@ -497,6 +501,7 @@ document.addEventListener("alpine:init", () => {
 
     home: 0,
     generating: false,
+    maxContextReached: false,
     cancelGeneration: false,
     endpoint: `${window.location.origin}/v1`,
 
@@ -504,6 +509,7 @@ document.addEventListener("alpine:init", () => {
     time_till_first: 0,
     tokens_per_second: 0,
     total_tokens: 0,
+    max_context: 0,
 
     removeHistory(cstate) {
       const index = this.histories.findIndex((state) => {
@@ -521,7 +527,8 @@ document.addEventListener("alpine:init", () => {
       if (!value) return;
 
       if (this.generating) return;
-      // TODO: fix bug: if we switch to another chat session during generation, prompt bar locks up with "Generating..."
+      this.maxContextReached = false;
+      this.placeholderText = "Generating...";
       this.generating = true;
       this.cancelGeneration = false;
       if (this.home === 0) this.home = 1;
@@ -571,6 +578,7 @@ document.addEventListener("alpine:init", () => {
               this.tokens_per_second = tokens / (diff / 1000);
             }
           }
+          this.checkMaxContext(this.total_tokens);
           if (this.cancelGeneration) break;
         }
       } finally {
@@ -589,8 +597,8 @@ document.addEventListener("alpine:init", () => {
         // update in local storage
         localStorage.setItem("histories", JSON.stringify(this.histories));
 
-        this.generating = false;
-        if (this.cancelGeneration) this.cstate = { time: null, messages: [] };
+        if (!this.maxContextReached) this.generating = false;
+        if (this.cancelGeneration && !this.maxContextReached) this.cstate = { time: null, messages: [] };
       }
     },
 
@@ -621,12 +629,21 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
+    checkMaxContext(num_tokens) {
+      if (num_tokens >= this.max_context) {
+        this.cancelGeneration = true;
+        this.maxContextReached = true;
+        this.placeholderText = `Max context reached: ${this.max_context} tokens`;
+      }
+    },
+
     async *openaiChatCompletion(messages) {
       let tokens = [this.tokenizer.bos_id];
       for (const message of messages) {
         tokens = tokens.concat(this.tokenizer.encodeMessage(message.role, message.content));
       }
       tokens = tokens.concat(this.tokenizer.encodeRole("assistant"));
+      this.checkMaxContext(tokens.length); // don't waste time prefilling if we know we're over the token limit
       let startPos = 0
       const prefillToks = tokens.slice(0, -1);
 
