@@ -241,10 +241,12 @@ if __name__=="__main__":
   }}
   """
 
+  exports = []
   for step in sub_steps:
     print(f'Executing step={step.name}')
     with Context(BEAM=3):
       prg += compile_step(model, step)
+      exports.append(step.name)
 
   partStartOffsets=[]
 
@@ -272,4 +274,4 @@ if __name__=="__main__":
   }};"""
 
   with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
-    text_file.write(prekernel + prg)
+    text_file.write(prekernel + prg + f"export {{ {','.join(exports)} }}")
