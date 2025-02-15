@@ -259,8 +259,8 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))
   ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
   # negative base adjustment: nan for non-integer exponent and -1 for odd exponent
-  adj = (base < 0).where((exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)).where(
-    ret.const_like(math.nan),
-    (exponent.cast(dtypes.int32).cast(dtypes.uint32)%2).eq(1).where(ret.const_like(-1), ret.const_like(1))), ret.const_like(1))
+  non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
+  adj = non_int.where(ret.const_like(math.nan),
+    (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool).where(ret.const_like(-1), ret.const_like(1)))
   # fix 0 ** 0 = 1
-  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * adj)
+  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * (base < 0).where(adj, ret.const_like(1)))
