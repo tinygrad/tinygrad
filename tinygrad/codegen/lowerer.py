@@ -16,22 +16,25 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
 
 # ***** indexing *****
 
-def _limit_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
+def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
   if not all_int(dims): return dims
   while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
-      if dims[i] * dims[i+1] <= m:
+      if i < (len(dims)-1) and dims[i] * dims[i+1] <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
         break
-    else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+    else: return None
   return dims
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
-  limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
+  # try to group: (a, b, c, d) -> (ab, c, d)
+  limited = (grouped if (grouped := _group_dims(dims, max_sizes)) else dims) if max_sizes is not None else dims
+  # check if grouping failed
+  if max_sizes is not None and len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
-  if limited != dims:
+  if len(limited) < len(dims):
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
     for idx, contraction_group in zip(raw_idxs, contraction):
