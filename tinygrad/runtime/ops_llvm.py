@@ -1,4 +1,4 @@
-import ctypes, platform, sys
+import ctypes, platform
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -12,8 +12,8 @@ def expect(x, err, ret=None):
   return ret
 
 class LLVMCompiler(Compiler):
-  def __init__(self, host_arch:str, opt:bool):
-    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
+  def __init__(self, host_arch:str):
+    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
 
     triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
@@ -24,7 +24,7 @@ class LLVMCompiler(Compiler):
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
-    if opt:
+    if (opt:=bool(getenv("LLVMOPT", "1"))):
       self.passes = b'default<O2>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
@@ -54,5 +54,5 @@ class LLVMCompiler(Compiler):
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
-    compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()], bool(getenv("LLVMOPT")))
-    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None), compiler, CPUProgram)
+    compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()])
+    super().__init__(device, MallocAllocator, LLVMRenderer(), compiler, CPUProgram)

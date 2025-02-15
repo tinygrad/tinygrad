@@ -1,8 +1,10 @@
 from typing import cast
-import math, struct
+import math, struct, sys
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
+from tinygrad.helpers import prod, AMX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -29,6 +31,19 @@ def lcast(input_type:DType, output_type:DType):
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
+# https://github.com/corsix/amx
+def render_wmma(ctx, wmma: UOp) -> str:
+  def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0; AMX'
+
+  return "\n".join([
+    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype.ptr())} {ctx[wmma]}_amx{i}, align {src.dtype.itemsize}' for i,src in enumerate(wmma.src)],
+      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0; AMX set',             # set
+    *[f'  {ctx[wmma]}_ld{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(4,f"{ctx[wmma]}_ld{i}")} ldz' for i in range(16)], # ldz
+      f'  {AMX(0, f"{ctx[wmma]}_ptr_amx1")} ldx\n  {AMX(1, f"{ctx[wmma]}_ptr_amx0")} ldy\n  {AMX(12, 0)} fma32',                        # ldx ldy fma
+    *[f'  {ctx[wmma]}_st{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(5,f"{ctx[wmma]}_st{i}")} stz' for i in range(16)], # stz
+      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0; AMX clr',             # clr
+      f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
+
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", }
@@ -37,7 +52,7 @@ flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
-llvm_rewrite = PatternMatcher([
+base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
@@ -62,8 +77,6 @@ llvm_rewrite = PatternMatcher([
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}" if isinstance(x.dtype, PtrDType) else None),
 
   # unary/binary/ternary ops
-  (UPat(Ops.SQRT, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = call{flags} {ldt(x.dtype)} @llvm.sqrt.{ldt(x.src[0].dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
@@ -84,6 +97,9 @@ llvm_rewrite = PatternMatcher([
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
+
+  # wmma
+  (UPat(Ops.WMMA, name="wmma"), render_wmma),
 ])
 
 def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
@@ -92,10 +108,13 @@ def llvm_bf16_cast(buf:UOp, idx:UOp, root:UOp):
 
 class LLVMRenderer(Renderer):
   device = "LLVM"
+  abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
   has_local = False
   has_shared = False
   global_max = None
+  string_rewrite = base_rewrite
+  if AMX: tensor_cores = ClangRenderer.amx_tc
 
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
@@ -108,9 +127,6 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
-  def __init__(self, abi:str|None=None):
-    self.abi = abi
-
   def render(self, name: str, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
     args: list[str] = []
@@ -118,19 +134,21 @@ class LLVMRenderer(Renderer):
     end_lines: dict[str, None] = {}
     vc = -1
 
-    # prealloc all assigns
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.ASSIGN:
+      if u.op is Ops.ASSIGN: # prealloc all assigns
         vc += 1
         r[u] = r[u.src[1]] = f"%assign{vc}"
         assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
         acc_to_assign[u.src[0]] = u.src[1]
+      if u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
+        vc += 1
+        r[u] = f"%wmma{vc}"
+        for i, dtype in enumerate(u.arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in u.arg[6]]):
+          kernel += [f"  {r[u]}_amx{i} = alloca {ldt(dtype)}, align {dtype.itemsize}",
+                     f"  {r[u]}_ptr_amx{i} = ptrtoint {ldt(dtype.ptr())} {r[u]}_amx{i} to i64"]
 
     for u in uops:
-      # hack for defining sqrt function (TODO: can we get a transcendental for this?)
-      if u.op is Ops.SQRT: end_lines[f'declare {ldt(u.dtype)} @llvm.sqrt.{ldt(u.dtype)}({ldt(u.dtype)} %".1")'] = None
-
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         # NOTE: MallocAllocator promises 0x20 alignment
@@ -146,7 +164,8 @@ class LLVMRenderer(Renderer):
           r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
-        if (l:=llvm_rewrite.rewrite(u, ctx=r)) is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
+          raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
         # generate the phi nodes for the assigns

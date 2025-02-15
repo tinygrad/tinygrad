@@ -117,7 +117,7 @@ class TestLinearizerFailures(unittest.TestCase):
           ast_const(dtypes.int, 10, st_src=(
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(10, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=2), Opt(op=OptOps.UPCAST, axis=0, arg=0)]
-    # COMPILE FAILED, KeyError: UOps.CONST
+    # COMPILE FAILED, KeyError: Ops.CONST
     helper_test_lin(Kernel(ast), opts, failed_platforms=[])
 
   def test_failure_7(self):
@@ -804,7 +804,7 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[], atol=0.1, rtol=0.05)
 
   def test_failure_33(self):
-    # UOps.UNMUL left after linearize
+    # Ops.UNMUL left after linearize
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
@@ -868,7 +868,7 @@ class TestLinearizerFailures(unittest.TestCase):
 
   # from world fuzz_linearizer: PYTHONPATH=. METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=1 FUZZ_N=100 FUZZ_NTH=84 python3 ./test/external/fuzz_linearizer.py
   def test_failure_36(self):
-    # UOps.UNMUL left after linearize
+    # Ops.UNMUL left after linearize
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(), arg=0, src=()),
