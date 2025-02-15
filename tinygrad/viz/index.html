@@ -193,13 +193,6 @@
     border-radius: 8px;
     padding: 8px;
   }
-  .progress {
-    font-size: 20px;
-    z-index: 2;
-    align-self: center;
-    justify-content: center;
-    width: 100%;
-  }
   </style>
 </head>
 <body>
@@ -211,7 +204,6 @@
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
-    <p class="progress"></p>
     <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
@@ -290,6 +282,24 @@
     hljs.highlightElement(codeEl);
     return pre;
   };
+  async function fetchMatches() {
+    const limit = 100;
+    const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
+    var newRet = {};
+    for (let i=0; i < pageCount; i++) {
+      const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
+      if (i === 0) newRet = chunk;
+      else {
+        // TODO: this shouldn't exist after the viz api refactor
+        for (const [k,v] of Object.entries(chunk)) {
+          if (Array.isArray(v) && k !== "loc") newRet[k].push(...v);
+        }
+      }
+    }
+    cache[`${currentKernel}-${currentUOp}`] = newRet;
+    ret = newRet;
+    main();
+  }
 
   // **** main loop
   var ret = {};
@@ -355,27 +365,11 @@
         ret = cache[cacheKey];
       }
       else {
-        const p = document.querySelector(".progress");
-        p.style.display = "none";
-        const limit = 100;
-        const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
-        if (pageCount > 1) {
-          p.style.display = "flex";
-          d3.select("#graph-svg g").selectAll("*").remove();
-        }
-        for (let i=0; i < pageCount; i++) {
-          p.innerText = `fetching data ${i+1}/${pageCount}`;
-          const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
-          if (i === 0) ret = chunk
-          else {
-            // TODO: this shouldn't exist after the viz api refactor
-            for (const [k,v] of Object.entries(chunk)) {
-              if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
-            }
-          }
-        }
-        p.style.display = "none";
+        // always fetch the first graph
+        ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=0&limit=1`)).json();
         cache[cacheKey] = ret;
+        // incrementally fetch the matches (this is non blocking)
+        fetchMatches();
       }
       renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
     }
@@ -426,7 +420,7 @@
           main();
         });
       })
-    } else {
+    } else if (ret.match_count === 0) {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
     }
     // ***** collapse/expand
