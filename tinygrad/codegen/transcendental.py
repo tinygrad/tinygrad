@@ -31,7 +31,7 @@ def pow2if(q:UOp, float_dtype:DType):
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
-  dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()])
+  dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.vcount))
   # -1 <= ilog2bk(d) <= 128
   return (shr(dint, mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
