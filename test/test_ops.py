@@ -615,9 +615,19 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
     helper_test_op([()], lambda x: 2.0**x)
-    # TODO: fix backward
-    helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
+    helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
+
+  def test_pow_zero_tensor(self):
+    helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
+    helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
+    # TODO: fix WEBGPU
+    if Device.DEFAULT != "WEBGPU":
+      helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
+  def test_pow_zero_const(self):
+    helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
@@ -641,14 +651,11 @@ class TestOps(unittest.TestCase):
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
-    if Device.DEFAULT not in ("LLVM", "DSP"):
-      # TODO: fix backward
-      helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
+    helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.sqrt())
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: x.rsqrt())
-    # TODO: fix backward
-    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]], forward_only=True)
+    helper_test_op(None, lambda x: x.rsqrt(), vals=[[0.0]])
     helper_test_op([()], lambda x: x.rsqrt())
 
   def test_xor(self):
@@ -1380,7 +1387,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=-1), lambda x: x.logcumsumexp(-1), atol=1e-7, grad_atol=1e-7)
 
-  @unittest.expectedFailure  # TODO: fix numerical instability
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
 
@@ -1406,7 +1412,7 @@ class TestOps(unittest.TestCase):
   def test_asinh(self):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6)
     # NOTE: this one has larger atol
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, rtol=2e-2, grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)

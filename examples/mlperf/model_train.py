@@ -647,7 +647,7 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.0001 * math.sqrt(BS/66))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00011 * math.sqrt(BS/66))
 
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
@@ -683,8 +683,14 @@ def train_bert():
 
   # ** init model **
 
-  model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
-  
+  model = get_mlperf_bert_model()
+  if RUNMLPERF:
+    model.load_from_pretrained(init_ckpt)
+  else:
+    # for init, zero out all weights
+    for p in get_parameters(model):
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
+
   parameters = get_parameters(model)
   for p in parameters:
     p.to_(GPUS)
@@ -801,7 +807,7 @@ def train_bert():
             f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
 
     # ** eval loop **
-    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
+    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
       if getenv("RESET_STEP", 0): train_step_bert.reset()
