@@ -1,4 +1,4 @@
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Callable, cast
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -269,11 +269,13 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.GEP, src=(UPat(Ops.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
   # push all GEPs through ALUs (fix arange stuff)
   (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
-   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
+    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
+     if not isinstance(gep.dtype, PtrDType) else None),
   # push some GEPs through WMMAs
   (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
   # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
-  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count)))),
+  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+    if not isinstance(x.dtype, PtrDType) else None),
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(Ops.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),
@@ -463,10 +465,42 @@ devectorize = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
+def expand_index(buf:UOp, base_index:UOp, c:UOp):
+  assert isinstance(buf.dtype, PtrDType)
+  ordered = sorted([(x,i) for i,x in enumerate(c.arg)])
+  groups = []
+  group: list[tuple[int, int]] = []
+  for x in ordered:
+    if len(group) == 0 or group[-1][0]+1 == x[0]: group.append(x)
+    else:
+      groups.append(group)
+      group = [x]
+  groups.append(group)
+  #print(len(c.arg), len(groups), groups)
+  # NOTE: ptr size is the base size
+  idxs = [UOp(Ops.INDEX, buf.dtype, (buf, base_index+g[0][0])).cast(buf.dtype.base.vec(len(g)).ptr(buf.dtype.size)) for g in groups]
+
+  big_gep: list[Optional[int]] = [None]*len(c.arg)
+  bj = 0
+  for g in groups:
+    for j,(_,i) in enumerate(g): big_gep[i] = bj+j
+    bj += len(g)
+  loads = UOp(Ops.CAT, buf.dtype.base.vec(len(c.arg)).ptr(buf.dtype.size), tuple(idxs)) if len(idxs) > 1 else idxs[0]
+  assert all(x is not None for x in big_gep)
+  return loads.gep(tuple(cast(list[int], big_gep)))
+
 devectorize_load_store = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
+                        UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
+  # GEP after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"), lambda gep, ld: ld.replace(src=ld.src[0].src).gep(gep.arg)),
+  # GEP on data of STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("x"))), lambda gep, x: UOp(Ops.STORE, src=(gep.src[0], x.gep(gep.arg)))),
+  # put CAT after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
+   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
   # TODO: add vectorized support to transcendental
-  (UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
+  (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
