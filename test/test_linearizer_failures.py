@@ -1273,19 +1273,16 @@ class TestLinearizerFailures(unittest.TestCase):
                     UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
                   UOp(Ops.ADD, dtypes.int, arg=None, src=(
                     UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (2,)), src=(
-                      UOp(Ops.WHERE, dtypes.int, arg=None, src=(
-                        UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50001, 99999), strides=(0, 0), offset=0, mask=((0, 50001), (49999, 99999)), contiguous=False), View(shape=(1024, 50000, 50000), strides=(0, 1, 100000), offset=0, mask=None, contiguous=False))), src=()),)),
                         UOp(Ops.CONST, dtypes.int, arg=1, src=(
-                          x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                            x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
                         UOp(Ops.CONST, dtypes.int, arg=0, src=(
-                           x20,)),)),)),
+                            x20,)),)),
                     UOp(Ops.CONST, dtypes.int, arg=-1, src=(
                       x23:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
                 UOp(Ops.CONST, dtypes.bool, arg=True, src=(
                    x23,)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=1, arg=16)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["AMD", "GPU", "METAL", "NV", "CUDA"])
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
   def test_failure_54(self):
