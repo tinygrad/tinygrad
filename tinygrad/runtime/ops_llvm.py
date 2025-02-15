@@ -12,15 +12,15 @@ def expect(x, err, ret=None):
   return ret
 
 class LLVMCompiler(Compiler):
-  def __init__(self, host_arch:str, opt:bool, arch:str|None=None):
-    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{host_arch}{component}')()
-    triple = b"amdgcn-amd-amdhsa" if host_arch == "AMDGPU" else ({'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf')
+  def __init__(self, target_arch:str, processor:str|None=None):
+    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{target_arch}{component}')()
+    triple = b"amdgcn-amd-amdhsa" if target_arch == "AMDGPU" else ({'AArch64': b'aarch64', 'X86': b'x86_64'}[target_arch] + b'-none-unknown-elf')
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
-    cpu = arch.encode() if host_arch == "AMDGPU" else ctypes.string_at(llvm.LLVMGetHostCPUName())
-    feats = b"+cumode" if host_arch == "AMDGPU" else ((b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()))
-    if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
-    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
+    processor = processor.encode() if target_arch == "AMDGPU" else ctypes.string_at(llvm.LLVMGetHostCPUName())
+    feats = b"+cumode" if target_arch == "AMDGPU" else ((b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()))
+    if DEBUG >= 2: print(f"LLVM init for {processor!r} with {feats!r}")
+    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor, feats,
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
@@ -54,5 +54,5 @@ class LLVMCompiler(Compiler):
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
-    compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()], bool(getenv("LLVMOPT")))
+    compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()])
     super().__init__(device, MallocAllocator, LLVMRenderer(), compiler, CPUProgram)
