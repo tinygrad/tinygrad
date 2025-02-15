@@ -1274,9 +1274,9 @@ class TestLinearizerFailures(unittest.TestCase):
                   UOp(Ops.ADD, dtypes.int, arg=None, src=(
                     UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (2,)), src=(
                         UOp(Ops.CONST, dtypes.int, arg=1, src=(
-                            x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                          x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
                         UOp(Ops.CONST, dtypes.int, arg=0, src=(
-                            x20,)),)),
+                          x20,)),)),
                     UOp(Ops.CONST, dtypes.int, arg=-1, src=(
                       x23:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
                 UOp(Ops.CONST, dtypes.bool, arg=True, src=(
