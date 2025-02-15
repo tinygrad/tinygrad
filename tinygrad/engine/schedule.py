@@ -414,12 +414,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   buffer_map: dict[UOp, UOp] = {}
   sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
   # get realizes
-  buf_tensors: dict[UOp, list[UOp]] = {}
   ops_metadata: dict[UOp, Metadata] = {}
   for k,v in tensor_map.items():
-    if (b:=buffer_map.get(v)) is not None:
-      buf_tensors.setdefault(b, []).append(k)
-      if isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
+    if (b:=buffer_map.get(v)) is not None and isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
   for tensor_uop,buf_uop in buffer_map.items():
     if buf_uop in realize_map:
@@ -428,11 +425,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # map tensors to new uops
   becomes_map = {k:v for k,v in tensor_map.items() if k is not v}
-  for k,v in becomes_map.items():
-    # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
-    if v.op is Ops.VIEW:
-      # TODO: what is this
-      pass
 
   # create kernels, TODO: this should use the SINK from tensor_map
   if len(realize_map) == 0: return [], {}, becomes_map
