@@ -38,7 +38,9 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program()
-  if replace_src is not None: prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1])
+  if replace_src is not None:
+    old_name = prg.src.split("inscount();\n")[1].split("(")[0]
+    prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   for _ in range(run_count): ei.run(wait=True)
 
@@ -105,9 +107,9 @@ class TestQuantizeOnnx(unittest.TestCase):
         unsigned_char128 hi128;
       };
     };
-    __attribute__((noinline)) void r_512_4_128_128_4(unsigned char* restrict __attribute__((align_value(128))) data0,
-                                                     unsigned char* restrict __attribute__((align_value(128))) data1,
-                                                     signed char* restrict __attribute__((align_value(128))) data2) {
+    __attribute__((noinline)) void fxn(unsigned char* restrict __attribute__((align_value(128))) data0,
+                                       unsigned char* restrict __attribute__((align_value(128))) data1,
+                                       signed char* restrict __attribute__((align_value(128))) data2) {
       for (int ridx0 = 0; ridx0 < 512; ridx0++) {
         int alu0 = (ridx0<<9);
         for (int ridx1 = 0; ridx1 < 4; ridx1++) {
