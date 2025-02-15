@@ -1911,8 +1911,16 @@ class Tensor(SimpleMathTrait):
     print(t.logcumsumexp(axis=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().cumsum(axis=axis).log() + m
+    if self.ndim == 0: return self
+    axis = self._resolve_dim(axis)
+    x = self.transpose(axis, -1)
+    last_dim_size = x.shape[-1]
+    x_reshaped = x.reshape(-1, last_dim_size)
+    x_cummax = x_reshaped.cummax(-1).unsqueeze(-1)
+    x_expand = x_reshaped.unsqueeze(1).expand(*x_reshaped.shape, last_dim_size)
+    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril().unsqueeze(0)
+    ret = ((x_expand - x_cummax).exp() * mask).sum(-1).log() + x_cummax.squeeze(-1)
+    return ret.reshape(*x.shape).transpose(-1, axis)
 
   def argmax(self, axis=None, keepdim=False):
     """
