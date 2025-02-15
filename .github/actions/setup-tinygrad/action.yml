@@ -143,14 +143,20 @@ runs:
 
     # **** CUDA ****
 
-    - name: Install packages (cuda)
-      if: inputs.cuda == 'true'
+    - name: Install cuda packages (Linux)
+      if: inputs.cuda == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         sudo apt update -y || true
         sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
           flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
+    - name: Install gpuocelot dependencies (MacOS)
+      if: inputs.cuda == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew update
+        brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
     - name: Cache gpuocelot
       if: inputs.cuda == 'true'
       id: cache-build
@@ -159,7 +165,7 @@ runs:
         cache-name: cache-gpuocelot-build
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ubuntu22.04-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
     - name: Clone/compile gpuocelot
       if: inputs.cuda == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
@@ -176,7 +182,7 @@ runs:
       shell: bash
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
+        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || ''}}lib/
 
     # **** WebGPU ****
 

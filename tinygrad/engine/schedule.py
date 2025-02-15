@@ -66,10 +66,6 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
-  # remove CONST/BIND/BUFFER/VIEW from SINK
-  (UPat(Ops.SINK, name="root"),
-    lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
-      if (new_src:=tuple(x.base for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
@@ -139,7 +135,7 @@ def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs)
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.buf_uop, x) for x in s.src if x.base.op not in {Ops.CONST,Ops.BIND,Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
@@ -440,7 +436,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     for tensor_uop in buf_tensors[buf_uop]:
       # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
       becomes_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
-    buf_uop.buffer.ref(1)
 
   # create kernels, TODO: this should use the SINK from tensor_map
   graph_rewrite(sink, break_sched, ctx)
@@ -475,6 +470,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   schedule: list[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
+    # NOTE: incrementing output buffer refcounts is required by the memory planner and JIT
+    for out in si.outputs: out.ref(1)
     for x in graph[si]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
