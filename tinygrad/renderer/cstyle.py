@@ -189,7 +189,9 @@ class ClangRenderer(CStyleLanguage):
   if sys.platform == 'win32':
     kernel_prefix = "__attribute__((ms_abi)) "
   def render_vector_prefix(self, dt:DType) -> str:
-    return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
+    # round (down) to power of two
+    alignment = 2**int(math.log2(dt.itemsize))
+    return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),vector_size({dt.itemsize})));"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
