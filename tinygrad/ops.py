@@ -317,6 +317,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
   def size(self) -> int: return self.arg[1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  @property
+  def has_output(self) -> bool: return self.op not in { Ops.SINK, Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.CONST, Ops.SPECIAL, *GroupOp.Block }
+  def get_output_shape(self) -> tuple[int, ...]: return self.arg.shape if hasattr(self.arg, 'shape') else ()
 
   # *** uop evaluation ***
 

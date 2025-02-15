@@ -147,6 +147,12 @@ def block_reorder(in_block:UOp):
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
+def is_image_compatible(op):
+  shape = op.get_output_shape()
+  if len(shape) != 4:
+    return False
+  return True
+
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
@@ -155,6 +161,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   children: dict[UOp, list[UOp]] = {}
   for u in sink.toposort:
     this_block_ctx: list[UOp] = []
+    out_shape = u.get_output_shape() if u.has_output else ()
+    if len(out_shape) == 5 and u.op in {Ops.POOL, Ops.CONV, ...}:
+      u.avoid_image_optim = True
     for s in u.src:
       # save children
       children.setdefault(s, []).append(u)
