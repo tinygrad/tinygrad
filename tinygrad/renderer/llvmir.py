@@ -68,7 +68,7 @@ def llvm_rewrite_cast(ctx, x):
   return f"  {ctx[x]} = {lcast(input_type, output_type)} {ldt(input_type)} {ctx[x.src[0]]} to {ldt(output_type)}"
 
 
-llvm_rewrite = PatternMatcher([
+base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
@@ -128,7 +128,8 @@ class LLVMRenderer(Renderer):
   supports_float4 = True
   has_local = False
   has_shared = False
-  string_rewrite = llvm_rewrite
+  global_max = None
+  string_rewrite = base_rewrite
   if AMX: tensor_cores = ClangRenderer.amx_tc
 
   extra_matcher = PatternMatcher([
@@ -206,6 +207,6 @@ class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
   abi = "protected amdgpu_kernel"
-  string_rewrite = llvm_rewrite + PatternMatcher([
+  string_rewrite = base_rewrite + PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
   ])
