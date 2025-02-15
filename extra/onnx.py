@@ -711,7 +711,9 @@ def get_onnx_ops():
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
-    return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
+    # this appears to work in practice, at least for uchar out_dtype
+    return _clamp_cast((x / y_scale + 0.5 + y_zero_point).int(), out_dtype).contiguous()
+    # return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
