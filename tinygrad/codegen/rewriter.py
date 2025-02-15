@@ -489,6 +489,15 @@ def expand_index(buf:UOp, base_index:UOp, c:UOp):
   assert all(x is not None for x in big_gep)
   return loads.gep(tuple(cast(list[int], big_gep)))
 
+def cat_after_store(cat:UOp, data:UOp):
+  # TODO: this is written in many places
+  offset = 0
+  ret = []
+  for s in cat.src:
+    ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
+    offset += s.dtype.count
+  return UOp.sink(*ret)
+
 devectorize_load_store = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
                         UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
@@ -499,6 +508,8 @@ devectorize_load_store = PatternMatcher([
   # put CAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
+  # put CAT after STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
   # TODO: add vectorized support to transcendental
   (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
   # fallback
