@@ -25,6 +25,7 @@ else:
 
 if DEBUG>=3: print(f'Using LLVM at {repr(LLVM_PATH)}')
 
+LLD_PATH: str|None = None 
 if os.getenv("AMD_LLVM") == "1":
   LLD_PATH= shutil.which('ld.lld')
   for ver in reversed(range(14, 19+1)):
