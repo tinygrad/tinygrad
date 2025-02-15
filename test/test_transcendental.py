@@ -129,28 +129,31 @@ class TestTranscendentalSchedule(unittest.TestCase):
       check_schedule(c, 1)
 
 class TestTranscendentalVectorized(unittest.TestCase):
-  def _test_vectorized_op(self, fxn, np_fxn, low, high, vec_size, param=False, param_vec_size=None):
+  def _vectorized_data(self, low, high, vec_size):
     np_data = np.linspace(low, high, num=(128 // vec_size) * vec_size, dtype=np.float32).reshape(-1, vec_size)
     data = Tensor(np_data, dtype=dtypes.float32.vec(vec_size))
-    if param:
-      np_param = np.linspace(low, high, num=(128 // vec_size) * vec_size, dtype=np.float32).reshape(-1, vec_size)
-      param = Tensor(np_data, dtype=dtypes.float32.vec(vec_size))
+    return data, np_data
+
+  def _test_vectorized_op(self, fxn, np_fxn, data_range, vec_size, param_range=None):
+    data, np_data = self._vectorized_data(data_range[0], data_range[1], vec_size)
+    if param_range:
+      param, np_param = self._vectorized_data(param_range[0], param_range[1], vec_size)
       out, np_out = fxn(data, param).numpy(), np_fxn(np_data, np_param)
     else:
       out, np_out = fxn(data).numpy(), np_fxn(np_data)
     np.testing.assert_allclose(out, np_out, rtol=1e-4)
 
   def test_exp2_vectorized(self):
-    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.exp2, np.exp2, -100, 100, vec_size)
+    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.exp2, np.exp2, (-100, 100), vec_size)
 
   def test_log2_vectorized(self):
-    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.log2, np.log2, 0.001, 200, vec_size)
+    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.log2, np.log2, (0.001, 200), vec_size)
 
   def test_sin_vectorized(self):
-    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sin, np.sin, -100, 100, vec_size)
+    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sin, np.sin, (-100, 100), vec_size)
 
   def test_pow_vectorized(self):
-    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.pow, np.pow, -100, 100, vec_size, param=True)
+    for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.pow, np.pow, (0.001, 200), vec_size, param_range=(-10, 10))
 
 if __name__ == '__main__':
   unittest.main()
