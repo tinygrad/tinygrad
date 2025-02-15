@@ -407,18 +407,10 @@ create_kernels = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+  # remove_movement_ops + sym
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
-  # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if k is v: continue # NOOP
-    if v.base.op is Ops.BUFFER:
-      # backtrack to the realized tensor
-      buf_src = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st]
-      if k is not buf_src[0]: becomes_map[k] = buf_src[0]
-    if v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
-  # we group the rest of UOps into ScheduleItems
+  # do_realize + group_realizes
   buffer_map: dict[UOp, UOp] = {}
   sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
   # get realizes
@@ -429,15 +421,25 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       buf_tensors.setdefault(b, []).append(k)
       if isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
-  if len(realize_map) == 0: return [], {}, becomes_map
-
-  # map buffers to realized tensors
   for buf_uop in realize_map:
     for tensor_uop in buf_tensors[buf_uop]:
       # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
-      becomes_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
+      tensor_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
+
+  # map tensors to new uops
+  becomes_map: dict[UOp, UOp] = {}
+  for k,v in tensor_map.items():
+    if k is v: continue
+    if v.base.op is Ops.BUFFER:
+      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
+      if v.op is Ops.VIEW:
+        mop = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st][0]
+        if k is not mop: becomes_map[k] = mop
+      else: becomes_map[k] = v
+    elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # create kernels, TODO: this should use the SINK from tensor_map
+  if len(realize_map) == 0: return [], {}, becomes_map
   graph_rewrite(sink, break_sched, ctx)
   sched_sink = graph_rewrite(UOp.sink(*realize_map.values()), create_kernels, ctx)
   type_verify(list(sched_sink.toposort), kernel_spec)
