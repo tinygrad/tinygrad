@@ -136,6 +136,14 @@ class TestModularWraparound(unittest.TestCase):
     t(-UOp.const(dtypes.int32, -2**31), -2**31)
     t(-UOp.const(dtypes.int64, -2**63), -2**63)
 
+  @xfail_broken_const_wraparound
+  def test_payne_hanek_reduction_bug(self):
+    t = self._test
+    a = (UOp.const(dtypes.uint, 43748177600).cast(dtypes.uint) | 36).cast(dtypes.ulong)
+    b = 2536655455 * a + 4294967296 * UOp.const(dtypes.ulong, 25366554550)
+    c = (b + 2261737165) // 4611686018427387904
+    t(c, 0)
+
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
     v1 = UOp(Ops.DEFINE_VAR, dtypes.float)
