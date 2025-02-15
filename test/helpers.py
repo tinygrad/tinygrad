@@ -52,10 +52,10 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
 
-def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]=[]):
+def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   allocator = PythonAllocator()
   bufs = []
-  for buf_dt, data in inputs:
+  for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + buf_dt.fmt, *data)))
   g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
