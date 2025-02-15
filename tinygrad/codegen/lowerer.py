@@ -20,7 +20,7 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
   if not all_int(dims): return dims
-  while len(dims) > len(max_sizes):
+  while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
       if dims[i] * dims[i+1] <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
@@ -29,6 +29,7 @@ def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   return dims
 
 def _split_dims(dims, max_sizes):
+  if all(d <= m for d,m in zip(dims, max_sizes)): return dims
   _dims = list(dims) + [1]*(3-len(dims))
   for i in range(len(_dims)):
     while _dims[i] > max_sizes[i]:
@@ -39,8 +40,8 @@ def _split_dims(dims, max_sizes):
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
-  limited = _group_dims(dims, max_sizes) if max_sizes is not None else dims
-  if max_sizes is not None and (limited == dims) and any(d > m for d,m in zip(dims, max_sizes)): limited = _split_dims(dims, max_sizes)
+  if max_sizes is not None and len(dims) > len(max_sizes): limited = _group_dims(dims, max_sizes)
+  else: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
