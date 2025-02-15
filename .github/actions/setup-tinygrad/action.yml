@@ -119,10 +119,13 @@ runs:
         deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.1.2 jammy main
         EOF
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
-        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-        sudo tee /etc/apt/sources.list <<'EOF'
+        # wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        cat /etc/apt/sources.list
+        sudo tee /etc/apt/sources.list <<'AOF'
         deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main
-        EOF        
+        AOF     
+        cat /etc/apt/sources.list
         sudo apt update || true
         sudo apt install --no-install-recommends --allow-unauthenticated -y libllvm19 lld-19 hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
         curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
