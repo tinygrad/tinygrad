@@ -672,8 +672,8 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      if getenv("RAWAST"): print(self.ast)
-      print(modified_ast)
+      for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op is not Ops.CONST]):
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
