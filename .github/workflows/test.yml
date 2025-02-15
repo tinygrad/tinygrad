@@ -424,6 +424,10 @@ jobs:
       run: DEBUG=2 DSP=1 python test/test_tiny.py
     - name: Test quantize onnx
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
+    - name: Test MobileNetV2 run
+      run: |
+        QUANT=1 CNT=20 CLANG=1 DONT_REALIZE_EXPAND=1 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx
+        DEVECTORIZE=0 DEBUG=2 DSP=1 CNT=1 DONT_REALIZE_EXPAND=1 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Test LLVM=1 DEVECTORIZE=0
       run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
     - name: Test CLANG=1 DEVECTORIZE=0
