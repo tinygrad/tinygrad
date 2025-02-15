@@ -647,7 +647,7 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.0001 * math.sqrt(BS/66))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00011 * math.sqrt(BS/66))
 
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)

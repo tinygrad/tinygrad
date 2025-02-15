@@ -1,4 +1,4 @@
-import ctypes, platform, sys
+import ctypes, platform
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -55,4 +55,4 @@ class LLVMCompiler(Compiler):
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
     compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()])
-    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None), compiler, CPUProgram)
+    super().__init__(device, MallocAllocator, LLVMRenderer(), compiler, CPUProgram)
