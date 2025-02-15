@@ -1,7 +1,7 @@
 import ctypes, os, subprocess, tempfile
-from tinygrad.helpers import OSX
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.runtime.ops_llvm import LLVMCompiler
+from tinygrad.runtime.support.llvm import LLD_PATH
 from tinygrad.device import Compiler, CompileError
 
 def check(status):
@@ -60,13 +60,12 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
 
 def compile_llvm(prg:str, arch="gfx1100") -> bytes:
   with tempfile.NamedTemporaryFile(delete=True) as f:
-    llvm_backend = LLVMCompiler("AMDGPU", True, arch=arch)
+    llvm_backend = LLVMCompiler("AMDGPU", processor=arch)
     relo = llvm_backend.compile(prg, load=False)
     f.write(relo)
     f.flush()
     args = [f.name, "--no-undefined", "-shared", "-o", "-"]
-    lld_path = 'ld.lld' if OSX else '/opt/rocm/llvm/bin/ld.lld'
-    obj = subprocess.check_output([lld_path, *args])
+    obj = subprocess.check_output([LLD_PATH, *args])
     return obj
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):

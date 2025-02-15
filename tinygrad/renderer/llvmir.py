@@ -1,7 +1,7 @@
 from typing import cast
 import math, struct, sys
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer.cstyle import ClangRenderer, AMDRenderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
@@ -20,17 +20,31 @@ def lconst(x, dtype:DType):
     return truncate[dtype](x)
   return int(x)
 
-def lcast(input_type:DType, output_type:DType):
+def render_cast(ctx, x: UOp) -> str:
+  output_type = x.dtype
+  input_type = x.src[0].dtype
+  if input_type == dtypes.half and output_type == dtypes.bfloat16:
+    return f"  {ctx[x]}_ext = fpext {ldt(input_type)} {ctx[x.src[0]]} to float\n" + \
+      f"  {ctx[x]} = fptrunc float {ctx[x]}_ext to {ldt(output_type)}"
+  if input_type == dtypes.bfloat16 and output_type == dtypes.half:
+    return f"  {ctx[x]}_ext = fpext bfloat {ctx[x.src[0]]} to float\n" + \
+      f"  {ctx[x]} = fptrunc float {ctx[x]}_ext to {ldt(output_type)}"
+  if dtypes.is_bool(input_type) and output_type == dtypes.bfloat16:
+    return f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n" + \
+      f"  {ctx[x]} = uitofp i32 {ctx[x]}_ext to bfloat"
+  cast_op = None
   if dtypes.is_float(input_type):
-    if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
-    if dtypes.is_int(output_type): return 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
-  if dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
-    if dtypes.is_float(output_type): return 'uitofp'
-    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
-  if dtypes.is_int(input_type):
-    if dtypes.is_float(output_type): return 'sitofp'
-    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
-  raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
+    if dtypes.is_float(output_type): cast_op = 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
+    elif dtypes.is_int(output_type): cast_op = 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
+  elif dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
+    if dtypes.is_float(output_type): cast_op = 'uitofp'
+    elif dtypes.is_int(output_type): cast_op = 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
+  elif dtypes.is_int(input_type):
+    if dtypes.is_float(output_type): cast_op = 'sitofp'
+    elif dtypes.is_int(output_type): cast_op = 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
+  else: raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
+  return f"  {ctx[x]} = {cast_op} {ldt(input_type)} {ctx[x.src[0]]} to {ldt(output_type)}"
+
 
 # https://github.com/corsix/amx
 def render_wmma(ctx, wmma: UOp) -> str:
@@ -52,21 +66,6 @@ signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: 
 flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
-
-def llvm_rewrite_cast(ctx, x):
-  output_type = x.dtype
-  input_type = x.src[0].dtype
-  if input_type == dtypes.half and output_type == dtypes.bfloat16:
-    return f"  {ctx[x]}_ext = fpext {ldt(input_type)} {ctx[x.src[0]]} to float\n" + \
-      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(output_type)}\n"
-  if input_type == dtypes.bfloat16 and output_type == dtypes.half:
-    return f"  {ctx[x]}_ext = fpext bfloat {ctx[x.src[0]]} to float\n" + \
-      f"  {ctx[x]}     = fptrunc float {ctx[x]}_ext to {ldt(output_type)}\n"
-  if dtypes.is_bool(input_type) and output_type == dtypes.bfloat16:
-    return f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n" + \
-      f"  {ctx[x]}     = uitofp i32 {ctx[x]}_ext to bfloat\n"
-  return f"  {ctx[x]} = {lcast(input_type, output_type)} {ldt(input_type)} {ctx[x.src[0]]} to {ldt(output_type)}"
-
 
 base_rewrite = PatternMatcher([
   # memory load/store
@@ -94,7 +93,7 @@ base_rewrite = PatternMatcher([
 
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(Ops.CAST, name="x"), llvm_rewrite_cast),
+  (UPat(Ops.CAST, name="x"), render_cast),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
    f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
@@ -128,7 +127,6 @@ class LLVMRenderer(Renderer):
   supports_float4 = True
   has_local = False
   has_shared = False
-  global_max = None
   string_rewrite = base_rewrite
   if AMX: tensor_cores = ClangRenderer.amx_tc
 
@@ -206,6 +204,7 @@ code_for_workitem = { "g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
+  shared_max = AMDRenderer.shared_max
   abi = "protected amdgpu_kernel"
   string_rewrite = base_rewrite + PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
