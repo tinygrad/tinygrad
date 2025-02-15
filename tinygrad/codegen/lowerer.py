@@ -29,7 +29,6 @@ def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   return dims
 
 def _split_dims(dims, max_sizes):
-  if len(dims) == 0 or all(d <= m for d,m in zip(dims, max_sizes)): return dims
   _dims = list(dims) + [1]*(3-len(dims))
   for i in range(len(_dims)):
     while _dims[i] > max_sizes[i]:
@@ -40,8 +39,8 @@ def _split_dims(dims, max_sizes):
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
-  if max_sizes is not None and len(dims) > len(max_sizes): limited = _group_dims(dims, max_sizes)
-  else: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
+  limited = _group_dims(dims, max_sizes) if max_sizes is not None else dims
+  if limited == dims and any(d > m for d,m in zip(dims, max_sizes)): limited = _split_dims(dims, max_sizes)
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
