@@ -1279,9 +1279,21 @@ class Tensor(SimpleMathTrait):
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
-    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return functools.reduce(Tensor.add, tensors)
+    target_shape = list(self.shape)
+    target_shape[dim] = sum(t.shape[dim] for t in tensors)
+    
+    # Create initial empty tensor
+    ret = self.full(tuple(target_shape), 0, device=self.device, dtype=self.dtype)
+    
+    # Copy each tensor to the correct position
+    offset = 0
+    for t in tensors:
+      indices = [slice(None)] * self.ndim
+      indices[dim] = slice(offset, offset + t.shape[dim])
+      ret[tuple(indices)] = t
+      offset += t.shape[dim]
+      
+    return ret
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
