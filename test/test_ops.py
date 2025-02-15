@@ -2559,12 +2559,16 @@ class TestOps(unittest.TestCase):
                                        lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     helper_test_op([(10,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                             lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
+
     self.helper_test_exception([(2,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                                        lambda x,src: x.scatter(dim=1, index=a, src=src), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(10,3,10), (10,3,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                                        lambda x,src: x.scatter(dim=1, index=a, src=src), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(3,4,5), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src, mode="typo"),
-                                       lambda x,src: x.scatter(dim=1, index=a, src=src, mode="typo"), expected=TypeError)
+                                                   lambda x,src: x.scatter(dim=1, index=a, src=src, mode="typo"), expected=TypeError)
+    self.helper_test_exception([(3,4,5), (3,4,5)], lambda x,src: x.half().scatter(dim=1, index=b, src=src),
+                                                   lambda x,src: x.half().scatter(dim=1, index=a, src=src), expected=RuntimeError)
+
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=3), lambda x: x.scatter(dim=1, index=a, src=3), forward_only=True)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf")),
       lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
@@ -2626,12 +2630,18 @@ class TestOps(unittest.TestCase):
       lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
       lambda src: x.scatter_reduce(dim=1, index=a, src=src, reduce="prod"), forward_only=True)
 
-  def test_scatter_reduce_invalid_reduce_op(self):
+  def test_scatter_reduce_errors(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    # invalid reduce arg
     self.helper_test_exception([(4,5,6), (4,5,6)],
       lambda x,src: x.scatter_reduce(dim=0, index=b, src=src, reduce="INVALID"),
       lambda x,src: x.scatter_reduce(dim=0, index=a, src=src, reduce="INVALID"),
+      RuntimeError)
+    # dtype mismatch
+    self.helper_test_exception([(4,5,6), (4,5,6)],
+      lambda x,src: x.half().scatter_reduce(dim=0, index=b, src=src, reduce="sum"),
+      lambda x,src: x.half().scatter_reduce(dim=0, index=a, src=src, reduce="sum"),
       RuntimeError)
 
   def test_scaled_dot_product_attention(self):
