@@ -343,50 +343,7 @@
       }
       kernelList.appendChild(kernelUl);
     });
-    // ***** RHS metadata
-    const kernel = kernels[currentKernel][1][currentUOp];
-    const metadata = document.querySelector(".container.metadata");
-    metadata.innerHTML = "";
-    metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
-    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
-    // ***** collapse/expand
-    let isCollapsed = false;
-    const collapseBtn = document.querySelector(".collapse-btn");
-    collapseBtn.addEventListener("click", () => {
-      isCollapsed = !isCollapsed;
-      mainContainer.classList.toggle("collapsed", isCollapsed);
-      kernelListParent.style.display = isCollapsed ? "none" : "block";
-      metadata.style.display = isCollapsed ? "none" : "block";
-      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-    });
-    // ***** resizer
-    function createResizer(element, width, type) {
-      const { minWidth, maxWidth } = width;
-      const handle = Object.assign(document.createElement("div"), { id: `${type}-resize-handle`, className: "resize-handle" });
-      element.appendChild(handle);
-      const resize = (e) => {
-        const change = e.clientX - element.dataset.startX;
-        const adjustedChange = type === "kernel" ? change : -change;
-        const newWidth = ((Number(element.dataset.startWidth) + adjustedChange) / Number(element.dataset.containerWidth)) * 100;
-        if (newWidth >= minWidth && newWidth <= maxWidth) {
-          element.style.width = `${newWidth}%`;
-        }
-      };
-      handle.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        element.dataset.startX = e.clientX;
-        element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
-        element.dataset.startWidth = element.getBoundingClientRect().width;
-        document.documentElement.addEventListener("mousemove", resize, false);
-        document.documentElement.addEventListener("mouseup", () => {
-          document.documentElement.removeEventListener("mousemove", resize, false);
-          element.style.userSelect = "initial";
-        }, { once: true });
-      });
-    }
-    createResizer(kernelListParent, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
-    createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
-    // ***** Stream uop graphs
+    // ***** UOp graph
     const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
       ret = cache[cacheKey];
@@ -405,6 +362,12 @@
         }
       };
     }
+    // ***** RHS metadata
+    const metadata = document.querySelector(".container.metadata");
+    metadata.innerHTML = "";
+    const kernel = kernels[currentKernel][1][currentUOp];
+    metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     if (ret.length === 0) return;
     if (kernel.kernel_code == null) metadata.appendChild(highlightedCodeBlock(ret[currentRewrite].uop, "python"));
     renderGraph(ret[currentRewrite].graph, []);
@@ -443,6 +406,46 @@
     } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
     }
+    // ***** collapse/expand
+    let isCollapsed = false;
+    const collapseBtn = document.querySelector(".collapse-btn");
+    collapseBtn.addEventListener("click", () => {
+      isCollapsed = !isCollapsed;
+      mainContainer.classList.toggle("collapsed", isCollapsed);
+      kernelListParent.style.display = isCollapsed ? "none" : "block";
+      metadata.style.display = isCollapsed ? "none" : "block";
+      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+    });
+    // ***** resizer
+    function createResizer(element, width, type) {
+      const { minWidth, maxWidth } = width;
+      const handle = Object.assign(document.createElement("div"), { id: `${type}-resize-handle`, className: "resize-handle" });
+      element.appendChild(handle);
+
+      const resize = (e) => {
+        const change = e.clientX - element.dataset.startX;
+        const adjustedChange = type === "kernel" ? change : -change;
+        const newWidth = ((Number(element.dataset.startWidth) + adjustedChange) / Number(element.dataset.containerWidth)) * 100;
+        if (newWidth >= minWidth && newWidth <= maxWidth) {
+          element.style.width = `${newWidth}%`;
+        }
+      };
+
+      handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        element.dataset.startX = e.clientX;
+        element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
+        element.dataset.startWidth = element.getBoundingClientRect().width;
+
+        document.documentElement.addEventListener("mousemove", resize, false);
+        document.documentElement.addEventListener("mouseup", () => {
+          document.documentElement.removeEventListener("mousemove", resize, false);
+          element.style.userSelect = "initial";
+        }, { once: true });
+      });
+    }
+    createResizer(kernelListParent, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
+    createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
   }
 
   // **** keyboard shortcuts
