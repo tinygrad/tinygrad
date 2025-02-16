@@ -46,6 +46,10 @@
   ul.active {
     color: #f0f0f5;
   }
+  ul.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+  }
   svg {
     width: 100%;
     height: 100%;
@@ -193,13 +197,6 @@
     border-radius: 8px;
     padding: 8px;
   }
-  .progress {
-    font-size: 20px;
-    z-index: 2;
-    align-self: center;
-    justify-content: center;
-    width: 100%;
-  }
   </style>
 </head>
 <body>
@@ -211,7 +208,6 @@
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
-    <p class="progress"></p>
     <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
@@ -290,6 +286,22 @@
     hljs.highlightElement(codeEl);
     return pre;
   };
+  async function fetchMatches() {
+    const limit = 100;
+    const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
+    for (let i=0; i < pageCount; i++) {
+      const res = await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit+1}&limit=${limit}`);
+      const chunk = await res.json(); // TODO: this is slow!
+      for (let j=0; j<chunk.graphs.length; j++) {
+        const gUl = document.getElementById(`rewrite-${ret.graphs.length+j}`);
+        if (gUl != null) gUl.classList.remove("disabled");
+      }
+      // TODO: this shouldn't exist after the viz api refactor
+      for (const [k,v] of Object.entries(chunk)) {
+        if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
+      }
+    }
+  }
 
   // **** main loop
   var ret = {};
@@ -349,36 +361,18 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    else {
-      const cacheKey = `${currentKernel}-${currentUOp}`;
-      if (cacheKey in cache) {
-        ret = cache[cacheKey];
-      }
-      else {
-        const p = document.querySelector(".progress");
-        p.style.display = "none";
-        const limit = 100;
-        const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
-        if (pageCount > 1) {
-          p.style.display = "flex";
-          d3.select("#graph-svg g").selectAll("*").remove();
-        }
-        for (let i=0; i < pageCount; i++) {
-          p.innerText = `fetching data ${i+1}/${pageCount}`;
-          const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
-          if (i === 0) ret = chunk
-          else {
-            // TODO: this shouldn't exist after the viz api refactor
-            for (const [k,v] of Object.entries(chunk)) {
-              if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
-            }
-          }
-        }
-        p.style.display = "none";
-        cache[cacheKey] = ret;
-      }
-      renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
+    const cacheKey = `${currentKernel}-${currentUOp}`;
+    if (cacheKey in cache) {
+      ret = cache[cacheKey];
     }
+    else {
+      // always fetch the first graph
+      ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=0&limit=1`)).json();
+      cache[cacheKey] = ret;
+      // fetch the rest of matches (this is non blocking)
+      fetchMatches();
+    }
+    renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
@@ -396,12 +390,13 @@
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (ret.graphs.length > 1) {
+    if (ret.match_count > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
-      ret.graphs.forEach((rw, i) => {
-        const gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
+      for (let i=0; i<=ret.match_count; i++) {
+        const gUl = Object.assign(document.createElement("ul"), { innerText: i, id: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
+        if (i > ret.graphs.length-1) gUl.classList.add("disabled");
         if (i === currentRewrite) {
           gUl.classList.add("active");
           if (i !== 0) {
@@ -425,7 +420,7 @@
           currentRewrite = i;
           main();
         });
-      })
+      }
     } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
     }
