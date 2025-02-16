@@ -659,13 +659,18 @@ document.addEventListener("alpine:init", () => {
       const unprocessedPrefillToks = prefillToks.slice(startPos);
       this.lastSeenToks = prefillToks.slice(0, startPos);
 
+      this.progress = makeProgress(unprocessedPrefillToks.length);
+      this.loadingMessage = `Reading input:`;
+      this.progress(0, this.loadingMessage);
       for (const tok of unprocessedPrefillToks) {
-        if (this.cancelGeneration) return;
+        if (this.cancelGeneration) {this.loadingMessage=""; return;}
         if (window.BACKEND === "WebGPU") {await this.nets["transformer"](new Int32Array([tok]), new Int32Array([startPos]));}
         else {await this.nets["transformer"](tok, startPos);}
         this.lastSeenToks.push(tok)
         startPos += 1;
+        this.progress(1);
       }
+      this.loadingMessage = ""; // hides progress bar
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
