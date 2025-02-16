@@ -285,20 +285,13 @@
   async function fetchMatches() {
     const limit = 100;
     const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
-    var newRet = {};
     for (let i=0; i < pageCount; i++) {
-      const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
-      if (i === 0) newRet = chunk;
-      else {
-        // TODO: this shouldn't exist after the viz api refactor
-        for (const [k,v] of Object.entries(chunk)) {
-          if (Array.isArray(v) && k !== "loc") newRet[k].push(...v);
-        }
+      const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit+1}&limit=${limit}`)).json();
+      // TODO: this shouldn't exist after the viz api refactor
+      for (const [k,v] of Object.entries(chunk)) {
+        if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
       }
     }
-    cache[`${currentKernel}-${currentUOp}`] = newRet;
-    ret = newRet;
-    main();
   }
 
   // **** main loop
@@ -389,10 +382,10 @@
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (ret.graphs.length > 1) {
+    if (ret.match_count > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
-      ret.graphs.forEach((rw, i) => {
+      for (let i=0; i<=ret.match_count; i++) {
         const gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
         if (i === currentRewrite) {
@@ -418,8 +411,8 @@
           currentRewrite = i;
           main();
         });
-      })
-    } else if (ret.match_count === 0) {
+      }
+    } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
     }
     // ***** collapse/expand
