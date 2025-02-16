@@ -365,31 +365,62 @@ class TestMultiTensor(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow, and flaky on LLVM")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
+  
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     from tinygrad.nn.optim import LARS
+    import numpy as np
 
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    # Create the input tensor.
+    fake_image = Tensor.rand((2, 3, 224 // 8, 224 // 8))
+    print("Fake image shape (non-sharded):", fake_image.shape, "dtype:", fake_image.dtype)
+    
+    # Shard the input tensor along the batch axis.
     fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    
+    # Print detailed shard info.
+    if isinstance(fake_image_sharded, list):
+        for i, shard in enumerate(fake_image_sharded):
+            print(f"Shard for device {devices_2[i]}: shape {shard.shape}, dtype {shard.dtype}")
+    else:
+        # If the sharding returns a wrapped tensor, print its metadata.
+        print("Fake image sharded metadata: shape", fake_image_sharded.shape)
+    
+    # Create labels.
     labels = Tensor.randint(2, low=0, high=1000)
+    print("Labels shape (non-sharded):", labels.shape, "dtype:", labels.dtype)
+    
     labels_sharded = labels.shard(devices_2, axis=0)
-
+    if isinstance(labels_sharded, list):
+        for i, shard in enumerate(labels_sharded):
+            print(f"Label shard for device {devices_2[i]}: shape {shard.shape}, dtype {shard.dtype}")
+    else:
+        print("Labels sharded metadata: shape", labels_sharded.shape)
+    
+    # Instantiate model and optimizer.
     m = ResNet18()
     optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
 
+    # --- Non-Sharded Run ---
     optimizer.zero_grad()
     m.load_from_pretrained()
     output = m(fake_image).sparse_categorical_crossentropy(labels, label_smoothing=0.1)
     output.backward()
     grad = m.conv1.weight.grad.numpy()
-
-    for p in get_parameters(m): p.shard_(devices_2).realize()
+    print("Non-sharded conv1.weight gradient (sample):", grad.flatten()[:10])
+    
+    # --- Sharded Run ---
+    for p in get_parameters(m):
+        p.shard_(devices_2).realize()
+    
     GlobalCounters.reset()
     optimizer.zero_grad()
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
-    # sometimes there is zeros in these grads... why?
+    print("Sharded conv1.weight gradient (sample):", shard_grad.flatten()[:10])
+    
+    # Compare gradients.
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   def test_assign_kv_cache_multi(self):
