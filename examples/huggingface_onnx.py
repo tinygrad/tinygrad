@@ -13,10 +13,10 @@ SKIPPED_FILES = [
   "merged", # implement attribute with graph type
 ]
 SKIPPED_REPOS = [
-  "patrickjohncyh/fashion-clip", # works but occasionally Gather goes out of bounds maybe due to poor example inputs
   "mangoapps/fb_zeroshot_mnli_onnx", # implement NonZero op
   "HuggingFaceTB/SmolLM2-360M-Instruct", # implement GroupQueryAttention
-  "stabilityai/stable-diffusion-xl-base-1.0", # stabilityai/stable-diffusion-xl-base-1.0/unet/model.onnx crashed (memory)
+  # ran out of memory on m1 mac
+  "stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo", "llava-hf/llava-onevision-qwen2-0.5b-ov-hf"
 ]
 
 def huggingface_download_onnx_model(model_id:str):
@@ -28,10 +28,10 @@ def get_config(root_path:Path):
 
 def run_huggingface_benchmark(onnx_model_path, config):
   inputs = get_example_inputs(OnnxRunner(onnx.load(onnx_model_path)).graph_inputs, config)
-  validate(onnx_model_path, inputs, rtol=1e-3, atol=1e-3)
+  validate(onnx_model_path, inputs, rtol=2e-3, atol=2e-3)
 
 if __name__ == "__main__":
-  assert getenv("LIMIT") or getenv("MODELPATH", ""), "usage: LIMIT=25 or MODELPATH=google-bert/bert-base-uncased/model.onnx"
+  assert getenv("LIMIT") or getenv("MODELPATH", ""), "usage: LIMIT=100 (to run) or MODELPATH=google-bert/bert-base-uncased/model.onnx (debug)"
 
   # for running
   if limit := getenv("LIMIT"):

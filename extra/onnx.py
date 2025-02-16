@@ -315,6 +315,9 @@ def get_onnx_ops():
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
   def BitwiseNot(x:Tensor): return ~x
+  def Mod(x:Tensor,y:Tensor,fmod=0):
+    if fmod != 0: raise NotImplementedError("float mod is not supported")
+    return x % y
 
   # ***** Casting Ops *****
   # TODO: saturate
@@ -834,7 +837,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf", "Mod")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops

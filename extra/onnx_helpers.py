@@ -6,21 +6,22 @@ import numpy as np
 import onnxruntime as ort
 
 def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
-  def _get_shape(shape: tuple[str|int]):
-    ret = []
-    for dim in shape:
-      match dim:
-        case int(): ret.append(dim)
-        case "width" | "height": ret.append(224)
-        case "sequence_length": ret.append(20)
-        case "decoder_sequence_length" | "encoder_sequence_length": ret.append(20)
-        case "past_decoder_sequence_length" | "encoder_sequence_length_out": ret.append(20)
-        case "batch_size": ret.append(1)
-        case "num_channels": ret.append(config.get("in_channels", 3))
-        case "num_channels_latent": ret.append(config.get("latent_channels", 4))
-        case "height_latent" | "width_latent": ret.append(config.get("sample_size", 1024) // 8)
-        case _: ret.append(1)
-    return ret
+  def _get_shape(onnx_shape: tuple[str|int]):
+    shape = []
+    for onnx_dim in onnx_shape:
+      match onnx_dim:
+        case int(): shape.append(onnx_dim)
+        case "width" | "height": shape.append(config.get("size", {}).get(onnx_dim, 224))
+        case "sequence_length": shape.append(20)
+        case "decoder_sequence_length" | "encoder_sequence_length": shape.append(config.get("nb_max_frames", 20))
+        case "past_decoder_sequence_length" | "encoder_sequence_length_out": shape.append(20)
+        case "batch_size": shape.append(1)
+        case "num_channels": shape.append(config.get("in_channels", 3))
+        case "num_channels_latent": shape.append(config.get("latent_channels", 4))
+        case "height_latent" | "width_latent": shape.append(config.get("sample_size", 1024) // 8)
+        case "feature_size": shape.append(config.get("num_mel_bins", 128))
+        case _: shape.append(1)
+    return shape
   def _get_value(name, shape, dtype):
     match name:
       case "input_ids":
