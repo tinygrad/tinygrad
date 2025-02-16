@@ -2,7 +2,7 @@
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable, TypedDict, cast
+from typing import Any, Callable, TypedDict, Generator, cast
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -63,18 +63,17 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
 
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
-def to_metadata(k:Any,v:TrackedRewriteContext) -> GraphRewriteMetadata:
+def to_metadata(k:Any,v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
           "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
-  return [(to_function_name(k.name) if isinstance(k, Kernel) else str(k), [to_metadata(v) for v in vals]) for k,vals in zip(keys, contexts)]
+  return [(to_function_name(k.name) if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
-def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails]:
-  sink = ctx.sink
+def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
+  yield {"graph": (sink_json:=uop_to_json(sink:=ctx.sink)), "uop":str(sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0,u1,upat in tqdm(ctx.matches):
     replaces[u0] = u1
-    sink = sink.substitute(replaces)
     yield {"graph": (sink_json:=uop_to_json(sink)), "uop":str(sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
 
@@ -125,11 +124,19 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       if "kernel" in (query:=parse_qs(url.query)):
+        # get query args
         def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
         kidx, ridx = getarg("kernel"), getarg("idx")
-        all_matches = get_details(contexts[0][kidx], contexts[1][kidx][ridx], getarg("offset", 0))
-      else: jret = kernels
-      ret, content_type = json.dumps(jret).encode(), "application/json"
+        # stream details
+        self.send_response(200)
+        self.send_header('Content-Type', "application/json")
+        self.end_headers()
+        for ret in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
+          chunk = json.dumps(ret)+"\n"
+          self.wfile.write(chunk.encode("utf-8"))
+          self.wfile.flush()
+        return
+      ret, content_type = json.dumps(kernels).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
     else: status_code = 404
 
