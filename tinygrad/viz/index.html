@@ -216,8 +216,6 @@
     <div class="container metadata"></div>
   </div>
   <script>
-  /* global hljs, dagreD3, d3, DOMPurify */
-
   // **** hljs extra definitions for UOps and float4
   hljs.registerLanguage("python", (hljs) => ({
     ...hljs.getLanguage("python"),
@@ -279,9 +277,8 @@
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const highlightedCodeBlock = (code, lang, wrap) => {
     const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
-    const codeEl = Object.assign(document.createElement("code"), {
-      // NOTE: since code is in textContent, we don't need DOMPurify
-      className: `language-${lang} code-block`, textContent: code});
+    // NOTE: since code is in textContent, we don't need DOMPurify
+    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code});
     pre.appendChild(codeEl);
     hljs.highlightElement(codeEl);
     return pre;
@@ -371,10 +368,8 @@
     metadata.innerHTML = "";
     const kernel = kernels[currentKernel][1][currentUOp];
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
-    const pre = highlightedCodeBlock(kernel.code_line, "python", true)
-    metadata.appendChild(pre);
-
-   // ** code blocks
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
+    // ** code blocks
     let code = ret[currentRewrite].uop;
     let lang = "python"
     if (kernel.kernel_code != null) {
