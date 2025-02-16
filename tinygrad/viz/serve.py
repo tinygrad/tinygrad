@@ -2,7 +2,7 @@
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable, TypedDict, Generator, cast
+from typing import Any, Callable, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -26,7 +26,7 @@ class GraphRewriteMetadata(TypedDict):
 
 class GraphRewriteDetails(TypedDict):
   graph: dict                   # JSON serialized UOp for this rewrite step
-  uop: dict                     # strigified UOp for this rewrite step
+  uop: str                      # strigified UOp for this rewrite step
   diff: list[str]|None          # string diff of the single UOp that changed
   changed_nodes: list[int]|None # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None
@@ -131,8 +131,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        for ret in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
-          self.wfile.write(f"data: {json.dumps(ret)}\n\n".encode("utf-8"))
+        for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
+          self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
           self.wfile.flush()
         self.wfile.write("data: END\n\n".encode("utf-8"))
         return self.wfile.flush()
@@ -181,7 +181,7 @@ if __name__ == "__main__":
   kernels = get_metadata(*contexts) if contexts is not None else []
 
   if getenv("FUZZ_VIZ"):
-    ret = [get_details(contexts[0][i], contexts[1][i][j], args) for i,v in tqdm(enumerate(kernels)) for j,args in enumerate(v[1])]
+    ret = [get_details(contexts[0][i], contexts[1][i][j]) for i,v in tqdm(enumerate(kernels)) for j,args in enumerate(v[1])]
     print(f"fuzzed {len(ret)} rewrite details")
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None

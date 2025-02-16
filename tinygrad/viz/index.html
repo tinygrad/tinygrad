@@ -359,7 +359,7 @@
         // if it's the first one render this new rgaph
         if (ret.length === 1) return main();
         // otherwise just enable the graph selector
-        const gUl = document.getElementById(`rewrite-${ret.length}`);
+        const gUl = document.getElementById(`rewrite-${ret.length-1}`);
         if (gUl != null) gUl.classList.remove("disabled");
       };
       cache[cacheKey] = ret;
