@@ -290,7 +290,8 @@
     const limit = 100;
     const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
     for (let i=0; i < pageCount; i++) {
-      const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit+1}&limit=${limit}`)).json();
+      const res = await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit+1}&limit=${limit}`);
+      const chunk = await res.json(); // TODO: this is slow!
       for (let j=0; j<chunk.graphs.length; j++) {
         const gUl = document.getElementById(`rewrite-${ret.graphs.length+j}`);
         if (gUl != null) gUl.classList.remove("disabled");
