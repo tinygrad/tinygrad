@@ -349,18 +349,18 @@
       ret = cache[cacheKey];
     } else {
       const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
-      const data = [];
+      ret = [];
       eventSource.onmessage = (e) => {
         if (e.data === "END") return eventSource.close();
-        data.push(JSON.parse(e.data));
-        cache[cacheKey] = data;
-        if (data.length === 1) {
-          // if it's the first one render this new rgaph
-          main();
-        } else {
-          // otherwise just update the matches list
-        }
+        const chunk = JSON.parse(e.data);
+        ret.push(chunk);
+        // if it's the first one render this new rgaph
+        if (ret.length === 1) return main();
+        // otherwise just enable the graph selector
+        const gUl = document.getElementById(`rewrite-${ret.length}`);
+        if (gUl != null) gUl.classList.remove("disabled");
       };
+      cache[cacheKey] = ret;
     }
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
