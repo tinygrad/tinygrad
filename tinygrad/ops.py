@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG, dedup
+from tinygrad.helpers import PICKLE_BUFFERS, SPLIT_REDUCEOP, DEBUG, dedup, call_at_exit, AtExitOrder
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
@@ -880,14 +880,12 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit
-  @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs), f)
-    if getenv("VIZ"): launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+      os.environ["VIZ_DATA"] = fn
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -895,14 +893,15 @@ if TRACK_MATCH_STATS:
         if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
+  call_at_exit(print_match_stats, once=True)
 
-def launch_viz(env_str:str, data:str):
-  os.environ[env_str] = "0"
-  os.environ[f"{env_str}_DATA"] = data
-  if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
+if getenv("VIZ"):
+  def launch_viz():
+    os.environ["VIZ"] = "0"
     args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
     args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
+  call_at_exit(launch_viz, AtExitOrder.SHOW_VIZ, once=True)
 
 # *** simple graph rewrite engine ***
 

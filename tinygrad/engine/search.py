@@ -5,7 +5,7 @@ from dataclasses import replace
 from tinygrad.ops import UOp, Ops, Variable, sym_infer
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored
-from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
+from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE, call_at_exit
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
@@ -141,8 +141,7 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL"} else 0
   if beam_pool is None and (workers := getenv("PARALLEL", default_parallel)):
     beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
-    @atexit.register
-    def close_pool(): beam_pool.close()
+    call_at_exit(lambda: beam_pool.close())
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")

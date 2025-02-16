@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up
+                             cpu_time_execution, colored, Context, round_up, call_at_exit, AtExitOrder
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
@@ -44,7 +44,9 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
-atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
+def _device_finalize():
+  for dn in Device._opened_devices: Device[dn].finalize()
+call_at_exit(_device_finalize, AtExitOrder.DEVICE_FINI, once=True)
 
 # **************** Profile ****************
 
@@ -328,16 +330,14 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   return True
 
 if PROFILE:
-  @atexit.register
   def finalize_profile():
     devs = [Device[d] for d in Device._opened_devices]
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
-
-    from tinygrad.ops import launch_viz
-    launch_viz("PROFILE", fn)
+    os.environ["PROFILE_DATA"] = fn
+  call_at_exit(finalize_profile, once=True)
 
 if __name__ == "__main__":
   for device in ALL_DEVICES:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
+import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib, atexit, collections
+from enum import auto, IntEnum
 from dataclasses import dataclass
 from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic
 
@@ -163,6 +164,18 @@ class Profiling(contextlib.ContextDecorator):
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn).ljust(50), "yellow"),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
+
+# *** ordered atexit logic ***
+
+_at_exit_queue: dict[int, list[Callable]] = collections.defaultdict(list)
+class AtExitOrder(IntEnum): REGULAR=auto(); DEVICE_FINI=auto(); SHOW_VIZ=auto() # noqa: E702
+def call_at_exit(cb:Callable, exit_order:AtExitOrder=AtExitOrder.REGULAR, once=False):
+  if once and cb in _at_exit_queue[int(exit_order)]: return
+  _at_exit_queue[int(exit_order)].append(cb)
+
+@atexit.register
+def _exit():
+  for exit_order in sorted(_at_exit_queue.keys()): [cb() for cb in _at_exit_queue[exit_order][::-1]]
 
 # *** universal database cache ***
 
