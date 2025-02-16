@@ -359,20 +359,19 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    else {
-      const cacheKey = `${currentKernel}-${currentUOp}`;
-      if (cacheKey in cache) {
-        ret = cache[cacheKey];
-      }
-      else {
-        // always fetch the first graph
-        ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=0&limit=1`)).json();
-        cache[cacheKey] = ret;
-        // incrementally fetch the matches (this is non blocking)
-        fetchMatches();
-      }
-      renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
+    const cacheKey = `${currentKernel}-${currentUOp}`;
+    if (cacheKey in cache) {
+      ret = cache[cacheKey];
     }
+    else {
+      // always fetch the first graph
+      ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=0&limit=1`)).json();
+      cache[cacheKey] = ret;
+      // fetch the rest of matches (this is non blocking)
+      fetchMatches();
+      cache[cacheKey] = ret;
+    }
+    renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
