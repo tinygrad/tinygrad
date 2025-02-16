@@ -292,7 +292,7 @@
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
-  var currentKernel = 0;
+  var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
   async function main() {
@@ -300,7 +300,7 @@
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
-      currentKernel = 0;
+      currentKernel = -1;
     }
     const kernelListParent = document.querySelector(".container.kernel-list-parent");
     const kernelList = document.querySelector(".container.kernel-list");
@@ -344,12 +344,14 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
+    if (currentKernel == -1) return;
     const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
       ret = cache[cacheKey];
-    } else {
-      const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+    }
+    else {
       ret = [];
+      const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
       eventSource.onmessage = (e) => {
         if (e.data === "END") return eventSource.close();
         const chunk = JSON.parse(e.data);
@@ -367,7 +369,8 @@
     metadata.innerHTML = "";
     const kernel = kernels[currentKernel][1][currentUOp];
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
-    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
+    const pre = highlightedCodeBlock(kernel.code_line, "python", true)
+    metadata.appendChild(pre);
     if (ret.length === 0) return;
     if (kernel.kernel_code == null) metadata.appendChild(highlightedCodeBlock(ret[currentRewrite].uop, "python"));
     renderGraph(ret[currentRewrite].graph, []);
@@ -501,7 +504,7 @@
     }
     if (event.key == "ArrowRight") {
       event.preventDefault()
-      const totalRewrites = ret.graphs.length-1;
+      const totalRewrites = ret.length-1;
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }

@@ -21,14 +21,14 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB"
 class GraphRewriteMetadata(TypedDict):
   loc: tuple[str, int]           # [path, lineno] calling graph_rewrite
   match_count: int               # total match count in this context
-  code_line: str
-  kernel_code: str|None
+  code_line: str                 # source code calling graph_rewrite
+  kernel_code: str|None          # optionally render the final kernel code
 
 class GraphRewriteDetails(TypedDict):
-  graph: dict
-  uop: dict
-  diff: list[str]|None
-  changed_nodes: list[int]|None
+  graph: dict                   # JSON serialized UOp for this rewrite step
+  uop: dict                     # strigified UOp for this rewrite step
+  diff: list[str]|None          # string diff of the single UOp that changed
+  changed_nodes: list[int]|None # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None
 
 # NOTE: if any extra rendering in VIZ fails, we don't crash
@@ -124,7 +124,6 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       if "kernel" in (query:=parse_qs(url.query)):
-        # get query args
         def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
         kidx, ridx = getarg("kernel"), getarg("idx")
         # stream details
@@ -133,8 +132,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         for ret in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
-          chunk = "data: "+json.dumps(ret)+"\n\n"
-          self.wfile.write(chunk.encode("utf-8"))
+          self.wfile.write(f"data: {json.dumps(ret)}\n\n".encode("utf-8"))
           self.wfile.flush()
         self.wfile.write("data: END\n\n".encode("utf-8"))
         return self.wfile.flush()
