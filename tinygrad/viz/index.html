@@ -364,6 +364,8 @@
       };
       cache[cacheKey] = ret;
     }
+    if (ret.length === 0) return;
+    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
@@ -371,9 +373,16 @@
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
     const pre = highlightedCodeBlock(kernel.code_line, "python", true)
     metadata.appendChild(pre);
-    if (ret.length === 0) return;
-    if (kernel.kernel_code == null) metadata.appendChild(highlightedCodeBlock(ret[currentRewrite].uop, "python"));
-    renderGraph(ret[currentRewrite].graph, []);
+
+   // ** code blocks
+    let code = ret[currentRewrite].uop;
+    let lang = "python"
+    if (kernel.kernel_code != null) {
+      code = kernel.kernel_code;
+      lang = "cpp";
+    }
+    const codeBlock = highlightedCodeBlock(code, lang, false);
+    metadata.appendChild(codeBlock);
     // ** rewrite list
     if (kernel.match_count > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
