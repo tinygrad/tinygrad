@@ -8,9 +8,9 @@ __kernel void max_half(__global half* data0, const __global half* data1) {
 }"""
 
 if __name__ == "__main__":
-  dev = CLDevice()
-  print("created device")
-  lib = CLCompiler(dev, "test").compile(src)
-  print("created lib", len(lib))
-  prg = CLProgram(dev, "max_half", lib)
-  print("created prg")
+    dev = CLDevice()
+    print("created device")
+    lib = CLCompiler(dev, "test").compile(src)
+    print("created lib", len(lib))
+    prg = CLProgram(dev, "max_half", lib)
+    print("created prg")

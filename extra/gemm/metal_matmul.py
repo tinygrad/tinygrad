@@ -1,10 +1,16 @@
 import os
+
 os.environ["METAL"] = "1"
 import time
 import numpy as np
 from tinygrad import Device, dtypes
 from tinygrad.helpers import getenv, flat_mv
-from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, MetalCompiler
+from tinygrad.runtime.ops_metal import (
+    MetalAllocator,
+    MetalDevice,
+    MetalProgram,
+    MetalCompiler,
+)
 
 N = getenv("N", 2048)
 LID = 2
@@ -12,21 +18,29 @@ LID = 2
 device = MetalDevice("METAL")
 metalalloc = MetalAllocator(device)
 
-a = metalalloc.alloc(N*N*4)
-b = metalalloc.alloc(N*N*4)
-c = metalalloc.alloc(N*N*4)
+a = metalalloc.alloc(N * N * 4)
+b = metalalloc.alloc(N * N * 4)
+c = metalalloc.alloc(N * N * 4)
 
-na = np.zeros((N,N),dtype=np.float32)
-nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)N
-nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32) #.astype(np.int32).astype(np.float32)
+na = np.zeros((N, N), dtype=np.float32)
+nb = np.random.default_rng().standard_normal(
+    size=(N, N), dtype=np.float32
+)  # .astype(np.int32).astype(np.float32)N
+nc = np.random.default_rng().standard_normal(
+    size=(N, N), dtype=np.float32
+)  # .astype(np.int32).astype(np.float32)
 
-metalalloc._copyin(b,nb.tobytes())
-metalalloc._copyin(c,nc.tobytes())
+metalalloc._copyin(b, nb.tobytes())
+metalalloc._copyin(c, nc.tobytes())
 
-FLOPS = N*N*N*2
-BW = N*N*3*4
+FLOPS = N * N * N * 2
+BW = N * N * 3 * 4
 
-prog = MetalProgram(device, "test", MetalCompiler(device).compile(f"""
+prog = MetalProgram(
+    device,
+    "test",
+    MetalCompiler(device).compile(
+        f"""
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>  // Available from Metal version 2.3 released with OS X 11.0+
 using namespace metal;
@@ -88,45 +102,82 @@ kernel void test(device float *a, device const float *data1, device const float 
   simdgroup_store(acc[1][3], a+{8+24*N}, {N}, ulong2(0, 0));
   simdgroup_store(acc[2][3], a+{16+24*N}, {N}, ulong2(0, 0));
   simdgroup_store(acc[3][3], a+{24+24*N}, {N}, ulong2(0, 0));
-}}"""))
+}}"""
+    ),
+)
+
+
 def timeit(fxn):
-  st = time.perf_counter()
-  et = fxn()
-  # NOTE: et doesn't contain the launch overhead
-  return time.perf_counter() - st
-tm = min([timeit(lambda: prog(a, b, c, global_size=[N//(8*4), N//(8*4*LID), 1], local_size=[32, LID, 1], wait=True)) for _ in range(20)])
-comp = nb@nc
+    st = time.perf_counter()
+    et = fxn()
+    # NOTE: et doesn't contain the launch overhead
+    return time.perf_counter() - st
+
+
+tm = min(
+    [
+        timeit(
+            lambda: prog(
+                a,
+                b,
+                c,
+                global_size=[N // (8 * 4), N // (8 * 4 * LID), 1],
+                local_size=[32, LID, 1],
+                wait=True,
+            )
+        )
+        for _ in range(20)
+    ]
+)
+comp = nb @ nc
 metalalloc._copyout(flat_mv(na.data), a)
 if N <= 32:
-  print(na)
-  print(comp)
-print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s")
+    print(na)
+    print(comp)
+print(
+    f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s"
+)
 np.testing.assert_allclose(na, comp, atol=1e-3)
 
 import torch, torch.mps
-b = torch.from_numpy(nb).to('mps')
-c = torch.from_numpy(nc).to('mps')
+
+b = torch.from_numpy(nb).to("mps")
+c = torch.from_numpy(nc).to("mps")
+
 
 def torch_prog(b, c):
-  st = time.perf_counter()
-  a = b@c
-  torch.mps.synchronize()
-  return time.perf_counter() - st
+    st = time.perf_counter()
+    a = b @ c
+    torch.mps.synchronize()
+    return time.perf_counter() - st
+
+
 tm = min([torch_prog(b, c) for _ in range(20)])
-print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul in torch")
+print(
+    f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul in torch"
+)
 
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
+
 b = Tensor(nb)
 c = Tensor(nc)
+
+
 # TODO: slowness without the JIT I suspect comes from a lack of a caching allocator
 @TinyJit
 def tiny_jit(b, c):
-  return (b@c).realize()
+    return (b @ c).realize()
+
+
 def tiny_prog(b, c):
-  st = time.perf_counter()
-  a = tiny_jit(b, c)
-  Device["METAL"].synchronize()
-  return time.perf_counter() - st
+    st = time.perf_counter()
+    a = tiny_jit(b, c)
+    Device["METAL"].synchronize()
+    return time.perf_counter() - st
+
+
 tm = min([tiny_prog(b, c) for _ in range(20)])
-print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul in tinygrad")
+print(
+    f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul in tinygrad"
+)

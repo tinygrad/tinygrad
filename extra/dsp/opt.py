@@ -3,9 +3,10 @@ from tinygrad import Device
 # PATH=/opt/homebrew/opt/llvm/bin:$PATH python3 extra/dsp/opt.py
 
 if __name__ == "__main__":
-  compiler = Device["DSP"].compiler
+    compiler = Device["DSP"].compiler
 
-  lib = compiler.compile("""
+    lib = compiler.compile(
+        """
 typedef long HVX_Vector __attribute__((__vector_size__(128))) __attribute__ ((aligned(128)));
 typedef long HVX_VectorPair __attribute__((__vector_size__(256))) __attribute__ ((aligned(256)));
 
@@ -22,6 +23,7 @@ void test(unsigned char *c, unsigned char *a, unsigned char *b) {
     acc = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc, t0, t1);
   }
   *((HVX_Vector*)c) = acc;
-}""")
+}"""
+    )
 
-  compiler.disassemble(lib)
+    compiler.disassemble(lib)

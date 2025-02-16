@@ -31,19 +31,20 @@ for x in out.values(): x.realize()
 """
 
 from openvino.runtime import Core
+
 core = Core()
 devices = core.available_devices
 for device in devices:
-  device_name = core.get_property(device, "FULL_DEVICE_NAME")
-  print(f"{device}: {device_name}")
+    device_name = core.get_property(device, "FULL_DEVICE_NAME")
+    print(f"{device}: {device_name}")
 model = core.read_model(onnx_path)
-compiled_model = core.compile_model(model, device_name='GPU.0')
+compiled_model = core.compile_model(model, device_name="GPU.0")
 print(compiled_model)
 ireq = compiled_model.create_infer_request()
 for model_input in compiled_model.inputs:
-  tensor = ireq.get_tensor(model_input)
-  tensor.data[:] = 2
-  print(tensor)
+    tensor = ireq.get_tensor(model_input)
+    tensor.data[:] = 2
+    print(tensor)
 print("request")
 ireq.infer()
 ireq.infer()
@@ -51,7 +52,7 @@ print("did one")
 
 REPS = 20
 st = time.perf_counter()
-for i in range(REPS): ireq.infer()
+for i in range(REPS):
+    ireq.infer()
 et = time.perf_counter() - st
 print(f"{et*1000:.2f} ms {(CNT*N*N*N*REPS*2/et)*1e-9:.2f} GFLOPS")
-

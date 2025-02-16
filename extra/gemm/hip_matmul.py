@@ -22,24 +22,32 @@ CNT = getenv("CNT", 128)
 N = getenv("N", 4096)
 KX = getenv("KX", 4)
 KY = getenv("KY", 4)
-assert N%(16*KX) == 0, f"N must be multiple of {16*KX}"
-assert N%(16*KY) == 0, f"N must be multiple of {16*KY}"
-FLOPS = N*N*N*2
-BW = N*N*3*4
+assert N % (16 * KX) == 0, f"N must be multiple of {16*KX}"
+assert N % (16 * KY) == 0, f"N must be multiple of {16*KY}"
+FLOPS = N * N * N * 2
+BW = N * N * 3 * 4
 
 local_size = [32, 1, 1]
-global_size = [N//(KX*16), N//(KY*16), 1]
+global_size = [N // (KX * 16), N // (KY * 16), 1]
 num_threads = prod(local_size)
 
 # Can AMDAllocator initialized as device=0 by default?
 device = AMDDevice()
 hipallocator = AMDAllocator(device)
-a = hipallocator.alloc(N*N*4)
-b = hipallocator.alloc(N*N*2)
-c = hipallocator.alloc(N*N*2)
-na = np.empty(N*N, np.float32)
-nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
-nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
+a = hipallocator.alloc(N * N * 4)
+b = hipallocator.alloc(N * N * 2)
+c = hipallocator.alloc(N * N * 2)
+na = np.empty(N * N, np.float32)
+nb = (
+    np.random.default_rng()
+    .standard_normal(size=(N, N), dtype=np.float32)
+    .astype(np.float16)
+)
+nc = (
+    np.random.default_rng()
+    .standard_normal(size=(N, N), dtype=np.float32)
+    .astype(np.float16)
+)
 hipallocator._copyin(b, memoryview(bytearray(nb)))
 hipallocator._copyin(c, memoryview(bytearray(nc)))
 
@@ -113,30 +121,65 @@ extern "C" __attribute__((global))void __attribute__((amdgpu_flat_work_group_siz
   }}
 }}"""
 
-if DEBUG > 1: print(prog_str)
+if DEBUG > 1:
+    print(prog_str)
 lib = device.compiler.compile(prog_str)
 prog = AMDProgram(device, "test", lib)
 
-def timeit(fxn):
-  st = time.perf_counter()
-  et = fxn()
-  ret = time.perf_counter() - st # NOTE: et doesn't contain the launch overhead
-  if DEBUG > 0: print(f"{ret*1e6:.2f} us")
-  # rerun rand
-  if RAND:
-    nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
-    nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
-    hipallocator._copyin(b, memoryview(bytearray(nb)))
-    hipallocator._copyin(c, memoryview(bytearray(nc)))
-  return et
 
-print("global/local size", global_size, local_size, f"local_size:{prod(local_size)} total_size:{prod(global_size+local_size)}")
-tm = min([timeit(lambda: prog(a, b, c, global_size=global_size, local_size=local_size, wait=True)) for _ in range(CNT)])
-hipallocator._copyout(flat_mv(na.data),a)
-na = na.reshape(N,N)
+def timeit(fxn):
+    st = time.perf_counter()
+    et = fxn()
+    ret = time.perf_counter() - st  # NOTE: et doesn't contain the launch overhead
+    if DEBUG > 0:
+        print(f"{ret*1e6:.2f} us")
+    # rerun rand
+    if RAND:
+        nb = (
+            np.random.default_rng()
+            .standard_normal(size=(N, N), dtype=np.float32)
+            .astype(np.float16)
+        )
+        nc = (
+            np.random.default_rng()
+            .standard_normal(size=(N, N), dtype=np.float32)
+            .astype(np.float16)
+        )
+        hipallocator._copyin(b, memoryview(bytearray(nb)))
+        hipallocator._copyin(c, memoryview(bytearray(nc)))
+    return et
+
+
+print(
+    "global/local size",
+    global_size,
+    local_size,
+    f"local_size:{prod(local_size)} total_size:{prod(global_size+local_size)}",
+)
+tm = min(
+    [
+        timeit(
+            lambda: prog(
+                a, b, c, global_size=global_size, local_size=local_size, wait=True
+            )
+        )
+        for _ in range(CNT)
+    ]
+)
+hipallocator._copyout(flat_mv(na.data), a)
+na = na.reshape(N, N)
 comp = nb.astype(np.float32) @ nc.astype(np.float32)
-print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s")
-if DEBUG > 2: print(f"which  nan={np.where(np.isnan(na))} len={len(np.where(np.isnan(na))[0])}")
-if DEBUG > 2: print(f"which diff={np.where(abs(na-comp) > 2e-2)} len={len(np.where(abs(na-comp) > 2e-2)[0])}")
-if DEBUG > 2: print(f"which zero={np.where(abs(na) < 2e-2)} len={len(np.where(abs(na) < 2e-2)[0])}")
+print(
+    f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s"
+)
+if DEBUG > 2:
+    print(f"which  nan={np.where(np.isnan(na))} len={len(np.where(np.isnan(na))[0])}")
+if DEBUG > 2:
+    print(
+        f"which diff={np.where(abs(na-comp) > 2e-2)} len={len(np.where(abs(na-comp) > 2e-2)[0])}"
+    )
+if DEBUG > 2:
+    print(
+        f"which zero={np.where(abs(na) < 2e-2)} len={len(np.where(abs(na) < 2e-2)[0])}"
+    )
 np.testing.assert_allclose(na, comp, atol=1e-2, rtol=1e-2)

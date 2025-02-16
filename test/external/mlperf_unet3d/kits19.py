@@ -49,7 +49,9 @@ class RandBalancedCrop:
 
     def rand_foreg_cropd(self, image, label):
         def adjust(foreg_slice, patch_size, label, idx):
-            diff = patch_size[idx - 1] - (foreg_slice[idx].stop - foreg_slice[idx].start)
+            diff = patch_size[idx - 1] - (
+                foreg_slice[idx].stop - foreg_slice[idx].start
+            )
             sign = -1 if diff < 0 else 1
             diff = abs(diff)
             ladj = self.randrange(diff)
@@ -64,7 +66,9 @@ class RandBalancedCrop:
             return low, high
 
         cl = np.random.choice(np.unique(label[label > 0]))
-        foreg_slices = scipy.ndimage.find_objects(scipy.ndimage.measurements.label(label==cl)[0])
+        foreg_slices = scipy.ndimage.find_objects(
+            scipy.ndimage.measurements.label(label == cl)[0]
+        )
         foreg_slices = [x for x in foreg_slices if x is not None]
         slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
         slice_idx = np.argsort(slice_volumes)[-2:]
@@ -115,7 +119,9 @@ class RandomBrightnessAugmentation:
     def __call__(self, data):
         image = data["image"]
         if random.random() < self.prob:
-            factor = np.random.uniform(low=1.0-self.factor, high=1.0+self.factor, size=1)
+            factor = np.random.uniform(
+                low=1.0 - self.factor, high=1.0 + self.factor, size=1
+            )
             image = (image * (1 + factor)).astype(image.dtype)
             data.update({"image": image})
         return data
@@ -131,7 +137,9 @@ class GaussianNoise:
         image = data["image"]
         if random.random() < self.prob:
             scale = np.random.uniform(low=0.0, high=self.std)
-            noise = np.random.normal(loc=self.mean, scale=scale, size=image.shape).astype(image.dtype)
+            noise = np.random.normal(
+                loc=self.mean, scale=scale, size=image.shape
+            ).astype(image.dtype)
             data.update({"image": image + noise})
         return data
 
@@ -142,7 +150,9 @@ class PytTrain(Dataset):
         self.train_transforms = get_train_transforms()
         patch_size, oversampling = kwargs["patch_size"], kwargs["oversampling"]
         self.patch_size = patch_size
-        self.rand_crop = RandBalancedCrop(patch_size=patch_size, oversampling=oversampling)
+        self.rand_crop = RandBalancedCrop(
+            patch_size=patch_size, oversampling=oversampling
+        )
 
     def __len__(self):
         return len(self.images)

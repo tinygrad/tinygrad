@@ -266,14 +266,14 @@ return HAP_perf_get_time_us() == 1 ? 4 : 0;
 """
 
 if __name__ == "__main__":
-  dev = DSPDevice()
+    dev = DSPDevice()
 
-  bufs = [dev.allocator.alloc(0x60000) for _ in range(4)]
+    bufs = [dev.allocator.alloc(0x60000) for _ in range(4)]
 
-  only_entry = dev.compiler.compile(entry)
-  app1 = dev.runtime("test", only_entry)
-  x = app1(*bufs)
+    only_entry = dev.compiler.compile(entry)
+    app1 = dev.runtime("test", only_entry)
+    x = app1(*bufs)
 
-  entry_n_unsued_code = dev.compiler.compile(kernel + "\n" + entry)
-  app2 = dev.runtime("test", entry_n_unsued_code)
-  x = app2(*bufs)
+    entry_n_unsued_code = dev.compiler.compile(kernel + "\n" + entry)
+    app2 = dev.runtime("test", entry_n_unsued_code)
+    x = app2(*bufs)

@@ -224,7 +224,6 @@ kernel void r_64_32_8_16_4_6_6_4(device float* data0, const device float* data1,
 from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 
 if __name__ == "__main__":
-  dev = MetalDevice("METAL")
-  lib = MetalCompiler().compile(src)
-  prg = MetalProgram(dev, "r_64_32_8_16_4_6_6_4", lib)
-
+    dev = MetalDevice("METAL")
+    lib = MetalCompiler().compile(src)
+    prg = MetalProgram(dev, "r_64_32_8_16_4_6_6_4", lib)

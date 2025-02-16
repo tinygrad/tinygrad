@@ -3,8 +3,10 @@ import numpy as np
 from tinygrad.runtime.ops_cuda import CUDAProgram, RawCUDABuffer
 
 if __name__ == "__main__":
-  test = RawCUDABuffer.fromCPU(np.zeros(10, np.float32))
-  prg = CUDAProgram("test", """
+    test = RawCUDABuffer.fromCPU(np.zeros(10, np.float32))
+    prg = CUDAProgram(
+        "test",
+        """
   .version 7.8
   .target sm_86
   .address_size 64
@@ -17,7 +19,8 @@ if __name__ == "__main__":
     mov.u32         %r1, 0x40000000; // 2.0 in float
     st.global.u32   [%rd2], %r1;
     ret;
-  }""", binary=True)
-  prg([1], [1], test)
-  print(test.toCPU())
-
+  }""",
+        binary=True,
+    )
+    prg([1], [1], test)
+    print(test.toCPU())
