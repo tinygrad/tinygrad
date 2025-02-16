@@ -129,10 +129,11 @@ class Handler(BaseHTTPRequestHandler):
         kidx, ridx = getarg("kernel"), getarg("idx")
         # stream details
         self.send_response(200)
-        self.send_header('Content-Type', "application/json")
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         for ret in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
-          chunk = json.dumps(ret)+"\n"
+          chunk = "data: "+json.dumps(ret)+"\n\n"
           self.wfile.write(chunk.encode("utf-8"))
           self.wfile.flush()
         return
