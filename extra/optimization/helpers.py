@@ -103,7 +103,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
 
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.search import _ensure_buffer_alloc, _time_program
-from tinygrad.helpers import to_function_name, CACHELEVEL, diskcache_put
+from tinygrad.helpers import to_function_name, CACHELEVEL, diskcache_get, diskcache_put
 
 def time_linearizer(lin:Kernel, rawbufs:list[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501
   key = {"ast": lin.ast.key, "opts": str(lin.applied_opts), "allow_test_size": allow_test_size,
