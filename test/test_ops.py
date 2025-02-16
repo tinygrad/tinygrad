@@ -610,7 +610,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x**0.0)
     helper_test_op([(45,65)], lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0)
+    helper_test_op([(45,65)], lambda x: x**8.0)
+    helper_test_op([(45,65)], lambda x: x**5.5)
+    helper_test_op([(45,65)], lambda x: x**-5.5)
+    # helper_test_op([(45,65)], lambda x: x**-8.0)  # TODO: fix this
     helper_test_op([(45,65)], lambda x: 1.0**x)
+    helper_test_op([(45,65)], lambda x: 5.5**x)
+    helper_test_op([(45,65)], lambda x: (-5.5)**x)
+    helper_test_op([(45,65)], lambda x: 8.0**x)
     helper_test_op([(45,65)], lambda x: x**2.0)
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
@@ -628,6 +635,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
     helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
