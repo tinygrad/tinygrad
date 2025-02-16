@@ -370,7 +370,6 @@
       cache[cacheKey] = ret;
       // fetch the rest of matches (this is non blocking)
       fetchMatches();
-      cache[cacheKey] = ret;
     }
     renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
     // ***** RHS metadata
