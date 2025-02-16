@@ -677,23 +677,17 @@ def get_onnx_ops():
 
       # apply attention masks
       if mask_index is not None:
-        mask = None
-        if mask_index.ndim == 4: mask = mask_index
-        elif mask_index.ndim == 3: mask = mask_index.unsqueeze(1)
-        elif mask_index.ndim == 2: mask = mask_index.unsqueeze(1).unsqueeze(1)
-        elif mask_index.ndim == 1:
-          seq_range = Tensor.arange(seq_len)
-          mask = (seq_range.unsqueeze(0) < mask_index.unsqueeze(1)).cast(attn_scores.dtype)
-          mask = mask.unsqueeze(1).unsqueeze(1)
-        if mask is not None: attn_scores = attn_scores + (1.0 - mask) * mask_filter_value
+        assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+        mask = Tensor.arange(seq_len).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index
+        for _ in range(4 - mask.ndim): mask = mask.unsqueeze(1)
+        attn_scores = attn_scores + (1 - mask) * mask_filter_value
       if unidirectional:
-        mask = Tensor.ones(attn_scores.shape[-2], attn_scores.shape[-1]).tril().cast(attn_scores.dtype)
-        attn_scores = attn_scores.masked_fill(mask == 0, mask_filter_value)
+        causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
+        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
+        attn_scores = attn_scores + (1 - causal_mask) * mask_filter_value
 
-      # Softmax and attention output
-      attn_weights = attn_scores.softmax(axis=-1)
-      output = attn_weights.matmul(v).permute(0, 2, 1, 3).reshape(batch_size, seq_len, -1)
-
+      output = attn_scores.softmax(-1) @ v
+      output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
       present = k.stack(v) if past is not None or past_present_share_buffer else None
       return output, present
 
