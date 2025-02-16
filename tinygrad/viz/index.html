@@ -288,7 +288,7 @@
   };
 
   // **** main loop
-  var ret = {};
+  var ret = null;
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
@@ -343,37 +343,44 @@
       }
       kernelList.appendChild(kernelUl);
     });
+    // ***** RHS metadata
+    const kernel = kernels[currentKernel][1][currentUOp];
+    const metadata = document.querySelector(".container.metadata");
+    metadata.innerHTML = "";
+    metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
+    if (kernel.kernel_code != null) metadata.appendChild(highlightedCodeBlock(kernel.kernel_code, "cpp", false));
+    return;
+    // ** code blocks
+    let code = ret.uop;
+    let lang = "python"
+    return;
     // ***** UOp graph
     // if (currentKernel == -1) return;
     const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
-      ret = cache[cacheKey];
+      ret = cache[cacheKey][currentRewrite];
     }
     else {
       const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+      data = [];
       eventSource.onmessage = (e) => {
         if (e.data === "END") return eventSource.close();
-        console.log(JSON.parse(e.data));
+        data.push(JSON.parse(e.data));
+        if (ret == null) {
+          ret = data[currentRewrite];
+        }
       };
+      cache[cacheKey] = data;
+      ret = data[currentRewrite];
     }
-    return;
-    renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
-    // ***** RHS metadata
-    const metadata = document.querySelector(".container.metadata");
-    metadata.innerHTML = "";
-    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = highlightedCodeBlock(ret.code_line, "python", true)
-    metadata.appendChild(pre);
-
-    // ** code blocks
-    let code = ret.uops[currentRewrite];
-    let lang = "python"
-    if (ret.kernel_code != null) {
-      code = ret.kernel_code;
-      lang = "cpp";
-    }
-    const codeBlock = highlightedCodeBlock(code, lang, false);
-    metadata.appendChild(codeBlock);
+    if (ret == null) return;
+    const k = kernels[currentKernel][1][currentUOp];
+    ret.loc = k.loc
+    ret.code_line = k.code_line
+    ret.match_count = k.match_count
+    console.log(ret)
+    renderGraph(ret.graph, ret.changed_nodes || []);
     // ** rewrite list
     if (ret.match_count > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
