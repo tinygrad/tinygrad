@@ -3787,7 +3787,7 @@ class Tensor(SimpleMathTrait):
     if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
       # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
       return self._apply_uop(UOp.cast, dtype=dtypes.int32)._apply_uop(UOp.cast, dtype=dt)
-    return self if self.dtype == dt else self._apply_uop(UOp.cast, dtype=dt)
+    return self._apply_uop(UOp.cast, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """

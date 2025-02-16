@@ -46,6 +46,10 @@
   ul.active {
     color: #f0f0f5;
   }
+  ul.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+  }
   svg {
     width: 100%;
     height: 100%;
@@ -287,6 +291,10 @@
     const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
     for (let i=0; i < pageCount; i++) {
       const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit+1}&limit=${limit}`)).json();
+      for (let j=0; j<chunk.graphs.length; j++) {
+        const gUl = document.getElementById(`rewrite-${ret.graphs.length+j}`);
+        if (gUl != null) gUl.classList.remove("disabled");
+      }
       // TODO: this shouldn't exist after the viz api refactor
       for (const [k,v] of Object.entries(chunk)) {
         if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
@@ -386,8 +394,9 @@
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
       for (let i=0; i<=ret.match_count; i++) {
-        const gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
+        const gUl = Object.assign(document.createElement("ul"), { innerText: i, id: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
+        if (i > ret.graphs.length-1) gUl.classList.add("disabled");
         if (i === currentRewrite) {
           gUl.classList.add("active");
           if (i !== 0) {
