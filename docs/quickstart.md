@@ -155,11 +155,15 @@ There is a simpler way to do this just by using `get_parameters(net)` from `tiny
 The parameters are just listed out explicitly here for clarity.
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
-There are a couple of dataset loaders in tinygrad located in [/extra/datasets](https://github.com/tinygrad/tinygrad/blob/master/extra/datasets).
 We will be using the MNIST dataset loader.
 
 ```python
-from extra.datasets import fetch_mnist
+from tinygrad.nn.datasets import mnist
+X_train, Y_train, X_test, Y_test = mnist()
+X_train, X_test = X_train.squeeze(), X_test.squeeze() # remove unecessary dimensions for the example
+# We also need to flatten the (28,28) vector to a (784,) vector as input for the model:
+X_train = X_train.flatten(1)
+X_test = X_test.flatten(1)
 ```
 
 Now we have everything we need to start training our neural network.
@@ -169,15 +173,15 @@ We use `with Tensor.train()` to set the internal flag `Tensor.training` to `True
 Upon exit, the flag is restored to its previous value by the context manager.
 
 ```python
-X_train, Y_train, X_test, Y_test = fetch_mnist()
-
 with Tensor.train():
   for step in range(1000):
     # random sample a batch
-    samp = np.random.randint(0, X_train.shape[0], size=(64))
-    batch = Tensor(X_train[samp], requires_grad=False)
+    samp = Tensor.randint(64, high=X_train.shape[0])
+    batch = X_train[samp]
+    batch.requires_grad = False
+
     # get the corresponding labels
-    labels = Tensor(Y_train[samp])
+    labels = Y_train[samp]
 
     # forward pass
     out = net(batch)
@@ -212,8 +216,11 @@ with Timing("Time: "):
   avg_acc = 0
   for step in range(1000):
     # random sample a batch
-    samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
+    samp = Tensor.randint(64, high=X_test.shape[0])
+
+    batch = X_test[samp]
+    batch.requires_grad = False
+
     # get the corresponding labels
     labels = Y_test[samp]
 
@@ -256,8 +263,11 @@ with Timing("Time: "):
   avg_acc = 0
   for step in range(1000):
     # random sample a batch
-    samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
+    samp = Tensor.randint(64, high=X_test.shape[0])
+
+    batch = X_test[samp]
+    batch.requires_grad = False
+
     # get the corresponding labels
     labels = Y_test[samp]
 
