@@ -2,7 +2,7 @@
 import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, Callable, TypedDict, cast
+from typing import Any, Callable, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
@@ -47,6 +47,7 @@ uops_colors = {
 
 
 class GraphRewriteMetadata(TypedDict):
+
     loc: tuple[str, int]  # [path, lineno] calling graph_rewrite
     match_count: int  # total match count in this context
 
@@ -180,6 +181,66 @@ def get_details(
     )
 
 
+  loc: tuple[str, int]           # [path, lineno] calling graph_rewrite
+  match_count: int               # total match count in this context
+  code_line: str                 # source code calling graph_rewrite
+  kernel_code: str|None          # optionally render the final kernel code
+
+class GraphRewriteDetails(TypedDict):
+  graph: dict                   # JSON serialized UOp for this rewrite step
+  uop: str                      # strigified UOp for this rewrite step
+  diff: list[str]|None          # string diff of the single UOp that changed
+  changed_nodes: list[int]|None # the changed UOp id + all its parents ids
+  upat: tuple[tuple[str, int], str]|None
+
+# NOTE: if any extra rendering in VIZ fails, we don't crash
+def pcall(fxn:Callable[..., str], *args, **kwargs) -> str:
+  try: return fxn(*args, **kwargs)
+  except Exception as e: return f"ERROR: {e}"
+
+def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
+  assert isinstance(x, UOp)
+  # NOTE: this is [id, [label, src_ids, color]]
+  graph: dict[int, tuple[str, list[int], str]] = {}
+  excluded: set[UOp] = set()
+  for u in (toposort:=x.toposort):
+    # always exclude DEVICE/CONST
+    if u.op in {Ops.DEVICE, Ops.CONST}: excluded.add(u)
+    # only exclude CONST VIEW source if it has no other children in the graph
+    if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
+      excluded.update(u.src)
+  for u in toposort:
+    if u in excluded: continue
+    argst = str(u.arg)
+    if u.op is Ops.VIEW:
+      argst = ("\n".join([f"{v.shape} / {v.strides}"+(f"\nMASK {v.mask}" if v.mask is not None else "")+
+                          ("" if v.offset == 0 else f" / {v.offset}") for v in unwrap(u.st).views]))
+    label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    for idx,x in enumerate(u.src):
+      if x in excluded:
+        if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
+        else: label += f"\n{x.op.name}{idx} {x.arg}"
+    graph[id(u)] = (label, [id(x) for x in u.src if x not in excluded], uops_colors.get(u.op, "#ffffff"))
+  return graph
+
+@functools.lru_cache(None)
+def _prg(k:Kernel): return k.to_program().src
+def to_metadata(k:Any,v:TrackedGraphRewrite) -> GraphRewriteMetadata:
+  return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
+          "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None}
+def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
+  return [(to_function_name(k.name) if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
+
+def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
+  yield {"graph": (sink_json:=uop_to_json(sink:=ctx.sink)), "uop":str(sink), "changed_nodes":None, "diff":None, "upat":None}
+  replaces: dict[UOp, UOp] = {}
+  for u0,u1,upat in tqdm(ctx.matches):
+    replaces[u0] = u1
+    sink = sink.substitute(replaces)
+    yield {"graph": (sink_json:=uop_to_json(sink)), "uop":str(sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
+           "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
+
+
 # Profiler API
 devices: dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 
@@ -292,6 +353,7 @@ def to_perfetto(profile: list[ProfileEvent]):
 
 
 class Handler(BaseHTTPRequestHandler):
+
     def do_GET(self):
         ret, status_code, content_type = b"", 200, "text/html"
 
@@ -345,6 +407,45 @@ class Handler(BaseHTTPRequestHandler):
         return self.wfile.write(ret)
 
 
+  def do_GET(self):
+    ret, status_code, content_type = b"", 200, "text/html"
+
+    if (url:=urlparse(self.path)).path == "/":
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
+    elif (url:=urlparse(self.path)).path == "/profiler":
+      with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
+    elif self.path.startswith("/assets/") and '/..' not in self.path:
+      try:
+        with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
+        if url.path.endswith(".js"): content_type = "application/javascript"
+        if url.path.endswith(".css"): content_type = "text/css"
+      except FileNotFoundError: status_code = 404
+    elif url.path == "/kernels":
+      if "kernel" in (query:=parse_qs(url.query)):
+        def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
+        kidx, ridx = getarg("kernel"), getarg("idx")
+        # stream details
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
+          self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+          self.wfile.flush()
+        self.wfile.write("data: END\n\n".encode("utf-8"))
+        return self.wfile.flush()
+      ret, content_type = json.dumps(kernels).encode(), "application/json"
+    elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
+    else: status_code = 404
+
+    # send response
+    self.send_response(status_code)
+    self.send_header('Content-Type', content_type)
+    self.send_header('Content-Length', str(len(ret)))
+    self.end_headers()
+    return self.wfile.write(ret)
+
+
 # ** main loop
 
 
@@ -365,6 +466,7 @@ def load_pickle(path: str):
 
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernels", type=str, help="Path to kernels", default=None)
     parser.add_argument("--profile", type=str, help="Path profile", default=None)
@@ -413,3 +515,39 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("*** viz is shutting down...")
         stop_reloader.set()
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--kernels', type=str, help='Path to kernels', default=None)
+  parser.add_argument('--profile', type=str, help='Path profile', default=None)
+  args = parser.parse_args()
+
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
+      raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
+  stop_reloader = threading.Event()
+  multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
+  st = time.perf_counter()
+  print("*** viz is starting")
+
+  contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
+
+  # NOTE: this context is a tuple of list[keys] and list[values]
+  kernels = get_metadata(*contexts) if contexts is not None else []
+
+  if getenv("FUZZ_VIZ"):
+    ret = [get_details(contexts[0][i], contexts[1][i][j]) for i,v in tqdm(enumerate(kernels)) for j,args in enumerate(v[1])]
+    print(f"fuzzed {len(ret)} rewrite details")
+
+  perfetto_profile = to_perfetto(profile) if profile is not None else None
+
+  server = HTTPServer(('', PORT), Handler)
+  reloader_thread = threading.Thread(target=reloader)
+  reloader_thread.start()
+  print(f"*** started viz on {HOST}:{PORT}")
+  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
+  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}{'/profiler' if contexts is None else ''}")
+  try: server.serve_forever()
+  except KeyboardInterrupt:
+    print("*** viz is shutting down...")
+    stop_reloader.set()
+

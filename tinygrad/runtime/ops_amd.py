@@ -1,8 +1,13 @@
 from __future__ import annotations
 from typing import Any, cast
+
 import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit
 
 assert sys.platform != "win32"
+
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select
+assert sys.platform != 'win32'
+
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import (
     HCQCompiled,
@@ -1242,6 +1247,7 @@ class PCIIface:
 
 
 class AMDDevice(HCQCompiled):
+
     driverless: bool = not HWInterface.exists("/sys/module/amdgpu") or bool(
         getenv("AMD_DRIVERLESS", 0)
     )
@@ -1399,3 +1405,76 @@ class AMDDevice(HCQCompiled):
         self.synchronize()
         if hasattr(self.dev_iface, "device_fini"):
             self.dev_iface.device_fini()
+
+  driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
+  signals_page:Any = None
+  signals_pool:list[int] = []
+
+  def __init__(self, device:str=""):
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
+    self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    self.target = int(self.dev_iface.props['gfx_target_version'])
+    self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
+    if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+
+    if AMDDevice.signals_page is None:
+      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
+      AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
+    else: self.dev_iface.map(AMDDevice.signals_page)
+
+    self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
+    self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
+    self.has_scratch_base_registers = self.target >= 110000
+
+    # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
+    sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
+    vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
+    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
+    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
+
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+                                           eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
+
+    super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+                     AMDSignal, AMDComputeQueue, AMDCopyQueue)
+
+    # Scratch setup
+    self.max_private_segment_size = 0
+    self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
+
+  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
+    ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
+    gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
+    eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
+    return self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, debug_memory_size=debug_memory_size,
+                                       ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
+
+  def _ensure_has_local_memory(self, required):
+    if self.max_private_segment_size >= required: return
+
+    # <gfx103 requires alignment of 1024, >=gfx11 requires 256
+    wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= 110000 else 1024)
+
+    self.scratch, ok = self._realloc(getattr(self, 'scratch', None), (self.max_cu_id+1)*self.dev_iface.props['max_slots_scratch_cu']*wave_scratch_len)
+    if ok:
+      engines = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
+      waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
+      # >=gfx11 wavesize is per SE
+      wavesize = self.scratch.size // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
+      self.tmpring_size = waves << 12 | wavesize
+      self.max_private_segment_size = required
+
+  def invalidate_caches(self):
+    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
+    self.timeline_value += 1
+    self.synchronize()
+
+  def on_device_hang(self): self.dev_iface.on_device_hang()
+
+  def finalize(self):
+    self.synchronize()
+    if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()
+
