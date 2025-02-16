@@ -228,8 +228,8 @@ with Timing("Time: "):
     out = net(batch)
 
     # calculate accuracy
-    pred = out.argmax(axis=-1).numpy()
-    avg_acc += (pred == labels).mean()
+    pred = out.argmax(axis=-1)
+    avg_acc += (pred == labels).numpy().mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
 
@@ -275,8 +275,8 @@ with Timing("Time: "):
     out = jit(batch)
 
     # calculate accuracy
-    pred = out.argmax(axis=-1).numpy()
-    avg_acc += (pred == labels).mean()
+    pred = out.argmax(axis=-1)
+    avg_acc += (pred == labels).numpy().mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
 
