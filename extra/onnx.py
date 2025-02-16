@@ -640,25 +640,21 @@ def get_onnx_ops():
         xk_out = complex_mult(xk, c, d)
         return xq_out.flatten(3), xk_out.flatten(3)
 
-      if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
-      hidden_size_q, hidden_size_k, v_hidden_size = qkv_hidden_sizes
-      head_size_q = hidden_size_q // num_heads
-      head_size_k = hidden_size_k // num_heads
-      head_size_v = v_hidden_size // num_heads
-
       # project x to q, k, v
+      if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
       qkv = x.linear(weights, bias)
-      q, k, v = qkv.split([hidden_size_q, hidden_size_k, v_hidden_size], dim=2)
+      q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
       # reshape to multi-head format
       batch_size, seq_len, _ = x.shape
-      q = q.reshape(batch_size, seq_len, num_heads, head_size_q).transpose(1, 2)
-      k = k.reshape(batch_size, seq_len, num_heads, head_size_k).transpose(1, 2)
-      v = v.reshape(batch_size, seq_len, num_heads, head_size_v).transpose(1, 2)
+      q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
+      q = q.reshape(batch_size, seq_len, num_heads, q_head_size).transpose(1, 2)
+      k = k.reshape(batch_size, seq_len, num_heads, k_head_size).transpose(1, 2)
+      v = v.reshape(batch_size, seq_len, num_heads, v_head_size).transpose(1, 2)
 
       # apply rotary embeddings
       if do_rotary:
-        rotary_dim = rotary_embedding_dim if rotary_embedding_dim is not None else head_size_q
+        rotary_dim = rotary_embedding_dim if rotary_embedding_dim is not None else q_head_size
         past_seq_len = past_sequence_length if past_sequence_length is not None else 0
         end = past_seq_len + seq_len
         freqs_cis = precompute_freqs_cis(rotary_dim, end)
@@ -669,7 +665,7 @@ def get_onnx_ops():
       if past is not None: k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
 
       # compute attention scores
-      if scale is None: scale = 1.0 / math.sqrt(head_size_q)
+      if scale is None: scale = 1.0 / math.sqrt(q_head_size)
       attn_scores = q @ k.transpose(-1, -2) * scale
 
       # apply attention bias
@@ -678,13 +674,13 @@ def get_onnx_ops():
       # apply attention masks
       if mask_index is not None:
         assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
-        mask = Tensor.arange(seq_len).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index
-        for _ in range(4 - mask.ndim): mask = mask.unsqueeze(1)
-        attn_scores = attn_scores + (1 - mask) * mask_filter_value
+        mask = Tensor.arange(seq_len).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index.bool()
+        mask = mask.reshape(mask.shape[0], *(1,)*(4 - mask.ndim), *mask.shape[1:])
+        attn_scores = attn_scores + ~mask * mask_filter_value
+
       if unidirectional:
         causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
-        causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
-        attn_scores = attn_scores + (1 - causal_mask) * mask_filter_value
+        attn_scores = attn_scores + ~causal_mask * mask_filter_value
 
       output = attn_scores.softmax(-1) @ v
       output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
@@ -728,10 +724,9 @@ def get_onnx_ops():
       else: raise NotImplementedError("reduction doesn't support max or min")
     return x
 
-  def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
+  def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
-    if reduction == "none": return x.scatter(axis, indices, updates)
-    return x.scatter_reduce(axis, indices, updates, {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}.get(reduction))
+    return x.scatter(axis, indices, updates, {"none":None, "mul": "multiply"}.get(reduction, reduction))
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     return x.gather(axis, indices)

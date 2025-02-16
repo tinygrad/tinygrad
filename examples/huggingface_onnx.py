@@ -16,7 +16,9 @@ SKIPPED_REPOS = [
   "mangoapps/fb_zeroshot_mnli_onnx", # implement NonZero op
   "HuggingFaceTB/SmolLM2-360M-Instruct", # implement GroupQueryAttention
   # ran out of memory on m1 mac
-  "stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo", "llava-hf/llava-onevision-qwen2-0.5b-ov-hf"
+  "stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo",
+  "llava-hf/llava-onevision-qwen2-0.5b-ov-hf", "distil-whisper/distil-large-v2",
+  "Snowflake/snowflake-arctic-embed-m-v2.0",
 ]
 
 def huggingface_download_onnx_model(model_id:str):
