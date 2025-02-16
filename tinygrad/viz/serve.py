@@ -136,7 +136,8 @@ class Handler(BaseHTTPRequestHandler):
           chunk = "data: "+json.dumps(ret)+"\n\n"
           self.wfile.write(chunk.encode("utf-8"))
           self.wfile.flush()
-        return
+        self.wfile.write("data: END\n\n".encode("utf-8"))
+        return self.wfile.flush()
       ret, content_type = json.dumps(kernels).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
     else: status_code = 404
