@@ -44,6 +44,7 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
+atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
 
 # **************** Profile ****************
 
@@ -298,6 +299,11 @@ class Compiled:
   def _at_profile_finalize(self):
     """
     Called at the end of profiling to allow the device to finalize any profiling.
+    """
+    # override this in your device implementation
+  def finalize(self):
+    """
+    Called at the end of process lifetime to allow the device to finalize.
     """
     # override this in your device implementation
 
