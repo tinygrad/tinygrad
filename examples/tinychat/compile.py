@@ -190,7 +190,7 @@ if __name__=="__main__":
     for i, (name,(size,dtype,_key)) in enumerate(bufs.items()):
       if i % (len(bufs) // buf_prog_chunks) == 0 and i>0:
         exported_bufs.append(f"await new Promise(resolve => setTimeout(resolve, 0));") # prevent browser lag
-        if step.show_progress: exported_bufs.append(f"progress({buf_prog / buf_prog_chunks} * progress.total, 'Loading model:');")
+        if step.show_progress: exported_bufs.append(f"progress({buf_prog / buf_prog_chunks} * progress.total);")
       exported_bufs.append(f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weights else (f"createWeightBuf(device, {size}, state_dict['{weights[_key]}'])" if "cache_kv" not in weights[_key] else f"createEmptyBuf(device, {size})") + ";"))
     exported_bufs = '\n   '.join(exported_bufs)
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v)])
@@ -202,8 +202,8 @@ if __name__=="__main__":
           const pipeline = await device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}});
           piplines.push(pipeline);
           if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 0)); // prevent browser lag
-          if (i === Math.floor(kernels.length * 1/3)) {{progress({pipeline_prog / 2} * progress.total, "Loading model:");}}
-          if (i === Math.floor(kernels.length * 1/3)) {{progress({pipeline_prog / 2} * progress.total, "Loading model:");}}
+          if (i === Math.floor(kernels.length * 1/3)) {{progress({pipeline_prog / 2} * progress.total);}}
+          if (i === Math.floor(kernels.length * 1/3)) {{progress({pipeline_prog / 2} * progress.total);}}
         }}""" if step.show_progress else f'const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));'
     return f"""\n    var {step.name} = function() {{
 

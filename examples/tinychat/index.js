@@ -22,17 +22,29 @@ const tiktokenReady = (async () => {
   window.tiktokenLoad = load;
 })();
 
-// copied from examples/webgpu/stable_diffusion/index.html
-const getDevice = async () => {
-  const adapter = await navigator.gpu.requestAdapter();
+async function getDevice() {
+  let adapter;
+  try {
+    adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+      this.loadingMessage = "Loading WASM model (enable WebGPU for more speed):";
+      throw new Error("No WebGPU adapter found");
+    }
+  } catch(error) {
+    this.loadingMessage = "Loading WASM model (enable WebGPU for more speed):";
+    throw error;
+  }
   const requiredLimits = {};
   const maxBufferSize = 322122544;
   requiredLimits.maxStorageBufferBindingSize = maxBufferSize;
   requiredLimits.maxBufferSize = maxBufferSize;
             
-  return await adapter.requestDevice({
-    requiredLimits
-  });
+  try {
+    return await adapter.requestDevice({ requiredLimits });
+  } catch(error) {
+    this.loadingMessage = "Loading WASM model (WebGPU launch failed):";
+    throw error;
+  }
 };
 
 // copied from examples/webgpu/stable_diffusion/index.html 
@@ -234,7 +246,7 @@ async function load_state_dict (data, device, progress) {
               for (;;) {
                   const { done, value } = await reader.read();
                   if (done) break;
-                  progress(value.byteLength, `Loading model:`);
+                  progress(value.byteLength);
                   controller.enqueue(value);
               }
               controller.close();
@@ -251,7 +263,7 @@ async function load_state_dict (data, device, progress) {
 
     if (part) {
       console.log(`Cache hit: ${filename}, hash: ${hash}`);
-      progress(part.content.byteLength, `Loading model:`)
+      progress(part.content.byteLength);
       return Promise.resolve(part.content);
     } else {
       console.log(`Cache miss: ${filename}, hash: ${hash}`);
@@ -273,12 +285,12 @@ async function load_state_dict (data, device, progress) {
     model = await transformer().setup(device, state_dict, progress);
   }
   else if (window.BACKEND === "WASM") {
-    progress(0.02 * progress.total, 'Loading model:');
+    progress(0.02 * progress.total);
     model = new Worker(`./worker.js?version=${Date.now()}`);
     await sendMessageToWorker(model, {header: "init"});
-    progress(0.02 * progress.total, 'Loading model:');
+    progress(0.02 * progress.total);
     //data.metadata.files = await sendMessageToWorker(model, {header: "init_state_dict", files: data.metadata.files, totalSize: data.totalSize});
-    progress(0.11 * progress.total, 'Loading model:');
+    progress(0.11 * progress.total);
   }
 
   const downloaded = [];
@@ -369,7 +381,7 @@ document.addEventListener("alpine:init", () => {
     // loadingMessage updates the user on page load progress, including weights download and decompression
     // if loadingMessage is not '', then prompt box will be hidden: this is default behavior on page load
     placeholderText: "Generating...",
-    loadingMessage: 'Loading...',
+    loadingMessage: `Loading ${window.BACKEND} model:`,
     // model
     nets: {},
     tokenizer: null,
@@ -381,14 +393,16 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       var device = null;
+      var webgpuErrorMessage = null;
       if (window.BACKEND === "WebGPU") {
         try {
-          device = await getDevice();
+          device = await getDevice.call(this);
           console.log("WebGPU device initialized");
         } catch (error) {
           //this.progress(0, "Failed to launch WebGPU. Loading WASM model instead...");
           window.BACKEND = "WASM";
           console.log(`error: ${error}\nFailed to launch WebGPU. Loading WASM model instead...`); // return;
+          webgpuErrorMessage = this.loadingMessage;
         }
       }
 
@@ -462,19 +476,21 @@ document.addEventListener("alpine:init", () => {
       try {
         this.progress(0.01 * totalSize, "Loading tokenizer:");
         const wasmResponse = await fetch(`${window.MODEL_BASE_URL}/tiktoken_bg.wasm`);
-        this.progress(0.01 * totalSize, "Loading tokenizer:");
+        this.progress(0.01 * totalSize);
         const wasmBytes = await wasmResponse.arrayBuffer();
         await tiktokenReady;
         await window.tiktokenInit((imports) => WebAssembly.instantiate(wasmBytes, imports));
-        this.progress(0.01 * totalSize, "Loading tokenizer:");
+        this.progress(0.01 * totalSize);
 
         this.tokenizer = await createTokenizer(`${window.MODEL_BASE_URL}/llama3-2.tiktoken`);
         const tokenizer_works = (new TextDecoder().decode(this.tokenizer.decode(this.tokenizer.encode("hello world"))) === "hello world");
         console.log("tokenizer works:", tokenizer_works)
-        this.progress(0.01 * totalSize, "Loading tokenizer:");
+        this.progress(0.01 * totalSize);
       } catch (error) {this.progress(-1, `Error launching tokenizer: ${error}`); console.log(error); return;}
 
       try {
+        const loadModelMessage = (webgpuErrorMessage) ? webgpuErrorMessage : `Loading ${window.BACKEND} model:`
+        this.progress(0, loadModelMessage);
         await kernelsReady;
         const model = await load_state_dict(data, device, this.progress);
 
