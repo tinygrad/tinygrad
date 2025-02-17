@@ -73,3 +73,6 @@ if __name__ == "__main__":
     t = p.argmax().item()
     hit += y==t
     print(f"target: {y:3d}  pred: {t:3d}  acc: {hit/(i+1)*100:.2f}%")
+
+  import pickle
+  with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)
