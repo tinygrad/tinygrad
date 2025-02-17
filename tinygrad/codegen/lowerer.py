@@ -6,6 +6,7 @@ from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, getenv
+from tinygrad.codegen.expander import expand_rewrite
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -183,5 +184,7 @@ pm_quant = symbolic+PatternMatcher([
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
   if opts.device in {"CLANG", "DSP"}: ast = graph_rewrite(ast, pm_quant)
-  return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+  # expand_rewrite turns this into a vectorized program
+  return expand_rewrite(sink)
