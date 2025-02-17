@@ -432,8 +432,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       else: becomes_map[k] = v
     elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
-  # break the schedule into kernels
+  # create kernels
+  if len(realize_map) == 0: return [], {}, becomes_map
   sched_sink = graph_rewrite(sink, create_kernels, ctx)
+  type_verify(list(sched_sink.toposort), kernel_spec)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
