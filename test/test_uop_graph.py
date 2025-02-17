@@ -383,6 +383,13 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.src[1].op, Ops.CONST)
     self.assertEqual(out.src[1].arg, 6)
 
+  def test_bitcast_to_same_dtype_fold(self):
+    for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
+      d0 = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), arg=0)
+      v = UOp(Ops.LOAD, dt, (d0.index(UOp.const(dtypes.int, 0)),))
+      uops = to_uops_list([v.bitcast(dt)])
+      self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
+
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
