@@ -248,20 +248,22 @@ class RPCListener(threading.Thread):
 
 # ***** mock DSP *****
 
+mockdsp_boilerplate = '''/* DSP boilerplate */ static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
+long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = %7; trap0(#1); %0 = r0" : "=r" (retval)
+  : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "r" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
+static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
+static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
+static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
+static unsigned int inscount(void) {{ unsigned int ret; __asm__ volatile(".word 0x6a15c000; %0 = R0" : "=r" (ret) : : "r0"); return ret; }}
+static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
+return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
+
 class MockDSPRenderer(DSPRenderer):
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     ret = ClangRenderer.render_kernel(self, function_name, kernel, bufs, uops, prefix)
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
-    msrc = ['''/* DSP boilerplate */ static long syscall(long r0, long r1, long r2, long r3, long r4, long r5, long r6) {
-        long retval; __asm__ volatile("r0 = %1; r1 = %2; r2 = %3; r3 = %4; r4 = %5; r5 = %6; r6 = %7; trap0(#1); %0 = r0" : "=r" (retval)
-          : "r" (r0), "r" (r1), "r" (r2), "r" (r3), "r" (r4), "r" (r5), "r" (r6) : "r0", "r1", "r2", "r3", "r4", "r5", "r6"); return retval; }
-      static int read(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 63); }}
-      static int write(int fd, void* buf, int len) {{ return syscall(fd, (long)buf, len, 0, 0, 0, 64); }}
-      static int exit(int ret) {{ return syscall(ret, 0, 0, 0, 0, 0, 93); }}
-      static unsigned int inscount(void) {{ unsigned int ret; __asm__ volatile(".word 0x6a15c000; %0 = R0" : "=r" (ret) : : "r0"); return ret; }}
-      static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
-        return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}''', 'void _start(void) {']
+    msrc = [mockdsp_boilerplate, 'void _start(void) {']
     for i,b in enumerate(bufs):
       if isinstance(b[1][0], PtrDType):
         sz = b[1][0].size*b[1][0].itemsize
