@@ -1733,8 +1733,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     is_close = (self - other).abs() <= atol + rtol * other.abs()
-    if equal_nan: return is_close | (self.isnan() & other.isnan())
-    return is_close & (self.isnan() | other.isnan()).logical_not()
+    return is_close | (self.isnan() & other.isnan()) if equal_nan else is_close & (self.isnan() | other.isnan()).logical_not()
 
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
