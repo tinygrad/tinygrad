@@ -132,16 +132,19 @@ class Handler(BaseHTTPRequestHandler):
       if "kernel" in (query:=parse_qs(url.query)):
         def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
         kidx, ridx = getarg("kernel"), getarg("idx")
-        # stream details
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
-          self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-          self.wfile.flush()
-        self.wfile.write("data: END\n\n".encode("utf-8"))
-        return self.wfile.flush()
+        try:
+          # stream details
+          self.send_response(200)
+          self.send_header("Content-Type", "text/event-stream")
+          self.send_header("Cache-Control", "no-cache")
+          self.end_headers()
+          for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
+            self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+          self.wfile.write("data: END\n\n".encode("utf-8"))
+          return self.wfile.flush()
+        # pass if client closed connection
+        except (BrokenPipeError, ConnectionResetError): return
       ret, content_type = json.dumps(kernels).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
     else: status_code = 404

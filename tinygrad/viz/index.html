@@ -307,6 +307,7 @@
   var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
+  const evtSources = [];
   async function main() {
     const mainContainer = document.querySelector('.main-container');
     // ***** LHS kernels list
@@ -357,13 +358,23 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    const cacheKey = `${currentKernel}-${currentUOp}`;
+    const kernel = kernels[currentKernel][1][currentUOp];
+    const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
+    // close any pending event sources
+    let activeSrc = null;
+    for (const e of evtSources) {
+      if (e.url.split("?")[1] !== cacheKey) e.close();
+      else if (e.readyState === EventSource.OPEN) activeSrc = e;
+    }
     if (cacheKey in cache) {
       ret = cache[cacheKey];
     }
-    else {
+    // if we don't have a complete cache yet we start streaming this kernel
+    if (!(cacheKey in cache) || (cache[cacheKey].length !== kernel.match_count+1 && activeSrc == null)) {
       ret = [];
+      cache[cacheKey] = ret;
       const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+      evtSources.push(eventSource);
       eventSource.onmessage = (e) => {
         if (e.data === "END") return eventSource.close();
         const chunk = JSON.parse(e.data);
@@ -374,14 +385,12 @@
         const gUl = document.getElementById(`rewrite-${ret.length-1}`);
         if (gUl != null) gUl.classList.remove("disabled");
       };
-      cache[cacheKey] = ret;
     }
     if (ret.length === 0) return;
     renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    const kernel = kernels[currentKernel][1][currentUOp];
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
     metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     // ** code blocks
