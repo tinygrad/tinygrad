@@ -479,7 +479,7 @@ def expand_index(buf:UOp, base_index:UOp, c:UOp):
     bj += len(g)
   loads = UOp(Ops.CAT, buf.dtype.base.vec(len(c.arg)).ptr(buf.dtype.size), tuple(idxs)) if len(idxs) > 1 else idxs[0]
   assert all(x is not None for x in big_gep)
-  return loads.gep(tuple(cast(list[int], big_gep)))
+  return loads.gep(tuple(cast(list[int], big_gep))) if tuple(big_gep) != tuple(range(0, len(big_gep))) else loads
 
 def cat_after_store(cat:UOp, data:UOp):
   # TODO: this is written in many places

@@ -70,6 +70,7 @@ class ProgramSpec:
   name:str
   src:str
   device:str
+  ast:UOp  # save the base ast (this is method cache key)
   uops:Optional[list[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
