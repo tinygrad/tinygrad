@@ -1,5 +1,5 @@
 # the job of the lowerer is to do indexing
-import functools, itertools, operator
+import functools, itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
@@ -7,7 +7,6 @@ from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UP
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.expander import expand_rewrite
-import math
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:

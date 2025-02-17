@@ -3,7 +3,7 @@ import functools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
-from tinygrad.ops import graph_rewrite, is_increasing, GroupOp
+from tinygrad.ops import graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, mulacc_unrolled
 from tinygrad.helpers import getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -109,7 +109,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
     # if X >= c, check if it's out of bound when X = c-1
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf.dtype.shape[1], buf.dtype.shape[0])):
-      if is_increasing(i):
+      if i.is_increasing():
         rw = i.substitute({X:X.const_like(test_value)}).simplify()
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
