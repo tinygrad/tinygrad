@@ -588,6 +588,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop symbolic stuff ***
 
+  def is_increasing(self:UOp) -> bool:
+    # is f a monotonically increasing function regards its input
+    if self.op in GroupOp.Irreducible: return True
+    if self.op is Ops.ADD: return self.src[0].is_increasing() and self.src[1].is_increasing()
+    if self.op in (Ops.MUL, Ops.IDIV) and self.src[1].op is Ops.CONST and self.src[1].arg >= 0: return self.src[0].is_increasing()
+    return False  # False if not sure
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is Ops.CONST: return self.arg
@@ -937,13 +943,6 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) ->
     tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
   rewrite_ctx = RewriteContext(pm, ctx)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
-
-def is_increasing(f:UOp) -> bool:
-  # is f a monotonically increasing function regards its input
-  if f.op in GroupOp.Irreducible: return True
-  if f.op is Ops.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
-  if f.op in (Ops.MUL, Ops.IDIV) and f.src[1].op is Ops.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
-  return False  # False if not sure
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
 
