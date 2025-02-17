@@ -1732,8 +1732,9 @@ class Tensor(SimpleMathTrait):
     print(t.isclose(Tensor([1, 2, 3.1])).numpy())
     ```
     """
-    if equal_nan: return ((self - other).abs() <= atol + rtol * other.abs()) * self.isnan().xor(other.isnan()).logical_not()
-    return ((self - other).abs() <= atol + rtol * other.abs()) * (self.isnan() | other.isnan()).logical_not()
+    is_close = (self - other).abs() <= atol + rtol * other.abs()
+    if equal_nan: return is_close | (self.isnan() & other.isnan())
+    return is_close & (self.isnan() | other.isnan()).logical_not()
 
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
