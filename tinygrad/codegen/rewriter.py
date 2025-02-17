@@ -17,12 +17,8 @@ def fold_expanded(ex, buf):
 
   # TODO: get the device from the buffer somehow
   # NOTE: this can't be Device.DEFAULT because it opens devices
-  if getenv("DSP"):
-    if buf.dtype.base == dtypes.bool: return None
-    lengths = [128,4]
-  else:
-    if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
-    lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
+  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
+  lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
 
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
@@ -529,6 +525,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   else:
     # new devectorize only for load/store
     sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
+
+  # optional pre matcher
+  if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
