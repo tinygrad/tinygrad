@@ -1,11 +1,12 @@
 # the job of the lowerer is to do indexing
-import functools, itertools, operator
+import functools, itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
+from tinygrad.codegen.expander import expand_rewrite
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -15,23 +16,37 @@ def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> l
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
 # ***** indexing *****
-
-def _limit_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
+def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
   if not all_int(dims): return dims
   while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
-      if dims[i] * dims[i+1] <= m:
+      if i < (len(dims)-1) and dims[i] * dims[i+1] <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
         break
-    else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+    else: return None
   return dims
+
+def _split_dims(dims, max_sizes):
+  if all(d <= m for d,m in zip(dims, max_sizes)): return dims
+  _dims = list(dims) + [1]*(3-len(dims))
+  for i in range(len(_dims)):
+    while _dims[i] > max_sizes[i]:
+      div = next((d for d in range(2, math.ceil(math.sqrt(_dims[i])) + 1) if (_dims[i] % d) == 0), 1)
+      if div == 1: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+      _dims[i], _dims[(i+1)%len(_dims)] = _dims[i]//div, _dims[(i+1)%len(_dims)]*div
+  return tuple(_dims[:2] if _dims[2] == 1 else _dims[0] if _dims[1:3] == [1,1] else _dims)
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: dims = dims[::-1]
-  limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
+  # try to group first: (a, b, c, d) -> (ab, c, d)
+  limited = (grouped if (grouped := _group_dims(dims, max_sizes)) else dims) if max_sizes is not None else dims
+  # check if grouping failed
+  if max_sizes is not None and len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+  # try to split up dims: (a,) -> (b, c)
+  if limited == dims: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
-  if limited != dims:
+  if len(limited) < len(dims):
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
     for idx, contraction_group in zip(raw_idxs, contraction):
@@ -39,6 +54,11 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
         ret.append(idx % dims[c])
         idx //= dims[c]
       ret.append(idx)
+  elif len(limited) > len(dims):
+    a, b = len(limited), len(dims)
+    if a == 2 and b == 1: ret = [raw_idxs[0] * limited[1] + raw_idxs[1]]
+    if a == 3 and b == 1: ret = [raw_idxs[0] * (limited[1] * limited[2]) + raw_idxs[1] * limited[2] + raw_idxs[2]]
+    if a == 3 and b == 2: ret = [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]
   return ret[::-1] if reverse else ret
 
 @dataclass
@@ -135,4 +155,7 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+  # expand_rewrite turns this into a vectorized program
+  return expand_rewrite(sink)

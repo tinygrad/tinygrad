@@ -213,6 +213,7 @@ generate_libc() {
     $(dpkg -L libc6-dev | grep sys/syscall.h) \
     /usr/include/elf.h \
     /usr/include/unistd.h \
+    /usr/include/asm-generic/mman-common.h \
     -o $BASE/libc.py
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
@@ -220,6 +221,24 @@ generate_libc() {
   sed -i "s\FunctionFactoryStub()\None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path)\g" $BASE/libc.py
 
   fixup $BASE/libc.py
+}
+
+generate_llvm() {
+  INC="$(llvm-config-14 --includedir)"
+  clang2py -k cdefstum \
+    $(find "$INC/llvm-c/" -type f -name '*.h' | sort) \
+    "$INC/llvm/Config/Targets.def" \
+    "$INC/llvm/Config/AsmPrinters.def" \
+    "$INC/llvm/Config/AsmParsers.def" \
+    "$INC/llvm/Config/Disassemblers.def" \
+    --clang-args="$(llvm-config-14 --cflags)" \
+    -o "$BASE/llvm.py"
+
+  sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support\g" "$BASE/llvm.py"
+  sed -i "s\FIXME_STUB\llvm\g" "$BASE/llvm.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVM_PATH)\g" "$BASE/llvm.py"
+
+  fixup "$BASE/llvm.py"
 }
 
 generate_kgsl() {
@@ -252,15 +271,11 @@ generate_qcom() {
   python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
 }
 
-generate_pciaccess() {
+generate_pci() {
   clang2py -k cdefstum \
-    /usr/include/pciaccess.h \
     /usr/include/linux/pci_regs.h \
-    -l /usr/lib/x86_64-linux-gnu/libpciaccess.so \
-    -o $BASE/libpciaccess.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/libpciaccess.py
-  fixup $BASE/libpciaccess.py
-  sed -i "s/ctypes\.CDLL('\([^']*\)')/ctypes.CDLL('\1') if os.path.exists('\1') else None/g" $BASE/libpciaccess.py
+    -o $BASE/pci.py
+  fixup $BASE/pci.py
 }
 
 generate_vfio() {
@@ -314,6 +329,12 @@ generate_am() {
   fixup $BASE/am/mmhub_3_0_0.py
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/mmhub_3_0_2_offset.h \
+    extra/amdpci/headers/mmhub_3_0_2_sh_mask.h \
+    -o $BASE/am/mmhub_3_0_2.py
+  fixup $BASE/am/mmhub_3_0_2.py
+
+  clang2py -k cdefstum \
     extra/amdpci/headers/nbio_4_3_0_offset.h \
     extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
     -o $BASE/am/nbio_4_3_0.py
@@ -333,6 +354,14 @@ generate_am() {
   fixup $BASE/am/smu_v13_0_0.py
 }
 
+generate_webgpu() {
+  clang2py -l /usr/local/lib/libwebgpu_dawn.so extra/webgpu/webgpu.h -o $BASE/webgpu.py
+  fixup $BASE/webgpu.py
+  sed -i 's/import ctypes/import ctypes, ctypes.util/g' $BASE/webgpu.py
+  sed -i "s|ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))|g" $BASE/webgpu.py
+  python3 -c "import tinygrad.runtime.autogen.webgpu"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -346,10 +375,12 @@ elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "pci" ]; then generate_pciaccess
+elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am
+elif [ "$1" == "webgpu" ]; then generate_webgpu
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
 else echo "usage: $0 <type>"
 fi

@@ -55,7 +55,7 @@ class GPFIFO:
 
   def _reset_buf_state(self): self.buf, self.buf_ptr = None, 0
   def _set_buf_state(self, gpfifo_entry):
-    ptr = ((gpfifo_entry >> 2) & 0xfffffffff) << 2
+    ptr = ((gpfifo_entry >> 2) & 0x3fffffffff) << 2
     sz = ((gpfifo_entry >> 42) & 0x1fffff) << 2
     self.buf = to_mv(ptr, sz).cast("I")
     self.buf_sz = sz // 4
@@ -92,7 +92,7 @@ class GPFIFO:
     qmd = qmd_struct_t.from_address(qmd_addr)
     prg_addr = qmd.program_address_lower + (qmd.program_address_upper << 32)
     const0 = to_mv(qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32), 0x160).cast('I')
-    args_cnt, vals_cnt = const0[0], const0[1]
+    args_cnt, vals_cnt = const0[80], const0[81]
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
     args = to_mv(args_addr, args_cnt*8).cast('Q')
     vals = to_mv(args_addr + args_cnt*8, vals_cnt*4).cast('I')

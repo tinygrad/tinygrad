@@ -1,7 +1,8 @@
 from __future__ import annotations
 import collections, heapq
 from dataclasses import dataclass
-from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
+from tinygrad.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
+from tinygrad.spec import type_verify
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 

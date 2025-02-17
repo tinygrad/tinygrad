@@ -2,6 +2,7 @@ from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import DEVECTORIZE
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -99,11 +100,13 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, bytes, int, int, bool], CompiledRunner] = {}
+method_cache: dict[tuple[str, bytes, tuple[int, ...], bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
-  ckey = (device, ast.key, BEAM.value, NOOPT.value, False)
+  # TODO: this should be all context relevant to rendering
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
+  ckey = (device, ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
+  bkey = (device.split(":")[0], ast.key, context, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:

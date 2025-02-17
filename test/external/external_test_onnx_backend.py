@@ -95,6 +95,10 @@ backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
 
+# no support for int pow
+backend_test.exclude('test_pow_types_int32_int32_cpu')
+backend_test.exclude('test_pow_types_int64_int64_cpu')
+
 # no support for fmod
 backend_test.exclude('test_mod_int64_fmod_cpu')
 backend_test.exclude('test_mod_mixed_sign_float16_cpu')
@@ -171,9 +175,7 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
 
-backend_test.exclude('test_scatter_elements_with_reduction_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
-backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
 if Device.DEFAULT in ['GPU', 'METAL']:

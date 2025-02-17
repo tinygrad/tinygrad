@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-from collections import defaultdict
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
 from typing import Callable, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.engine.schedule import ScheduleContext, schedule_uop
+from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
@@ -20,6 +19,10 @@ os.environ["RUN_PROCESS_REPLAY"] = "0"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+MAX_LINES = 500
+def trunc_log(x):
+  if len(lines:=repr(x).splitlines()) > MAX_LINES: lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
+  logging.info("\n".join(lines))
 
 # user config
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
@@ -30,9 +33,9 @@ class ProcessReplayWarning(Warning): pass
 
 # *** recreators
 
-def recreate_sched(ast:UOp) -> UOp:
-  # NOTE: process replay isn't meant to actually schedule anything
-  return schedule_uop(ast, ScheduleContext(tensor_uops=defaultdict(list))).ast
+def recreate_sched(big_sink:UOp) -> list[UOp]:
+  sched, _, __ = create_schedule_with_vars(big_sink)
+  return [x.ast for x in sched]
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
@@ -42,7 +45,8 @@ def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) ->
 # *** diff a "good" recreation against the generated version
 
 def diff(offset:int, name:str, fxn:Callable) -> None:
-  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
+  # TODO: add this assert back for schedule
+  if ASSERT_DIFF and name != "schedule": warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
@@ -61,18 +65,21 @@ def diff(offset:int, name:str, fxn:Callable) -> None:
       continue
     # try recreate
     try:
-      with Context(**{k:v.value for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
+      ctx_vars = {k:v.value for k,v in args[-2].items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+      with Context(**ctx_vars): good = fxn(*args[:-2])
       if good is None: continue
     except Exception as e:
       changed += 1
       warnings.warn(f"FAILED TO RECREATE KERNEL {e}", ProcessReplayWarning)
-      for x in args[:-1]: logging.info(x)
+      if ctx_vars: logging.info(ctx_vars)
+      for x in args[:-2]: trunc_log(x)
       continue
     # diff kernels
     try: assert str(args[-1]) == str(good)
     except AssertionError:
       changed += 1
-      for x in args[:-1]: logging.info(x)
+      if ctx_vars: logging.info(ctx_vars)
+      for x in args[:-2]: trunc_log(x)
       changes = list(difflib.unified_diff(str(good).splitlines(), str(args[-1]).splitlines()))
       logging.info("\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in changes))
       warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)

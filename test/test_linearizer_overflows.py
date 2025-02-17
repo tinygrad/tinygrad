@@ -4,8 +4,8 @@ from test.helpers import ast_const
 from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.search import Opt, OptOps
-from tinygrad.engine.search import time_linearizer, bufs_from_lin
+from tinygrad.engine.search import Opt, OptOps, bufs_from_lin
+from extra.optimization.helpers import time_linearizer
 
 # stuff needed to unpack a kernel
 from tinygrad.ops import UOp, Ops

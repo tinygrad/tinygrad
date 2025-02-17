@@ -4,9 +4,8 @@
   <title>tinygrad viz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-  <script src="https://cdn.jsdelivr.net/npm/cytoscape/dist/cytoscape.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.3.0/dist/cytoscape-elk.min.js"></script>
+  <script src="assets/d3js.org/d3.v5.min.js" charset="utf-8"></script>
+  <script src="assets/dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
   <link rel="stylesheet" href="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
@@ -27,7 +26,7 @@
     padding: 0;
     width: 100%;
     height: 100%;
-    font-family: "Noto Sans", sans-serif;
+    font-family: sans-serif;
     font-optical-sizing: auto;
     font-weight: 400;
     font-style: normal;
@@ -40,12 +39,16 @@
   }
   ul {
     padding: 0;
-    color: #7c7d85;
+    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
   ul.active {
-    color: #f0f0f5;
+    opacity: 1;
+  }
+  ul.disabled {
+    opacity: 0.6;
+    pointer-events: none;
   }
   svg {
     width: 100%;
@@ -194,13 +197,6 @@
     border-radius: 8px;
     padding: 8px;
   }
-  .progress {
-    font-size: 20px;
-    z-index: 2;
-    align-self: center;
-    justify-content: center;
-    width: 100%;
-  }
   </style>
 </head>
 <body>
@@ -212,13 +208,14 @@
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
-    <p class="progress"></p>
-    <div class="graph"></div>
+    <div class="graph">
+      <svg id="graph-svg">
+        <g id="render"></g>
+      </svg>
+    </div>
     <div class="container metadata"></div>
   </div>
   <script>
-  /* global hljs, dagreD3, d3, DOMPurify */
-
   // **** hljs extra definitions for UOps and float4
   hljs.registerLanguage("python", (hljs) => ({
     ...hljs.getLanguage("python"),
@@ -236,62 +233,42 @@
     contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
   }));
 
-  // **** UOp graph
-  const cy = cytoscape({
-    container: document.querySelector('.graph'),
-    boxSelectionEnabled: false,
-    autoungrabify: true, autounselectify: true,
-    style: [
-      {
-        selector: "node",
-        style: {
-          label: "data(label)",
-          color: "#08090e",
-          textWrap: "wrap",
-          width: "label",
-          height: "label",
-          padding: "4px",
-          fontSize: "5px",
-          textHalign: "center",
-          textValign: "center",
-          shape: "roundrectangle",
-          borderWidth: "0.4px",
-          borderColor: "#4a4b57",
-        }
-      },
-      {
-        selector: "edge",
-        style: {
-          width: 0.4,
-          lineColor: "#4a4b57",
-          targetArrowColor: "#4a4b57",
-          targetArrowShape: "triangle",
-          arrowScale: 0.4,
-          curveStyle: "straight",
-        }
-      },
-    ],
-  });
+  // **** D3
+  function recenterRects(svg, zoom) {
+    const svgBounds = svg.node().getBoundingClientRect();
+    for (const rect of svg.node().querySelectorAll("rect")) {
+      const rectBounds = rect.getBoundingClientRect();
+      const outOfBounds = rectBounds.top < svgBounds.top || rectBounds.left < svgBounds.left ||
+        rectBounds.bottom > svgBounds.bottom || rectBounds.right > svgBounds.right;
+      // if there's at least one rect in view we don't do anything
+      if (!outOfBounds) return;
+    }
+    svg.call(zoom.transform, d3.zoomIdentity)
+  }
   function renderGraph(graph, additions) {
-    const currElements = new Set();
-    for (const [id, [label, src, color]] of Object.entries(graph)) {
-      currElements.add(id);
-      if (cy.getElementById(id).length == 0) {
-        cy.add({data: {id, label}, style: {backgroundColor: color}})
+    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
+    for (const [k,u] of Object.entries(graph)) {
+      g.setNode(k, {label: u[0], style: `fill: ${u[2]};` });
+      for (const src of u[1]) {
+        g.setEdge(src, k, {curve: d3.curveBasis})
       }
-      for (const source of src) {
-        const edgeKey = `${source}-${id}`;
-        currElements.add(edgeKey)
-        if (cy.getElementById(edgeKey).length == 0) {
-          cy.add({data: {source, target: id, id:edgeKey}, classes: "edge"})
-        }
+      if (additions.includes(parseInt(k))) {
+        g.setParent(k, "addition");
       }
     }
-
-    for (const e of cy.elements()) {
-      if (!(currElements.has(e.id()))) e.remove();
-    }
-    cy.layout({name: "elk"}).run();
+    const svg = d3.select("#graph-svg");
+    const inner = svg.select("g");
+    var zoom = d3.zoom()
+      .scaleExtent([0.05, 2])
+      .on("zoom", () => {
+        const transform = d3.event.transform;
+        inner.attr("transform", transform);
+      });
+    recenterRects(svg, zoom);
+    svg.call(zoom);
+    const render = new dagreD3.render();
+    render(inner, g);
   }
 
   // **** extra helpers
@@ -300,16 +277,21 @@
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const highlightedCodeBlock = (code, lang, wrap) => {
     const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
-    const codeEl = Object.assign(document.createElement("code"), {
-      // NOTE: since code is in textContent, we don't need DOMPurify
-      className: `language-${lang} code-block`, textContent: code});
+    // NOTE: since code is in textContent, we don't need DOMPurify
+    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code});
     pre.appendChild(codeEl);
     hljs.highlightElement(codeEl);
     return pre;
   };
+  const coloredToHTML = (str) => {
+    const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+    return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+    })
+  }
 
   // **** main loop
-  var ret = {};
+  var ret = [];
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
@@ -332,7 +314,7 @@
       if (i === currentKernel) {
         requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
-      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerText: key, style: "cursor: pointer;"});
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
@@ -366,63 +348,55 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    else {
-      const cacheKey = `${currentKernel}-${currentUOp}`;
-      if (cacheKey in cache) {
-        ret = cache[cacheKey];
-      }
-      else {
-        // clear the graph before fetching the new one
-        cy.elements().remove();
-        const p = document.querySelector(".progress");
-        const limit = 100;
-        const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
-        p.style.display = pageCount == 1 ? "none" : "flex";
-        for (let i=0; i < pageCount; i++) {
-          p.innerText = `fetching data ${i+1}/${pageCount}`;
-          const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
-          if (i === 0) ret = chunk
-          else {
-            // TODO: this shouldn't exist after the viz api refactor
-            for (const [k,v] of Object.entries(chunk)) {
-              if (["uops", "graphs"].includes(k)) v.splice(0, 1);
-              if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
-            }
-          }
-        }
-        p.style.display = "none";
-        cache[cacheKey] = ret;
-      }
-      renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
+    const cacheKey = `${currentKernel}-${currentUOp}`;
+    if (cacheKey in cache) {
+      ret = cache[cacheKey];
     }
+    else {
+      ret = [];
+      const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+      eventSource.onmessage = (e) => {
+        if (e.data === "END") return eventSource.close();
+        const chunk = JSON.parse(e.data);
+        ret.push(chunk);
+        // if it's the first one render this new rgaph
+        if (ret.length === 1) return main();
+        // otherwise just enable the graph selector
+        const gUl = document.getElementById(`rewrite-${ret.length-1}`);
+        if (gUl != null) gUl.classList.remove("disabled");
+      };
+      cache[cacheKey] = ret;
+    }
+    if (ret.length === 0) return;
+    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = highlightedCodeBlock(ret.code_line, "python", true)
-    metadata.appendChild(pre);
-
+    const kernel = kernels[currentKernel][1][currentUOp];
+    metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     // ** code blocks
-    let code = ret.uops[currentRewrite];
+    let code = ret[currentRewrite].uop;
     let lang = "python"
-    if (ret.kernel_code != null) {
-      code = ret.kernel_code;
+    if (kernel.kernel_code != null) {
+      code = kernel.kernel_code;
       lang = "cpp";
     }
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (ret.graphs.length > 1) {
+    if (kernel.match_count > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
-      ret.graphs.forEach((rw, i) => {
-        const gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
+      for (let i=0; i<=kernel.match_count; i++) {
+        const gUl = Object.assign(document.createElement("ul"), { innerText: i, id: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
+        if (i > ret.length-1) gUl.classList.add("disabled");
         if (i === currentRewrite) {
           gUl.classList.add("active");
           if (i !== 0) {
-            const diff = ret.diffs[i-1];
-            const [loc, pattern] = ret.upats[i-1];
+            const diff = ret[i].diff;
+            const [loc, pattern] = ret[i].upat;
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             const link = vsCodeOpener(parts);
@@ -441,9 +415,9 @@
           currentRewrite = i;
           main();
         });
-      })
+      }
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
     }
     // ***** collapse/expand
     let isCollapsed = false;
@@ -540,7 +514,7 @@
     }
     if (event.key == "ArrowRight") {
       event.preventDefault()
-      const totalRewrites = ret.graphs.length-1;
+      const totalRewrites = ret.length-1;
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }
