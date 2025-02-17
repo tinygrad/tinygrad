@@ -85,7 +85,6 @@ class ScheduleContext:
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
-  var_vals: dict[Variable, int] = field(default_factory=dict)
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 # wrap tensor uops around a VIEW(BUFFER, <uop>)
@@ -381,14 +380,14 @@ def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
   return var
 unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
 
-def schedule_uop(sink:UOp, ctx:ScheduleContext) -> ScheduleItem:
+def schedule_uop(sink:UOp, var_vals:dict[UOp, UOp]) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
   # start by adding buffer ops
   ast = graph_rewrite(sink.src[1].arg.ast.sink(), add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
   # unbind_vars + push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
+  ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
-  ast = graph_rewrite(ast, fix_kernel_ops, ctx.var_vals)
+  ast = graph_rewrite(ast, fix_kernel_ops, var_vals)
   return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].arg.metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
@@ -465,9 +464,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
+  var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    schedule.append(si:=schedule_uop(u, ctx))
+    schedule.append(si:=schedule_uop(u, var_vals))
     # NOTE: incrementing output buffer refcounts is required by the memory planner and JIT
     for out in si.outputs: out.ref(1)
     for x in children.get(u, []):
@@ -480,4 +480,4 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
     with Context(PICKLE_BUFFERS=0): PROCESS_REPLAY_CAPTURE[str(big_sink.key)] = pickle.dumps((big_sink, ContextVar._cache, [x.ast for x in schedule]))
-  return schedule, ctx.var_vals, becomes_map
+  return schedule, var_vals, becomes_map
