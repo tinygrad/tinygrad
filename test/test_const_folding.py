@@ -1,7 +1,10 @@
-import unittest, math
+import unittest, itertools, math
+from typing import Any
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import Ops, GroupOp
+from tinygrad.dtype import DType
+from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import CI
+from tinygrad.codegen.rewriter import full_graph_rewrite
 import numpy as np
 from tinygrad.device import is_dtype_supported
 
@@ -97,33 +100,38 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
-  def test_2_pow_is_exp2(self):
-    t = 2.0 ** Tensor([1.0, 2.0, 3.0])
-    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
-    self.assertEqual(len(s), 1)
-    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
-    self.assertEqual(alu, [Ops.EXP2])
+class TestBitcastConstFolding(unittest.TestCase):
+  def test_scalar_bitcast(self):
+    def t(cases: dict[DType, Any]):
+      for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
+        if not math.isnan(from_v):
+          r = full_graph_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
+          self.assertEqual(r.dtype, to_dt, msg)
+          np.testing.assert_equal(r.arg, to_v, msg)
 
-  def test_pow_05_is_sqrt(self):
-    t = Tensor([1.0, 2.0, 3.0]) ** 0.5
-    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
-    self.assertEqual(len(s), 1)
-    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
-    self.assertEqual(alu, [Ops.SQRT])
+    t({dtypes.int8: 0, dtypes.uint8: 0, dtypes.bool: False})
+    t({dtypes.int8: 1, dtypes.uint8: 1, dtypes.bool: True})
 
-  def test_pow_neg_05_is_rsqrt(self):
-    t = Tensor([1.0, 2.0, 3.0]) ** -0.5
-    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
-    self.assertEqual(len(s), 1)
-    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
-    self.assertEqual(alu, [Ops.RECIP, Ops.SQRT])
+    t({dtypes.int8:  -1, dtypes.uint8:  2**8-1})
+    t({dtypes.int16: -1, dtypes.uint16: 2**16-1, dtypes.float16: float('nan')})
+    t({dtypes.int32: -1, dtypes.uint32: 2**32-1, dtypes.float32: float('nan')})
+    t({dtypes.int64: -1, dtypes.uint64: 2**64-1, dtypes.float64: float('nan')})
 
-  def test_pow_8_has_3_muls(self):
-    t = Tensor([1.0, 2.0, 3.0]) ** 8
-    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
-    self.assertEqual(len(s), 1)
-    alu = [u.op for u in s[0].ast.toposort if u.op in GroupOp.ALU]
-    self.assertEqual(alu, [Ops.MUL, Ops.MUL, Ops.MUL])
+    t({dtypes.int8:  -2**7,  dtypes.uint8:  2**7})
+    t({dtypes.int16: -2**15, dtypes.uint16: 2**15})
+    t({dtypes.int32: -2**31, dtypes.uint32: 2**31})
+    t({dtypes.int64: -2**63, dtypes.uint64: 2**63})
+
+    t({dtypes.int16: 13496, dtypes.uint16: 13496, dtypes.float16: 0.294921875})
+    t({dtypes.int32: 1050081145, dtypes.uint32: 1050081145, dtypes.float32: 0.29485681653022766})
+    t({dtypes.int64: 4598983288165178391, dtypes.uint64: 4598983288165178391, dtypes.float64: 0.29485681936461233})
+
+  def test_vec_bitcast(self):
+    r = full_graph_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
+    self.assertEqual(r.op, Ops.VECTORIZE)
+    self.assertEqual(r.dtype, dtypes.uint32.vec(3))
+    self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):

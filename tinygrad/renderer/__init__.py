@@ -70,6 +70,7 @@ class ProgramSpec:
   name:str
   src:str
   device:str
+  ast:UOp  # save the base ast (this is method cache key)
   uops:Optional[list[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
@@ -121,10 +122,11 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
-  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
+  pre_matcher: Optional[PatternMatcher] = None
   extra_matcher: Optional[PatternMatcher] = None
   code_for_op: dict[Ops, Callable] = {}
 

@@ -16,6 +16,7 @@ tensor_uop_spec = PatternMatcher([
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.CONST, Ops.DEVICE}),)), lambda: False),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -31,11 +32,6 @@ tensor_uop_spec = PatternMatcher([
   # COPY
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
-
-  # VIEW(BUFFER) applies a ShapeTracker on top of the underlying device buffer
-  # NOTE: VIEW size exactly matches the underlying BUFFER, tensor doesn't apply movement ops to the VIEW
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),
-   lambda view,buf: view.dtype == buf.dtype and view.size == buf.size and view.st.contiguous),
 
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
@@ -113,9 +109,9 @@ spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
-  #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
+  #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  (UPat(Ops.NOOP), lambda: True),
+  (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),

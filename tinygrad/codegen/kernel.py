@@ -325,8 +325,8 @@ class Kernel:
       -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
       [0-N]: uses only the n'th tensor core available; useful for search
     tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
-      0: applies to only kernels with a single reduce axis and direct UOps.LOAD into Ops.MUL
-      1: allows kernels with multiple reduce axes and also multiplication of UOps.CAST'd buffers
+      0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
+      1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
     if tc_select is None: tc_select = TC_SELECT.value
@@ -339,7 +339,7 @@ class Kernel:
         if extra_opts is not None:
           for opt in extra_opts: self.apply_opt(opt)
         else:
-          if (self.opts.device == "CLANG" and AMX): return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
+          if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
           # hand-coded TC opts
           for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
             szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
@@ -385,6 +385,8 @@ class Kernel:
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
+      # NOTE: LLVM/CLANG can use locals too, but they are treated the same as globals (still helpful for L1 cache)
+      # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce)
@@ -409,7 +411,7 @@ class Kernel:
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
-      check(amt <= 16, "don't upcast more than 16")
+      check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.NOLOCALS:
@@ -512,7 +514,7 @@ class Kernel:
     for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
     # potentially do more upcasts of non reduce axes based on a heuristic
-    upcasted_axis = set()
+    upcasted_axis: set[int] = set()
     while resolve(prod(self.sts[0].shape[:self.first_reduce]) >= 1024):
       xb_choices = []
       for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
@@ -668,7 +670,8 @@ class Kernel:
     if DEBUG >= 3:
       print(self.name)
       if getenv("RAWAST"): print(self.ast)
-      print(modified_ast)
+      for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
@@ -691,5 +694,5 @@ class Kernel:
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return ProgramSpec(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
-                   global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
+    return ProgramSpec(ansiname, src, self.opts.device, self.ast, self.uops, mem_estimate=mem_bytes,
+                       global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
