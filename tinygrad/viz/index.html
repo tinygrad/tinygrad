@@ -39,12 +39,16 @@
   }
   ul {
     padding: 0;
-    color: #7c7d85;
+    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
   ul.active {
-    color: #f0f0f5;
+    opacity: 1;
+  }
+  ul.disabled {
+    opacity: 0.4;
+    pointer-events: none;
   }
   svg {
     width: 100%;
@@ -60,7 +64,7 @@
     rx: 8px;
     ry: 8px;
   }
-  .label text {
+  .label :is(text, p) {
     color: #08090e;
     font-weight: 350;
   }
@@ -193,13 +197,6 @@
     border-radius: 8px;
     padding: 8px;
   }
-  .progress {
-    font-size: 20px;
-    z-index: 2;
-    align-self: center;
-    justify-content: center;
-    width: 100%;
-  }
   </style>
 </head>
 <body>
@@ -211,7 +208,6 @@
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
-    <p class="progress"></p>
     <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
@@ -220,8 +216,6 @@
     <div class="container metadata"></div>
   </div>
   <script>
-  /* global hljs, dagreD3, d3, DOMPurify */
-
   // **** hljs extra definitions for UOps and float4
   hljs.registerLanguage("python", (hljs) => ({
     ...hljs.getLanguage("python"),
@@ -255,7 +249,16 @@
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
     for (const [k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[2]};` });
+      let node = {label: u[0], labelType: "text", style: `fill: ${u[2]};`};
+      // for PROGRAM UOp we render the node with a code block
+      if (u[0].includes("PROGRAM")) {
+        const [name, ...rest] = u[0].split("\n");
+        const label = Object.assign(document.createElement("div"));
+        label.appendChild(Object.assign(document.createElement("p"), {innerText: name, className: "label", style: "margin-bottom: 2px" }))
+        label.appendChild(highlightedCodeBlock(rest.join("\n"), "cpp", true));
+        node = {label, labelType: "html", style: `fill: ${u[2]}`};
+      }
+      g.setNode(k, node);
       for (const src of u[1]) {
         g.setEdge(src, k, {curve: d3.curveBasis})
       }
@@ -283,22 +286,28 @@
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
   const highlightedCodeBlock = (code, lang, wrap) => {
     const pre = Object.assign(document.createElement("pre"), {className: wrap ? "wrap" : ""});
-    const codeEl = Object.assign(document.createElement("code"), {
-      // NOTE: since code is in textContent, we don't need DOMPurify
-      className: `language-${lang} code-block`, textContent: code});
+    // NOTE: since code is in textContent, we don't need DOMPurify
+    const codeEl = Object.assign(document.createElement("code"), { className: `language-${lang} code-block`, textContent: code});
     pre.appendChild(codeEl);
     hljs.highlightElement(codeEl);
     return pre;
   };
+  const coloredToHTML = (str) => {
+    const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+    return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+    })
+  }
 
   // **** main loop
-  var ret = {};
+  var ret = [];
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
   var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
+  const evtSources = [];
   async function main() {
     const mainContainer = document.querySelector('.main-container');
     // ***** LHS kernels list
@@ -315,7 +324,7 @@
       if (i === currentKernel) {
         requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
-      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerText: key, style: "cursor: pointer;"});
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
@@ -349,64 +358,63 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    else {
-      const cacheKey = `${currentKernel}-${currentUOp}`;
-      if (cacheKey in cache) {
-        ret = cache[cacheKey];
-      }
-      else {
-        const p = document.querySelector(".progress");
-        p.style.display = "none";
-        const limit = 100;
-        const pageCount = Math.ceil((kernels[currentKernel][1][currentUOp].match_count+1)/limit);
-        if (pageCount > 1) {
-          p.style.display = "flex";
-          d3.select("#graph-svg g").selectAll("*").remove();
-        }
-        for (let i=0; i < pageCount; i++) {
-          p.innerText = `fetching data ${i+1}/${pageCount}`;
-          const chunk = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}&offset=${i*limit}&limit=${limit}`)).json();
-          if (i === 0) ret = chunk
-          else {
-            // TODO: this shouldn't exist after the viz api refactor
-            for (const [k,v] of Object.entries(chunk)) {
-              if (Array.isArray(v) && k !== "loc") ret[k].push(...v);
-            }
-          }
-        }
-        p.style.display = "none";
-        cache[cacheKey] = ret;
-      }
-      renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
+    const kernel = kernels[currentKernel][1][currentUOp];
+    const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
+    // close any pending event sources
+    let activeSrc = null;
+    for (const e of evtSources) {
+      if (e.url.split("?")[1] !== cacheKey) e.close();
+      else if (e.readyState === EventSource.OPEN) activeSrc = e;
     }
+    if (cacheKey in cache) {
+      ret = cache[cacheKey];
+    }
+    // if we don't have a complete cache yet we start streaming this kernel
+    if (!(cacheKey in cache) || (cache[cacheKey].length !== kernel.match_count+1 && activeSrc == null)) {
+      ret = [];
+      cache[cacheKey] = ret;
+      const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+      evtSources.push(eventSource);
+      eventSource.onmessage = (e) => {
+        if (e.data === "END") return eventSource.close();
+        const chunk = JSON.parse(e.data);
+        ret.push(chunk);
+        // if it's the first one render this new rgaph
+        if (ret.length === 1) return main();
+        // otherwise just enable the graph selector
+        const gUl = document.getElementById(`rewrite-${ret.length-1}`);
+        if (gUl != null) gUl.classList.remove("disabled");
+      };
+    }
+    if (ret.length === 0) return;
+    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
-    const pre = highlightedCodeBlock(ret.code_line, "python", true)
-    metadata.appendChild(pre);
-
+    metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     // ** code blocks
-    let code = ret.uops[currentRewrite];
+    let code = ret[currentRewrite].uop;
     let lang = "python"
-    if (ret.kernel_code != null) {
-      code = ret.kernel_code;
+    if (kernel.kernel_code != null) {
+      code = kernel.kernel_code;
       lang = "cpp";
     }
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (ret.graphs.length > 1) {
+    if (kernel.match_count > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
-      ret.graphs.forEach((rw, i) => {
-        const gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
+      for (let i=0; i<=kernel.match_count; i++) {
+        const gUl = Object.assign(document.createElement("ul"), { innerText: i, id: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
+        if (i > ret.length-1) gUl.classList.add("disabled");
         if (i === currentRewrite) {
           gUl.classList.add("active");
           if (i !== 0) {
-            const diff = ret.diffs[i];
-            const [loc, pattern] = ret.upats[i];
+            const diff = ret[i].diff;
+            const [loc, pattern] = ret[i].upat;
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             const link = vsCodeOpener(parts);
@@ -425,9 +433,9 @@
           currentRewrite = i;
           main();
         });
-      })
+      }
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
     }
     // ***** collapse/expand
     let isCollapsed = false;
@@ -524,7 +532,7 @@
     }
     if (event.key == "ArrowRight") {
       event.preventDefault()
-      const totalRewrites = ret.graphs.length-1;
+      const totalRewrites = ret.length-1;
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }

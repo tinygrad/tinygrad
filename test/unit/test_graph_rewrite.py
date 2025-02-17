@@ -203,7 +203,8 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
 
 
 import inspect
-from tinygrad.ops import graph_rewrite, _substitute, track_rewrites, symbolic_simple
+from tinygrad.ops import graph_rewrite, _substitute, track_rewrites
+from tinygrad.codegen.symbolic import symbolic_simple
 
 class TestBottomUpRewrite(unittest.TestCase):
   def test_const_folding(self):

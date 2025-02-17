@@ -1,5 +1,5 @@
-import time
-from typing import Callable, Optional
+import time, struct
+from typing import Any, Callable, Optional
 import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.ops import UOp, Ops, sint
@@ -52,10 +52,14 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
 
-def eval_uop(uop:UOp):
+def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
+  allocator = PythonAllocator()
+  bufs = []
+  for buf_dt, data in inputs or []:
+    bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
+    allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + buf_dt.fmt, *data)))
   g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
   rw = full_graph_rewrite(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(), PythonRenderer)
   prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
-  buf = PythonAllocator().alloc(uop.dtype.itemsize)
-  prog(buf)
-  return buf.cast(uop.dtype.fmt).tolist()[0]
+  prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs)
+  return out_buf.cast(uop.dtype.fmt).tolist()[0]
