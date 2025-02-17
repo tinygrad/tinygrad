@@ -81,7 +81,6 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  ops_metadata: dict[UOp, Metadata]                                  # this maps uops in the schedule to the tensor metadata
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
@@ -173,9 +172,9 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
-def group_realizes(sink:UOp, ctx:ScheduleContext) -> dict[UOp, UOp]:
+def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx)
+  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=ScheduleContext())
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
@@ -236,13 +235,18 @@ class Kernel:
   metadata: tuple[Metadata, ...]
   def __repr__(self): return f"<Kernel {len(list(self.ast.toposort))} {self.ast.op} {self.metadata}>"
 
-def create_kernel(ctx:ScheduleContext, b:UOp, x:UOp, st:UOp):
+@dataclass(frozen=True)
+class KernelContext:
+  realizes: dict[UOp, UOp]
+  ops_metadata: dict[UOp, Metadata]
+
+def create_kernel(ctx:KernelContext, b:UOp, x:UOp, st:UOp):
   if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
   if b not in ctx.realizes: return x # collapse BUFFER
   # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
   return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, (m,) if m is not None else ())))
 
-def append_to_kernel(ctx:ScheduleContext, x:UOp):
+def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
   new_metadata: dict[Metadata, None] = dict.fromkeys(x.arg.metadata)
   for s in x.src:
@@ -413,7 +417,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     if (b:=buffer_map.get(v)) is not None:
       buf_tensors.setdefault(b, []).append(k)
       if isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
-  realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
+  realize_map = group_realizes(sink)
   for buf_uop in realize_map:
     for tensor_uop in buf_tensors[buf_uop]:
       # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
@@ -433,7 +437,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # create kernels
   if len(realize_map) == 0: return [], {}, becomes_map
-  sched_sink = graph_rewrite(sink, create_kernels, ctx)
+  sched_sink = graph_rewrite(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata))
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
