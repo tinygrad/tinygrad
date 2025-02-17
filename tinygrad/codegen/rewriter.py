@@ -319,9 +319,11 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in {Ops.SINK, Ops.UNROLL} else (x,) for x in root.src)), root.arg)
       if any(x.op in {Ops.SINK, Ops.UNROLL} for x in root.src) else None),
+  # stable sigmoid
   ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
   ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")), lambda x,d: 1-d), # x*/(1+x) -> 1-1/(1+x)
+  ((UPat.var("x") * UPat.var("y")) * ((1+UPat.var("x")).reciprocal().named("d")), lambda x,y,d: y*(1-d)), # x*/(1+x) -> 1-1/(1+x)
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")*UPat.var("y")), lambda x,y,d: y*(1-d)),
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")+UPat.var("y")), lambda x,y,d: (1-d)+x*y),
 ])
@@ -519,13 +521,13 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, sym+expander)
 
   if DEVECTORIZE:
-    # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
-    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
-      mulacc_unrolled)
+    # devectorize + load_store_indexing
+    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
   else:
     # new devectorize only for load/store
-    sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
+    sink = graph_rewrite(sink, sym+devectorize_load_store)
 
   # final rules for the renderer (without sym)
+  sink = graph_rewrite(sink, mulacc_unrolled)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
   return sink
