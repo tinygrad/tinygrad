@@ -120,10 +120,13 @@ spec = PatternMatcher([
 # *** this is the spec of a Kernel in UOp ***
 
 kernel_spec = PatternMatcher([
-  (UPat(Ops.DEVICE, src=()), lambda: True),
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
+  # assign has a buffer view and kernel source, it can optionally depend on other assigns
   (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  # device/view/sink/const can also exist in the kernel graph
+  (UPat((Ops.DEVICE, Ops.VIEW, Ops.SINK, Ops.CONST)), lambda: True),
+  (UPat(GroupOp.All), lambda: False),
 ])
 
 # *** this is the UOp shape spec ***
