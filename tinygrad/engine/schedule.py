@@ -2,7 +2,8 @@ import sys, functools, atexit, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
-from tinygrad.ops import can_pad, identity_element, resolve, symbolic_simple, view_left, merge_views
+from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
+from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND
 from tinygrad.dtype import ImageDType
@@ -66,10 +67,6 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
-  # remove CONST/BIND/BUFFER from SINK
-  (UPat(Ops.SINK, name="root"),
-    lambda root: UOp(Ops.SINK, root.dtype, new_src, root.arg)
-      if (new_src:=tuple(x for x in root.src if not x.is_realized and x.base.op not in {Ops.CONST, Ops.BIND})) != root.src else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
@@ -138,7 +135,7 @@ def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs)
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.realizes.update((x.buf_uop, x) for x in sink.src)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.buf_uop, x) for x in s.src if x.base.op not in {Ops.CONST,Ops.BIND,Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
@@ -404,18 +401,10 @@ if CAPTURE_PROCESS_REPLAY:
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
+  # remove_movement_ops + sym
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
-  # tensors can become an existing buffer or simplify to a const, no ScheduleItem needed
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if k is v: continue # NOOP
-    if v.base.op is Ops.BUFFER:
-      # backtrack to the realized tensor
-      buf_src = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st]
-      if k is not buf_src[0]: becomes_map[k] = buf_src[0]
-    if v.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
-  # we group the rest of UOps into ScheduleItems
+  # do_realize + group_realizes
   buffer_map: dict[UOp, UOp] = {}
   sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
   # get realizes
@@ -426,18 +415,25 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       buf_tensors.setdefault(b, []).append(k)
       if isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink, ctx:=ScheduleContext(ops_metadata))
-  if len(realize_map) == 0: return [], {}, becomes_map
-
-  # map buffers to realized tensors
   for buf_uop in realize_map:
     for tensor_uop in buf_tensors[buf_uop]:
       # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
-      becomes_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
-    buf_uop.buffer.ref(1)
+      tensor_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
+
+  # map tensors to new uops
+  becomes_map: dict[UOp, UOp] = {}
+  for k,v in tensor_map.items():
+    if k is v: continue
+    if v.base.op is Ops.BUFFER:
+      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
+      if v.op is Ops.VIEW:
+        mop = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st][0]
+        if k is not mop: becomes_map[k] = mop
+      else: becomes_map[k] = v
+    elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # break the schedule into kernels
   sched_sink = graph_rewrite(sink, create_kernels, ctx)
-  type_verify(list(sched_sink.toposort), kernel_spec)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -467,7 +463,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   schedule: list[ScheduleItem] = []
   while queue:
     u = queue.popleft()
-    schedule.append(schedule_uop(u, ctx))
+    schedule.append(si:=schedule_uop(u, ctx))
+    # NOTE: incrementing output buffer refcounts is required by the memory planner and JIT
+    for out in si.outputs: out.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
