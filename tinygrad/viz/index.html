@@ -39,12 +39,12 @@
   }
   ul {
     padding: 0;
-    color: #7c7d85;
+    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
   ul.active {
-    color: #f0f0f5;
+    opacity: 1;
   }
   ul.disabled {
     opacity: 0.6;
@@ -283,6 +283,12 @@
     hljs.highlightElement(codeEl);
     return pre;
   };
+  const coloredToHTML = (str) => {
+    const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
+    return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
+      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
+    })
+  }
 
   // **** main loop
   var ret = [];
@@ -308,7 +314,7 @@
       if (i === currentKernel) {
         requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
       }
-      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerText: key, style: "cursor: pointer;"});
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,

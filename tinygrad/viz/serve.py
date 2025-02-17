@@ -3,7 +3,7 @@ import multiprocessing, pickle, functools, difflib, os, threading, json, time, s
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
@@ -37,7 +37,7 @@ def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
           "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
-  return [(to_function_name(k.name) if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
+  return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
 # ** Complete rewrite details for a graph_rewrite call
 
