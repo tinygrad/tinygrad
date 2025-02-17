@@ -514,7 +514,7 @@ class Kernel:
     for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
     # potentially do more upcasts of non reduce axes based on a heuristic
-    is_dsp = getenv("DSP")
+    is_dsp = self.opts is not None and self.opts.device == "DSP"
     upcasted_axis: set[int] = set()
     while resolve(prod(self.sts[0].shape[:self.first_reduce]) >= 1024):
       xb_choices = []
