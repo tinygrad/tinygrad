@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
@@ -601,8 +601,6 @@ class AMDDevice(HCQCompiled):
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
-    atexit.register(self.device_fini)
-
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
@@ -632,6 +630,6 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
 
-  def device_fini(self):
+  def finalize(self):
     self.synchronize()
     if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()

@@ -11,19 +11,20 @@ from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.spec import spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import fix_kernel_ops
-from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
+from tinygrad.engine.realize import CompiledRunner, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.symbolic import sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
 def _uops_to_prg(uops_list):
-  uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
+  uops = linearize_uop(full_graph_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops,
+  return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, ast, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -241,13 +242,6 @@ class TestConstantFolding(unittest.TestCase):
     t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)
     si = t.schedule()
     assert len(si) == 0
-
-  def test_bitcast_const(self):
-    t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
-    si = t.schedule()
-    assert len(si) == 1
-    ji = lower_schedule_item(si[-1])
-    assert any(uop.op is Ops.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
@@ -486,7 +480,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "rewriter.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
     self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?

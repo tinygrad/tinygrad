@@ -175,9 +175,7 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
 
-backend_test.exclude('test_scatter_elements_with_reduction_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
-backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
 if Device.DEFAULT in ['GPU', 'METAL']:
