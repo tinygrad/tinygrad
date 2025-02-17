@@ -93,6 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
+  DEVICE = auto(); NAME = auto() # noqa: E702
   SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); PRELOAD = auto(); KERNEL = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
@@ -149,9 +150,7 @@ class Ops(FastEnum):
   VCONST = auto(); CONST = auto() # noqa: E702
 
   # device
-  DEVICE = auto()
-  MULTI = auto()
-  CUSTOM = auto()
+  MULTI = auto(); CUSTOM = auto(); PROGRAM = auto() # noqa: E702
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}

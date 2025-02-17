@@ -147,7 +147,7 @@ def block_reorder(in_block:UOp):
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
+def linearize_to_uop(sink:UOp):
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # get children and all block contexts
@@ -211,9 +211,13 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # final rewrite to merge all blocks into one
   sink = graph_rewrite(sink, pm_block_merge, ctx=children)
-
-  # there should just be one block left, with a few parents with 0 srcs
   assert sink.op is Ops.BLOCK
+  assert all(x.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST} for x in sink.src), \
+    f"sink contains non {[x.op for x in sink.src]}"
+  return sink
+
+def to_uop_list(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
+  # there should just be one block left, with a few parents with 0 srcs
   _uops = sorted(dedup(sink.src), key=lambda x: x.tuplize)
   assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
   _uops += sink.arg.lst
@@ -221,5 +225,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
 
-  # strip the SINK
-  return _uops[:-1]
+  # strip the DEVICE, NAME, and SINK
+  return [x for x in _uops if x.op not in {Ops.DEVICE, Ops.NAME, Ops.SINK}]
+
+def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]: return to_uop_list(linearize_to_uop(sink), skip_check)

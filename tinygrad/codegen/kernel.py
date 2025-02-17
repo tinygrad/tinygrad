@@ -14,7 +14,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, ro
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.linearize import linearize_to_uop, to_uop_list
 from tinygrad.codegen.rewriter import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
@@ -678,13 +678,29 @@ class Kernel:
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
-    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
-    if DEBUG >= 5: print_uops(self.uops)
+    #self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    #if DEBUG >= 5: print_uops(self.uops)
+    #return self
+    self.sink = linearize_to_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    # TODO: these shouldn't both be here
+    self.uops = to_uop_list(self.sink)
     return self
 
+  @track_rewrites()
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
     self.linearize()
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+
+    # TODO: this belongs in linearize
+    sink = self.sink.replace(src=(
+      UOp(Ops.NAME, arg=(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)))),)+self.sink.src)
+
+    from tinygrad.ops import PatternMatcher, UPat
+    src = graph_rewrite(sink, PatternMatcher([
+      (UPat(Ops.BLOCK, name="x"), lambda ctx, x: UOp(Ops.PROGRAM, arg=ctx.render(x.src[0].arg, to_uop_list(x)))),
+    ]), ctx=self.opts).arg
+    print(src)
+
+    #src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
       diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, ContextVar._cache, src))
