@@ -6,6 +6,7 @@
 ::: tinygrad.Tensor.min
 ::: tinygrad.Tensor.any
 ::: tinygrad.Tensor.all
+::: tinygrad.Tensor.isclose
 ::: tinygrad.Tensor.mean
 ::: tinygrad.Tensor.var
 ::: tinygrad.Tensor.std
