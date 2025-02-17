@@ -156,7 +156,7 @@ pm_lowerer = PatternMatcher([
 ])
 
 FP = (1 << 16)
-from tinygrad.ops import symbolic
+from tinygrad.codegen.symbolic import symbolic
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
   (UPat.var("x").cast(dtypes.float32) + UPat.var("y").cast(dtypes.float32),
