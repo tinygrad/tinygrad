@@ -1270,18 +1270,22 @@ class TestOps(unittest.TestCase):
 
   def test_isclose(self):
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)
+    helper_test_op([(3, 4, 5, 6), (3, 4, 5, 6)], lambda x,y: x.isclose(y), forward_only=True)
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x, equal_nan=True), forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x + 1e-6), vals=[[1.0, 2.0, 3.0]], forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x + 0.1), vals=[[1.0, 2.0, 3.0]], forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x + 0.1, rtol=0.2, atol=0.0), vals=[[1.0, 2.0, 3.0]], forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x + 1e-9), vals=[[0.0, 0.0, 0.0]], forward_only=True)
-    helper_test_op([(2, 3, 4)], lambda x: x.isclose(x + 1e-6), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6, atol=0.0), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, atol=0.0), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6, rtol=0.01), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, rtol=0.01), forward_only=True)
+    helper_test_op(None, lambda x,y: x.isclose(y), vals=[[1e-7, 1e-8, 1e-9], [0.0, 0.0, 0.0]], forward_only=True)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "isinf check of 'nan' fails on CI software-based vulkan")
   def test_isclose_edge_cases(self):
-    helper_test_op(None, lambda x: x.isclose(x), vals=[[float("inf"), float("-inf"), 1.0]], forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x, equal_nan=True), vals=[[float("inf"), float("-inf"), 1.0]], forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x), vals=[[float("nan"), 1.0]], forward_only=True)
-    helper_test_op(None, lambda x: x.isclose(x, equal_nan=True), vals=[[float("nan"), 1.0]], forward_only=True)
+    for a in [math.inf, -math.inf, math.nan, 0.0]:
+      for b in [math.inf, -math.inf, math.nan, 0.0]:
+        helper_test_op(None, lambda x,y: x.isclose(y), vals=[[a], [b]], forward_only=True)
+        helper_test_op(None, lambda x,y: x.isclose(y, equal_nan=True), vals=[[a], [b]], forward_only=True)
 
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
