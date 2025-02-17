@@ -33,7 +33,7 @@ class GraphRewriteMetadata(TypedDict):
 
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
-def to_metadata(k:Any,v:TrackedGraphRewrite) -> GraphRewriteMetadata:
+def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
           "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
