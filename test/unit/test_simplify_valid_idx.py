@@ -2,7 +2,8 @@ import unittest, itertools
 
 from tinygrad.codegen.rewriter import full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, simplify_valid
+from tinygrad.ops import UOp, Ops
+from tinygrad.codegen.symbolic import simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
