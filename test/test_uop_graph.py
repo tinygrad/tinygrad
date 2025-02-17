@@ -5,7 +5,8 @@ from tinygrad.helpers import DEBUG, AMX
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.rewriter import full_graph_rewrite, graph_rewrite, expander, sym
+from tinygrad.codegen.rewriter import full_graph_rewrite, graph_rewrite, sym
+from tinygrad.codegen.expander import expander, expand_rewrite
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
@@ -730,7 +731,7 @@ class TestIFUOps(unittest.TestCase):
     lbuf = UOp(Ops.LOAD, dtypes.float, (sbuf.index(UOp.const(dtypes.int, 0)), barrier))
     store = UOp(Ops.STORE, dtypes.void, (gbuf.index(UOp.const(dtypes.int, 0), gate), lbuf))
     sink = UOp(Ops.SINK, dtypes.void, (store,))
-    sink = full_graph_rewrite(sink)
+    sink = full_graph_rewrite(expand_rewrite(sink))
     if_uops = [u for u in sink.toposort if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
@@ -748,7 +749,7 @@ class TestIFUOps(unittest.TestCase):
     lbufs = [UOp(Ops.LOAD, dtypes.float, (sbuf.index(UOp.const(dtypes.int, i)), barrier)) for i in range(4)]
     stores = [UOp(Ops.STORE, dtypes.void, (gbuf.index(UOp.const(dtypes.int, i), gate), lbufs[i])) for i in range(4)]
     sink = UOp(Ops.SINK, dtypes.void, tuple(stores))
-    sink = full_graph_rewrite(sink)
+    sink = full_graph_rewrite(expand_rewrite(sink))
     if_uops = [u for u in sink.toposort if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
