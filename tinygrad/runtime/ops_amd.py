@@ -595,10 +595,10 @@ class USBIface(PCIIface):
 
   def __init__(self, dev, dev_id):
     self.dev = dev
-    self.usb = Asm236x("/dev/sg1", is_24=True)
+    self.usb = Asm236x("/dev/sg1", is_24=False)
 
     gpu_bus = 4 if self.usb.is_24 else 3
-    
+
     # setup pci switch
     self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
     self.usb.pcie_cfg_req(libpciaccess.PCI_SUBORDINATE_BUS, bus=0, dev=0, fn=0, value=gpu_bus, size=1)
@@ -606,32 +606,67 @@ class USBIface(PCIIface):
     self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=0, dev=0, fn=0, value=0, size=1)
 
     self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1000, size=2)
+    # self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0x2000, size=2)
 
     self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x4000, size=2)
     self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0xffff, size=2)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_LIMIT_UPPER32, bus=0, dev=0, fn=0, value=0xffff, size=2)
 
     for bus in ([2, 3] if self.usb.is_24 else [1, 2]):
+      print("bus", bus)
       self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
       self.usb.pcie_cfg_req(libpciaccess.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
 
       self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
       self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_PREF_LIMIT_UPPER32, bus=0, dev=0, fn=0, value=0xffff, size=2)
 
       self.usb.pcie_cfg_req(libpciaccess.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
       self.usb.pcie_cfg_req(libpciaccess.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
-      self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=bus-1, size=1)
+      self.usb.pcie_cfg_req(libpciaccess.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
 
       self.usb.pcie_cfg_req(libpciaccess.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_BRIDGE_CTL_BUS_RESET, size=1)
       # time.sleep(1)
       self.usb.pcie_cfg_req(libpciaccess.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_BRIDGE_CTL_PARITY|libpciaccess.PCI_BRIDGE_CTL_SERR, size=1)      
       self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=bus, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_IO | libpciaccess.PCI_COMMAND_MEMORY | libpciaccess.PCI_COMMAND_MASTER, size=1)
 
-      print("xx", hex(self.usb.pcie_cfg_req(0, bus=gpu_bus, dev=0, fn=0, size=4)))
-
-    # exit(0)
-
-    gpu_bus = 4
+    # gpu_bus = 4
     # print("xx", hex(self.usb.pcie_cfg_req(0, bus=gpu_bus, dev=0, fn=0, size=4)))
+
+    # self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_IO, size=1)
+
+    # # try to resize gpu bar first
+    # cap_ptr = self.usb.pcie_cfg_req(libpciaccess.PCI_CAPABILITY_LIST, bus=gpu_bus, dev=0, fn=0, value=None, size=4)
+    # caps = {}
+    # while True:
+    #   cap_0 = self.usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
+    #   cap_nxt = self.usb.pcie_cfg_req(cap_ptr+1, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
+    #   cap_len = self.usb.pcie_cfg_req(cap_ptr+2, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
+    #   print(cap_0, cap_nxt, cap_len)
+    #   caps[cap_0] = cap_ptr
+    #   if cap_nxt == 0: break
+    #   cap_ptr = cap_nxt
+    # print(caps)
+
+    # offset = 0x100  # Start of extended capabilities
+    # pcie_caps = {}
+    # while offset:
+    #   header = self.usb.pcie_cfg_req(offset, bus=gpu_bus, dev=0, fn=0, value=None, size=4)
+    #   cap_id = libpciaccess.PCI_EXT_CAP_ID(header)
+    #   # next_ptr = (header >> 20) & 0xFFF
+    #   print("hex(cap_id)", hex(cap_id), hex(libpciaccess.PCI_EXT_CAP_VER(header)), hex(libpciaccess.PCI_EXT_CAP_NEXT(header)))
+
+    #   pcie_caps[cap_id] = offset
+    #   offset = libpciaccess.PCI_EXT_CAP_NEXT(header)
+    
+    # rebar_cfg = self.usb.pcie_cfg_req(pcie_caps[0x15] + 0x8, bus=gpu_bus, dev=0, fn=0, value=None, size=4)
+    # nbars = (rebar_cfg & 0xE0) >> 5
+    # for i in range(nbars):
+    #   barcfg = self.usb.pcie_cfg_req(pcie_caps[0x15] + 0x8 * (i + 1), bus=gpu_bus, dev=0, fn=0, value=None, size=4)
+    #   print("bar idx is", barcfg & 0x7, hex((barcfg & 0x1F00) >> 8))
+
+    # print(nbars)
+    # exit(0)
 
     bar_next_addr, bar_off, self.bars = [0x10000000, 0x40000000], 0, {}
     for bar_id in range(4):
@@ -644,35 +679,21 @@ class USBIface(PCIIface):
           self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
           self.bars[bar_id] = (bar_next_addr[is_pref], bar_size)
           bar_next_addr[is_pref] += round_up(bar_size, 2 << 20)
-          print(bar_id, hex(self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)))
+          print(bar_id, bar_size, hex(self.usb.pcie_cfg_req(libpciaccess.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)))
       print(bar_id, hex(bar_cfg))
       bar_off += 8 if bar_cfg & libpciaccess.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
 
-    cap_ptr = self.usb.pcie_cfg_req(0x34, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
-    print(cap_ptr)
-    caps = {}
-    while True:
-        cap_0 = self.usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
-        cap_nxt = self.usb.pcie_cfg_req(cap_ptr+1, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
-        cap_len = self.usb.pcie_cfg_req(cap_ptr+2, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
-        print(cap_0, cap_nxt, cap_len)
-        caps[cap_0] = cap_ptr
-        if cap_nxt == 0: break
-        cap_ptr = cap_nxt
-
-    print(caps)
-
-    pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
-    self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=1)
+    # pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
+    # self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=1)
     # print("PM cap now", pm_state)
 
-    self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_MEMORY, size=1)
+    self.usb.pcie_cfg_req(libpciaccess.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=libpciaccess.PCI_COMMAND_IO | libpciaccess.PCI_COMMAND_MEMORY | libpciaccess.PCI_COMMAND_MASTER, size=1)
 
     # print(caps)
 
     # print(self.bars)
 
-    aa, size = self.bars[3]
+    # aa, size = self.bars[3]
     # print(hex(aa))
     # print(self.usb.pcie_mem_req(aa, None, size=4))
     # exit(0)
@@ -681,8 +702,13 @@ class USBIface(PCIIface):
     vram_bar = USBTrackedMemoryView(self.bars[0], self.usb, elsz=1)
     doorbell_bar = USBTrackedMemoryView(self.bars[1], self.usb, elsz=8)
     mmio_bar = USBTrackedMemoryView(self.bars[3], self.usb, elsz=4)
+
+    # st = time.perf_counter_ns()
+    # vram_bar.copyin(memoryview(array.array('B', [0]*4096)))
+    # print(f"copyin in ms: {(time.perf_counter_ns() - st) / 1e6}")
+    # exit(0)
+
     AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
-    # print(bars)
 
 class AMDDevice(HCQCompiled):
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))

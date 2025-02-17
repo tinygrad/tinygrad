@@ -214,7 +214,6 @@ class Asm236x(Asm2x6x):
             self.write(0xB220, struct.pack('>I', shifted_value))
 
         # https://www.intel.com/content/www/us/en/docs/programmable/683733/14-1/tlp-packet-formats-with-data-payload.html
-        print(fmt_type)
         self.write(0xB210, struct.pack('>III',
             0x00000001 | (fmt_type << 24),
             byte_enable,
@@ -224,9 +223,8 @@ class Asm236x(Asm2x6x):
         if self.is_24:
             self.write(0xB216, bytes([0x20]))
             self.write(0xB296, bytes([0x04]))
-
-        # Clear timeout bit.
         else:
+            # Clear timeout bit.
             self.write(0xB296, bytes([0x01]))
 
         # Unknown
@@ -283,83 +281,6 @@ class Asm236x(Asm2x6x):
             shifted_value = full_value >> (8 * offset)
             masked_value = shifted_value & ((1 << (8 * size)) - 1)
             return masked_value
-
-class Asm246x(Asm236x):
-    def __init__(self, dev_path):
-        super().__init__(dev_path)
-
-    def flash_dump(self, read_len):
-        first_read_len = read_len
-        second_read_len = 0
-        if read_len > 0x10000:
-            first_read_len = 0xff00
-            second_read_len = read_len - first_read_len
-
-        cdb = struct.pack('>BBI', 0xe2, 0x50, first_read_len)
-        first_data = bytearray(first_read_len)
-        ret = sgio.execute(self._file, cdb, None, first_data)
-        assert ret == 0
-
-        time.sleep(1)
-
-        data = bytes(first_data)
-        if second_read_len:
-            cdb = struct.pack('>BBI', 0xe2, 0xd0, second_read_len)
-            second_data = bytearray(second_read_len)
-            ret = sgio.execute(self._file, cdb, None, second_data)
-            assert ret == 0
-
-            time.sleep(1)
-
-            data += bytes(second_data)
-
-        return data
-
-    # def reload(self):
-    #     cdb = bytes.fromhex("e8 00 00 00 00 00 00 00")
-    #     # print("here", cdb, len(cdb))
-    #     # cdb = struct.pack('>B8x', 0xe8)
-    #     # print("here", cdb, len(cdb))
-    #     ret = sgio.execute(self._file, cdb, None, None)
-    #     assert ret == 0
-
-    def read(self, start_addr, read_len, stride=255):
-        data = bytearray(read_len)
-
-        for i in range(0, read_len, stride):
-            remaining = read_len - i
-            buf_len = min(stride, remaining)
-
-            current_addr = start_addr + i
-            assert current_addr >> 17 == 0
-            current_addr &= 0x01ffff
-            current_addr |= 0x500000
-
-            cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
-
-            buf = bytearray(buf_len)
-            ret = sgio.execute(self._file, cdb, None, buf)
-            assert ret == 0
-
-            data[i:i+buf_len] = buf
-
-        return bytes(data)
-
-    def write(self, start_addr, data):
-        for offset, value in enumerate(data):
-            current_addr = start_addr + offset
-            # Ensure the address fits the expected range
-            assert current_addr >> 17 == 0
-
-            # Mask and shift address for the ASM246x's addressing scheme
-            current_addr &= 0x01ffff
-            current_addr |= 0x500000
-
-            # Use command code 0xe5 similarly to ASM236x
-            cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
-            ret = sgio.execute(self._file, cdb, None, None)
-            assert ret == 0
-
 
 def get_asm2x6x_dev(device="auto"):
     if device == "auto":
