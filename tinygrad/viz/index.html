@@ -4,8 +4,9 @@
   <title>tinygrad viz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-  <script src="assets/d3js.org/d3.v5.min.js" charset="utf-8"></script>
-  <script src="assets/dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-elk@2.3.0/dist/cytoscape-elk.min.js"></script>
   <link rel="stylesheet" href="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
@@ -209,9 +210,6 @@
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
     <div class="graph">
-      <svg id="graph-svg">
-        <g id="render"></g>
-      </svg>
     </div>
     <div class="container metadata"></div>
   </div>
@@ -233,42 +231,62 @@
     contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
   }));
 
-  // **** D3
-  function recenterRects(svg, zoom) {
-    const svgBounds = svg.node().getBoundingClientRect();
-    for (const rect of svg.node().querySelectorAll("rect")) {
-      const rectBounds = rect.getBoundingClientRect();
-      const outOfBounds = rectBounds.top < svgBounds.top || rectBounds.left < svgBounds.left ||
-        rectBounds.bottom > svgBounds.bottom || rectBounds.right > svgBounds.right;
-      // if there's at least one rect in view we don't do anything
-      if (!outOfBounds) return;
-    }
-    svg.call(zoom.transform, d3.zoomIdentity)
-  }
+  // **** UOp graph
+  const cy = cytoscape({
+    container: document.querySelector('.graph'),
+    boxSelectionEnabled: false,
+    autoungrabify: true, autounselectify: true,
+    style: [
+      {
+        selector: "node",
+        style: {
+          label: "data(label)",
+          color: "#08090e",
+          textWrap: "wrap",
+          width: "label",
+          height: "label",
+          padding: "4px",
+          fontSize: "5px",
+          textHalign: "center",
+          textValign: "center",
+          shape: "roundrectangle",
+          borderWidth: "0.4px",
+          borderColor: "#4a4b57",
+        }
+      },
+      {
+        selector: "edge",
+        style: {
+          width: 0.4,
+          lineColor: "#4a4b57",
+          targetArrowColor: "#4a4b57",
+          targetArrowShape: "triangle",
+          arrowScale: 0.4,
+          curveStyle: "straight",
+        }
+      },
+    ],
+  });
   function renderGraph(graph, additions) {
-    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
-    for (const [k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[2]};` });
-      for (const src of u[1]) {
-        g.setEdge(src, k, {curve: d3.curveBasis})
+    const currElements = new Set();
+    for (const [id, [label, src, color]] of Object.entries(graph)) {
+      currElements.add(id);
+      if (cy.getElementById(id).length == 0) {
+        cy.add({data: {id, label}, style: {backgroundColor: color}})
       }
-      if (additions.includes(parseInt(k))) {
-        g.setParent(k, "addition");
+      for (const source of src) {
+        const edgeKey = `${source}-${id}`;
+        currElements.add(edgeKey)
+        if (cy.getElementById(edgeKey).length == 0) {
+          cy.add({data: {source, target: id, id:edgeKey}, classes: "edge"})
+        }
       }
     }
-    const svg = d3.select("#graph-svg");
-    const inner = svg.select("g");
-    var zoom = d3.zoom()
-      .scaleExtent([0.05, 2])
-      .on("zoom", () => {
-        const transform = d3.event.transform;
-        inner.attr("transform", transform);
-      });
-    recenterRects(svg, zoom);
-    svg.call(zoom);
-    const render = new dagreD3.render();
-    render(inner, g);
+
+    for (const e of cy.elements()) {
+      if (!(currElements.has(e.id()))) e.remove();
+    }
+    cy.layout({name: "elk"}).run();
   }
 
   // **** extra helpers
