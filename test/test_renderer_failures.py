@@ -1,7 +1,7 @@
 import unittest
 from typing import List, cast
 import numpy as np
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.device import Buffer, Device, is_dtype_supported
 from tinygrad.dtype import dtypes
