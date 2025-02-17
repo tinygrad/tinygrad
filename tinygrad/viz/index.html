@@ -286,7 +286,7 @@
   const coloredToHTML = (str) => {
     const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
     return str.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-      return `<span style="${`color: ${colors[(parseInt(code)-30+60)%60]}`}">${st}</span>`;
+      return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
     })
   }
 
