@@ -20,7 +20,7 @@ if __name__ == "__main__":
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
-        k.hand_coded_optimizations()
+        if not getenv("NOOPT"): k.hand_coded_optimizations()
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2))
         new_ei.run()
