@@ -3,7 +3,7 @@
 import functools, itertools, operator
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
-from tinygrad.codegen.rewriter import sym
+from tinygrad.codegen.symbolic import sym
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
