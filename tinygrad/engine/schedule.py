@@ -80,7 +80,7 @@ remove_movement_ops = merge_views+PatternMatcher([
 # **** UOp realization
 
 @dataclass(frozen=True)
-class ScheduleContext:
+class GrouperContext:
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
@@ -119,9 +119,9 @@ class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs):
     super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
 
-def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
+def realize(ctx:GrouperContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
 
-def realize_before_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
@@ -142,7 +142,7 @@ do_realize = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(), UPatScheduled())), realize),
 ])
 
-def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
+def append_uop(ctx:GrouperContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
   if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns[buf_uop] = None
   for x in op.base.src:
@@ -174,7 +174,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
 
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=ScheduleContext())
+  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext())
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
