@@ -110,7 +110,17 @@ def block_merge(ctx, x:UOp):
   if len(to_append) == 0 and len(placed) == 0: return None
   return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(sorted(new_ctx, key=lambda x: x.tuplize)), tuple(to_append)+x.arg.lst, x.arg.end))
 
-pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
+def block_finalize(block:UOp):
+  if len(block.src) == 0: return None
+  _uops = sorted(dedup(block.src), key=lambda x: x.tuplize)
+  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+  _uops += block.arg.lst
+  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops)))
+
+pm_block_merge = PatternMatcher([
+  (UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),
+  (UPat(Ops.BLOCK, name="block"), block_finalize),
+])
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(in_block:UOp):
@@ -147,7 +157,7 @@ def block_reorder(in_block:UOp):
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
+def linearize_to_uop(sink:UOp) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # get children and all block contexts
@@ -210,7 +220,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   sink = sink.substitute({u:newu for u in sink.toposort if u.op is Ops.BLOCK and (newu:=block_reorder(u)) is not u})
 
   # final rewrite to merge all blocks into one
-  sink = graph_rewrite(sink, pm_block_merge, ctx=children)
+  return graph_rewrite(sink, pm_block_merge, ctx=children)
 
   # there should just be one block left, with a few parents with 0 srcs
   assert sink.op is Ops.BLOCK

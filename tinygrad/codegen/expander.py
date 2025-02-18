@@ -112,10 +112,3 @@ migrate_indexing = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
-
-def expand_rewrite(sink:UOp) -> UOp:
-  # initial symbolic + migrate indexing (remove this)
-  sink = graph_rewrite(sink, sym+migrate_indexing)
-
-  # expand
-  return graph_rewrite(sink, sym+expander)
