@@ -321,7 +321,6 @@ def load_buf(ctx:list[UOp], x:UOp):
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.ASSIGN, src=[UPat.var("x"), UPat(Ops.KERNEL)], allow_any_len=True), load_buf),
   (UPat(Ops.BUFFER, name="x"), load_buf),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
@@ -336,10 +335,9 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 
 def schedule_uop(sink:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
-  local_kernel_map = {s.src[1].arg.ast:s for s in sink.src[1].src if s.op is Ops.ASSIGN}
-  ast = sink.src[1].arg.ast.substitute(local_kernel_map).sink()
   # start by adding buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
+  kernel_src = {s.src[1].arg.ast:s.src[0] for s in sink.src[1].src if s.op is Ops.ASSIGN}
+  ast = graph_rewrite(sink.src[1].arg.ast.substitute(kernel_src).sink(), add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
