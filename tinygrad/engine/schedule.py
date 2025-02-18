@@ -360,12 +360,19 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   sched_sink = kernel_map[tensor_map[big_sink]]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # map tensors to const/buffer
+  # map tensors to new uops
   becomes_map: dict[UOp, UOp] = {}
   rev_tensor_map: dict[UOp, list[UOp]] = {}
   for k,v in tensor_map.items():
     rev_tensor_map.setdefault(v, []).append(k)
-    if v.op is Ops.CONST and all_int(v.shape) and k is not v: becomes_map[k] = v
+    if k is v: continue
+    if v.base.op is Ops.BUFFER:
+      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
+      if v.op is Ops.VIEW:
+        mop = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st][0]
+        if k is not mop: becomes_map[k] = mop
+      else: becomes_map[k] = v
+    elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
   for k,v in kernel_map.items():
     if k is v or v.op is not Ops.ASSIGN: continue
     for t in rev_tensor_map[k]: becomes_map[t] = v.buf_uop.reshape(t.shape)
