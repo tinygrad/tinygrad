@@ -802,7 +802,7 @@ class TestIdxUpcast(unittest.TestCase):
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
-        renderer.render("test", uops)
+        renderer.render(uops)
         return uops
 
   def _assert(self, dtype: DType, a: Tensor):
