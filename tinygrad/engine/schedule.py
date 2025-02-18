@@ -127,8 +127,10 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
     for s in u.src: children.setdefault(s.base, {})[u] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
+  double_reduces: list[UOp] = []
   for r in sink.toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
+    if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
     if r in realizes: continue
     group: dict[UOp, None] = {}
     recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
@@ -157,6 +159,10 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
       group = {tr: None}
       realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
+  # fuse double reduces with no other child
+  for reduceop in double_reduces:
+    top_reduce = reduceop.src[0].base
+    if len(children[top_reduce]) == 1: del realizes[top_reduce]
   return realizes
 
 # break the SINK into kernels
