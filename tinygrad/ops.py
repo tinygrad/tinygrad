@@ -93,7 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto() # noqa: E702
+  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -316,7 +316,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -525,11 +525,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
 
+  # *** uop UNIQUE ***
+
+  # TODO: use this in Buffer
+  unique_num = itertools.count(0)
+  @staticmethod
+  def unique(): return UOp(Ops.UNIQUE, arg=next(UOp.unique_num))
+
   # *** uop Buffer stuff ***
 
-  buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
+  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
@@ -853,6 +859,7 @@ class TrackedGraphRewrite:
   sink: UOp                                                                                  # the sink input to graph_rewrite
   bottom_up: bool
   matches: list[tuple[UOp, UOp, UPat]] = field(default_factory=list)                         # before+after of all the matches
+  name: Optional[str] = None
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
@@ -935,14 +942,14 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).top_down_rewrite(sink)
 
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> dict[UOp, UOp]:
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> dict[UOp, UOp]:
   if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
-    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
+    tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
   rewrite_ctx = RewriteContext(pm, ctx)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
 

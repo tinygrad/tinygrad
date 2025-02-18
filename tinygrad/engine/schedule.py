@@ -407,6 +407,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # remove_movement_ops + sym
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
 
+  # display the cleaned up tensor graph
+  if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
+
   # do_realize + group_realizes
   buffer_map: dict[UOp, UOp] = {}
   sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
@@ -451,9 +454,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort):
         raise RuntimeError(f"cycle detected in graph, kernel must either depend on ASSIGN or BUFFER for {k}")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
+    # increment the refcount of the target buf (this is required by the JIT and memory planner)
+    u.buf_uop.buffer.ref(1)
   if assign_rep: sched_sink = sched_sink.substitute(assign_rep)
+
   # display the final graph
-  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]))
+  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
 
   # final toposort (bfs)
   children: dict[UOp, list[UOp]] = {}
@@ -471,9 +477,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    schedule.append(si:=schedule_uop(u, var_vals))
-    # NOTE: incrementing output buffer refcounts is required by the memory planner and JIT
-    for out in si.outputs: out.ref(1)
+    schedule.append(schedule_uop(u, var_vals))
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

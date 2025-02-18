@@ -80,6 +80,7 @@ class Estimates:
 
 @dataclass
 class ProgramSpec:
+  name:str
   src:str
   device:str
   ast:UOp  # save the base ast (this is method cache key)
@@ -88,7 +89,6 @@ class ProgramSpec:
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
   # filled in from uops (if we have uops)
-  name:str="test"
   global_size:Optional[list[int]]=None
   local_size:Optional[list[int]]=None
   vars:list[Variable]=field(default_factory=list)
@@ -101,7 +101,6 @@ class ProgramSpec:
     if not self._ran_post_init and self.uops is not None:
       # single pass through the uops
       for u in self.uops:
-        if u.op is Ops.NAME: self.name = u.arg
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL])

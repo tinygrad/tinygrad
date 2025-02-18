@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -655,6 +656,9 @@ class Kernel:
 
   @track_rewrites()
   def linearize(self, name_override:Optional[str]=None) -> Kernel:
+    # display the AST
+    if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
+
     modified_ast = self.get_optimized_ast(name_override)
 
     if DEBUG >= 3:
@@ -685,5 +689,5 @@ class Kernel:
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return ProgramSpec(src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_estimate=mem_bytes,
+    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
