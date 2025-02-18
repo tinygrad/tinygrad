@@ -53,7 +53,7 @@ class WGSLRenderer(CStyleLanguage):
   type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
 
-  def __init__(self, supports_f16:bool):
+  def __init__(self, supports_f16:bool = False):
     self.supports_f16 = supports_f16
 
   string_rewrite = PatternMatcher([
