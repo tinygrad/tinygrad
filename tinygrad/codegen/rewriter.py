@@ -1,13 +1,12 @@
-from typing import Optional, Any, Callable
+from typing import Any, Callable
 import functools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
-from tinygrad.ops import graph_rewrite, GroupOp
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, mulacc_unrolled
-from tinygrad.helpers import getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.ops import GroupOp
+from tinygrad.codegen.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid
+from tinygrad.helpers import getenv, flatten, dedup, AMX, prod
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
-from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
@@ -223,25 +222,3 @@ pm_render = PatternMatcher([
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
 ])
-
-# *** uop graph ***
-
-def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
-  assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-  supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
-  extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
-
-  if DEVECTORIZE:
-    # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
-    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
-      mulacc_unrolled)
-  else:
-    # new devectorize only for load/store
-    sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
-
-  # optional pre matcher
-  if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
-
-  # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
-  return sink

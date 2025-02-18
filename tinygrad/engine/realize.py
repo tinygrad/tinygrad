@@ -8,6 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.codegen.flow import ast_to_program
 
 # **************** Program Creation ****************
 
@@ -110,7 +111,8 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: ProgramSpec = get_kernel(Device[device].renderer, ast).to_program()
+    #prg: ProgramSpec = get_kernel(Device[device].renderer, ast).to_program()
+    prg: ProgramSpec = ast_to_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 

@@ -1,9 +1,7 @@
 # this converts a lowerer program into a vectorized program
-
 import functools, itertools, operator
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
-from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
-from tinygrad.codegen.symbolic import sym
+from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -112,10 +110,3 @@ migrate_indexing = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(Ops.STORE, name="root"), create_gate),
 ])
-
-def expand_rewrite(sink:UOp) -> UOp:
-  # initial symbolic + migrate indexing (remove this)
-  sink = graph_rewrite(sink, sym+migrate_indexing)
-
-  # expand
-  return graph_rewrite(sink, sym+expander)
