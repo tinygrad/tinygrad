@@ -222,18 +222,13 @@ def get_mlperf_bert_model():
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
   return BertForPretraining(**config)
 
-def get_data_bert(GPUS:list[str], it):
-  data: dict[str, Tensor] = next(it)
-  for key in data.keys(): data[key].shard_(GPUS, axis=0)
-  return data
-
 def get_fake_data_bert(BS:int):
   return {
-    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.float32),
-    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.default_float),
-    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.float32),
-    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.float32),
-    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.float32),
-    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32),
-    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32),
+    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.float32, device="CLANG"),
+    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.default_float, device="CLANG"),
+    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.float32, device="CLANG"),
+    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CLANG"),
+    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CLANG"),
+    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CLANG"),
+    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32, device="CLANG"),
   }
