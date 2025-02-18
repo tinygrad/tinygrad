@@ -929,7 +929,7 @@ class LazyMatcher:
     # these are lazily created during graph rewrite
     self.table: dict[tuple[tuple[Ops, DType, Any], tuple[frozenset[UPat]]], frozenset[UPat]] = {}
     self.uop_matchset: dict[UOp, frozenset[UPat]] = {}
-    self.final: dict[frozenset[UPat], list[tuple[int, Callable, bool]]] = {}
+    self.final: dict[frozenset[UPat], list[tuple[int, UPat, Callable, bool]]] = {}
 
     def _add_candidates(pat: UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
@@ -941,9 +941,13 @@ class LazyMatcher:
       assert pat.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       real_fxn = types.FunctionType(*tuple_fxn)
-      self.pats[pat] = (i, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters)
+      self.pats[pat] = (i, pat, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters)
 
-  def matches(self, uop:UOp) -> list[tuple[int, Callable, bool]]:
+  def valid_binds(self, uop: UOp, pat: UPat, binds: dict[str, UOp]) -> bool:
+    return (pat.name is None or binds.setdefault(pat.name, uop) is uop) and \
+      (pat.src is None or all(self.valid_binds(us, ps, binds) for us,ps in zip(uop.src, pat.src[0])))
+
+  def matches(self, uop:UOp) -> list[tuple[int, UPat, Callable, bool]]:
     srcs = tuple([self.uop_matchset[s] for s in uop.src])
     transition = ((uop.op, uop.dtype, uop.arg), srcs)
     if not (matchset:=self.table.get(transition)):
@@ -951,7 +955,7 @@ class LazyMatcher:
       self.table[transition] = matchset = frozenset(pat for op in (uop.op, None) for pat in self.candidates.get(op, set()) \
         if (pat.dtype is None or uop.dtype in pat.dtype or uop.dtype.scalar() in pat.dtype) \
         and (pat.arg is None or uop.arg == pat.arg) and (pat.allowed_len == -1 or len(uop.src) == pat.allowed_len) \
-        and (pat.src is None or any(all(s in sm for s,sm in zip(src, srcs)) for src in pat.src)))
+        and (pat.src is None or any(all(s in sm for s,sm in zip(src, srcs)) for src in pat.src)) and self.valid_binds(uop, pat, {}))
       # if equivalent matchset doesn't exist sort functions to run
       if matchset not in self.final: self.final[matchset] = sorted([self.pats[pat] for pat in matchset if pat in self.pats], key=lambda x: x[0])
     self.uop_matchset[uop] = matchset
@@ -965,8 +969,16 @@ class NewRewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
+  def bind_vars(self, uop:UOp, pat:UPat, binds:dict[str, UOp]) -> dict[str, UOp]:
+    if pat.name is not None: binds[pat.name] = uop
+    if pat.src is not None:
+      for us,ps in zip(uop.src, pat.src[0]): self.bind_vars(us, ps, binds)
+    return binds
+
   def rewrite_uop(self, uop:UOp) -> UOp|None:
-    for _,fxn,has_ctx in self.lm.matches(uop): continue
+    for _,pat,fxn,has_ctx in self.lm.matches(uop):
+      binds = self.bind_vars(uop, pat, {})
+      if (ret:=(fxn(ctx=self.ctx, **binds) if has_ctx else fxn(**binds))) is not None: return ret
     return None
 
   def rewrite(self, n:UOp) -> UOp:
