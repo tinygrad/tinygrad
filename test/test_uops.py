@@ -343,7 +343,7 @@ class TestAssembly(unittest.TestCase):
     a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render("test", uops)
+    Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHL, ops)
     self.assertIn(Ops.MUL, ops)
@@ -356,7 +356,7 @@ class TestAssembly(unittest.TestCase):
     a1 = UOp(Ops.IDIV, dtypes.uint, (l1, c1))
     a2 = UOp(Ops.IDIV, dtypes.uint, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render("test", uops)
+    Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertIn(Ops.IDIV, ops)
