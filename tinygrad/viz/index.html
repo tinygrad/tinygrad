@@ -404,7 +404,7 @@
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (kernel.match_count > 1) {
+    if (kernel.match_count >= 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
       for (let i=0; i<=kernel.match_count; i++) {
