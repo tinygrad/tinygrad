@@ -82,65 +82,32 @@ remove_movement_ops = merge_views+PatternMatcher([
 @dataclass(frozen=True)
 class GrouperContext:
   assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
-  realizes: dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
+  realizes: dict[UOp, None] = field(default_factory=dict)            # this holds all the uops we realize
   allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
-# wrap tensor uops around a VIEW(BUFFER, <uop>)
-# this BUFFER preserves a link back to the uop on the tensor after the scheduler rewrites it.
-def add_buffers(buf:UOp, buffer_map:dict[UOp, UOp], cache:dict[UOp, UOp]) -> UOp:
-  if (r:=cache.get(buf)) is not None: return r
-  # SINK is passthrough
-  if buf.op is Ops.SINK: return buf.replace(src=tuple(add_buffers(x, buffer_map, cache) for x in buf.src))
-  # skip creating buffers for CONST/BIND/DEVICE/BUFFER
-  if buf.base.op in {Ops.CONST, Ops.BIND, Ops.DEVICE}: return buf
-  if buf.base.op is Ops.BUFFER: return buf.view(unwrap(buf.st))
-  # VIEW is passthrough
-  if buf is not buf.base:
-    cache[buf] = ret = add_buffers(buf.base, buffer_map, cache).view(unwrap(buf.st))
-    return ret
-  # make things that can't be images not images
-  dtype = buf.dtype
-  if isinstance(dtype, ImageDType) and (prod(buf.shape)!=prod(dtype.shape) or not any(buf.shape[x]%4==0 for x in unwrap(buf.st).unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
-    dtype = buf.dtype.base
-  # ASSIGN already has a target buffer, otherwise we create a new one
-  assert isinstance(buf.device, str), f"buf device is str, not {buf.device}"
-  buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-  op = buf.replace(dtype=dtype, src=tuple(add_buffers(x, buffer_map, cache) for x in buf.src))
-  # track the buffer uop for the simplified uop
-  buffer_map[buf] = buf_uop
-  if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).buf_uop.buffer.view(op.size, op.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
-  # (early) bufferize
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op), buf.st)
-  return ret
+def realize(ctx:GrouperContext, tr:UOp) -> None: ctx.realizes[tr] = None
 
-class UPatScheduled(UPat):
-  def __init__(self, *args, **kwargs):
-    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"), UPat(*args, **{"name":"to_store",**kwargs})))
-
-def realize(ctx:GrouperContext, b:UOp, to_store:UOp, **kwargs) -> None: ctx.realizes[b] = to_store
-
-def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, b, src)
+    return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, src)
   # early realize before expand
-  if resolve(prod(src.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, b, src)
+  if resolve(prod(src.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, b, src)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, src)
 
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"),
-   lambda ctx,s: ctx.realizes.update((x.buf_uop, x.base) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
+   lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
+  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, name="view", src=(UPatScheduled(name="src"),)), realize_before_view),
+  (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.DEVICE}, name="src"),)), realize_before_view),
   # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(), UPatScheduled())), realize),
+  (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER}, name="tr"))), realize),
 ])
 
 def append_uop(ctx:GrouperContext, view:UOp, buf_uop:UOp) -> None:
@@ -175,7 +142,9 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
 
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext())
+  sink = graph_rewrite(sink, do_realize, ctx:=GrouperContext())
+  return ctx.realizes
+  """
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
@@ -227,6 +196,7 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
     top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
     if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
   return ctx.realizes
+  """
 
 # break the SINK into kernels
 
@@ -241,24 +211,24 @@ class KernelContext:
   realizes: dict[UOp, UOp]
   ops_metadata: dict[UOp, Metadata]
 
-def create_kernel(ctx:KernelContext, b:UOp, x:UOp, st:UOp):
-  if (m:=ctx.ops_metadata.get(b)) is not None: ctx.ops_metadata[x] = m
-  if b not in ctx.realizes: return x # collapse BUFFER
+def create_kernel(ctx:KernelContext, x:UOp):
+  if x not in ctx.realizes: return None
+  b = UOp.new_buffer(x.device, x.size, x.dtype)
   # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
-  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=st.src, arg=Kernel(x, (m,) if m is not None else ())))
+  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=x.src, arg=Kernel(x, ())))
 
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
   new_metadata: dict[Metadata, None] = dict.fromkeys(x.arg.metadata)
   for s in x.src:
-    if s.op is Ops.BUFFER or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL): new_srcs.append(s)
+    if s.op is Ops.BUFFER or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL) or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       if (m:=ctx.ops_metadata.get(s)) is not None: new_metadata[m] = None
   return x.replace(src=n, arg=Kernel(x.arg.ast, tuple(new_metadata))) if (n:=tuple(dedup(new_srcs))) != x.src else None
 
 create_kernels = merge_views+PatternMatcher([
-  (UPat(Ops.VIEW, name="st", src=(UPat(Ops.BUFFER, name="b"), UPat.var("x"))), create_kernel),
+  (UPat(GroupOp.All-{Ops.KERNEL, Ops.BUFFER}, name="x"), create_kernel),
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
 ])
 
@@ -385,8 +355,10 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 
 def schedule_uop(sink:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
+  local_kernel_map = {s.src[1].arg.ast:s for s in sink.src[1].src if s.op is Ops.ASSIGN}
+  ast = sink.src[1].arg.ast.substitute(local_kernel_map).sink()
   # start by adding buffer ops
-  ast = graph_rewrite(sink.src[1].arg.ast.sink(), add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
@@ -409,39 +381,21 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
-  # do_realize + group_realizes
-  buffer_map: dict[UOp, UOp] = {}
-  sink = add_buffers(tensor_map[big_sink], buffer_map, cache={})
-  # get realizes
-  buf_tensors: dict[UOp, list[UOp]] = {}
-  ops_metadata: dict[UOp, Metadata] = {}
-  for k,v in tensor_map.items():
-    if (b:=buffer_map.get(v)) is not None:
-      buf_tensors.setdefault(b, []).append(k)
-      if isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
-  realize_map = group_realizes(sink)
-  for buf_uop,v in realize_map.items():
-    assert v is v.base, f"can only realize base {v}"
-    for tensor_uop in buf_tensors[buf_uop]:
-      # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
-      tensor_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
+  # get the tensors that need to realize
+  realize_map = group_realizes(tensor_map[big_sink])
 
-  # map tensors to new uops
-  becomes_map: dict[UOp, UOp] = {}
-  for k,v in tensor_map.items():
-    if k is v: continue
-    if v.base.op is Ops.BUFFER:
-      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
-      if v.op is Ops.VIEW:
-        mop = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st][0]
-        if k is not mop: becomes_map[k] = mop
-      else: becomes_map[k] = v
-    elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
-
-  # create kernels
-  if len(realize_map) == 0: return [], {}, becomes_map
-  sched_sink = graph_rewrite(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata))
+  # map tensors to kernels
+  kernel_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, {}), bottom_up=True)
+  sched_sink = kernel_map[tensor_map[big_sink]]
   type_verify(list(sched_sink.toposort), kernel_spec)
+
+  # realize tensors
+  rev_tensor_map: dict[UOp, list[UOp]] = {}
+  for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
+  becomes_map: dict[UOp, UOp] = {}
+  for k,v in kernel_map.items():
+    if k is v or v.op is not Ops.ASSIGN: continue
+    for t in rev_tensor_map[k]: becomes_map[t] = v.buf_uop.reshape(t.shape)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
