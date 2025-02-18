@@ -13,7 +13,8 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, symbolic_simple, merge_views, GroupOp
+from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, merge_views, GroupOp
+from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same, temp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops, sym
@@ -322,6 +323,7 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
     for optim, cnt in [(nn.optim.Adam, 30), (nn.optim.SGD, 11)]:
@@ -1106,6 +1108,7 @@ class TestSchedule(unittest.TestCase):
       c2(c1(img).relu()).relu().sum().backward()
       check_schedule(opt.schedule_step(), 7)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
@@ -1454,9 +1457,10 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
@@ -2487,7 +2491,7 @@ class TestContiguous(unittest.TestCase):
     self.assertEqual(b.lazydata.base.buffer.size, 16)
 
 class TestUOpBecome(unittest.TestCase):
-  # the simplest case, if we create a new BUFFER for this UOp
+  # the simplest case, if we create a new BUFFER for this tensor UOp
   def test_new_buffer(self):
     a = Tensor.empty(4, 4)
     b = Tensor.empty(4, 4)
@@ -2495,8 +2499,10 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(add, 1)
     # NOTE: realized base is always a flat buffer
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
-    # the Tensor UOp can optionally stack a VIEW on top of BUFFER
+    # the Tensor UOp can optionally stack movement ops on top of BUFFER, in this case to preserve the (4, 4) shape of the tensor
     assert UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)).match(add.lazydata, {})
+    self.assertEqual(add.lazydata.size, 16)
+    self.assertEqual(add.lazydata.shape, (4, 4))
 
   def test_new_buffer_view(self):
     a = Tensor.empty(4, 4)
@@ -2504,9 +2510,27 @@ class TestUOpBecome(unittest.TestCase):
     add = (a+b).reshape(8, 2)
     check_schedule(add, 1)
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
-    # VIEW is preserverd after the becomes rewrite.
+    # the shape is preserverd in the becomes_map.
     self.assertEqual(add.lazydata.shape, (8, 2))
     assert add.lazydata is not add.lazydata.base
+
+  def test_new_flat_buffer(self):
+    a = Tensor.empty(4,)
+    b = Tensor.empty(4,)
+    add = a+b
+    check_schedule(add, 1)
+    # BUFFER already has a shape (4,), this tensor just becomes a contiguous BUFFER
+    assert UPat(Ops.BUFFER).match(add.lazydata, {})
+
+  # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
+
+  @unittest.expectedFailure
+  def test_new_buffer_mops(self):
+    a = Tensor.empty(4, 1)
+    b = a.expand(4, 4).reciprocal()
+    check_schedule(b, 1)
+    self.assertEqual(b.lazydata.base.realized.size, 4)
+    assert UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE),)).match(b.lazydata, {}), f"{b.lazydata}"
 
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
