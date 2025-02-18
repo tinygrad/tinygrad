@@ -93,7 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto() # noqa: E702
+  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -669,6 +669,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
 @dataclass(frozen=True)
 class KernelInfo:
+  name: str = "test"            # name of the kernel
   local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
   dont_use_locals: bool = False # don't use local indexing
