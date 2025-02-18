@@ -6,7 +6,7 @@ from tinygrad.spec import type_verify
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
-DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
+DONT_PLACE_IN_BLOCK = {Ops.NAME, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
 def disp(y:UOp) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
@@ -70,7 +70,7 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(list(old_blocks.values())+new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src+(UOp(Ops.NAME, arg=x.arg.name),), arg=BasicBlock((), (x,)))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
@@ -221,5 +221,6 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
 
-  # strip the SINK
-  return _uops[:-1]
+  # strip the NAME and SINK
+  assert _uops[0].op is Ops.NAME and _uops[-1].op is Ops.SINK
+  return _uops[1:-1]
