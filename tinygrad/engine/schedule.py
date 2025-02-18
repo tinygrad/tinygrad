@@ -122,8 +122,10 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize, realizes:={s.base:None for s in sink.src if s.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
   children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
+  assigns: dict[UOp, UOp] = {}
   for u in sink.toposort:
     if u is not u.base or u.base.op is Ops.SINK: continue
+    if u.op is Ops.ASSIGN: assigns[u.buf_uop] = u
     for s in u.src: children[s.base][u] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
@@ -140,6 +142,14 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
     forced_realize = r in group
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
+    # can only fuse assign if no other assign_target is used in the kernel
+    if not forced_realize and any(x.op is Ops.ASSIGN for x in group):
+      parents = deque((r, *group))
+      while parents and not forced_realize:
+        p = parents.pop().base
+        if (assign:=assigns.get(p)) is not None and assign not in group: forced_realize, can_chase = True, False
+        if p in realizes: continue
+        parents.extend(p.src)
     if forced_realize or not group:
       tr = r
       if can_chase:
