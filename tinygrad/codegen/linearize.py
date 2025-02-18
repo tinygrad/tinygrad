@@ -2,7 +2,6 @@ from __future__ import annotations
 import collections, heapq
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
-from tinygrad.spec import type_verify
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
@@ -115,12 +114,11 @@ def block_finalize(block:UOp):
   _uops = sorted(dedup(block.src), key=lambda x: x.tuplize)
   assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
   _uops += block.arg.lst
-  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops)))
+  assert _uops[-1].op is Ops.SINK, "block doesn't end with SINK"
+  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops[:-1])))
 
-pm_block_merge = PatternMatcher([
-  (UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),
-  (UPat(Ops.BLOCK, name="block"), block_finalize),
-])
+pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge)])
+pm_block_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="block"), block_finalize)])
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(in_block:UOp):
@@ -220,16 +218,7 @@ def linearize_to_uop(sink:UOp) -> UOp:
   sink = sink.substitute({u:newu for u in sink.toposort if u.op is Ops.BLOCK and (newu:=block_reorder(u)) is not u})
 
   # final rewrite to merge all blocks into one
-  return graph_rewrite(sink, pm_block_merge, ctx=children)
+  sink = graph_rewrite(sink, pm_block_merge, ctx=children)
 
-  # there should just be one block left, with a few parents with 0 srcs
-  assert sink.op is Ops.BLOCK
-  _uops = sorted(dedup(sink.src), key=lambda x: x.tuplize)
-  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
-  _uops += sink.arg.lst
-
-  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(_uops)
-
-  # strip the SINK
-  return _uops[:-1]
+  # TODO: can this go in merge?
+  return graph_rewrite(sink, pm_block_finalize)
