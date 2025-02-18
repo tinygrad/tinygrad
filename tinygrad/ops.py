@@ -922,16 +922,16 @@ def launch_viz(env_str:str, data:str):
     os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")] + args)
 
 class LazyMatcher:
-  def __init__(self, patterns: list[tuple[UPat, Callable]]):
+  def __init__(self, patterns:list[tuple[UPat, Callable]]):
     self.patterns = patterns
     self.candidates: dict[Union[Ops, None], set[UPat]] = {}
-    self.pats: dict[UPat, tuple[int, Callable, bool]] = {}
+    self.pats: dict[UPat, tuple[int, UPat, Callable, bool]] = {}
     # these are lazily created during graph rewrite
-    self.table: dict[tuple[tuple[Ops, DType, Any], tuple[frozenset[UPat]]], frozenset[UPat]] = {}
-    self.uop_matchset: dict[UOp, frozenset[UPat]] = {}
+    self.table: dict[tuple[tuple[Ops, DType, Any], tuple[frozenset[UPat], ...]], frozenset[UPat]] = {}
     self.final: dict[frozenset[UPat], list[tuple[int, UPat, Callable, bool]]] = {}
+    self.uop_matchset: dict[UOp, frozenset[UPat]] = {}
 
-    def _add_candidates(pat: UPat):
+    def _add_candidates(pat:UPat):
       std_src = (pat._in_src,) if isinstance(pat._in_src, UPat) else () if pat._in_src is None else pat._in_src
       for s in std_src: _add_candidates(s)
       for op in ((pat.op,) if pat.op is None else pat.op): self.candidates.setdefault(op, set()).add(pat)
@@ -943,7 +943,7 @@ class LazyMatcher:
       real_fxn = types.FunctionType(*tuple_fxn)
       self.pats[pat] = (i, pat, real_fxn, 'ctx' in inspect.signature(real_fxn).parameters)
 
-  def valid_binds(self, uop: UOp, pat: UPat, binds: dict[str, UOp]) -> bool:
+  def valid_binds(self, uop:UOp, pat:UPat, binds:dict[str, UOp]) -> bool:
     return (pat.name is None or binds.setdefault(pat.name, uop) is uop) and \
       (pat.src is None or all(self.valid_binds(us, ps, binds) for us,ps in zip(uop.src, pat.src[0])))
 
