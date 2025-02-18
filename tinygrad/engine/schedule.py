@@ -100,16 +100,58 @@ do_realize = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER}, name="tr"))), realize),
 ])
 
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None], reduce_for_op:dict[UOp, UOp],
+                    group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]):
+  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
+  if (tr, st) in cache: return
+  cache.setdefault((tr, st))
+  if tr in realizes:
+    # can only fuse contiguous
+    # max one reduceop per kernel
+    if not st.contiguous or st.size != unwrap(r.st).size or tr in reduce_for_op: group.setdefault(r)
+    return group.setdefault(tr)
+  for tr_next in children[tr]:
+    # max one reduceop per kernel
+    if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
+    # can only fuse contiguous
+    if len(st_childs:=dedup(s for s in tr_next.src if s.base is tr)) > 1: return group.setdefault(r)
+    recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
+
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize, realizes:={x.base:None for x in sink.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
-  children: dict[UOp, list[UOp]] = {}
+  children: dict[UOp, dict[UOp, None]] = {}
   for u in sink.toposort:
-    for s in u.src: children.setdefault(s, []).append(u)
-  #raise Exception(children)
+    if u is not u.base: continue
+    for s in u.src: children.setdefault(s.base, {})[u] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-
   reduce_for_op: dict[UOp, UOp] = {}
+  for r in sink.toposort:
+    if r.op is not Ops.REDUCE_AXIS or r in realizes: continue
+    group: dict[UOp, None] = {}
+    recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
+    can_chase = all(tr not in reduce_for_op for tr in group)
+    forced_realize = r in group
+    if not forced_realize and len(group) > 1: forced_realize = True
+    if forced_realize or not group:
+      tr = r
+      if can_chase:
+        # can chase this down to contiguous children
+        st = tr.st
+        while len(children[tr]) == 1:
+          tr_next = next(iter(children[tr]))
+          st_childs = dedup(s for s in tr_next.src if s.base is tr)
+          if len(st_childs) > 1: break
+          if st.size != st_childs[0].st.size: break
+          st = st + st_childs[0].st
+          if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
+          tr = tr_next
+        # don't cast to higher size before store (tr cannot be realized if forced_realize)
+        if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
+          tr = tr.srcs[0].base
+        reduce_for_op[tr] = r
+      realizes[tr] = None
+    else: reduce_for_op.update((tr, r) for tr in group)
   return realizes
 
 # break the SINK into kernels
