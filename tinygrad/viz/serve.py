@@ -55,8 +55,8 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   graph: dict[int, tuple[str, list[int], str]] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
-    # always exclude DEVICE/CONST
-    if u.op in {Ops.DEVICE, Ops.CONST}: excluded.add(u)
+    # always exclude DEVICE/CONST/UNIQUE
+    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE}: excluded.add(u)
     # only exclude CONST VIEW source if it has no other children in the graph
     if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
       excluded.update(u.src)

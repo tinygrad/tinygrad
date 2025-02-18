@@ -93,7 +93,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto() # noqa: E702
+  NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -316,7 +316,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
-  def size(self) -> int: return self.arg[1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -525,11 +525,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
 
+  # *** uop UNIQUE ***
+
+  # TODO: use this in Buffer
+  unique_num = itertools.count(0)
+  @staticmethod
+  def unique(): return UOp(Ops.UNIQUE, arg=next(UOp.unique_num))
+
   # *** uop Buffer stuff ***
 
-  buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device),), (next(UOp.buffer_num), size))
+  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp(Ops.DEVICE, arg=device), UOp.unique()), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
