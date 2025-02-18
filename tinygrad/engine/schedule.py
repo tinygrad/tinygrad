@@ -100,8 +100,8 @@ do_realize = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER}, name="tr"))), realize),
 ])
 
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp, None]], realizes:dict[UOp, None], reduce_for_op:dict[UOp, UOp],
-                    group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]):
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
+                    reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]):
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -121,10 +121,10 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp,
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize, realizes:={s.base:None for s in sink.src if s.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
-  children: dict[UOp, dict[UOp, None]] = {}
+  children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
   for u in sink.toposort:
-    if u is not u.base: continue
-    for s in u.src: children.setdefault(s.base, {})[u] = None
+    if u is not u.base or u.base.op is Ops.SINK: continue
+    for s in u.src: children[s.base][u] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
@@ -159,6 +159,10 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
       group = {tr: None}
       realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
+    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST:
+      # maybe fuse arange with its children
+      if len(flatten(children[tr] for tr in group)) != 0:
+        for tr in group: del realizes[tr]
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
