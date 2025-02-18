@@ -13,9 +13,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
-
-if getenv("LIBUSB", 0): from tinygrad.runtime.support.am.usb import Asm236x
-else: from tinygrad.runtime.support.am.asm2x6x import Asm236x
+from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
 
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -590,12 +588,10 @@ class USBTrackedMemoryView:
   def __repr__(self): return "USBTrackedMemoryView"
 
 class USBIface(PCIIface):
-  iommu_set:bool = False
-  gpus:List[Any] = []
-
   def __init__(self, dev, dev_id):
     self.dev = dev
-    self.usb = Asm236x("/dev/sg1", is_24=False)
+    connector_t = USBConnector if getenv("LIBUSB", 0) else SCSIConnector
+    self.usb = connector_t("/dev/sg0")
 
     gpu_bus = 4 if self.usb.is_24 else 3
 
