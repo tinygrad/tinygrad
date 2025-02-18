@@ -1,7 +1,7 @@
 import unittest
 from typing import List, cast
 import numpy as np
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.device import Buffer, Device, is_dtype_supported
 from tinygrad.dtype import dtypes
@@ -22,7 +22,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
   inbufs = [cast(UOp,x.lazydata).base.buffer for x in inputs]
-  src = Device[Device.DEFAULT].renderer.render("test", uops)
+  src = Device[Device.DEFAULT].renderer.render(uops)
   ei = CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops[-1], uops=uops, local_size=local_size))
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
