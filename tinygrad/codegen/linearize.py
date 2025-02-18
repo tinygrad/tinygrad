@@ -6,7 +6,7 @@ from tinygrad.spec import type_verify
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
-DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
+DONT_PLACE_IN_BLOCK = {Ops.NAME, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
 def disp(y:UOp) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
@@ -70,7 +70,8 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(list(old_blocks.values())+new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
+  (UPat(Ops.SINK, name="x"),
+    lambda x: UOp(Ops.BLOCK, src=x.src+((UOp(Ops.NAME, arg=x.arg.name),) if x.arg is not None else ()), arg=BasicBlock((), (x,)))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
@@ -111,6 +112,17 @@ def block_merge(ctx, x:UOp):
   return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(sorted(new_ctx, key=lambda x: x.tuplize)), tuple(to_append)+x.arg.lst, x.arg.end))
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
+
+def block_finalize(block:UOp):
+  if len(block.src) == 0: return None
+  _uops = sorted(dedup(block.src), key=lambda x: x.tuplize)
+  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+  _uops += block.arg.lst
+  # strip the SINK
+  assert _uops[-1].op is Ops.SINK, "doesn't end with SINK"
+  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops[:-1])))
+
+pm_block_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="block"), block_finalize)])
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(in_block:UOp):
@@ -212,14 +224,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   # final rewrite to merge all blocks into one
   sink = graph_rewrite(sink, pm_block_merge, ctx=children)
 
-  # there should just be one block left, with a few parents with 0 srcs
-  assert sink.op is Ops.BLOCK
-  _uops = sorted(dedup(sink.src), key=lambda x: x.tuplize)
-  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
-  _uops += sink.arg.lst
+  # there should just be one block left, with a few parents with 0 srcs (now done in a rewriter)
+  sink = graph_rewrite(sink, pm_block_finalize)
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(_uops)
+  if not skip_check: type_verify(sink.arg.lst)
 
-  # strip the SINK
-  return _uops[:-1]
+  # return the list. TODO: refactor to return the UOp
+  return list(sink.arg.lst)

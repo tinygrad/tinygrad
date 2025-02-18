@@ -952,7 +952,7 @@ class TestLinearizer(unittest.TestCase):
     sink = UOp(Ops.SINK, src=(store,))
     lin = Kernel(sink)
     lin.linearize()
-    assert len(lin.uops) <= 9, "too many uops"
+    assert len(lin.uops) <= 10, "too many uops"
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.

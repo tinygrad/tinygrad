@@ -1,6 +1,6 @@
 import unittest, itertools
 
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops
 from tinygrad.codegen.symbolic import simplify_valid

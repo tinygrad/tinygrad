@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import CI
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 import numpy as np
 from tinygrad.device import is_dtype_supported
 

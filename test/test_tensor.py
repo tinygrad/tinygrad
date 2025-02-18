@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.dtype import DType
 
@@ -802,7 +802,7 @@ class TestIdxUpcast(unittest.TestCase):
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
-        renderer.render("test", uops)
+        renderer.render(uops)
         return uops
 
   def _assert(self, dtype: DType, a: Tensor):

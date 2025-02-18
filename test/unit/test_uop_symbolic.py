@@ -3,7 +3,7 @@ import unittest, pickle
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite, sym
+from tinygrad.codegen.devectorizer import full_graph_rewrite, sym
 from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools

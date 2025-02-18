@@ -154,7 +154,7 @@ class PTXRenderer(Renderer):
     params = ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs])
     return f"{self.kernel_prefix} {function_name}(\n\t{params}\n)\n{{\n{kernel}\n}}"
 
-  def render(self, name:str, uops:list[UOp]) -> str:
+  def render(self, uops:list[UOp]) -> str:
     kernel:list[str] = []
     bufs = []
 
@@ -169,7 +169,11 @@ class PTXRenderer(Renderer):
       c[prefix] += 1
       return f"%{prefix}{c[prefix]-1}"
 
+    name = "test"
     for u in uops:
+      if u.op is Ops.NAME:
+        name = u.arg
+        continue
       if u.op is Ops.VECTORIZE:
         r[u] = [cast(str,r[x]) for x in u.src]
         continue

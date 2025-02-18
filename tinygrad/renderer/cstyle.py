@@ -5,7 +5,7 @@ from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
-from tinygrad.codegen.rewriter import no_vectorized_alu
+from tinygrad.codegen.devectorizer import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
@@ -120,7 +120,7 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def render(self, name:str, uops:list[UOp]) -> str:
+  def render(self, uops:list[UOp]) -> str:
     r: dict[UOp, str] = {}
     self.r = r
 
@@ -129,7 +129,11 @@ class CStyleLanguage(Renderer):
     kernel = []
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
+    name = "test"
     for u in uops:
+      if u.op is Ops.NAME:
+        name = u.arg
+        continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
