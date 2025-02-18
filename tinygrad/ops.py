@@ -669,7 +669,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
 @dataclass(frozen=True)
 class KernelInfo:
-  name: str                     # name of the kernel
+  name: str = "test"            # name of the kernel
   local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
   dont_use_locals: bool = False # don't use local indexing

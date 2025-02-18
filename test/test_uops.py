@@ -22,7 +22,7 @@ def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return 
 
 def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
-  src = Device[Device.DEFAULT].renderer.render("test", uops)
+  src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, ast, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))

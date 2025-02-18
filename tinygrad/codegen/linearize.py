@@ -70,7 +70,8 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(list(old_blocks.values())+new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src+(UOp(Ops.NAME, arg=x.arg.name),), arg=BasicBlock((), (x,)))),
+  (UPat(Ops.SINK, name="x"),
+    lambda x: UOp(Ops.BLOCK, src=x.src+((UOp(Ops.NAME, arg=x.arg.name),) if x.arg is not None else ()), arg=BasicBlock((), (x,)))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
@@ -117,9 +118,9 @@ def block_finalize(block:UOp):
   _uops = sorted(dedup(block.src), key=lambda x: x.tuplize)
   assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
   _uops += block.arg.lst
-  # strip the NAME and SINK
-  assert _uops[0].op is Ops.NAME and _uops[-1].op is Ops.SINK
-  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops[1:-1])))
+  # strip the SINK
+  assert _uops[-1].op is Ops.SINK, "doesn't end with SINK"
+  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops[:-1])))
 
 pm_block_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="block"), block_finalize)])
 
