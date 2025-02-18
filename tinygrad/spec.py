@@ -1,21 +1,25 @@
 from typing import cast
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_int, all_same, dedup, prod
+from tinygrad.helpers import all_same, dedup, prod
+
+buffer_spec = PatternMatcher([
+  (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
+  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="buf"),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+])
 
 # *** this is the spec of a Tensor in UOp ***
 
-tensor_uop_spec = PatternMatcher([
-  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
-   lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
-
+tensor_uop_spec = buffer_spec+PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.CONST, Ops.DEVICE}),)), lambda: False),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -53,7 +57,7 @@ spec = PatternMatcher([
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
+  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
@@ -109,7 +113,7 @@ spec = PatternMatcher([
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
-  (UPat(Ops.SINK, dtypes.void), lambda: True),
+  (UPat((Ops.NAME, Ops.SINK), dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
@@ -118,11 +122,13 @@ spec = PatternMatcher([
 
 # *** this is the spec of a Kernel in UOp ***
 
-kernel_spec = PatternMatcher([
-  (UPat(Ops.DEVICE, src=()), lambda: True),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
-  # TODO: currently kernel only has buffer parents, this is incomplete. it should be BUFFER and ASSIGN
-  (UPat(Ops.KERNEL, src=UPat(Ops.BUFFER)), lambda: True),
+kernel_spec = buffer_spec+PatternMatcher([
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
+  # assign has a buffer view and kernel source, it can optionally depend on other assigns
+  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  # view/sink/const can also exist in the kernel graph
+  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST)), lambda: True),
+  (UPat(GroupOp.All), lambda: False),
 ])
 
 # *** this is the UOp shape spec ***

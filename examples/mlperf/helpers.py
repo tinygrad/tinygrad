@@ -227,13 +227,13 @@ def get_data_bert(GPUS:list[str], it):
   for key in data.keys(): data[key].shard_(GPUS, axis=0)
   return data
 
-def get_fake_data_bert(GPUS:list[str], BS:int):
+def get_fake_data_bert(BS:int):
   return {
-    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.default_float).contiguous().shard_(GPUS, axis=0),
-    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.float32),
+    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.default_float),
+    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.float32),
+    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.float32),
+    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.float32),
+    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32),
+    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32),
   }

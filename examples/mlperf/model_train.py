@@ -647,7 +647,7 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.0001 * math.sqrt(BS/66))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00011 * math.sqrt(BS/66))
 
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
@@ -747,18 +747,22 @@ def train_bert():
     eval_it = iter(batch_load_val_bert(EVAL_BS))
     train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
     for _ in range(start_step): next(train_it) # Fast forward
-
+  else:
+    # repeat fake data
+    def repeat_fake(bs):
+      while True: yield get_fake_data_bert(bs)
+    eval_it = iter(repeat_fake(EVAL_BS))
+    train_it = iter(repeat_fake(BS))
 
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
+
+  i, train_data = start_step, get_data_bert(GPUS, train_it)
+
   if RUNMLPERF:
-    # only load real data with RUNMLPERF
-    i, train_data = start_step, get_data_bert(GPUS, train_it)
     if MLLOGGER:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*BS, metadata={"epoch_num": i*BS})
-  else:
-    i, train_data = start_step, get_fake_data_bert(GPUS, BS)
 
   while train_data is not None and i < train_steps and not achieved:
     Tensor.training = True
@@ -772,10 +776,7 @@ def train_bert():
     pt = time.perf_counter()
 
     try:
-      if RUNMLPERF:
-        next_data = get_data_bert(GPUS, train_it)
-      else:
-        next_data = get_fake_data_bert(GPUS, BS)
+      next_data = get_data_bert(GPUS, train_it)
     except StopIteration:
       next_data = None
 
@@ -821,10 +822,7 @@ def train_bert():
       BEAM.value = EVAL_BEAM
 
       for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
-        if RUNMLPERF:
-          eval_data = get_data_bert(GPUS, eval_it)
-        else:
-          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
+        eval_data = get_data_bert(GPUS, eval_it)
         GlobalCounters.reset()
         st = time.time()
 
