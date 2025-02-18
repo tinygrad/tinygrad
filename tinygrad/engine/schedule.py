@@ -79,29 +79,19 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 # **** UOp realization
 
-@dataclass(frozen=True)
-class GrouperContext:
-  assigns: dict[UOp, None] = field(default_factory=dict)             # this holds all the BUFFER uops we ASSIGN to in this schedule
-  realizes: dict[UOp, None] = field(default_factory=dict)            # this holds all the uops we realize
-  allbufs: dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
-  children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+def realize(ctx:dict[UOp, UOp], tr:UOp) -> None: ctx[tr] = None
 
-def realize(ctx:GrouperContext, tr:UOp) -> None: ctx.realizes[tr] = None
-
-def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
+def realize_before_view(ctx:dict[UOp, UOp], view:UOp, src:UOp) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, src)
+    return None if can_pad(src, ctx, dict()) else realize(ctx, src)
   # early realize before expand
   if resolve(prod(src.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, src)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx, dict())) else realize(ctx, src)
 
 do_realize = PatternMatcher([
-  # always realize SINK parents
-  (UPat(Ops.SINK, name="s"),
-   lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -110,93 +100,10 @@ do_realize = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER}, name="tr"))), realize),
 ])
 
-def append_uop(ctx:GrouperContext, view:UOp, buf_uop:UOp) -> None:
-  ctx.allbufs[buf_uop] = view
-  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns[buf_uop] = None
-  for x in op.base.src:
-    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
-create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
-
-def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2 and u.src[0].op is Ops.BUFFER
-def uval(u:UOp) -> UOp:
-  assert is_scheduled(u), f"must be a scheduled op {u}"
-  return u.src[1]
-
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp], realizes:dict[UOp, UOp],
-                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
-  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
-  if (tr, st) in cache: return
-  cache.setdefault((tr, st))
-  rsize = unwrap(allbufs[r].st).size
-  if tr in realizes and tr is not r:
-    # can only fuse contiguous
-    # max one reduceop per kernel
-    if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
-    return group.setdefault(tr)
-  for tr_next in children[tr]:
-    # max one reduceop per kernel
-    if (tr_next_uop:=uval(allbufs[tr_next]).base).op is Ops.REDUCE_AXIS: return group.setdefault(r)
-    # can only fuse contiguous
-    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
-    recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
-
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize, ctx:=GrouperContext())
-  return ctx.realizes
-  """
-  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: dict[UOp, UOp] = {}
-  double_reduces: list[UOp] = []
-  for r, r_uop in ctx.allbufs.items():
-    if (r_uop:=uval(r_uop)).op is not Ops.REDUCE_AXIS: continue
-    if FUSE_CONV_BW and is_scheduled((x:=r_uop.src[0]).base) and uval(x.base).op is r_uop.op and x.base is not x: double_reduces.append(r)
-    if r in ctx.realizes: continue
-    group: dict[UOp, None] = {}
-    recursive_group(r, unwrap(r_uop.st), r, ctx.children, ctx.allbufs, ctx.realizes, reduce_for_op, group, cache={})
-    # max one reduceop per kernel
-    can_chase = all(tr not in reduce_for_op for tr in group)
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = r in group
-    # can only have one output
-    if not forced_realize and len(group) > 1: forced_realize = True
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x in ctx.assigns for x in group):
-      parents = deque((r, *group))
-      while parents and not forced_realize:
-        if (p_uop:=ctx.allbufs.get(p:=parents.pop())) is None: continue
-        if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
-        if p in ctx.realizes: continue
-        parents.extend([x.base.buf_uop for x in p_uop.src if x.base.is_realized or (x.base.op is Ops.VIEW and len(x.base.src) != 0)])
-    if forced_realize or not group:
-      tr = r
-      if can_chase:
-        # can chase this down to contiguous children
-        st = unwrap(r_uop.st)
-        while len(ctx.children[tr]) == 1:
-          tr_next_uop = uval(ctx.allbufs[(tr_next:=next(iter(ctx.children[tr])))])
-          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop is tr])
-          if len(st_childs) > 1: break
-          if st.size != st_childs[0].size: break
-          st = st + st_childs[0]
-          if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
-          tr = tr_next
-        # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if (tr_uop:=uval(ctx.allbufs[tr])).op is Ops.CAST and tr_uop.dtype.base.itemsize > tr_uop.src[0].dtype.base.itemsize:
-          tr = tr_uop.src[0].base.buf_uop
-      group = {tr: None}
-      ctx.realizes[tr] = tr
-    reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r_uop.arg[0] is Ops.ADD and r_uop.src[0].base.op is Ops.CONST:
-      # maybe fuse arange with its children
-      if len(flatten(ctx.children[tr] for tr in group)) != 0:
-        for tr in group: del ctx.realizes[tr]
-  # fuse double reduces with no other child
-  for reduceop in double_reduces:
-    top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
-    if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
-  return ctx.realizes
-  """
+  sink = graph_rewrite(sink, do_realize, realizes:={x.base:None for x in sink.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
+  return realizes
 
 # break the SINK into kernels
 
@@ -384,15 +291,17 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # get the tensors that need to realize
   realize_map = group_realizes(tensor_map[big_sink])
 
-  # map tensors to kernels
+  # create kernels
   kernel_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, {}), bottom_up=True)
   sched_sink = kernel_map[tensor_map[big_sink]]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # realize tensors
-  rev_tensor_map: dict[UOp, list[UOp]] = {}
-  for k,v in tensor_map.items(): rev_tensor_map.setdefault(v, []).append(k)
+  # map tensors to const/buffer
   becomes_map: dict[UOp, UOp] = {}
+  rev_tensor_map: dict[UOp, list[UOp]] = {}
+  for k,v in tensor_map.items():
+    rev_tensor_map.setdefault(v, []).append(k)
+    if v.op is Ops.CONST and all_int(v.shape) and k is not v: becomes_map[k] = v
   for k,v in kernel_map.items():
     if k is v or v.op is not Ops.ASSIGN: continue
     for t in rev_tensor_map[k]: becomes_map[t] = v.buf_uop.reshape(t.shape)
