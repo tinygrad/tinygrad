@@ -145,4 +145,4 @@ class Renderer:
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, name:str, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

@@ -60,6 +60,6 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + buf_dt.fmt, *data)))
   g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
   rw = full_graph_rewrite(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(), PythonRenderer)
-  prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
+  prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render(linearize_uop(rw))))
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs)
   return out_buf.cast(uop.dtype.fmt).tolist()[0]

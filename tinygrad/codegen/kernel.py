@@ -572,7 +572,7 @@ class Kernel:
     num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name + colored(num, 'BLACK')
 
-  def get_optimized_ast(self) -> UOp:
+  def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
@@ -582,7 +582,9 @@ class Kernel:
         if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.valid(unwrap(st_uop.st))
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
-      if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+      if op.op is Ops.SINK:
+        return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
+                                            self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -652,8 +654,8 @@ class Kernel:
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self) -> Kernel:
-    modified_ast = self.get_optimized_ast()
+  def linearize(self, name_override:Optional[str]=None) -> Kernel:
+    modified_ast = self.get_optimized_ast(name_override)
 
     if DEBUG >= 3:
       print(self.name)
@@ -671,16 +673,17 @@ class Kernel:
     return self
 
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
-    self.linearize()
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+    self.linearize(name_override)
+    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+    src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, ContextVar._cache, src))
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return ProgramSpec(ansiname, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_estimate=mem_bytes,
+    return ProgramSpec(self.uops[0].arg, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_estimate=mem_bytes,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
