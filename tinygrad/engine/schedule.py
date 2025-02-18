@@ -103,6 +103,13 @@ do_realize = PatternMatcher([
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize, realizes:={x.base:None for x in sink.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
+  children: dict[UOp, list[UOp]] = {}
+  for u in sink.toposort:
+    for s in u.src: children.setdefault(s, []).append(u)
+  #raise Exception(children)
+  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
+
+  reduce_for_op: dict[UOp, UOp] = {}
   return realizes
 
 # break the SINK into kernels
