@@ -13,7 +13,7 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.symbolic import sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps

@@ -15,7 +15,7 @@ from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROC
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
 class OptOps(Enum):
