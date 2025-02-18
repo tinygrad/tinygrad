@@ -53,6 +53,9 @@ class WGSLRenderer(CStyleLanguage):
   type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
 
+  def __init__(self, supports_f16:bool):
+    self.supports_f16 = supports_f16
+
   string_rewrite = PatternMatcher([
     (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "true" if x.arg else "false"),
     (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"), lambda ctx,x: f"bitcast<u32>({x.arg})" \
@@ -85,7 +88,8 @@ class WGSLRenderer(CStyleLanguage):
     bind_it = iter(range(len(bufs)))
     external_local_bufs = [line.lstrip() for line in kernel if "var<workgroup>" in line]
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
-    prg = "enable f16;\nfn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    prg = "enable f16;\n" if self.supports_f16 else ""
+    prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
       f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +
