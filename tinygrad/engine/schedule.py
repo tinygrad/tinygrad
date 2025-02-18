@@ -184,7 +184,7 @@ class KernelContext:
 
 def create_kernel(ctx:KernelContext, x:UOp):
   if x not in ctx.realizes: return None
-  b = UOp.new_buffer(x.device, x.size, x.dtype)
+  b = x.buf_uop if x.op is Ops.ASSIGN else UOp.new_buffer(x.device, x.size, x.dtype)
   # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
   return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=x.src, arg=Kernel(x, ())))
 
@@ -375,7 +375,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
   for k,v in kernel_map.items():
     if k is v or v.op is not Ops.ASSIGN: continue
-    for t in rev_tensor_map[k]: becomes_map[t] = v.buf_uop.reshape(t.shape)
+    for t in rev_tensor_map[k]: becomes_map[t] = t.src[0] if t.op is Ops.ASSIGN else v.buf_uop.reshape(t.shape)
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
