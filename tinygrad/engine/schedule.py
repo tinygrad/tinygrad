@@ -133,7 +133,8 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp, b:UOp, **kwargs) 
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.buf_uop, x) for x in s.src if x.base.op not in {Ops.CONST,Ops.BIND,Ops.BUFFER})),
+  (UPat(Ops.SINK, name="s"),
+   lambda ctx,s: ctx.realizes.update((x.buf_uop, x.base) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}), realize),
   # realize before expand or unsafe pad ops
@@ -419,7 +420,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       buf_tensors.setdefault(b, []).append(k)
       if isinstance(k.metadata, Metadata): ops_metadata[b] = k.metadata
   realize_map = group_realizes(sink)
-  for buf_uop in realize_map:
+  for buf_uop,v in realize_map.items():
+    assert v is v.base, f"can only realize base {v}"
     for tensor_uop in buf_tensors[buf_uop]:
       # ASSIGN just becomes the buffer in source, otherwise we reshape the buffer
       tensor_map[tensor_uop] = tensor_uop.src[0] if tensor_uop.op is Ops.ASSIGN else buf_uop.reshape(tensor_uop.shape)
