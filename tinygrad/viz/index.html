@@ -47,7 +47,7 @@
     opacity: 1;
   }
   ul.disabled {
-    opacity: 0.6;
+    opacity: 0.4;
     pointer-events: none;
   }
   svg {
@@ -64,7 +64,7 @@
     rx: 8px;
     ry: 8px;
   }
-  .label text {
+  .label :is(text, p) {
     color: #08090e;
     font-weight: 350;
   }
@@ -249,7 +249,16 @@
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
     for (const [k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[2]};` });
+      let node = {label: u[0], labelType: "text", style: `fill: ${u[2]};`};
+      // for PROGRAM UOp we render the node with a code block
+      if (u[0].includes("PROGRAM")) {
+        const [name, ...rest] = u[0].split("\n");
+        const label = Object.assign(document.createElement("div"));
+        label.appendChild(Object.assign(document.createElement("p"), {innerText: name, className: "label", style: "margin-bottom: 2px" }))
+        label.appendChild(highlightedCodeBlock(rest.join("\n"), "cpp", true));
+        node = {label, labelType: "html", style: `fill: ${u[2]}`};
+      }
+      g.setNode(k, node);
       for (const src of u[1]) {
         g.setEdge(src, k, {curve: d3.curveBasis})
       }
@@ -298,6 +307,7 @@
   var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
+  const evtSources = [];
   async function main() {
     const mainContainer = document.querySelector('.main-container');
     // ***** LHS kernels list
@@ -317,7 +327,8 @@
       const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
+        const rwUl = Object.assign(document.createElement("ul"), {
+          innerText: u.name ? `${u.name} - ${u.match_count}` : `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
           className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         if (j === currentUOp) {
           requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
@@ -348,13 +359,23 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    const cacheKey = `${currentKernel}-${currentUOp}`;
+    const kernel = kernels[currentKernel][1][currentUOp];
+    const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
+    // close any pending event sources
+    let activeSrc = null;
+    for (const e of evtSources) {
+      if (e.url.split("?")[1] !== cacheKey) e.close();
+      else if (e.readyState === EventSource.OPEN) activeSrc = e;
+    }
     if (cacheKey in cache) {
       ret = cache[cacheKey];
     }
-    else {
+    // if we don't have a complete cache yet we start streaming this kernel
+    if (!(cacheKey in cache) || (cache[cacheKey].length !== kernel.match_count+1 && activeSrc == null)) {
       ret = [];
+      cache[cacheKey] = ret;
       const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+      evtSources.push(eventSource);
       eventSource.onmessage = (e) => {
         if (e.data === "END") return eventSource.close();
         const chunk = JSON.parse(e.data);
@@ -365,14 +386,12 @@
         const gUl = document.getElementById(`rewrite-${ret.length-1}`);
         if (gUl != null) gUl.classList.remove("disabled");
       };
-      cache[cacheKey] = ret;
     }
     if (ret.length === 0) return;
     renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    const kernel = kernels[currentKernel][1][currentUOp];
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
     metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     // ** code blocks
@@ -385,7 +404,7 @@
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (kernel.match_count > 1) {
+    if (kernel.match_count >= 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
       for (let i=0; i<=kernel.match_count; i++) {

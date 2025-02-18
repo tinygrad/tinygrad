@@ -127,7 +127,7 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
   ])
 
-  def render(self, name: str, uops: list[UOp]) -> str:
+  def render(self, uops: list[UOp]) -> str:
     r: dict[UOp, str] = {}
     args: list[str] = []
     kernel: list[str] = []
@@ -148,7 +148,11 @@ class LLVMRenderer(Renderer):
           kernel += [f"  {r[u]}_amx{i} = alloca {ldt(dtype)}, align {dtype.itemsize}",
                      f"  {r[u]}_ptr_amx{i} = ptrtoint {ldt(dtype.ptr())} {r[u]}_amx{i} to i64"]
 
+    name = "test"
     for u in uops:
+      if u.op is Ops.NAME:
+        name = u.arg
+        continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         # NOTE: MallocAllocator promises 0x20 alignment
