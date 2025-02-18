@@ -327,7 +327,8 @@
       const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
+        const rwUl = Object.assign(document.createElement("ul"), {
+          innerText: u.name ? `${u.name} - ${u.match_count}` : `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
           className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         if (j === currentUOp) {
           requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
