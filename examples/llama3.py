@@ -254,10 +254,8 @@ if __name__ == "__main__":
   # download_model is the default without a model passed in
   if args.download_model or not args.model:
     if args.size == "1B":
-      tokenizer_dir = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
-      #args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
-      #args.model = fetch("./examples/tinychat/llama3_1B_f32.safetensors", "llama3_1B_f32.safetensors")
-      args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
+      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
+      args.model = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf", "Llama-3.2-1B-Instruct-Q6_K.gguf", subdir="llama3-1b-instruct")
     elif args.size == "8B":
       fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr")
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00001-of-00004.safetensors", "model-00001-of-00004.safetensors", subdir="llama3-8b-sfr")
@@ -279,25 +277,14 @@ if __name__ == "__main__":
   print(f"seed = {Tensor._seed}")
   TEMPERATURE = args.temperature
 
-  tokenizer = Tokenizer(str((tokenizer_dir if tokenizer_dir.is_dir() else tokenizer_dir.parent) / "tokenizer.model"))
+  tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "tokenizer.model"))
   def encode_role(role: str):
     return [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode(role) + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
   def encode_message(role: str, content: str):
     return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
 
-  # TODO: revert these changes in __main__ before merge. The below changes are for quick correctness testing of quantization
-  Device.DEFAULT="CLANG" # may be necessary for quantization from float16 to work
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
-  clang_model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device, max_context=1024)
-  from tinygrad.nn.state import get_state_dict
-  state_dict = get_state_dict(clang_model)
-  state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
-  state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
-  Device.DEFAULT="WEBGPU"
-  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
-  model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, max_context=1024, device=device, load_weights=False)
-  load_state_dict(model, state_dict)
-
+  model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
 
   if not args.no_api and not args.benchmark:
