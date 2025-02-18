@@ -10,7 +10,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
-import pytest, math
+import os, pytest, math
 pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -23,7 +23,7 @@ dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
 # TODO: LLVM comparing with nan is incorrect
-if Device.DEFAULT == "LLVM":
+if Device.DEFAULT == "LLVM" or os.getenv("AMD_LLVM") == "1":
   binary_operations.remove(operator.lt)
 
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
