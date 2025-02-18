@@ -95,7 +95,7 @@ do_realize = PatternMatcher([
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.DEVICE}, name="src"),)), realize_before_view),
+  (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}, name="src"),)), realize_before_view),
   # realize before COPY
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER}, name="tr"))), realize),
 ])
@@ -105,21 +105,22 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:dict[UOp, dict[UOp,
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
-  if tr in realizes:
+  rsize = unwrap(r.st).size
+  if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    if not st.contiguous or st.size != unwrap(r.st).size or tr in reduce_for_op: group.setdefault(r)
+    if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
   for tr_next in children[tr]:
     # max one reduceop per kernel
     if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next.src if s.base is tr)) > 1: return group.setdefault(r)
-    recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
+    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
+    recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
 def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize, realizes:={x.base:None for x in sink.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
+  sink = graph_rewrite(sink, do_realize, realizes:={s.base:None for s in sink.src if s.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
   children: dict[UOp, dict[UOp, None]] = {}
   for u in sink.toposort:
     if u is not u.base: continue
@@ -127,31 +128,35 @@ def group_realizes(sink:UOp) -> dict[UOp, UOp]:
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   for r in sink.toposort:
-    if r.op is not Ops.REDUCE_AXIS or r in realizes: continue
+    if r.op is not Ops.REDUCE_AXIS: continue
+    if r in realizes: continue
     group: dict[UOp, None] = {}
     recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
+    # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
+    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
+    # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
     if forced_realize or not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
-        st = tr.st
+        st = unwrap(tr.st)
         while len(children[tr]) == 1:
           tr_next = next(iter(children[tr]))
-          st_childs = dedup(s for s in tr_next.src if s.base is tr)
+          st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
           if len(st_childs) > 1: break
-          if st.size != st_childs[0].st.size: break
-          st = st + st_childs[0].st
+          if st.size != st_childs[0].size: break
+          st = st + st_childs[0]
           if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
         if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
-          tr = tr.srcs[0].base
-        reduce_for_op[tr] = r
+          tr = tr.src[0].base
+      group = {tr: None}
       realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in group)
+    reduce_for_op.update((tr, r) for tr in group)
   return realizes
 
 # break the SINK into kernels
