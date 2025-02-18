@@ -3,12 +3,11 @@ import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
-from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
-from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
+from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
@@ -18,27 +17,10 @@ from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
-class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
-
 class KernelOptError(Exception): pass
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
-
-@dataclass(frozen=True, order=True)
-class Opt:
-  op: OptOps
-  axis: Optional[int] = None
-  arg: Optional[int | tuple] = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
-  def real_axis(self, k:Kernel):
-    if self.axis is None: return -1
-    if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
-    if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
-    return self.axis
 
 @dataclass
 class TensorCoreOptions:
@@ -351,6 +333,12 @@ class Kernel:
     except KernelOptError:
       return False
 
+  def real_axis(self, opt:Opt):
+    if opt.axis is None: return -1
+    if opt.op is OptOps.UNROLL: return self.first_reduce+opt.axis
+    if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.first_reduce+self.group_for_reduces+opt.axis
+    return opt.axis
+
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
 
@@ -365,7 +353,7 @@ class Kernel:
       self.applied_opts.append(opt)
       return
 
-    axis = opt.real_axis(self)
+    axis = self.real_axis(opt)
     check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
@@ -694,5 +682,5 @@ class Kernel:
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return ProgramSpec(ansiname, src, self.opts.device, self.ast, self.uops, mem_estimate=mem_bytes,
+    return ProgramSpec(ansiname, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_estimate=mem_bytes,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
