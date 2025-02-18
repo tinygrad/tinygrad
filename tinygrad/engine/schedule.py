@@ -311,7 +311,7 @@ def load_buf(ctx:list[UOp], x:UOp):
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat(Ops.KERNEL))), load_buf),
+  (UPat(Ops.ASSIGN, src=[UPat.var("x"), UPat(Ops.KERNEL)], allow_any_len=True), load_buf),
   (UPat(Ops.BUFFER, name="x"), load_buf),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
