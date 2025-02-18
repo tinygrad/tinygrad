@@ -6,6 +6,7 @@ from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
@@ -667,6 +668,9 @@ class Kernel:
 
   @track_rewrites()
   def linearize(self, name_override:Optional[str]=None) -> Kernel:
+    # display the AST
+    if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
+
     modified_ast = self.get_optimized_ast(name_override)
 
     if DEBUG >= 3:
