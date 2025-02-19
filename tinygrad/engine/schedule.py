@@ -363,7 +363,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # do_realize + group_realizes
-  realize_map = group_realizes(tensor_map[big_sink])
+  sink = tensor_map[big_sink]
+  realize_map = group_realizes(sink)
 
   # map tensors to new uops
   becomes_map: dict[UOp, UOp] = {}
@@ -382,8 +383,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # create kernels
-  kernel_map = graph_rewrite_map(tensor_map[big_sink], create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
-  sched_sink = kernel_map[tensor_map[big_sink]]
+  if len(realize_map) == 0: return [], {}, becomes_map
+  kernel_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
+  sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # map realized tensors to buffers
