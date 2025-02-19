@@ -37,6 +37,11 @@ def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
     if (replace_src:=ctx.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+def check_img(u:UOp):
+  if prod(u.shape) != prod(u.dtype.shape) or not any(u.shape[x]%4 == 0 for x in unwrap(u.st).unit_stride_axes()):
+    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
+    return u.replace(dtype=u.dtype.base)
+
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -67,6 +72,9 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
+  # make things that can't be images not images
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW, Ops.CONST}, name="u"),
+   lambda u: check_img(u) if isinstance(u.dtype, ImageDType) and u.st is not None else None)
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
