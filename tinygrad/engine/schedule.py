@@ -37,6 +37,11 @@ def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
     if (replace_src:=ctx.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+def fix_image(u:UOp):
+  if isinstance(dt:=u.dtype, ImageDType) and (prod(u.shape) != prod(dt.shape) or not any(u.shape[x]%4 == 0 for x in unwrap(u.st).unit_stride_axes())):
+    if DEBUG >= 2: print(f"forcing image {u.dtype} with shape {u.shape} to {u.dtype.base}")
+    return u.replace(dtype=u.dtype.base)
+
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -56,6 +61,8 @@ sym = symbolic_simple+PatternMatcher([
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"))),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
+  # make things that can't be images not images
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW, Ops.CONST, Ops.DEVICE}, name="u"), lambda u: fix_image(u) if isinstance(u.dtype, ImageDType) else None),
   # remove contiguous if we can just view the buffer
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
@@ -99,11 +106,7 @@ def add_buffers(buf:UOp, buffer_map:dict[UOp, UOp], cache:dict[UOp, UOp]) -> UOp
   if buf is not buf.base:
     cache[buf] = ret = add_buffers(buf.base, buffer_map, cache).view(unwrap(buf.st))
     return ret
-  # make things that can't be images not images
   dtype = buf.dtype
-  if isinstance(dtype, ImageDType) and (prod(buf.shape)!=prod(dtype.shape) or not any(buf.shape[x]%4==0 for x in unwrap(buf.st).unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
-    dtype = buf.dtype.base
   # ASSIGN already has a target buffer, otherwise we create a new one
   assert isinstance(buf.device, str), f"buf device is str, not {buf.device}"
   buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
