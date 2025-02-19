@@ -8,11 +8,11 @@ from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_S
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
 class AMBar:
-  def __init__(self, addr, size): self.bar = to_mv(addr, size)
-  def read(self, offset:int, size:int) -> int: return 0
-  def write(self, offset:int, size:int, value:int): pass
-  def copyin(self, offset:int, data:memoryview): pass
-  def copyout(self, offset:int, size:int) -> memoryview: return memoryview(bytearray(size))
+  def __init__(self, addr, size): self.bar, self.size = to_mv(addr, size), size
+  def read(self, offset:int, size:int) -> int: return self.bar.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[size])[offset//size]
+  def write(self, offset:int, value:int, size:int): self.bar.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[size])[offset//size] = value
+  def copyin(self, offset:int, data:memoryview): self.bar.cast('B')[offset:offset+data.nbytes] = data.cast('B')
+  def copyout(self, offset:int, size:int) -> memoryview: return self.bar.cast('B')[offset:offset+size]
 
 @dataclasses.dataclass(frozen=True)
 class AMRegister:
@@ -307,11 +307,14 @@ class AMDev:
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
+    self.fini()
+    exit(0)
+
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini()
     self.smu.set_clocks(level=0)
-    self.ih.interrupt_handler()
+    # self.ih.interrupt_handler()
 
   # def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr

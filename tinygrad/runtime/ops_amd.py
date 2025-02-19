@@ -13,7 +13,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping, AMBar
-from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
+# from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
 
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -497,7 +497,7 @@ class PCIIface:
     bar_info = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-    self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
+    self.adev = AMDev(self.pcibus, self._map_pci_bar(0), dbell:=self._map_pci_bar(2), self._map_pci_bar(5))
     self.doorbell_cpu_addr = mv_address(dbell)
 
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
@@ -508,6 +508,11 @@ class PCIIface:
     self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': self.adev.ip_versions[am.GC_HWIP],
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
+
+  def _map_pci_bar(self, bar, off=0, addr=0, size=None):
+    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
+    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
+    return AMBar(loc, sz)
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
@@ -562,40 +567,6 @@ class PCIIface:
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.adev.fini()
-
-class USBTrackedMemoryView:
-  def __init__(self, bar_info, usb, elsz=1):
-    (self.addr, self.size), self.usb = bar_info, usb
-    self.elsz = elsz
-
-  def _read(self, index):
-    val = 0
-    for off in range(max(1, self.elsz // 4)):
-      part = self.usb.pcie_mem_req(self.addr + index * self.elsz + off * 4, None, min(4, self.elsz))
-      val += part << (32 * off)
-    return val
-
-  def _write(self, index, value):
-    for off in range(max(1, self.elsz // 4)):
-      self.usb.pcie_mem_req(self.addr + index * self.elsz + off * 4, (value >> (32 * off)) & 0xFFFFFFFF, min(4, self.elsz))
-
-  def __getitem__(self, index): return self._read(index)
-  def __setitem__(self, index, value): return self._write(index, value)
-  def cast(self, new_type, **kwargs): return self
-
-  def copyin(self, mv):
-    print("copyin", len(mv))
-    x = mv.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[self.elsz])
-    for i in range(len(x)): self._write(i, x[i])
-
-  def copyout(self, mv):
-    x = mv.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[self.elsz])
-    for i in range(len(x)): x[i] = self._read(i)
-
-  @property
-  def nbytes(self): return self.size
-  def __len__(self): return self.size // self.elsz
-  def __repr__(self): return "USBTrackedMemoryView"
 
 class AMUSBBar(AMBar):
   def __init__(self, addr, usb): (self.addr, self.size), self.usb = addr, usb
@@ -691,7 +662,7 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     # self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-    self.dev_iface = USBIface(self, self.device_id)
+    self.dev_iface = PCIIface(self, self.device_id)
 
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
