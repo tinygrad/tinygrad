@@ -5,6 +5,9 @@ from tinygrad.helpers import round_up, OSX
 from tinygrad.runtime.autogen import webgpu
 from typing import List, Any
 import ctypes
+import os
+
+backend_types = {v: k for k, v in webgpu.WGPUBackendType__enumvalues.items() }
 
 try:
   instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable = True)))
@@ -193,7 +196,9 @@ class WebGpuDevice(Compiled):
     # Requesting an adapter
     adapter_res = _run(webgpu.wgpuInstanceRequestAdapterF, webgpu.WGPURequestAdapterCallbackInfo, webgpu.WGPURequestAdapterCallback,
     webgpu.WGPURequestAdapterStatus__enumvalues, 1, 2, instance,
-    webgpu.WGPURequestAdapterOptions(powerPreference=webgpu.WGPUPowerPreference_HighPerformance))
+
+    webgpu.WGPURequestAdapterOptions(powerPreference=webgpu.WGPUPowerPreference_HighPerformance,
+      backendType=backend_types.get(os.getenv("WEBGPU_BACKEND", ""), 0)))
 
     # Get supported features
     supported_features = webgpu.WGPUSupportedFeatures()
