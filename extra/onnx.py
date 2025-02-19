@@ -200,6 +200,30 @@ def get_onnx_ops():
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
     return _onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))
 
+  # copied from extra/models/llama.py
+  def _precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+    freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+    freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+    return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
+
+  # copied from extra/models/llama.py
+  def _complex_mult(A, c, d):
+    a,b = A[..., 0:1], A[..., 1:2]
+    ro = a*c - b*d
+    co = a*d + b*c
+    return ro.cat(co, dim=-1)
+
+  # copied from extra/models/llama.py
+  def _apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
+    assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
+    xq = xq.reshape(*xq.shape[0:-1], -1, 2)
+    xk = xk.reshape(*xk.shape[0:-1], -1, 2)
+    assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
+    c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+    xq_out = _complex_mult(xq, c, d)
+    xk_out = _complex_mult(xk, c, d)
+    return xq_out.flatten(3), xk_out.flatten(3)
+
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
 
   def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
@@ -620,72 +644,52 @@ def get_onnx_ops():
   def Attention(x:Tensor, weights:Tensor, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
                 past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
                 past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
-      # copied from extra/models/llama.py
-      def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
-        freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
-        freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-        return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
-      def complex_mult(A, c, d):
-        a,b = A[..., 0:1], A[..., 1:2]
-        ro = a*c - b*d
-        co = a*d + b*c
-        return ro.cat(co, dim=-1)
-      def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
-        assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
-        xq = xq.reshape(*xq.shape[0:-1], -1, 2)
-        xk = xk.reshape(*xk.shape[0:-1], -1, 2)
-        assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
-        c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
-        xq_out = complex_mult(xq, c, d)
-        xk_out = complex_mult(xk, c, d)
-        return xq_out.flatten(3), xk_out.flatten(3)
+    # project x to q, k, v
+    if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
+    qkv = x.linear(weights, bias)
+    q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
-      # project x to q, k, v
-      if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
-      qkv = x.linear(weights, bias)
-      q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
+    # reshape to multi-head format
+    batch_size, seq_len, _ = x.shape
+    q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
+    q = q.reshape(batch_size, seq_len, num_heads, q_head_size).transpose(1, 2)
+    k = k.reshape(batch_size, seq_len, num_heads, k_head_size).transpose(1, 2)
+    v = v.reshape(batch_size, seq_len, num_heads, v_head_size).transpose(1, 2)
 
-      # reshape to multi-head format
-      batch_size, seq_len, _ = x.shape
-      q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
-      q = q.reshape(batch_size, seq_len, num_heads, q_head_size).transpose(1, 2)
-      k = k.reshape(batch_size, seq_len, num_heads, k_head_size).transpose(1, 2)
-      v = v.reshape(batch_size, seq_len, num_heads, v_head_size).transpose(1, 2)
+    # apply rotary embeddings
+    if do_rotary:
+      rotary_dim = rotary_embedding_dim if rotary_embedding_dim is not None else q_head_size
+      past_seq_len = past_sequence_length if past_sequence_length is not None else 0
+      end = past_seq_len + seq_len
+      freqs_cis = _precompute_freqs_cis(rotary_dim, end)
+      freqs_cis = freqs_cis[:, past_seq_len:past_seq_len+seq_len]
+      q, k = _apply_rotary_emb(q, k, freqs_cis)
 
-      # apply rotary embeddings
-      if do_rotary:
-        rotary_dim = rotary_embedding_dim if rotary_embedding_dim is not None else q_head_size
-        past_seq_len = past_sequence_length if past_sequence_length is not None else 0
-        end = past_seq_len + seq_len
-        freqs_cis = precompute_freqs_cis(rotary_dim, end)
-        freqs_cis = freqs_cis[:, past_seq_len:past_seq_len+seq_len]
-        q, k = apply_rotary_emb(q, k, freqs_cis)
+    # concatenate with past keys/values
+    if past is not None: k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
 
-      # concatenate with past keys/values
-      if past is not None: k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
+    # compute attention scores
+    if scale is None: scale = 1.0 / math.sqrt(q_head_size)
+    attn_scores = q @ k.transpose(-1, -2) * scale
 
-      # compute attention scores
-      if scale is None: scale = 1.0 / math.sqrt(q_head_size)
-      attn_scores = q @ k.transpose(-1, -2) * scale
+    # apply attention bias
+    if attention_bias is not None: attn_scores += attention_bias
 
-      # apply attention bias
-      if attention_bias is not None: attn_scores += attention_bias
+    # apply attention masks
+    if mask_index is not None:
+      assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+      mask = Tensor.arange(seq_len).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index.bool()
+      mask = mask.reshape(mask.shape[0], *(1,)*(4 - mask.ndim), *mask.shape[1:])
+      attn_scores = attn_scores + ~mask * mask_filter_value
 
-      # apply attention masks
-      if mask_index is not None:
-        assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
-        mask = Tensor.arange(seq_len).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index.bool()
-        mask = mask.reshape(mask.shape[0], *(1,)*(4 - mask.ndim), *mask.shape[1:])
-        attn_scores = attn_scores + ~mask * mask_filter_value
+    if unidirectional:
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
+      attn_scores = attn_scores + ~causal_mask * mask_filter_value
 
-      if unidirectional:
-        causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
-        attn_scores = attn_scores + ~causal_mask * mask_filter_value
-
-      output = attn_scores.softmax(-1) @ v
-      output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
-      present = k.stack(v) if past is not None or past_present_share_buffer else None
-      return output, present
+    output = attn_scores.softmax(-1) @ v
+    output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
+    present = k.stack(v) if past is not None or past_present_share_buffer else None
+    return output, present
 
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]

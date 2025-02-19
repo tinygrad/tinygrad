@@ -12,13 +12,19 @@ SKIPPED_FILES = [
   "model_O4", # requires non cpu ort runner and MemcpyFromHost
   "merged", # implement attribute with graph type
 ]
-SKIPPED_REPOS = [
+SKIPPED_REPO_PATHS = [
   "mangoapps/fb_zeroshot_mnli_onnx", # implement NonZero op
-  "HuggingFaceTB/SmolLM2-360M-Instruct", # implement GroupQueryAttention
+  "HuggingFaceTB/SmolLM2-360M-Instruct", # TODO implement GroupQueryAttention
+  "HuggingFaceTB/SmolLM2-1.7B-Instruct", # TODO implement SimplifiedLayerNormalization, RotaryEmbedding, MultiHeadAttention
+
   # ran out of memory on m1 mac
-  "stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo",
-  "llava-hf/llava-onevision-qwen2-0.5b-ov-hf", "distil-whisper/distil-large-v2",
+  "stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo", "llava-hf/llava-onevision-qwen2-0.5b-ov-hf",
+  "distil-whisper/distil-large-v2", "distil-whisper/distil-large-v3",
   "Snowflake/snowflake-arctic-embed-m-v2.0",
+
+  # TODO MOD bug with const folding
+  # There's a huge concat in here with 1024 shape=(1, 3, 32, 32) Tensors
+  "briaai/RMBG-2.0"
 ]
 
 def huggingface_download_onnx_model(model_id:str):
@@ -33,7 +39,13 @@ def run_huggingface_benchmark(onnx_model_path, config):
   validate(onnx_model_path, inputs, rtol=2e-3, atol=2e-3)
 
 if __name__ == "__main__":
-  assert getenv("LIMIT") or getenv("MODELPATH", ""), "usage: LIMIT=100 (to run) or MODELPATH=google-bert/bert-base-uncased/model.onnx (debug)"
+  assert getenv("LIMIT") or getenv("MODELPATH", "") or getenv("REPOPATH", ""), \
+    """
+    Please provide one of these environment variables:
+    - 'LIMIT=100' (to run top N models)
+    - 'REPOPATH=google-bert/bert-base-uncased' (to debug all onnx models inside repo)
+    - 'MODELPATH=google-bert/bert-base-uncased/model.onnx' (to debug a single model)
+      - optionally use 'TRUNCATE=50' with 'MODELPATH' to test intermediate results"""
 
   # for running
   if limit := getenv("LIMIT"):
@@ -41,7 +53,7 @@ if __name__ == "__main__":
     result = {"passed": 0, "failed": 0}
     print(f"** Running benchmarks on top {limit} models ranked by '{sort}' on huggingface **")
     for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
-      if model.id in SKIPPED_REPOS: continue  # skip these
+      if model.id in SKIPPED_REPO_PATHS: continue  # skip these
       print(f"{i}: ({getattr(model, sort)} {sort}) ")
       url = f"{HUGGINGFACE_URL}/{model.id}"
       result[model.id] = {"url": url}
@@ -64,10 +76,37 @@ if __name__ == "__main__":
       json.dump(result, f, indent=2)
       print(f"report saved to {os.path.abspath('huggingface_results.json')}")
 
-  # for debug
+  # for debugging
   if model_path := str(getenv("MODELPATH", "")):
     model_id, relative_path = model_path.split("/", 2)[:2], model_path.split("/", 2)[2]
     model_id = "/".join(model_id)
     root_path = huggingface_download_onnx_model(model_id)
     onnx_model = root_path / relative_path
-    run_huggingface_benchmark(onnx_model, get_config(root_path))
+    if (limit := getenv("TRUNCATE", -1)) != -1:
+      # truncates the onnx model so intermediate results can be validated
+      model = onnx.load(onnx_model)
+      nodes_up_to_limit = list(model.graph.node)[:limit+1]
+      new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
+      model.graph.ClearField("node")
+      model.graph.node.extend(nodes_up_to_limit)
+      model.graph.ClearField("output")
+      model.graph.output.extend(new_output_values)
+      truncated_model = str(onnx_model.parent / f"{onnx_model.stem}_truncated{onnx_model.suffix}")
+      onnx.save(model, truncated_model)
+      run_huggingface_benchmark(truncated_model, get_config(root_path))
+      os.remove(truncated_model)
+    else:
+      run_huggingface_benchmark(onnx_model, get_config(root_path))
+
+  if repo_path := str(getenv("REPOPATH", "")):
+    # `repo_path` is the same as `model.id`
+    root_path = huggingface_download_onnx_model(repo_path)
+    for onnx_model_path in root_path.rglob("*.onnx"):
+      relative_path = str(onnx_model_path.relative_to(root_path))
+      print(f"Benchmarking {relative_path}")
+      try:
+        run_huggingface_benchmark(onnx_model_path, get_config(root_path))
+        print("passed")
+      except Exception as e:
+        print("failed")
+        print(e)
