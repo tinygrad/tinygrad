@@ -40,7 +40,7 @@ def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
-    and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
+   and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
   # reduce of size 0 is the identity element
@@ -66,7 +66,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
-  lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
+   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
@@ -155,7 +155,7 @@ def uval(u:UOp) -> UOp:
   return u.src[1]
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], allbufs:dict[UOp, UOp], realizes:dict[UOp, UOp],
-                     reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
+                    reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
