@@ -88,7 +88,7 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class GrouperContext:
-  assigns: dict[UOp, UOp] = field(default_factory=dict)              # this holds all the ASSIGN UOps to in this schedule
+  assigns: dict[UOp, UOp] = field(default_factory=dict)              # this holds all the ASSIGN UOps in this schedule
   realizes: dict[UOp, None] = field(default_factory=dict)            # this holds all the Tensor uops we realize in this schedule
   children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
@@ -107,7 +107,7 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"),
-   lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
+   lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -208,12 +208,11 @@ class KernelContext:
   ops_metadata: dict[UOp, Metadata]
 
 def create_kernel(ctx:KernelContext, x:UOp):
-  m = ctx.ops_metadata.get(x)
   if x not in ctx.realizes: return None
   assert isinstance(x.device, str), f"buf device in kernel must be string {x.device}"
   b = x.buf_uop if x.op is Ops.ASSIGN else UOp.new_buffer(x.device, x.size, x.dtype)
   # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
-  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=x.src, arg=Kernel(x, (m,) if m is not None else ())))
+  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=x.src, arg=Kernel(x, (m,) if (m:=ctx.ops_metadata.get(x)) else ())))
 
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
@@ -352,9 +351,10 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 
 def schedule_uop(sink:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
-  # start by adding buffer ops
-  kernel_src = {s.src[1].arg.ast:s.src[0] for s in sink.src[1].src if s.op is Ops.ASSIGN}
-  ast = graph_rewrite(sink.src[1].arg.ast.substitute(kernel_src).sink(), add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
+  # substitute kernel sources for the target buffer
+  ast = sink.src[1].arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in sink.src[1].src if s.op is Ops.ASSIGN}).sink()
+  # add buffer ops
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
