@@ -236,10 +236,12 @@ class CPUProgram:
       PAGE_EXECUTE_READWRITE = 0x40
       MEM_COMMIT =  0x1000
       MEM_RESERVE = 0x2000
-      ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
-      self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
+      self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
       ctypes.memmove(self.mem, lib, len(lib))
-      assert ctypes.windll.kernel32.FlushInstructionCache(ctypes.windll.kernel32.GetCurrentProcess(), ctypes.c_int(self.mem), ctypes.c_int(len(lib))) != 0, "FlushInstructionCache failed"
+      ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+      proc = ctypes.windll.kernel32.GetCurrentProcess()
+      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.mem), ctypes.c_size_t(len(lib)))
       self.fxn = ctypes.CFUNCTYPE(None)(self.mem)
     else:
       from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
