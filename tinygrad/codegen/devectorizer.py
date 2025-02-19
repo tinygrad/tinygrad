@@ -1,5 +1,5 @@
 from typing import Optional, Any, Callable, cast
-import functools, operator
+import functools, operator, itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
@@ -181,11 +181,12 @@ devectorize = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
-def expand_index(buf:UOp, base_index:UOp, c:UOp):
+def expand_index(buf:UOp, base_index:UOp, c:UOp, mask:Optional[UOp]=None):
   assert isinstance(buf.dtype, PtrDType)
-  ordered = sorted([(x,i) for i,x in enumerate(c.arg)])
+  ordered_one = sorted([(x,i) for i,x in enumerate(c.arg)])
+  ordered = [(k, [y[1] for y in g]) for k,g in itertools.groupby(ordered_one, key=lambda x: x[0])]
   groups = []
-  group: list[tuple[int, int]] = []
+  group: list[tuple[int, list[int]]] = []
   for x in ordered:
     if len(group) == 0 or group[-1][0]+1 == x[0]: group.append(x)
     else:
@@ -199,7 +200,9 @@ def expand_index(buf:UOp, base_index:UOp, c:UOp):
   big_gep: list[Optional[int]] = [None]*len(c.arg)
   bj = 0
   for g in groups:
-    for j,(_,i) in enumerate(g): big_gep[i] = bj+j
+    for j,(_,ii) in enumerate(g):
+      #big_gep[ii] = bj+j
+      for i in ii: big_gep[i] = bj+j
     bj += len(g)
   loads = UOp(Ops.CAT, buf.dtype.base.vec(len(c.arg)).ptr(buf.dtype.size), tuple(idxs)) if len(idxs) > 1 else idxs[0]
   assert all(x is not None for x in big_gep)
@@ -217,8 +220,11 @@ def cat_after_store(cat:UOp, data:UOp):
 devectorize_load_store = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
                         UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
+                        UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"), UPat.var("mask"))), expand_index),
   # GEP after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"), lambda gep, ld: ld.replace(src=ld.src[0].src).gep(gep.arg)),
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"),
+   lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=gep.src).gep(gep.arg)),
   # GEP on data of STORE
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("x"))), lambda gep, x: UOp(Ops.STORE, src=(gep.src[0], x.gep(argsort(gep.arg))))),
   # put CAT after LOAD

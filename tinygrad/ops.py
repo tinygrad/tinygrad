@@ -152,6 +152,7 @@ class Ops(FastEnum):
   DEVICE = auto()
   MULTI = auto()
   CUSTOM = auto()
+  CUSTOMI = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
