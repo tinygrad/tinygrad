@@ -157,7 +157,7 @@ class ClassificationHead:
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors, box_coder:Optional[BoxCoder] = None):
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
     if box_coder is None:
@@ -219,8 +219,8 @@ class ResNetFPN:
 
 class ExtraFPNBlock:
   def __init__(self, in_channels, out_channels):
-    self.p6 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.p7 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p6 = Conv2dKaimingUniform(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p7 = Conv2dKaimingUniform(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
     self.use_P5 = in_channels == out_channels
 
   def __call__(self, p, c):

@@ -352,7 +352,7 @@ def train_retinanet():
   from extra.lr_scheduler import LambdaLR
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
-  from tinygrad.helpers import get_child, colored
+  from tinygrad.helpers import colored
   
   import numpy as np
 
@@ -367,12 +367,10 @@ def train_retinanet():
   print(f"training on {GPUS}")
 
   def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
-    model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
-    for model_layer in model_layers:
-      for loaded_key in loaded_keys:
-        if model_layer in loaded_key:
-          layer:Tensor = get_child(backbone, loaded_key)
-          layer.requires_grad = False
+    layers_to_train = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
+    for k, v in get_state_dict(backbone).items():
+      if all([not k.startswith(layer) for layer in layers_to_train]):
+        v.requires_grad = False
 
   def _data_get(it, val=False):
     if val:
@@ -410,10 +408,10 @@ def train_retinanet():
 
   # ** hyperparameters **
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  config["bs"] = BS = getenv("BS", 30)
+  config["bs"] = BS = getenv("BS", 256)
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
-  config["lr"] = lr = getenv("LR", 0.000085)
-  config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 0)
+  config["lr"] = lr = getenv("LR", 0.0001)
+  config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
   config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
 
   if SEED:
@@ -436,7 +434,7 @@ def train_retinanet():
   step_times, start_epoch = [], 0
 
   # ** optimizer **
-  optim = Adam([p for p in params if p.requires_grad is None] , lr=lr)
+  optim = Adam(params, lr=lr)
 
   # ** dataset **
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
