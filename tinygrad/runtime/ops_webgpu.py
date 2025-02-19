@@ -198,7 +198,7 @@ class WebGpuDevice(Compiled):
     webgpu.WGPURequestAdapterStatus__enumvalues, 1, 2, instance,
 
     webgpu.WGPURequestAdapterOptions(powerPreference=webgpu.WGPUPowerPreference_HighPerformance,
-      backendType=backend_types.get(os.getenv("Backend", ""), 0)))
+      backendType=backend_types.get(os.getenv("WEBGPU_BACKEND", ""), 0)))
 
     # Get supported features
     supported_features = webgpu.WGPUSupportedFeatures()
