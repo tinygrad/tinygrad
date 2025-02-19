@@ -1716,6 +1716,28 @@ class Tensor(SimpleMathTrait):
     """
     return self.logical_not().any(axis, keepdim).logical_not()
 
+  def isclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
+    """
+    Returns a new tensor with element-wise comparison of closeness to `other` within a tolerance.
+
+    The `rtol` and `atol` keyword arguments control the relative and absolute tolerance of the comparison.
+
+    By default, two `NaN` values are not close to each other. If `equal_nan` is `True`, two `NaN` values are considered close.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1e-7, 1e-8, 1e-9, float('nan')]).isclose(Tensor([0.0, 0.0, 0.0, float('nan')])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
+    ```
+    """
+    # TODO: Tensor.isfinite
+    def isfinite(t): return (t.isinf()|t.isnan()).logical_not()
+    is_finite_close = isfinite(self) & isfinite(other) & ((self - other).abs() <= atol + rtol * other.abs())
+    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
+    return is_finite_close | is_infinite_close | is_nan_close
+
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the mean value of the tensor along the specified axis or axes.
@@ -2440,9 +2462,11 @@ class Tensor(SimpleMathTrait):
     return x.cast(self.dtype)
 
   def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
+    index, dim = index.to(self.device), self._resolve_dim(dim)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
+    if self.dtype != src.dtype: raise RuntimeError(f"expect {self.dtype=} to be equal to {src.dtype=}")
     # shrink src to index shape to shrink away the unused values
     src = src.shrink(tuple((0,s) for s in index.shape))
     # prepare src and mask for reduce with respect to dim
@@ -2480,12 +2504,10 @@ class Tensor(SimpleMathTrait):
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
     if reduce and isinstance(src, Tensor): raise TypeError("Tensor src is not supported with reduce arg. see scatter_reduce")
-    src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
-    index, dim = index.to(self.device), self._resolve_dim(dim)
+    if not isinstance(src, Tensor): src = index.full_like(src, device=self.device, dtype=self.dtype)
+    if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
+    if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
     src, mask = self._pre_scatter(dim, index, src)
-    # TODO: should not overwrite acc_dtype here?
-    if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
-    if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
     return _masked_setitem(self, src, mask, (-1,))
 
   def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
@@ -2518,8 +2540,6 @@ class Tensor(SimpleMathTrait):
     print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amin').numpy())
     ```
     """
-    src = src.cast(self.dtype)
-    index, dim = index.to(self.device), self._resolve_dim(dim)
     src, mask = self._pre_scatter(dim, index, src)
     def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.any(-1).logical_not().where(a, b)
     # TODO: should not overwrite acc_dtype here?

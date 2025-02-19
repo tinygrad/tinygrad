@@ -841,7 +841,7 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "error due to too large dimensions")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):
     N = 10000
