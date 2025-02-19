@@ -38,8 +38,8 @@ def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
 def fix_image(u:UOp):
-  if prod(u.shape) != prod(u.dtype.shape) or not any(u.shape[x]%4 == 0 for x in unwrap(u.st).unit_stride_axes()):
-    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
+  if isinstance(dt:=u.dtype, ImageDType) and (prod(u.shape) != prod(dt.shape) or not any(u.shape[x]%4 == 0 for x in unwrap(u.st).unit_stride_axes())):
+    if DEBUG >= 2: print(f"forcing image {u.dtype} with shape {u.shape} to {u.dtype.base}")
     return u.replace(dtype=u.dtype.base)
 
 sym = symbolic_simple+PatternMatcher([
@@ -86,9 +86,9 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 # **** UOp realization
 
-def realize(ctx:dict[UOp, UOp], tr:UOp) -> None: ctx[tr] = None
+def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
-def realize_before_view(ctx:dict[UOp, UOp], view:UOp, src:UOp) -> None:
+def realize_before_view(ctx:dict[UOp, None], view:UOp, src:UOp) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
@@ -125,7 +125,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
-def group_realizes(sink:UOp) -> dict[UOp, UOp]:
+def group_realizes(sink:UOp) -> dict[UOp, None]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize, realizes:={s.base:None for s in sink.src if s.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
   children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
@@ -196,14 +196,16 @@ class Kernel:
 
 @dataclass(frozen=True)
 class KernelContext:
-  realizes: dict[UOp, UOp]
+  realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
 def create_kernel(ctx:KernelContext, x:UOp):
+  m = ctx.ops_metadata.get(x)
   if x not in ctx.realizes: return None
+  assert isinstance(x.device, str), f"buf device in kernel must be string {x.device}"
   b = x.buf_uop if x.op is Ops.ASSIGN else UOp.new_buffer(x.device, x.size, x.dtype)
   # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
-  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=x.src, arg=Kernel(x, (m,) if (m:=ctx.ops_metadata.get(x)) is not None else ())))
+  return b.view(ShapeTracker.from_shape(x.shape)).assign(UOp(Ops.KERNEL, src=x.src, arg=Kernel(x, (m,) if m is not None else ())))
 
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
@@ -380,7 +382,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for k,v in tensor_map.items():
     rev_tensor_map.setdefault(v, []).append(k)
     if k is v: continue
-    if k.metadata is not None and v.op is not Ops.CONST: ops_metadata[v] = k.metadata
+    if isinstance(k.metadata, Metadata) and v.op is not Ops.CONST: ops_metadata[v] = k.metadata
     if v.base.op is Ops.BUFFER:
       # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
       if v.op is Ops.VIEW:
