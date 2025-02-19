@@ -4,18 +4,13 @@ import sys
 def patch(input_filepath, output_filepath, patches):
   with open(input_filepath, 'rb') as infile: data = bytearray(infile.read())
 
-  # Apply all patches
   for offset, expected_bytes, new_bytes in patches:
-    if len(expected_bytes) != len(new_bytes):
-      raise ValueError("Expected bytes and new bytes must be the same length")
+    # if len(expected_bytes) != len(new_bytes):
+    #   raise ValueError("Expected bytes and new bytes must be the same length")
 
-    if offset + len(expected_bytes) > len(data):
-      return False
-
+    if offset + len(new_bytes) > len(data): return False
     current_bytes = data[offset:offset + len(expected_bytes)]
-    if bytes(current_bytes) != expected_bytes:
-      return False
-
+    assert bytes(current_bytes) == expected_bytes
     data[offset:offset + len(new_bytes)] = new_bytes
 
   with open(output_filepath, 'wb') as outfile:
@@ -23,6 +18,7 @@ def patch(input_filepath, output_filepath, patches):
 
   return True
 
+# function verifier, old asm
 patched_pci_bar_write_old = bytes([
     0x90, 0x00, 0x06,  # MOV DPTR,#0x6
     0xE0,              # MOVX A,@DPTR
@@ -41,38 +37,38 @@ patched_pci_bar_write_old = bytes([
     0xE0,              # MOVX A,@DPTR
     0x30])
 
-patched_pci_bar_write = (
-    # MOV DPTR, #0x7
-    b'\x90\x00\x07'     
-    # MOVX A, @DPTR
-    b'\xE0'             
-    # MOV R2, A
-    b'\xFA'             
-    # INC DPTR
-    b'\xA3'             
-    # MOVX A, @DPTR
-    b'\xE0'             
-    # ADD A, #0x10
-    b'\x24\x10'         
-    # MOV R1, A
-    b'\xF9'             
-    # CLR A
-    b'\xE4'             
-    # ADDC A, R2
-    b'\x3A'             
-    # MOV DPH, A
-    b'\xF5\x83'         
-    # MOV DPL, R1
-    b'\x89\x82'         
-    # LCALL copy4_from_dptr_into_r4_r7
-    b'\x12\x74\xD7'     
-    # LCALL copy4_into_b220
-    b'\x12\x75\x09'     
-    # LCALL SUB_CODE_b6e3 # call into return, not function
-    b'\x12\xB6\xE3'     
-    # RET
-    b'\x22'             
-)
+patched_pci_bar_write = bytes([
+    0x90, 0x00, 0x07,  # MOV DPTR,#0x7
+    0xE0,              # MOVX A,@DPTR
+    0xFA,              # MOV R2,A
+    0xA3,              # INC DPTR
+    0xE0,              # MOVX A,@DPTR
+    0x24, 0x10,        # ADD A,#0x10
+    0xF9,              # MOV R1,A
+    0xE4,              # CLR A
+    0x3A,              # ADDC A,R2
+    0xF5, 0x83,        # MOV DPH,A
+    0x89, 0x82,        # MOV DPL,R1
+    0x12, 0x74, 0xD7,  # LCALL copy4_from_dptr_into_r4_r7
+    0x12, 0x75, 0x09,  # LCALL copy4_into_b220
+    0x90, 0x00, 0x07,  # MOV DPTR,#0x7
+    0xE0,              # MOVX A,@DPTR
+    0xFA,              # MOV R2,A
+    0xA3,              # INC DPTR
+    0xE0,              # MOVX A,@DPTR
+    0x24, 0x14,        # ADD A,#0x14
+    0xF9,              # MOV R1,A
+    0xE4,              # CLR A
+    0x3A,              # ADDC A,R2
+    0xF5, 0x83,        # MOV DPH,A
+    0x89, 0x82,        # MOV DPL,R1
+    0x12, 0x74, 0xD7,  # LCALL copy4_from_dptr_into_r4_r7
+    0x90, 0x05, 0xF9,  # MOV DPTR,#0x5f9
+    0x12, 0x72, 0x8D,  # LCALL copy_4_into_ptr
+    0x12, 0xA3, 0x99,  # LCALL mb_tlp_mem_req
+    0x12, 0xB6, 0xE3,  # LCALL SUB_CODE_b6e3
+    0x22               # RET
+])
 
 patches = [
   (0x7a63, b'\xC6\x4B', b'\xB6\xB3'),
