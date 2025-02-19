@@ -1,6 +1,6 @@
 import sys, functools, atexit, pickle
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
 from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
 from tinygrad.codegen.symbolic import symbolic_simple
@@ -86,19 +86,28 @@ remove_movement_ops = merge_views+PatternMatcher([
 
 # **** UOp realization
 
-def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
+@dataclass(frozen=True)
+class GrouperContext:
+  assigns: dict[UOp, UOp] = field(default_factory=dict)              # this holds all the ASSIGN UOps to in this schedule
+  realizes: dict[UOp, None] = field(default_factory=dict)            # this holds all the Tensor uops we realize in this schedule
+  children: defaultdict[UOp, dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
-def realize_before_view(ctx:dict[UOp, None], view:UOp, src:UOp) -> None:
+def realize(ctx:GrouperContext, tr:UOp) -> None: ctx.realizes[tr] = None
+
+def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx, dict()) else realize(ctx, src)
+    return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, src)
   # early realize before expand
   if resolve(prod(src.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx, dict())) else realize(ctx, src)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, src)
 
 do_realize = PatternMatcher([
+  # always realize SINK parents
+  (UPat(Ops.SINK, name="s"),
+   lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -108,7 +117,7 @@ do_realize = PatternMatcher([
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
-                    reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]):
+                    reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
   """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -125,24 +134,23 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, di
     if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
+def append_uop(ctx:GrouperContext, u:UOp) -> None:
+  if u.op is Ops.ASSIGN: ctx.assigns[u.buf_uop] = u
+  for s in u.src: ctx.children[s.base][u] = None
+create_ctx = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}, name="u"), append_uop)])
+
 def group_realizes(sink:UOp) -> dict[UOp, None]:
   # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize, realizes:={s.base:None for s in sink.src if s.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER}})
-  children: defaultdict[UOp, dict[UOp, None]] = defaultdict(dict)
-  assigns: dict[UOp, UOp] = {}
-  for u in sink.toposort:
-    if u is not u.base or u.base.op is Ops.SINK: continue
-    if u.op is Ops.ASSIGN: assigns[u.buf_uop] = u
-    for s in u.src: children[s.base][u] = None
+  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext())
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
   for r in sink.toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
-    if r in realizes: continue
+    if r in ctx.realizes: continue
     group: dict[UOp, None] = {}
-    recursive_group(r, unwrap(r.st), r, children, realizes, reduce_for_op, group, cache={})
+    recursive_group(r, unwrap(r.st), r, ctx.children, ctx.realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
@@ -154,16 +162,16 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       parents = deque((r, *group))
       while parents and not forced_realize:
         p = parents.pop().base
-        if (assign:=assigns.get(p)) is not None and assign not in group: forced_realize, can_chase = True, False
-        if p in realizes: continue
+        if (assign:=ctx.assigns.get(p)) is not None and assign not in group: forced_realize, can_chase = True, False
+        if p in ctx.realizes: continue
         parents.extend(p.src)
     if forced_realize or not group:
       tr = r
       if can_chase:
         # can chase this down to contiguous children
         st = unwrap(tr.st)
-        while len(children[tr]) == 1:
-          tr_next = next(iter(children[tr]))
+        while len(ctx.children[tr]) == 1:
+          tr_next = next(iter(ctx.children[tr]))
           st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
@@ -174,17 +182,17 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
         if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
           tr = tr.src[0].base
       group = {tr: None}
-      realizes[tr] = None
+      ctx.realizes[tr] = None
     reduce_for_op.update((tr, r) for tr in group)
     if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST:
       # maybe fuse arange with its children
-      if len(flatten(children[tr] for tr in group)) != 0:
-        for tr in group: del realizes[tr]
+      if len(flatten(ctx.children[tr] for tr in group)) != 0:
+        for tr in group: del ctx.realizes[tr]
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = reduceop.src[0].base
-    if len(children[top_reduce]) == 1: del realizes[top_reduce]
-  return realizes
+    if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
+  return ctx.realizes
 
 # break the SINK into kernels
 
