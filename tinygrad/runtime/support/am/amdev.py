@@ -7,6 +7,13 @@ from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_S
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
+class AMBar:
+  def __init__(self, addr, size): self.bar = to_mv(addr, size)
+  def read(self, offset:int, size:int) -> int: return 0
+  def write(self, offset:int, size:int, value:int): pass
+  def copyin(self, offset:int, data:memoryview): pass
+  def copyout(self, offset:int, size:int) -> memoryview: return memoryview(bytearray(size))
+
 @dataclasses.dataclass(frozen=True)
 class AMRegister:
   adev:AMDev; reg_off:int; reg_fields:dict[str, tuple[int, int]] # noqa: E702
@@ -104,7 +111,7 @@ class AMFirmware:
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class AMPageTableEntry:
-  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.entries, self.lv = adev, paddr, to_mv(adev.paddr2cpu(paddr), 0x1000).cast('Q'), lv
+  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv = adev, paddr, lv
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
@@ -113,7 +120,8 @@ class AMPageTableEntry:
       | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
       | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
-    self.entries[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
+    self.adev.vram_bar.write(self.paddr + entry_id * 8, 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
+  def entry(self, entry_id:int) -> int: return self.adev.vram_bar.read(self.paddr + entry_id * 8, 8)
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -125,10 +133,10 @@ class AMPageTableTraverseContext:
 
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
-    if (entry:=pt.entries[pte_idx]) & am.AMDGPU_PTE_VALID == 0:
+    if (entry:=pt.entry(pte_idx)) & am.AMDGPU_PTE_VALID == 0:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
-      entry = pt.entries[pte_idx]
+      entry = pt.entry(pte_idx)
 
     assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
@@ -138,7 +146,7 @@ class AMPageTableTraverseContext:
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entries[i] & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
+    if self.free_pts and pt != self.adev.mm.root_page_table and all(pt.entry(i) & am.AMDGPU_PTE_VALID == 0 for i in range(512)):
       self.adev.mm.pfree(pt.paddr)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
@@ -156,7 +164,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entry(pte_idx) & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -171,8 +179,8 @@ class AMMemoryManager:
 
   def __init__(self, adev:AMDev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
-    self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
+    self.boot_allocator = TLSFAllocator(32 << 20, base=0) # per device
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
@@ -184,7 +192,7 @@ class AMMemoryManager:
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
-          assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
+          assert pt.entry(pte_idx + pte_off) & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers,
             uncached=uncached, system=system, snooped=snooped, frag=0 if pte_covers == 0x1000 else 0x9, valid=True)
 
@@ -199,7 +207,7 @@ class AMMemoryManager:
     ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, vaddr, free_pts=True)
     for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.entries[pte_id] & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entries[pte_id]:#x}"
+        assert pt.entry(pte_id) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
 
   @staticmethod
@@ -229,13 +237,13 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
+    # if zero: self.adev.paddr2cpu(paddr, size).cast('Q')[:] = [0] * (size // 8)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
 
 class AMDev:
-  def __init__(self, devfmt, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+  def __init__(self, devfmt, vram_bar:AMBar, doorbell_bar:AMBar, mmio_bar:AMBar):
     self.devfmt = devfmt
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
@@ -261,7 +269,7 @@ class AMDev:
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000002)) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000003)) and (getenv("AM_RESET", 0) != 1)
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
@@ -305,7 +313,7 @@ class AMDev:
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
-  def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
+  # def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
@@ -313,15 +321,15 @@ class AMDev:
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
+    val = self.indirect_rreg(reg * 4) if reg > self.mmio.size else self.mmio.read(reg * 4, 4)
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
-    else: self.mmio[reg] = val
+    if reg > self.mmio.size: self.indirect_wreg(reg * 4, val)
+    else: self.mmio.write(reg * 4, val, 4)
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int):
     self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff)
@@ -348,6 +356,7 @@ class AMDev:
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
     print("vram", self.vram_size)
 
+    self.ip_versions = {13: 30000, 28: 130005, 21: 40201, 22: 30200, 1: 110000, 2: 60000, 11: 60000, 12: 30000, 15: 130000, 16: 130000, 14: 40300, 26: 40300, 23: 60000, 33: 70400, 25: 90000, 3: 60000, 4: 60000, 24: 130006, 27: 130005, 29: 81000, 17: 40001}
     self.regs_offset = {13: {0: [3072, 37784576]}, 28: {0: [93184, 37754880], 1: [201327616, 201461760], 2: [209716224, 209850368], 3: [218104832, 218238976], 4: [226493440, 226627584], 5: [234882048, 235016192], 6: [243270656, 243404800]}, 21: {0: [28672, 12582912, 37795840, 130023424, 306184192], 1: [201326592, 201463808, 201465856, 204210176, 204472320], 2: [209715200, 209852416, 209854464, 212598784, 212860928], 3: [218103808, 218241024, 218243072, 220987392, 221249536], 4: [226492416, 226629632, 226631680, 229376000, 229638144], 5: [234881024, 235018240, 235020288, 237764608, 238026752], 6: [243269632, 243406848, 243408896, 246153216, 246415360]}, 22: {0: [18, 192, 13504, 36864, 37764096]}, 1: {0: [4704, 40960, 114688, 37760000]}, 2: {0: [3872, 37790720]}, 11: {0: [70656, 38103040]}, 12: {0: [106496, 37783552]}, 15: {0: [90112, 14417920, 14680064, 14942208, 38009856]}, 16: {0: [90112, 14417920, 14680064, 14942208, 38009856]}, 14: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 26: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 23: {0: [4256, 37789696]}, 33: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 25: {0: []}, 3: {0: [4704, 40960, 114688, 37760000]}, 4: {0: [4704, 40960, 114688, 37760000]}, 24: {0: [92160, 92672, 37752832, 54788096]}, 27: {0: [91648, 37751808], 1: [201339904, 201458176], 2: [209728512, 209846784], 3: [218117120, 218235392], 4: [226505728, 226624000], 5: [234894336, 235012608], 6: [243282944, 243401216]}, 29: {0: [201342976, 201344000, 205520896, 205537280], 1: [209731584, 209732608, 213909504, 213925888], 2: [218120192, 218121216, 222298112, 222314496], 3: [226508800, 226509824, 230686720, 230703104], 4: [234897408, 234898432, 239075328, 239091712], 5: [243286016, 243287040, 247463936, 247480320]}, 17: {0: [30720, 32256], 1: [31488, 73728]}}
     return
 

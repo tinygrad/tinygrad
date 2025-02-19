@@ -365,8 +365,9 @@ class AM_PSP(AM_IP):
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 
   def _prep_msg1(self, data):
-    ctypes.memset(cpu_addr:=self.adev.paddr2cpu(self.msg1_paddr), 0, am.PSP_1_MEG)
-    to_mv(cpu_addr, len(data))[:] = data
+    assert data.nbytes < 0x4000
+    self.adev.vram.copyin(self.msg1_paddr, data)
+    self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(0x4000 - data.nbytes)))
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
@@ -406,7 +407,7 @@ class AM_PSP(AM_IP):
 
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x8000FFFF, value=0x80000000)
 
-  def _ring_submit(self):
+  def _ring_submit(self, cmd):
     prev_wptr = self.adev.regMP0_SMN_C2PMSG_67.read()
     ring_entry_addr = self.adev.paddr2cpu(self.ring_paddr) + prev_wptr * 4
 
