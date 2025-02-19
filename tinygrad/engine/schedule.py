@@ -45,7 +45,7 @@ def fix_image(u:UOp):
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
-    and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
+   and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
   # reduce of size 0 is the identity element
@@ -73,7 +73,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
-  lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
+   lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
