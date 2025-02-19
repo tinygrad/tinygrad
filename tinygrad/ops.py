@@ -186,11 +186,11 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM",
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, UOp], visisted:dict[UOp, None]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, None], cache:dict[UOp, None]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
-  if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
-  visisted[u] = None
-  return all(can_pad(x.base, edges, visisted) for x in u.src)
+  if u in edges or u in cache: return True
+  cache[u] = None
+  return all(can_pad(x.base, edges, cache) for x in u.src)
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
@@ -509,7 +509,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
-    if (self.op is Ops.VIEW and len(self.src) == 1) or self.op in GroupOp.Movement: return self.src[0].base
+    if (self.op is Ops.VIEW and len(self.src) != 0) or self.op in GroupOp.Movement: return self.src[0].base
     return self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
@@ -546,7 +546,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.base.op is Ops.BUFFER: return self.base
-    assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
+    assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN}, f"buf_uop called on {self.op}"
     return self.src[0].buf_uop
   @property
   def buffer(self) -> Buffer:
