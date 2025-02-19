@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.dtype import DType
 
@@ -63,17 +63,16 @@ class TestTinygrad(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
-  # This will only work if retain_graph works.
-  def test_retain_graph(self):
+  def test_accumulate_gradients(self):
     x = Tensor(x_init, requires_grad=True)
     W = Tensor(W_init, requires_grad=True)
     m = Tensor(m_init)
     out = x.dot(W).relu()
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad,wgrad = x.grad, W.grad
-    out.backward(retain_graph=True)
+    out.backward()
     xgrad2,wgrad2 = x.grad, W.grad
     out.backward() # no need to retain again since we will not re-run backward
     xgrad3,wgrad3 = x.grad, W.grad
@@ -486,6 +485,12 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
+  def test_no_attributeerror_after_apply_uop_exception(self):
+    try:
+      Tensor.arange(4).reshape(3,2)
+    except ValueError:
+      Tensor.zeros(2, 2).realize()
+
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
@@ -770,8 +775,8 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
   def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3, requires_grad=True).realize()
+    y = Tensor.rand(3, requires_grad=True).realize()
     out = (x.relu() * y.sigmoid()).sum()
     self.assertEqual(out.lazydata.metadata.name, "sum")
     out.backward()
@@ -797,7 +802,7 @@ class TestIdxUpcast(unittest.TestCase):
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
-        renderer.render("test", uops)
+        renderer.render(uops)
         return uops
 
   def _assert(self, dtype: DType, a: Tensor):

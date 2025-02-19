@@ -3,9 +3,8 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Any, Iterator, Generator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
-from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context
+                             cpu_time_execution, colored, Context, round_up
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
@@ -45,6 +44,7 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
+atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
 
 # **************** Profile ****************
 
@@ -208,7 +208,14 @@ class LRUAllocator(Allocator):
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
-    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
+    # must be aligned to 0x20 for 256-bit ymm registers
+    # TODO: investigate if this is the cause of nondeterminism in speed
+    alignment = 0x1000 if size >= 0x1000 else 0x20
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, alignment)
+  def _alloc_aligned(self, size:int, alignment:int):
+    buffer = (ctypes.c_uint8 * (size + alignment))()
+    offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
+    return (ctypes.c_uint8 * size).from_buffer(buffer, offset)
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
@@ -221,24 +228,35 @@ MAP_JIT = 0x0800
 
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
-  helper_handle = ctypes.CDLL(ctypes.util.find_library('System') if OSX else 'libgcc_s.so.1')
+  rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
+  atomic_lib = ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
   def __init__(self, name:str, lib:bytes):
-    # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
-    # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
-    self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)
+    if sys.platform == "win32":
+      PAGE_EXECUTE_READWRITE = 0x40
+      MEM_COMMIT =  0x1000
+      MEM_RESERVE = 0x2000
+      ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
+      ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(ptr, lib, len(lib))
+      self.fxn = ctypes.CFUNCTYPE(None)(ptr)
+    else:
+      from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
+      # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
+      # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
+      self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)
 
-    if OSX: CPUProgram.helper_handle.pthread_jit_write_protect_np(False)
-    self.mem.write(lib)
-    if OSX: CPUProgram.helper_handle.pthread_jit_write_protect_np(True)
+      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(False)
+      self.mem.write(lib)
+      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(True)
 
-    # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
-    # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
-    # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
-    # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-    CPUProgram.helper_handle["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+      # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
+      # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
+      # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
+      # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
+      CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
 
-    self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
+      self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
   def __call__(self, *bufs, vals=(), wait=False):
     args = list(bufs) + list(vals)
@@ -283,6 +301,11 @@ class Compiled:
     Called at the end of profiling to allow the device to finalize any profiling.
     """
     # override this in your device implementation
+  def finalize(self):
+    """
+    Called at the end of process lifetime to allow the device to finalize.
+    """
+    # override this in your device implementation
 
 # TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
@@ -291,7 +314,7 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
-                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32]
+                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs

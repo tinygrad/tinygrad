@@ -40,7 +40,7 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF}
+        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME}
         if uop is Ops.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
@@ -60,16 +60,16 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.NAME):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
-          assert dtype.fmt is not None
+          assert dtype.fmt is not None and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
-          buf = memoryview(bytearray(arg[1]*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
+          buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
           ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
@@ -196,7 +196,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
 
-  def render(self, name:str, uops:list[UOp]) -> str:
+  def render(self, uops:list[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 

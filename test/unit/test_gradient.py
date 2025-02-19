@@ -14,7 +14,7 @@ class TestGradient(unittest.TestCase):
 
   def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
-    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), [x])[x]
+    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), set([x]))[x]
     gf = jax.grad(f if jf is None else jf)
 
     for val in [-5., -2.0, 0.0, 2.0, 5.]:
@@ -24,7 +24,7 @@ class TestGradient(unittest.TestCase):
   def _test_two_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
-    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), [x, y])
+    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), set([x, y]))
     gx, gy = grads[x], grads[y]
     gf = jax.grad(f if jf is None else jf, argnums=(0, 1))
 
@@ -102,14 +102,16 @@ class TestTensorGradient(unittest.TestCase):
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
-    self.assertEqual(x.lazydata.op, Ops.VIEW)
+    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata.is_realized
 
   #@unittest.expectedFailure
   # update: passing after delete_forced_realize
   def test_uniform_realizes(self):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
     print(x.lazydata)
-    self.assertEqual(x.lazydata.op, Ops.VIEW)
+    self.assertEqual(x.lazydata.op, Ops.RESHAPE)
+    assert x.lazydata.is_realized
 
   # NOTE: even though it doesn't realize, this seems fine
   def test_uniform_gradient(self):

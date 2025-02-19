@@ -1,14 +1,15 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib, weakref
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
+from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
-from tinygrad.multi import get_multi_map
+from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
+from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, BufferSpec
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
@@ -42,28 +43,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
       if s is ns: continue
       t.lazydata = ns
 
-# **** start with two base classes, Tensor and Function ****
-
-class Function:
-  def __init__(self, device:Union[str, tuple[str, ...]], *tensors:Tensor, metadata:Optional[Metadata]=None):
-    self.device = device
-    self.needs_input_grad = [t.requires_grad for t in tensors]
-    self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
-    if self.requires_grad: self.parents = tensors
-    self.metadata = metadata
-
-  def forward(self, *args, **kwargs): raise NotImplementedError(f"forward not implemented for {type(self)}")
-  def backward(self, *args, **kwargs): raise RuntimeError(f"backward not implemented for {type(self)}")
-
-  @classmethod
-  def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
-    ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
-    ret = Tensor.__new__(Tensor)
-    ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
-    ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
-    return ret
-
-import tinygrad.function as F
+# **** Tensor helper functions ****
 
 def _metaop(op, shape:tuple[sint,...], dtype:DType, device:Union[str, tuple[str, ...]], arg=None):
   if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
@@ -80,7 +60,7 @@ def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
-  return ret.buf_uop_view()
+  return ret
 
 def get_shape(x) -> tuple[int, ...]:
   # NOTE: str is special because __getitem__ on a str is still a str
@@ -88,7 +68,7 @@ def get_shape(x) -> tuple[int, ...]:
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
-def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
+def _frompy(x:Union[list, tuple, bytes], dtype:DType) -> UOp:
   if isinstance(x, bytes): ret, data = UOp.metaop(Ops.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
   else:
     ret = UOp.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
@@ -97,7 +77,7 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
-  return ret.buf_uop_view()
+  return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:Union[str, tuple[str, ...]], dtype:DType) -> list[list[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
@@ -147,18 +127,11 @@ class Tensor(SimpleMathTrait):
   np.set_printoptions(precision=4)
   ```
   """
-  __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
-  __deletable__ = ('_ctx',)
+  __slots__ = "lazydata", "requires_grad", "grad"
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __new__(cls, *args, **kwargs):
-    instance = super().__new__(cls)
-    all_tensors.add(weakref.ref(instance))
-    return instance
-  def __del__(self): all_tensors.discard(weakref.ref(self))
-
-  def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, bytes, list, tuple, UOp, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
@@ -170,9 +143,6 @@ class Tensor(SimpleMathTrait):
     # NOTE: this can be in three states. False and None: no gradient, True: gradient
     # None (the default) will be updated to True if it's put in an optimizer
     self.requires_grad: Optional[bool] = requires_grad
-
-    # internal variable used for autograd graph construction
-    self._ctx: Optional[Function] = None
 
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, UOp):
@@ -197,7 +167,7 @@ class Tensor(SimpleMathTrait):
       dtype = dtype or dtypes.uint8
       data = _metaop(Ops.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
 
-    # by this point, it has to be a LazyBuffer
+    # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
@@ -207,6 +177,19 @@ class Tensor(SimpleMathTrait):
     else:
       assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
       self.lazydata = data
+
+    # add to all_tensors after construction succeeds
+    all_tensors.add(weakref.ref(self))
+  def __del__(self): all_tensors.discard(weakref.ref(self))
+
+  def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
+    new_uop: UOp = fxn(*[t.lazydata for t in (self,)+x], **kwargs)
+    needs_input_grad = [t.requires_grad for t in (self,)+x]
+    return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
+
+  def _apply_broadcasted_uop(self, fxn:Callable, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    lhs,rhs = self._broadcasted(x, reverse)
+    return lhs._apply_uop(fxn, rhs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -261,6 +244,9 @@ class Tensor(SimpleMathTrait):
       _apply_map_to_tensors(get_multi_map(big_sink))
       big_sink = UOp.sink(*flatten([x.lazydata.src if x.lazydata.op is Ops.MULTI else [x.lazydata] for x in (self,)+lst]))
 
+    # verify Tensors match the spec
+    if __debug__: type_verify(list(big_sink.toposort), tensor_uop_spec)
+
     schedule, var_vals, becomes_map = create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map)
     return memory_planner(schedule), var_vals
@@ -281,7 +267,6 @@ class Tensor(SimpleMathTrait):
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert getattr(self, '_ctx', None) is None
     assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
     return self
@@ -290,10 +275,9 @@ class Tensor(SimpleMathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CLANG", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.realized.copyin(x._data())
+      self.contiguous().realize().lazydata.base.realized.ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
@@ -345,14 +329,19 @@ class Tensor(SimpleMathTrait):
     assert self.numel() == 1, "must have one element for item"
     return self.data()[(0,) * len(self.shape)]
 
-  # TODO: should be Tensor.tolist() -> Union[list[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
+  # TODO: should be Tensor.tolist() -> Union[list[ConstType], ConstType]. The list is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
   def tolist(self) -> Union[Sequence[ConstType], ConstType]:
     """
     Returns the value of this tensor as a nested list.
+    Returns single value for const tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 2, 3, 4])
+    print(t.tolist())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor(5)
     print(t.tolist())
     ```
     """
@@ -379,7 +368,6 @@ class Tensor(SimpleMathTrait):
     """
     ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.clone()
-    if hasattr(self, '_ctx'): ret._ctx = self._ctx
     return ret
 
   def to(self, device:Optional[Union[str, tuple[str, ...]]]) -> Tensor:
@@ -391,7 +379,6 @@ class Tensor(SimpleMathTrait):
     if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
-    if hasattr(self, '_ctx'): ret._ctx = self._ctx
     return ret
 
   def to_(self, device:Optional[Union[str, tuple[str, ...]]]):
@@ -467,7 +454,6 @@ class Tensor(SimpleMathTrait):
 
     r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
-    r.lazydata.buf_uop_view()
     return r
 
   @staticmethod
@@ -507,7 +493,7 @@ class Tensor(SimpleMathTrait):
   @staticmethod
   def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = F.Threefry.apply(x, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
+    x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
     counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
 
@@ -751,7 +737,8 @@ class Tensor(SimpleMathTrait):
       if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `rand_like` of a multi device tensor")
       if self.lazydata.axis is None: return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
       contiguous = kwargs.pop("contiguous", True)
-      rands = [Tensor.rand(*lb.shape, device=cast(str, lb.device), dtype=dtype, contiguous=contiguous, **kwargs).lazydata for lb in self.lazydata.src]
+      sharded_shape = tuple(s//len(self.device) if a==self.lazydata.axis else s for a,s in enumerate(self.shape))
+      rands = [Tensor.rand(sharded_shape, device=d, dtype=dtype, contiguous=contiguous, **kwargs).lazydata for d in self.device]
       return Tensor(UOp.multi(*rands, axis=self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
@@ -901,7 +888,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** toposort and backward pass *****
 
-  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None, materialize_grads=False) -> list[Tensor]:
     """
     Compute the gradient of the targets with respect to self.
 
@@ -922,58 +909,31 @@ class Tensor(SimpleMathTrait):
     grads = compute_gradient(self.lazydata, gradient.lazydata, set(target_uops))
     ret = []
     for x in target_uops:
-      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
+      if (y:=grads.get(x)) is None:
+        if materialize_grads: y = x.const_like(0)
+        else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
       ret.append(y)
     rets.append(ret)
     # create returned Tensors
     return [Tensor(u, device=t.device) for t,u in zip(targets, rets[0])]
 
-  def _deepwalk(self) -> list[Tensor]:
-    def _walk(node:Tensor, visited:set[Tensor]):
-      visited.add(node)
-      # if tensor is not leaf, reset grad
-      if (ctx := getattr(node, "_ctx", None)) is not None and len(ctx.parents) != 0: node.grad = None
-      if ctx:
-        for i in cast(Function, node._ctx).parents:
-          if i not in visited: yield from _walk(i, visited)
-        yield node
-    return list(_walk(self, set()))
-
-  def backward(self, gradient:Optional[Tensor]=None, retain_graph:bool=False) -> Tensor:
+  def backward(self, gradient:Optional[Tensor]=None) -> Tensor:
     """
     Propagates the gradient of a tensor backwards through the computation graph.
     If the 'gradient' argument is not provided, the tensor must be a scalar, and the gradient is implicitly set to 1.0.
-    If 'retain_graph' is false, the graph used to compute the grads will be freed. Otherwise, it will be kept. Keeping it can increase memory usage.
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
     t.sum().backward()
     print(t.grad.numpy())
     ```
     """
-    toposorted = self._deepwalk()
-    if gradient is None:
-      assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-      # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
-      # this is "implicit gradient creation"
-      gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-
-    toposort_uop = self.lazydata.toposort
-    assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
-    self.grad = gradient
-    for t0 in reversed(toposorted):
-      if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
-      ctx = cast(Function, t0._ctx)
-      token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := ctx.metadata) is not None else None)
-      grads = ctx.backward(t0.grad.lazydata)
-      _METADATA.reset(token)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-        for g in ([grads] if len(ctx.parents) == 1 else grads)]
-      for t, g in zip(ctx.parents, grads):
-        if g is not None and t.requires_grad:
-          assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-          assert t.lazydata in toposort_uop, f"grad uop must have a path from self\ngrad uop: {t.lazydata}"
-          t.grad = g if t.grad is None else (t.grad + g)
-      if not retain_graph: del t0._ctx
+    all_uops = self.lazydata.toposort
+    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
+                                       t.lazydata in all_uops and t.requires_grad and not Tensor.no_grad]
+    # clear contexts
+    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
+      assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
+      t.grad = g if t.grad is None else (t.grad + g)
     return self
 
   # ***** movement low level ops *****
@@ -997,7 +957,7 @@ class Tensor(SimpleMathTrait):
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    return F.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
+    return self._apply_uop(UOp.reshape, arg=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
     """
@@ -1030,7 +990,7 @@ class Tensor(SimpleMathTrait):
     """
     order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
     if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
-    return F.Permute.apply(self, order=order_arg)
+    return self._apply_uop(UOp.permute, arg=order_arg)
 
   def flip(self, axis, *args) -> Tensor:
     """
@@ -1050,7 +1010,7 @@ class Tensor(SimpleMathTrait):
     """
     axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
     if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
-    return F.Flip.apply(self, axis=axis_arg)
+    return self._apply_uop(UOp.flip, arg=tuple([i in axis_arg for i in range(len(self.shape))]))
 
   def shrink(self, arg:tuple[Optional[tuple[sint, sint]], ...]) -> Tensor:
     """
@@ -1070,7 +1030,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if (shrink_arg:=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)]) == [(0,s) for s in self.shape]: return self
-    return F.Shrink.apply(self, arg=tuple(shrink_arg))
+    return self._apply_uop(UOp.shrink, arg=tuple(shrink_arg))
 
   def pad(self, padding:Union[Sequence[sint], Sequence[Optional[tuple[sint, sint]]]], mode:str="constant", value:float=0.0) -> Tensor:
     """
@@ -1114,7 +1074,8 @@ class Tensor(SimpleMathTrait):
     if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
     X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
     if mode == "constant":
-      def _constant(x,px,v): return F.Pad.apply(x, arg=px) if v == 0 else F.Pad.apply(x, arg=px) + F.Pad.apply(Tensor.ones_like(x), arg=px).where(0,v)
+      def _constant(x:Tensor,px,v):
+        return x._apply_uop(UOp.pad, arg=px) if v == 0 else (x._apply_uop(UOp.pad, arg=px)+Tensor.ones_like(x)._apply_uop(UOp.pad, arg=px).where(0,v))
       return _constant(X, pX, value) if all(resolve(p >= 0) for p in flatten(pX)) else \
              _constant(X.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))), pads, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
@@ -1139,8 +1100,7 @@ class Tensor(SimpleMathTrait):
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    # turn scalar Tensors into const val for int indexing if possible
-    x, indices = self, [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
+    x, indices = self, list(indices)
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
@@ -1230,7 +1190,7 @@ class Tensor(SimpleMathTrait):
     """
     Retrieve a sub-tensor using indexing.
 
-    Supported Index Types: `int | slice | Tensor | None | List | Tuple | Ellipsis`
+    Supported Index Types: `int | slice | Tensor | None | list | tuple | Ellipsis`
 
     Examples:
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1272,8 +1232,8 @@ class Tensor(SimpleMathTrait):
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.lazydata.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
-    if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
-    if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self.realize()._getitem(indices, v)
@@ -1604,10 +1564,10 @@ class Tensor(SimpleMathTrait):
 
   # ***** reduce ops *****
 
-  def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False) -> Tensor:
+  def _reduce(self, op:Ops, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False) -> Tensor:
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
-    ret = fxn.apply(self, axis=axis)
+    ret = self._apply_uop(UOp.r, op=op, axis=axis)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
   def sum(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
@@ -1634,7 +1594,7 @@ class Tensor(SimpleMathTrait):
     print(t.sum(axis=1).numpy())
     ```
     """
-    ret = self.cast(sum_acc_dtype(self.dtype) if acc_dtype is None else acc_dtype)._reduce(F.Sum, axis, keepdim)
+    ret = self.cast(sum_acc_dtype(self.dtype) if acc_dtype is None else acc_dtype)._reduce(Ops.ADD, axis, keepdim)
     return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
 
   def prod(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, acc_dtype:Optional[DTypeLike]=None):
@@ -1661,7 +1621,7 @@ class Tensor(SimpleMathTrait):
     print(t.prod(axis=1).numpy())
     ```
     """
-    return self.cast(acc_dtype if acc_dtype is not None else self.dtype)._reduce(F.Prod, axis, keepdim)
+    return self.cast(acc_dtype if acc_dtype is not None else self.dtype)._reduce(Ops.MUL, axis, keepdim)
 
   def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
@@ -1684,7 +1644,7 @@ class Tensor(SimpleMathTrait):
     print(t.max(axis=1, keepdim=True).numpy())
     ```
     """
-    return self._reduce(F.Max, axis, keepdim)
+    return self._reduce(Ops.MAX, axis, keepdim)
 
   def _inverse(self): return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
 
@@ -1754,6 +1714,28 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self.logical_not().any(axis, keepdim).logical_not()
+
+  def isclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
+    """
+    Returns a new tensor with element-wise comparison of closeness to `other` within a tolerance.
+
+    The `rtol` and `atol` keyword arguments control the relative and absolute tolerance of the comparison.
+
+    By default, two `NaN` values are not close to each other. If `equal_nan` is `True`, two `NaN` values are considered close.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1e-7, 1e-8, 1e-9, float('nan')]).isclose(Tensor([0.0, 0.0, 0.0, float('nan')])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
+    ```
+    """
+    # TODO: Tensor.isfinite
+    def isfinite(t): return (t.isinf()|t.isnan()).logical_not()
+    is_finite_close = isfinite(self) & isfinite(other) & ((self - other).abs() <= atol + rtol * other.abs())
+    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
+    return is_finite_close | is_infinite_close | is_nan_close
 
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
@@ -1951,8 +1933,16 @@ class Tensor(SimpleMathTrait):
     print(t.logcumsumexp(axis=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().cumsum(axis=axis).log() + m
+    if self.ndim == 0: return self
+    axis = self._resolve_dim(axis)
+    x = self.transpose(axis, -1)
+    last_dim_size = x.shape[-1]
+    x_reshaped = x.reshape(-1, last_dim_size)
+    x_cummax = x_reshaped.cummax(-1).unsqueeze(-1)
+    x_expand = x_reshaped.unsqueeze(1).expand(*x_reshaped.shape, last_dim_size)
+    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril().unsqueeze(0)
+    ret = ((x_expand - x_cummax).exp() * mask).sum(-1).log() + x_cummax.squeeze(-1)
+    return ret.reshape(*x.shape).transpose(-1, axis)
 
   def argmax(self, axis=None, keepdim=False):
     """
@@ -2060,7 +2050,7 @@ class Tensor(SimpleMathTrait):
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
     if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
       # input size scaling factor to make sure shrink for stride is possible
-      f_ = [1 + int(resolve(o*s > i+d)) for o,s,i,d in zip(o_,s_,i_,d_)]
+      f_ = [1 + int(resolve(o*s > (i - d*(k-1)))) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
       # # repeats such that we don't need padding
       x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
       # handle dilation
@@ -2081,7 +2071,7 @@ class Tensor(SimpleMathTrait):
       raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
-  def _apply_ceil_mode(self, pads:Sequence[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> List[int]:
+  def _apply_ceil_mode(self, pads:Sequence[int], k_:tuple[sint, ...], s_:Union[tuple[int, ...], int], d_:Union[tuple[int, ...], int]) -> list[int]:
     (d_,s_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_)), self.shape[-len(k_):]
     pads, grouped_pads = list(pads), _flat_to_grouped(pads)
     # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
@@ -2104,10 +2094,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2151,10 +2141,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2189,10 +2179,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2262,10 +2252,10 @@ class Tensor(SimpleMathTrait):
     1. `int` (single value):
       Applies the same padding value uniformly to all spatial dimensions.
 
-    2. `Tuple[int, ...]` (length = number of spatial dimensions):
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
       Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
 
-    3. `Tuple[int, ...]` (length = 2 * number of spatial dimensions):
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
       Specifies explicit padding for each side of each spatial dimension in the form
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
@@ -2470,10 +2460,27 @@ class Tensor(SimpleMathTrait):
         x = x.gather(i, index)
     return x.cast(self.dtype)
 
+  def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
+    index, dim = index.to(self.device), self._resolve_dim(dim)
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
+    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
+    if self.dtype != src.dtype: raise RuntimeError(f"expect {self.dtype=} to be equal to {src.dtype=}")
+    # shrink src to index shape to shrink away the unused values
+    src = src.shrink(tuple((0,s) for s in index.shape))
+    # prepare src and mask for reduce with respect to dim
+    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
+    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
+    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
+    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    return src, mask
+
   def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']]=None) -> Tensor:
     """
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
+
+    NOTE: To use the `reduce` argument with a Tensor `src`, see `Tensor.scatter_reduce`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     src = Tensor.arange(1, 11).reshape(2, 5)
@@ -2495,21 +2502,54 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    index, dim = index.to(self.device), self._resolve_dim(dim)
-    src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
-    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
-    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
-      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
-    # shrink src to index shape to shrink away the unused values
-    src = src.shrink(tuple((0,s) for s in index.shape))
-    # prepare src and mask for reduce with respect to dim
-    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
-    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
-    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
-    if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
-    if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
+    if reduce and isinstance(src, Tensor): raise TypeError("Tensor src is not supported with reduce arg. see scatter_reduce")
+    if not isinstance(src, Tensor): src = index.full_like(src, device=self.device, dtype=self.dtype)
+    if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
+    if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
+    src, mask = self._pre_scatter(dim, index, src)
     return _masked_setitem(self, src, mask, (-1,))
+
+  def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
+                     include_self:bool=True) -> Tensor:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `"sum"`, `"prod"`, `"mean"`, `"amax"`, or `"amin"` reduction operations with `reduce`.
+
+    Set `include_self=False` to exclude values in the `self` Tensor from the reduction.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    src = Tensor.arange(1, 11).cast(dtypes.float).reshape(2, 5)
+    print(src.numpy())
+    index = Tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    print(index.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='sum').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='prod').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='mean', include_self=False).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amax').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amin').numpy())
+    ```
+    """
+    src, mask = self._pre_scatter(dim, index, src)
+    def _inv_mask(a:Union[Tensor, ConstType], b:Union[Tensor, ConstType]) -> Tensor: return mask.any(-1).logical_not().where(a, b)
+    # TODO: should not overwrite acc_dtype here?
+    if reduce == "sum": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0))
+    if reduce == "prod": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype).mul(self if include_self else _inv_mask(self, 1))
+    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
+    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).min(-1).minimum(self if include_self else _inv_mask(self, m))
+    if reduce == "mean":
+      count = mask.where(1, 0).sum(-1, acc_dtype=self.dtype).add(1 if include_self else _inv_mask(1, 0))
+      return mask.where(src, 0).sum(-1, acc_dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
+    raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   # ***** unary ops *****
 
@@ -2521,7 +2561,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return F.Neq.apply(*self.cast(dtypes.bool)._broadcasted(True))
+    return self.cast(dtypes.bool)._apply_broadcasted_uop(UOp.ne, True)
   def neg(self):
     """
     Negates the tensor element-wise.
@@ -2535,12 +2575,12 @@ class Tensor(SimpleMathTrait):
     """
     Returns a contiguous tensor.
     """
-    return F.Contiguous.apply(self)
+    return self._apply_uop(UOp.contiguous)
   def contiguous_backward(self):
     """
     Inserts a contiguous operation in the backward pass.
     """
-    return F.ContiguousBackward.apply(self)
+    return self._apply_uop(UOp.contiguous_backward)
   def log(self):
     """
     Computes the natural logarithm element-wise.
@@ -2551,7 +2591,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 4., 8.]).log().numpy())
     ```
     """
-    return F.Log.apply(self.cast(least_upper_float(self.dtype)))
+    return self.log2()*math.log(2)
   def log2(self):
     """
     Computes the base-2 logarithm element-wise.
@@ -2562,7 +2602,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 4., 8.]).log2().numpy())
     ```
     """
-    return self.log()/math.log(2)
+    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
   def exp(self):
     """
     Computes the exponential function element-wise.
@@ -2573,7 +2613,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
-    return F.Exp.apply(self.cast(least_upper_float(self.dtype)))
+    return self.mul(1/math.log(2)).exp2()
   def exp2(self):
     """
     Computes the base-2 exponential function element-wise.
@@ -2584,8 +2624,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([0., 1., 2., 3.]).exp2().numpy())
     ```
     """
-    return F.Exp.apply(self*math.log(2))
-
+    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
   def relu(self):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
@@ -2596,7 +2635,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
     ```
     """
-    return F.Relu.apply(self)
+    return (self>0).where(self, 0)
 
   def sigmoid(self):
     """
@@ -2632,7 +2671,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
     ```
     """
-    return F.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
+    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
   def rsqrt(self):
     """
     Computes the reciprocal of the square root of the tensor element-wise.
@@ -2641,7 +2680,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
     ```
     """
-    return self.reciprocal().sqrt()
+    return self.sqrt().reciprocal()
   def sin(self):
     """
     Computes the sine of the tensor element-wise.
@@ -2650,7 +2689,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
     ```
     """
-    return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
+    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
   def cos(self):
     """
     Computes the cosine of the tensor element-wise.
@@ -2809,7 +2848,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sign().numpy())
     ```
     """
-    return F.Sign.apply(self)
+    return self.ne(0).where((self<0).where(self.full_like(-1), self.full_like(1)), self.full_like(0)) + self*0
   def abs(self):
     """
     Computes the absolute value of the tensor element-wise.
@@ -2827,7 +2866,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
     """
-    return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
+    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
 
   # ***** activation functions *****
 
@@ -3105,7 +3144,7 @@ class Tensor(SimpleMathTrait):
     # for each dimension, check either dim is 1, or it does not change
     if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    return F.Expand.apply(self.reshape(shape), shape=new_shape)
+    return self.reshape(shape)._apply_uop(UOp.expand, arg=new_shape)
 
   def _broadcasted(self, y:Union[Tensor, UOp, ConstType], reverse:bool=False, match_dtype:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -3126,11 +3165,6 @@ class Tensor(SimpleMathTrait):
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
-  # TODO: tensor should stop checking if things are const
-  def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
-    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, UOp) and x.lazydata.base.op is Ops.CONST \
-      and unwrap(x.lazydata.st).views[0].mask is None and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
-
   def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Adds `self` and `x`.
@@ -3149,7 +3183,7 @@ class Tensor(SimpleMathTrait):
     print(t.add(Tensor([[2.0], [3.5]])).numpy())
     ```
     """
-    return F.Add.apply(*self._broadcasted(x, reverse))
+    return self._apply_broadcasted_uop(UOp.add, x, reverse)
 
   def sub(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3190,7 +3224,7 @@ class Tensor(SimpleMathTrait):
     print(t.mul(Tensor([[-1.0], [2.0]])).numpy())
     ```
     """
-    return F.Mul.apply(*self._broadcasted(x, reverse))
+    return self._apply_broadcasted_uop(UOp.mul, x, reverse)
 
   def idiv(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3203,7 +3237,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
-    return F.IDiv.apply(*self._broadcasted(x, reverse))
+    return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
 
   def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3238,7 +3272,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return (r := F.Mod.apply(a, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
+    return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
 
   def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3254,7 +3288,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return F.Xor.apply(*self._broadcasted(x, reverse))
+    return self._apply_broadcasted_uop(UOp.xor, x, reverse)
 
   def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3269,7 +3303,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return F.BitwiseAnd.apply(*self._broadcasted(x, reverse))
+    return self._apply_broadcasted_uop(UOp.bitwise_and, x, reverse)
 
   def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3284,7 +3318,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
+    return self._apply_broadcasted_uop(UOp.bitwise_or, x, reverse)
 
   def bitwise_not(self) -> Tensor:
     """
@@ -3330,38 +3364,21 @@ class Tensor(SimpleMathTrait):
     Equivalent to `self ** x`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(2).numpy())
+    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print((2 ** Tensor([-1, 2, 3])).numpy())
+    print((2.0 ** Tensor([-1, 2, 3])).numpy())
     ```
     """
-    x = self._to_const_val(x)
-    if not isinstance(x, Tensor) and not reverse:
-      # simple pow identities
-      if x < 0: return self.reciprocal().pow(-x).cast(self.dtype)
-      if x == 0: return 1 + self * 0
-      # rewrite pow 0.5 to sqrt
-      if int(x - 0.5) + 0.5 == x: return self.pow(int(x - 0.5)) * self.sqrt()
-      if int(x) == x: return self.pow(x // 2).square() * (1 if x % 2 == 0 else self)
-
-    # positive const ** self
-    if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
-
     base, exponent = self._broadcasted(x, reverse=reverse)
-    # start with b ** e = exp(e * log(b))
-    ret = base.abs().log().mul(exponent).exp()
-    # correct sign of negative base with odd exponent (cos has a period of 2pi so we use it here to get the oddness of the exponent)
-    negative_base = (base < 0).detach().where(1, 0)
-    # 1 for non-negative base or negative even exponent, -1 for negative odd exponent, don't care about non-integer exponent
-    correct_sign = 1 + negative_base * ((exponent * math.pi).cos() - 1)
-    # inject nan for negative base and non-integer exponent
-    inject_nan = (negative_base * (exponent != exponent.trunc())).detach().where(math.nan, 1)
-    # apply correct_sign inject_nan, and fix 0 ** 0 = 1
-    ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    # TODO: int pow
+    if not base.is_floating_point(): raise RuntimeError("base needs to be float")
+
+    # NOTE: pow(int, float) -> int
+    ret = base._apply_uop(UOp.pow, exponent)
     return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
@@ -3375,9 +3392,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    # NOTE: the mid-point is for backward, revisit after new gradient API
-    if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
-    return (self<x).detach().where(x, self)
+    return self._apply_broadcasted_uop(UOp.maximum, x)
 
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
@@ -3415,7 +3430,7 @@ class Tensor(SimpleMathTrait):
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
     cond, x = self._broadcasted(x, match_dtype=False)
     cond, y = cond._broadcasted(y, match_dtype=False)
-    return F.Where.apply(cond.cast(dtypes.bool), *x._broadcasted(y))
+    return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
@@ -3445,9 +3460,9 @@ class Tensor(SimpleMathTrait):
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
 
-  def __lt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
-  def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
-  def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))
+  def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
+  def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
+  def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
@@ -3793,8 +3808,8 @@ class Tensor(SimpleMathTrait):
     """
     if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
       # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
-      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int32), dtype=dt)
-    return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
+      return self._apply_uop(UOp.cast, dtype=dtypes.int32)._apply_uop(UOp.cast, dtype=dt)
+    return self if self.dtype == dt else self._apply_uop(UOp.cast, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
@@ -3819,7 +3834,7 @@ class Tensor(SimpleMathTrait):
       tmp = self.bitcast(old_uint)
       if ns > os: return functools.reduce(Tensor.add, (tmp[..., i::ns//os].cast(new_uint) << 8*i*os for i in range(ns//os))).bitcast(dtype)
       return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
-    return F.Cast.apply(self, dtype=dt, bitcast=True) if self.dtype != dt else self
+    return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
 
   def float(self) -> Tensor:
     """
@@ -3993,5 +4008,5 @@ def _metadata_wrapper(fn):
 
 if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential"]: continue
+    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
