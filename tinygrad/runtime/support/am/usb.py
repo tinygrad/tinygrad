@@ -93,6 +93,10 @@ class USBConnector:
       else: cdb = struct.pack('>BBBHB', 0xe5, value, 0x00, current_addr, 0x00)
       self._send(cdb)
 
+  def pcie_write_request_fw(self, address, value):
+    cdb = struct.pack('>BII', 0x03, address, value)
+    self._send(cdb)
+
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
     assert size > 0 and size <= 4
