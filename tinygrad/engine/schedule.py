@@ -98,11 +98,11 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx.realizes, dict()) else realize(ctx, src)
+    return None if can_pad(src, ctx.realizes, cache=dict()) else realize(ctx, src)
   # early realize before expand
   if resolve(prod(src.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, dict())) else realize(ctx, src)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, cache=dict())) else realize(ctx, src)
 
 do_realize = PatternMatcher([
   # always realize SINK parents
