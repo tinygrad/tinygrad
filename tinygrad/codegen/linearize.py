@@ -211,8 +211,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
-    # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
+      # NOTE: if any BLOCKEND is a child of another one that we are merging, there will be cycle in replacement, so we skip those
+      if any(any(u in other.toposort for other in v if other is not u) for u in v): continue
       out = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
                                         arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
       for u in v: new_forks[u] = out
