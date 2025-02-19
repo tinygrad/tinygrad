@@ -366,7 +366,7 @@ def train_retinanet():
   for x in GPUS: Device[x]
   print(f"training on {GPUS}")
 
-  def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
+  def _freeze_backbone_layers(backbone, trainable_layers):
     layers_to_train = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
     for k, v in get_state_dict(backbone).items():
       if all([not k.startswith(layer) for layer in layers_to_train]):
