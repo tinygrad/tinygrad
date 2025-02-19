@@ -390,7 +390,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for k,v in tensor_map.items():
     rev_tensor_map.setdefault(v, []).append(k)
     if k is v: continue
-    if isinstance(k.metadata, Metadata) and v.op is not Ops.CONST: ops_metadata[v] = k.metadata
     if v.base.op is Ops.BUFFER:
       # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
       if v.op is Ops.VIEW:
@@ -398,6 +397,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
         if k is not mop: becomes_map[k] = mop
       else: becomes_map[k] = v
     elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
+    # if we're not realizing this tensor, map its metadata to the simplified uop
+    elif isinstance(k.metadata, Metadata): ops_metadata[v] = k.metadata
 
   # create kernels
   if len(realize_map) == 0: return [], {}, becomes_map
