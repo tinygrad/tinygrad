@@ -13,7 +13,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping, AMBar
-# from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
+from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
 
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -586,9 +586,10 @@ class AMUSBBar(AMBar):
     print("copyin", len(x), cp_sz)
     for i in range(len(x)): self.write(i * cp_sz, x[i], cp_sz)
   def copyout(self, offset, size):
-    x = memoryview(bytearray(size)).cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(mv.nbytes)])
+    x = memoryview(bytearray(size))
+    mv = x.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(size)])
     print("copyout", len(x), cp_sz)
-    for i in range(len(x)): x[i] = self.read(i * cp_sz, cp_sz)
+    for i in range(len(mv)): mv[i] = self.read(i * cp_sz, cp_sz)
     return x
 
 class USBIface(PCIIface):
@@ -662,7 +663,7 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     # self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
-    self.dev_iface = PCIIface(self, self.device_id)
+    self.dev_iface = USBIface(self, self.device_id)
 
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
