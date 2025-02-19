@@ -186,11 +186,11 @@ view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM",
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp, edges:dict[UOp, None], visisted:dict[UOp, None]) -> bool:
+def can_pad(u:UOp, edges:dict[UOp, None], cache:dict[UOp, None]) -> bool:
   if u.op in GroupOp.UnsafePad: return False
-  if u in edges or u in visisted: return True
-  visisted[u] = None
-  return all(can_pad(x.base, edges, visisted) for x in u.src)
+  if u in edges or u in cache: return True
+  cache[u] = None
+  return all(can_pad(x.base, edges, cache) for x in u.src)
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
