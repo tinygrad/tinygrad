@@ -328,8 +328,8 @@ fix_kernel_ops = PatternMatcher([
 ])
 
 def load_buf(ctx:list[UOp], x:UOp):
-  if x.base not in ctx: ctx.append(x.base)
-  return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.base.size), (), ctx.index(x.base)), unwrap(x.st).to_uop()))
+  if x not in ctx: ctx.append(x)
+  return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop()))
 
 add_buffer_ops = PatternMatcher([
   # LOAD
