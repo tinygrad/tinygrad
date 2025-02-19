@@ -237,9 +237,10 @@ class CPUProgram:
       MEM_COMMIT =  0x1000
       MEM_RESERVE = 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
-      ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(ptr, lib, len(lib))
-      self.fxn = ctypes.CFUNCTYPE(None)(ptr)
+      self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(self.mem, lib, len(lib))
+      assert ctypes.windll.kernel32.FlushInstructionCache(ctypes.windll.kernel32.GetCurrentProcess(), ctypes.c_int(self.mem), ctypes.c_int(len(lib))) != 0, "FlushInstructionCache failed"
+      self.fxn = ctypes.CFUNCTYPE(None)(self.mem)
     else:
       from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
