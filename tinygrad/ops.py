@@ -509,7 +509,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
-    if (self.op is Ops.VIEW and len(self.src) == 1) or self.op in GroupOp.Movement: return self.src[0].base
+    if (self.op is Ops.VIEW and len(self.src) != 0) or self.op in GroupOp.Movement: return self.src[0].base
     return self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
 
@@ -546,7 +546,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.base.op is Ops.BUFFER: return self.base
-    assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
+    assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN}, f"buf_uop called on {self.op}"
     return self.src[0].buf_uop
   @property
   def buffer(self) -> Buffer:
