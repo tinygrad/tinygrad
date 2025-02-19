@@ -40,9 +40,8 @@ class Asm2x6x:
         return self.read(0x07f0, 6)
 
 class Asm236x(Asm2x6x):
-    def __init__(self, dev_path, is_24=False):
+    def __init__(self, dev_path):
         super().__init__(dev_path)
-        self.is_24 = is_24
 
     def flash_dump(self, read_len):
         data = bytearray(read_len)
@@ -70,59 +69,26 @@ class Asm236x(Asm2x6x):
 
     def read(self, start_addr, read_len, stride=255):
         data = bytearray(read_len)
-        if self.is_24:
-            for i in range(0, read_len, stride):
-                remaining = read_len - i
-                buf_len = min(stride, remaining)
 
-                current_addr = start_addr + i
-                assert current_addr >> 17 == 0
-                current_addr &= 0x01ffff
-                current_addr |= 0x500000
+        for i in range(0, read_len, stride):
+            remaining = read_len - i
+            buf_len = min(stride, remaining)
 
-                cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
+            cdb = struct.pack('>BBBHB', 0xe4, buf_len, 0x00, start_addr + i, 0x00)
 
-                buf = bytearray(buf_len)
-                ret = sgio.execute(self._file, cdb, None, buf)
-                assert ret == 0
+            buf = bytearray(buf_len)
+            ret = sgio.execute(self._file, cdb, None, buf)
+            assert ret == 0
 
-                data[i:i+buf_len] = buf
-        else:
-            for i in range(0, read_len, stride):
-                remaining = read_len - i
-                buf_len = min(stride, remaining)
-
-                cdb = struct.pack('>BBBHB', 0xe4, buf_len, 0x00, start_addr + i, 0x00)
-
-                buf = bytearray(buf_len)
-                ret = sgio.execute(self._file, cdb, None, buf)
-                assert ret == 0
-
-                data[i:i+buf_len] = buf
+            data[i:i+buf_len] = buf
 
         return bytes(data)
 
     def write(self, start_addr, data):
-        if self.is_24:
-            for offset, value in enumerate(data):
-                current_addr = start_addr + offset
-                # Ensure the address fits the expected range
-                assert current_addr >> 17 == 0
-
-                # Mask and shift address for the ASM246x's addressing scheme
-                current_addr &= 0x01ffff
-                current_addr |= 0x500000
-
-                # Use command code 0xe5 similarly to ASM236x
-                cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
-                ret = sgio.execute(self._file, cdb, None, None)
-                assert ret == 0
-        else:
-            for offset, value in enumerate(data):
-                cdb = struct.pack('>BBBHB', 0xe5, value, 0x00, start_addr + offset, 0x00)
-                ret = sgio.execute(self._file, cdb, None, None)
-                assert ret == 0
-
+        for offset, value in enumerate(data):
+            cdb = struct.pack('>BBBHB', 0xe5, value, 0x00, start_addr + offset, 0x00)
+            ret = sgio.execute(self._file, cdb, None, None)
+            assert ret == 0
 
     def reload(self):
         cdb = bytes.fromhex("e8 00 00 00 00 00 00 00 00 00 00 00")
@@ -171,14 +137,13 @@ class Asm236x(Asm2x6x):
 
         return bytes(data)
 
-    def pcie_cfg_req(self, byte_addr, bus=1, dev=0, fn=0, value=None, size=4):
+    def pcie_cfg_req(self, byte_addr, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=4):
         assert byte_addr >> 12 == 0
 
         assert bus >> 8 == 0
         assert dev >> 5 == 0
         assert fn >> 3 == 0
 
-        cfgreq_type = int(bus > 0)
         assert cfgreq_type >> 1 == 0
 
         fmt_type = 0x04
@@ -188,6 +153,7 @@ class Asm236x(Asm2x6x):
         fmt_type |= cfgreq_type
         address = (bus << 24) | (dev << 19) | (fn << 16) | (byte_addr & 0xfff)
 
+        # print(address)
         return self.pcie_gen_req(fmt_type, address, value, size)
 
     def pcie_mem_req(self, address, value=None, size=4):
@@ -213,19 +179,16 @@ class Asm236x(Asm2x6x):
             shifted_value = value << (8 * offset)
             self.write(0xB220, struct.pack('>I', shifted_value))
 
-        # https://www.intel.com/content/www/us/en/docs/programmable/683733/14-1/tlp-packet-formats-with-data-payload.html
+        # print("fmt_type", fmt_type)
         self.write(0xB210, struct.pack('>III',
             0x00000001 | (fmt_type << 24),
             byte_enable,
             masked_address,
         ))
 
-        if self.is_24:
-            self.write(0xB216, bytes([0x20]))
-            self.write(0xB296, bytes([0x04]))
-        else:
-            # Clear timeout bit.
-            self.write(0xB296, bytes([0x01]))
+        self.write(0xB216, bytes([0x20]))
+
+        self.write(0xB296, bytes([0x04]))
 
         # Unknown
         self.write(0xB254, bytes([0x0f]))
@@ -242,13 +205,21 @@ class Asm236x(Asm2x6x):
             return
 
         # Wait for completion.
+        # print(self.read(0xB296, 1)[0])
+        # print(self.read(0xB212, 1)[0])
+        # print(self.read(0xB213, 1)[0])
+        # print(self.read(0xB23e, 1)[0])
         while self.read(0xB296, 1)[0] & 2 == 0:
-            # print(self.read(0xB296, 1)[0])
+            print(self.read(0xB296, 1)[0])
+            if self.read(0xB296, 1)[0] & 0b10 == 0b10: break
             if self.read(0xB296, 1)[0] & 1:
                 # Clear timeout bit.
                 self.write(0xB296, bytes([0x01]))
 
                 raise Exception("PCIe timeout!")
+
+        # print("ok")
+        # exit(0)
 
         # Clear done bit.
         self.write(0xB296, bytes([0x02]))
@@ -281,6 +252,83 @@ class Asm236x(Asm2x6x):
             shifted_value = full_value >> (8 * offset)
             masked_value = shifted_value & ((1 << (8 * size)) - 1)
             return masked_value
+
+class Asm246x(Asm236x):
+    def __init__(self, dev_path):
+        super().__init__(dev_path)
+
+    def flash_dump(self, read_len):
+        first_read_len = read_len
+        second_read_len = 0
+        if read_len > 0x10000:
+            first_read_len = 0xff00
+            second_read_len = read_len - first_read_len
+
+        cdb = struct.pack('>BBI', 0xe2, 0x50, first_read_len)
+        first_data = bytearray(first_read_len)
+        ret = sgio.execute(self._file, cdb, None, first_data)
+        assert ret == 0
+
+        time.sleep(1)
+
+        data = bytes(first_data)
+        if second_read_len:
+            cdb = struct.pack('>BBI', 0xe2, 0xd0, second_read_len)
+            second_data = bytearray(second_read_len)
+            ret = sgio.execute(self._file, cdb, None, second_data)
+            assert ret == 0
+
+            time.sleep(1)
+
+            data += bytes(second_data)
+
+        return data
+
+    def reload(self):
+        cdb = bytes.fromhex("e8 00 00 00 00 00 00 00 00 00 00 00")
+        # print("here", cdb, len(cdb))
+        # cdb = struct.pack('>B8x', 0xe8)
+        # print("here", cdb, len(cdb))
+        ret = sgio.execute(self._file, cdb, None, None)
+        assert ret == 0
+
+    def read(self, start_addr, read_len, stride=255):
+        data = bytearray(read_len)
+
+        for i in range(0, read_len, stride):
+            remaining = read_len - i
+            buf_len = min(stride, remaining)
+
+            current_addr = start_addr + i
+            assert current_addr >> 17 == 0
+            current_addr &= 0x01ffff
+            current_addr |= 0x500000
+
+            cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
+
+            buf = bytearray(buf_len)
+            ret = sgio.execute(self._file, cdb, None, buf)
+            assert ret == 0
+
+            data[i:i+buf_len] = buf
+
+        return bytes(data)
+
+    def write(self, start_addr, data):
+        for offset, value in enumerate(data):
+            current_addr = start_addr + offset
+            # Ensure the address fits the expected range
+            assert current_addr >> 17 == 0
+
+            # Mask and shift address for the ASM246x's addressing scheme
+            current_addr &= 0x01ffff
+            current_addr |= 0x500000
+
+            # Use command code 0xe5 similarly to ASM236x
+            cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
+            ret = sgio.execute(self._file, cdb, None, None)
+            assert ret == 0
+
 
 def get_asm2x6x_dev(device="auto"):
     if device == "auto":
@@ -413,6 +461,7 @@ def fw_write(args, dev):
             return 1
 
     fw_size = struct.unpack_from('<H', fw_data, 0)[0]
+    print("fw_size", fw_size)
     fw_data = fw_data[:fw_size+8]
     fw_magic = fw_data[2+fw_size+0]
     if fw_magic not in (0x4b, 0x5a):
@@ -667,7 +716,7 @@ def pcie_cfg_dump(args, dev):
     if bdf[0] != 0:
         cfgreq_type = 1
 
-    buf = bytearray(4096)
+    buf = bytearray(256)
     start_ns = time.perf_counter_ns()
     for addr in range(0, len(buf), 4):
         struct.pack_into('<I', buf, addr, dev.pcie_cfg_req(addr, bus=bdf[0], dev=bdf[1], fn=bdf[2], cfgreq_type=cfgreq_type))
@@ -808,186 +857,6 @@ def main():
     if not dev:
         sys.stderr.write("Error: Failed to auto-detect an ASM2x6x device. Please specify it manually using the \"-d\" flag.\n")
         return 1
-    
-    # data = dev.pcie_cfg_req(4, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x7, size=2)
-    # print(dev.pcie_cfg_req(34, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-    # data = dev.pcie_cfg_req(70, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x20, size=2)
-    import time
-    time.sleep(2)
-    data = dev.pcie_cfg_req(70, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x10, size=2)
-    print("Header", dev.pcie_cfg_req(0x0e, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-    print("Primary", dev.pcie_cfg_req(0x18, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-    print("Secondary", dev.pcie_cfg_req(0x19, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-    print("Subordinate", dev.pcie_cfg_req(0x1a, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-
-    cap_ptr = dev.pcie_cfg_req(0x34, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1)
-    caps = {}
-    while True:
-        cap_0 = dev.pcie_cfg_req(cap_ptr, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1)
-        cap_nxt = dev.pcie_cfg_req(cap_ptr+1, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1)
-        cap_len = dev.pcie_cfg_req(cap_ptr+2, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1)
-        print(cap_0, cap_nxt, cap_len)
-        caps[cap_0] = cap_ptr
-        if cap_nxt == 0: break
-        cap_ptr = cap_nxt
-    
-    print("PM cap off", caps[0x1])
-    
-    pm_state = dev.pcie_cfg_req(caps[0x1]+4, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1)
-    print("PM cap now", pm_state)
-    dev.pcie_cfg_req(caps[0x1]+4, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x0, size=1)
-    print(dev.pcie_cfg_req(caps[0x1]+4, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-
-    for i in range(6):
-        print("BAR", i, hex(dev.pcie_cfg_req(0x10 + 4 * i, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=4)))
-
-    dev.pcie_cfg_req(0x1c, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x10, size=1)
-    dev.pcie_cfg_req(0x1d, bus=1, dev=0, fn=0, cfgreq_type=1, value=0xff, size=1)
-    
-    dev.pcie_cfg_req(0x20, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x1000, size=2)
-    dev.pcie_cfg_req(0x22, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x4000, size=2)
-
-    dev.pcie_cfg_req(0x24, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x4000, size=2)
-    dev.pcie_cfg_req(0x26, bus=1, dev=0, fn=0, cfgreq_type=1, value=0xffff, size=2)
-
-    dev.pcie_cfg_req(0x1a, bus=1, dev=0, fn=0, cfgreq_type=1, value=3, size=1)
-    dev.pcie_cfg_req(0x19, bus=1, dev=0, fn=0, cfgreq_type=1, value=2, size=1)
-    dev.pcie_cfg_req(0x18, bus=1, dev=0, fn=0, cfgreq_type=1, value=1, size=1)
-
-    print("br ctrl", dev.pcie_cfg_req(0x3e, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-    dev.pcie_cfg_req(0x3e, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x40, size=1)
-    time.sleep(1)
-    dev.pcie_cfg_req(0x3e, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x3, size=1)
-
-    data = dev.pcie_cfg_req(4, bus=1, dev=0, fn=0, cfgreq_type=1, value=0x7, size=1)
-    print(dev.pcie_cfg_req(4, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-
-    # Now do the same for downstram port
-    
-    pm_state = dev.pcie_cfg_req(caps[0x1]+4, bus=2, dev=0, fn=0, cfgreq_type=1, value=None, size=1)
-    print("PM cap now", pm_state)
-    dev.pcie_cfg_req(caps[0x1]+4, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x0, size=1)
-    print(dev.pcie_cfg_req(caps[0x1]+4, bus=2, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-
-    for i in range(6):
-        print("BAR", i, hex(dev.pcie_cfg_req(0x10 + 4 * i, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=4)))
-
-    dev.pcie_cfg_req(0x1c, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x10, size=1)
-    dev.pcie_cfg_req(0x1d, bus=2, dev=0, fn=0, cfgreq_type=1, value=0xff, size=1)
-
-    dev.pcie_cfg_req(0x20, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x1000, size=2)
-    dev.pcie_cfg_req(0x22, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x4000, size=2)
-
-    dev.pcie_cfg_req(0x24, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x4000, size=2)
-    dev.pcie_cfg_req(0x26, bus=2, dev=0, fn=0, cfgreq_type=1, value=0xffff, size=2)
-    
-    dev.pcie_cfg_req(0x1a, bus=2, dev=0, fn=0, cfgreq_type=1, value=3, size=1)
-    dev.pcie_cfg_req(0x19, bus=2, dev=0, fn=0, cfgreq_type=1, value=3, size=1)
-    dev.pcie_cfg_req(0x18, bus=2, dev=0, fn=0, cfgreq_type=1, value=2, size=1)
-
-    print("br ctrl", dev.pcie_cfg_req(0x3e, bus=1, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-    dev.pcie_cfg_req(0x3e, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x40, size=1)
-    time.sleep(1)
-    dev.pcie_cfg_req(0x3e, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x3, size=1)
-
-    data = dev.pcie_cfg_req(4, bus=2, dev=0, fn=0, cfgreq_type=1, value=0x7, size=1)
-    print(dev.pcie_cfg_req(4, bus=2, dev=0, fn=0, cfgreq_type=1, value=None, size=1))
-
-    for bus in range(1, 32):
-        for fn in range(0, 8):
-            try:
-                print(bus, fn, hex(dev.pcie_cfg_req(0, bus=bus, dev=0, fn=fn, cfgreq_type=1, value=None, size=2)))
-            except: pass
-
-    data = dev.pcie_cfg_req(4, bus=3, dev=0, fn=0, cfgreq_type=1, value=0x7, size=1)
-
-    def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
-    bars = {}
-    mmio_start = 0x1000
-    bar_start = 0x40000000
-    next_64 = 0
-    bar = 0
-    for i in range(12):
-        if next_64:
-            dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=0x0, size=4)
-            next_64 = False
-            continue
-
-        x = dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=None, size=4)
-        addr = x & 0xFFFFFFF0
-        flags = x & 0xf
-
-        if flags & 1 == 0:
-            dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=0xffffffff, size=4)
-
-            bs = dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=None, size=4)
-            bar_size = 0xffffffff - (bs & 0xFFFFFFF0) + 1
-            
-            if bar_size < 0x100000000:
-                bar_start += round_up(bar_size, 2 << 20)
-                print(bar, hex(bar_size), hex(bar_start))
-                
-                dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=bar_start, size=4)
-                x = dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=None, size=4)
-                # print(bar, bar_size, x)
-
-                addr = x & 0xFFFFFFF0
-                print(bar, addr, flags)
-
-                bars[bar] = (addr, bar_size)
-        else:
-            # dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=0xffffffff, size=4)
-
-            # bs = dev.pcie_cfg_req(0x10 + 4 * i, bus=3, dev=0, fn=0, cfgreq_type=1, value=None, size=4)
-            # bar_size = 0xffffffff - (bs & 0xFFFFFFF0) + 1
-
-            # print("bar", bar, flags, "IO??", hex(bar_size))
-            pass
-
-
-        if flags & 0x8 == 0x8: 
-            next_64 = True
-        bar += 1
-
-        if bar == 6: break
-
-    
-    dev.pcie_cfg_req(0x20, bus=0, dev=0, fn=0, cfgreq_type=0, value=0x1000, size=2)
-    dev.pcie_cfg_req(0x22, bus=0, dev=0, fn=0, cfgreq_type=0, value=0x4000, size=2)
-
-    dev.pcie_cfg_req(0x24, bus=0, dev=0, fn=0, cfgreq_type=0, value=0x4000, size=2)
-    dev.pcie_cfg_req(0x26, bus=0, dev=0, fn=0, cfgreq_type=0, value=0xffff, size=2)
-
-    print(bars)
-
-    # dev.pcie_cfg_req(0x1a, bus=0, dev=0, fn=0, cfgreq_type=0, value=3, size=1)
-    # dev.pcie_cfg_req(0x19, bus=0, dev=0, fn=0, cfgreq_type=0, value=3, size=1)
-    # dev.pcie_cfg_req(0x18, bus=0, dev=0, fn=0, cfgreq_type=0, value=0, size=1)
-
-    # print(dev.pcie_cfg_req(0x19, bus=0, dev=0, fn=0, cfgreq_type=0, value=None, size=1))
-    # print(dev.pcie_cfg_req(0x22, bus=0, dev=0, fn=0, cfgreq_type=0, value=None, size=2))
-
-    aa, size = bars[0]
-    print(hex(dev.pcie_mem_req(aa, None, size=4)))
-
-    x = dev.pcie_mem_req(aa, 0x0, size=4)
-    print(x)
-
-    # pci_read_config_word(dev, PCI_BRIDGE_CONTROL, &ctrl);
-	# ctrl |= PCI_BRIDGE_CTL_BUS_RESET;
-	# pci_write_config_word(dev, PCI_BRIDGE_CONTROL, ctrl);
-
-	# /*
-	#  * PCI spec v3.0 7.6.4.2 requires minimum Trst of 1ms.  Double
-	#  * this to 2ms to ensure that we meet the minimum requirement.
-	#  */
-	# msleep(2);
-
-	# ctrl &= ~PCI_BRIDGE_CTL_BUS_RESET;
-	# pci_write_config_word(dev, PCI_BRIDGE_CONTROL, ctrl);
-
-
-
     return args.func(args, dev)
 
 
