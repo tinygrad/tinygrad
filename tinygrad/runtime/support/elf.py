@@ -1,4 +1,4 @@
-import tinygrad.runtime.autogen.libc as libc
+import struct, tinygrad.runtime.autogen.libc as libc
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, i2u
 
@@ -32,6 +32,8 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   for sh, trgt_sh_name, c_rels in rel + rela:
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
+    for roff, sym, r_type_, r_addend in rels:
+      if sym.st_shndx == 0: raise RuntimeError(f'Attempting to relocate against an undefined symbol {repr(_strtab(sh_strtab, sym.st_name))}')
     relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs
@@ -51,3 +53,10 @@ def relocate(instr: int, ploc: int, tgt: int, r_type: int):
     case libc.R_AARCH64_LDST64_ABS_LO12_NC: return instr | (getbits(tgt, 3, 11) << 10)
     case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
   raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
+
+def jit_loader(obj: bytes) -> bytes:
+  image, _, relocs = elf_loader(obj)
+  # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
+  for ploc,tgt,r_type,r_addend in relocs:
+    image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
+  return bytes(image)

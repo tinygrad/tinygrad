@@ -1,10 +1,10 @@
-import unittest, operator, subprocess, math
+import unittest, operator, subprocess, struct, math
 import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, to_dtype
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, to_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import assume, given, settings, strategies as strat
@@ -327,6 +327,11 @@ class TestPtrDType(unittest.TestCase):
     dt = dtypes.float.vec(4).ptr().vec(4)
     self.assertEqual(dt, eval(str(dt)))
 
+  def test_vec_ptr_sz(self):
+    dt = dtypes.float.ptr(1024).vec(4)
+    self.assertEqual(dt, eval(str(dt)))
+    self.assertEqual(str(dt), "dtypes.float.ptr(1024).vec(4)")
+
   def test_vcount(self):
     dt = dtypes.float.ptr().vec(4)
     self.assertEqual(dt.vcount, 4)
@@ -433,6 +438,14 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_fp16(65504), 65504)
     self.assertEqual(truncate_fp16(65519.999), 65504)
     self.assertEqual(truncate_fp16(65520), math.inf)
+
+  def test_truncate_bf16(self):
+    self.assertEqual(truncate_bf16(1), 1)
+    self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
+    max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
+    self.assertEqual(truncate_bf16(max_bf16), max_bf16)
+    self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
+    self.assertEqual(truncate_bf16(max_bf16 * 1.001), math.inf)
 
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
@@ -781,7 +794,8 @@ class TestAutoCastType(unittest.TestCase):
         if DEBUG >= 2:
           print(f"testing {default_dtype=}, {dtype=}")
         a = Tensor([1, 2, 3], dtype=dtype, requires_grad=True)
-        b = (a * 5).sum()
+        # NOTE: this is broken without default_dtype because of CAST_BEFORE_VIEW
+        b = (a * 5).sum(acc_dtype=default_dtype)
         b.backward()  # if there is dtype mismatch, lazy should assert
         assert a.grad.dtype == a.dtype
         np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
@@ -795,7 +809,8 @@ class TestAutoCastType(unittest.TestCase):
     t.reshape(2, 1).expand(2, 10001).max().backward()
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
-  @unittest.skipIf(Device.DEFAULT=="PYTHON", "very slow")
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):
     N = 10000
@@ -811,6 +826,7 @@ class TestAutoCastType(unittest.TestCase):
     t.square().mean().backward()
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision error")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_softmax_dtype(self):
     data = [1, 2, 3]

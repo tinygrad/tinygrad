@@ -41,7 +41,7 @@ class TestArange(unittest.TestCase):
   def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=1)
 
   @unittest.skip("doesn't work yet")
-  def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(op=OptOps.PADTO, axis=1, amt=32)])
+  def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(op=OptOps.PADTO, axis=1, arg=32)])
 
   def test_all_opts(self, opts=None, exclude=None):
     k = Kernel(Tensor.arange(256).schedule()[-1].ast)
@@ -59,27 +59,24 @@ class TestArange(unittest.TestCase):
       self.test_complexity(opts)
   def test_all_opts_w_local(self):
     with contextlib.suppress(KernelOptError):
-      return self.test_all_opts([Opt(OptOps.LOCAL, 0, 16)], [Opt(op=OptOps.PADTO, axis=1, amt=32)])
+      return self.test_all_opts([Opt(OptOps.LOCAL, 0, 16)], [Opt(op=OptOps.PADTO, axis=1, arg=32)])
   def test_all_opts_w_upcast(self): return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4)])
-  def test_all_opts_w_unroll(self): return self.test_all_opts([Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
+  def test_all_opts_w_unroll(self): return self.test_all_opts([Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
   def test_all_opts_w_upcast_and_unroll(self):
-    return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, amt=0)])
+    return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
 
 class TestIndexing(unittest.TestCase):
-  # update: passing after CAST_BEFORE_VIEW=1 deletion
-  # @unittest.expectedFailure
   def test_arange_2_reduce(self):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
     needle.realize()
     with Context(NOOPT=1, FUSE_ARANGE=1):
       GlobalCounters.reset()
-      # TODO: it should work without these reshapes
-      out = ((Tensor.arange(1,16385).reshape(16384,1)-1)*needle.reshape(16384,1)).sum()
+      out = ((Tensor.arange(1,16385)-1)*needle).sum()
       sched = out.schedule()
-      assert len(sched) == 1
+      self.assertEqual(len(sched), 1)
       run_schedule(sched)
-    assert out.item() == 1337, f"expected 1337, got {out.item()}"
+    self.assertEqual(out.item(), 1337)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_manual_index(self):
@@ -95,7 +92,7 @@ class TestIndexing(unittest.TestCase):
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, 256, 16384, 1))
       X = full.sum(axis=(2,3))
       sched = X.schedule()
-      assert len(sched) == 1
+      self.assertEqual(len(sched), 1)
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -111,7 +108,7 @@ class TestIndexing(unittest.TestCase):
       assert X.shape == (4,256)
       sched = X.schedule()
       # TODO: enable these asserts when the scheduler can handle this
-      #assert len(sched) == 1, f"{len(sched)} != 1"
+      #self.assertEqual(len(sched), 1)
       run_schedule(sched)
       #assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -126,7 +123,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,256)
       sched = X.schedule()
-      assert len(sched) == 2
+      self.assertEqual(len(sched), 2)
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*16384, f"too many ops {GlobalCounters.global_ops} != {4*16384}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -160,7 +157,8 @@ class TestIndexing(unittest.TestCase):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb_w = emb.weight.numpy()
+    # TODO: why is a new realize needed here
+    emb_w = emb.weight.realize().numpy()
     x = Tensor([1,2,3,4])
     with Context(NOOPT=noopt, FUSE_ARANGE=1):
       GlobalCounters.reset()
