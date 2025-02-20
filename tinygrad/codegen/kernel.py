@@ -3,42 +3,25 @@ import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
-from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
+from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
-from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
+from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
-
-class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
 
 class KernelOptError(Exception): pass
 
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
-
-@dataclass(frozen=True, order=True)
-class Opt:
-  op: OptOps
-  axis: Optional[int] = None
-  arg: Optional[int | tuple] = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
-  def real_axis(self, k:Kernel):
-    if self.axis is None: return -1
-    if self.op is OptOps.UNROLL: return k.first_reduce+self.axis
-    if self.op in {OptOps.GROUP, OptOps.GROUPTOP}: return k.first_reduce+k.group_for_reduces+self.axis
-    return self.axis
 
 @dataclass
 class TensorCoreOptions:
@@ -351,6 +334,12 @@ class Kernel:
     except KernelOptError:
       return False
 
+  def real_axis(self, opt:Opt):
+    if opt.axis is None: return -1
+    if opt.op is OptOps.UNROLL: return self.first_reduce+opt.axis
+    if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.first_reduce+self.group_for_reduces+opt.axis
+    return opt.axis
+
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
 
@@ -365,7 +354,7 @@ class Kernel:
       self.applied_opts.append(opt)
       return
 
-    axis = opt.real_axis(self)
+    axis = self.real_axis(opt)
     check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
@@ -427,7 +416,7 @@ class Kernel:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, {}), f"cannot pad {r}")
+      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}, cache={}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
@@ -584,7 +573,7 @@ class Kernel:
     num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name + colored(num, 'BLACK')
 
-  def get_optimized_ast(self) -> UOp:
+  def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
@@ -594,7 +583,9 @@ class Kernel:
         if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.valid(unwrap(st_uop.st))
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
-      if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+      if op.op is Ops.SINK:
+        return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
+                                            self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -664,8 +655,11 @@ class Kernel:
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self) -> Kernel:
-    modified_ast = self.get_optimized_ast()
+  def linearize(self, name_override:Optional[str]=None) -> Kernel:
+    # display the AST
+    if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
+
+    modified_ast = self.get_optimized_ast(name_override)
 
     if DEBUG >= 3:
       print(self.name)
@@ -683,16 +677,17 @@ class Kernel:
     return self
 
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
-    self.linearize()
-    src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
+    self.linearize(name_override)
+    assert self.uops[0].op is Ops.NAME, "first uop must be name"
+    src = self.opts.render(self.uops)
 
     if CAPTURE_PROCESS_REPLAY:
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, ContextVar._cache, src))
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, self.uops[0].arg, ContextVar._cache, src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.toposort if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return ProgramSpec(ansiname, src, self.opts.device, self.ast, self.uops, mem_estimate=mem_bytes,
+    return ProgramSpec(self.name if not name_override else name_override, src, self.opts.device, self.ast, self.uops, self.applied_opts, mem_bytes,
                        global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)

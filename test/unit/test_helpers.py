@@ -2,7 +2,7 @@ import gzip, unittest
 from PIL import Image
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction
 import numpy as np
@@ -281,6 +281,15 @@ class TestPolyN(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 2.0), [1.0, -2.0, 1.0])), 1.0)
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 3.0), [1.0, -2.0, 1.0])), 4.0)
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 4.0), [1.0, -2.0, 1.0])), 9.0)
+
+class TestTimeToStr(unittest.TestCase):
+  def test_seconds(self):           self.assertEqual("   10.01s ", time_to_str(10.01))
+  def test_boundary_sec_ms(self):   self.assertEqual("10000.00ms", time_to_str(10))
+  def test_milliseconds(self):      self.assertEqual("  500.00ms", time_to_str(0.5))
+  def test_boundary_ms_us(self):    self.assertEqual("10000.00us", time_to_str(0.01))
+  def test_microseconds(self):      self.assertEqual("  100.00us", time_to_str(0.0001))
+  def test_zero(self):              self.assertEqual("    0.00us", time_to_str(0))
+  def test_width_formatting(self):  self.assertEqual(" 10.01s ", time_to_str(10.01, w=6))
 
 if __name__ == '__main__':
   unittest.main()

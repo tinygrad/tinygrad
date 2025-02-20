@@ -1,12 +1,12 @@
 # the job of the lowerer is to do indexing
-import functools, itertools, operator
+import functools, itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
-import math
+from tinygrad.codegen.expander import expand_rewrite
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -155,4 +155,7 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
 ])
 
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+  # expand_rewrite turns this into a vectorized program
+  return expand_rewrite(sink)
