@@ -72,7 +72,7 @@ def split_uop(x:UOp, sep:Ops):
     for s in x.src: yield from split_uop(s, sep)
   else: yield x
 
-def non_folded_divs(vmin, vmax, d) -> tuple[Iterator[int], int]:
+def non_folded_divs(vmin, vmax, d) -> tuple[list[int], int]:
   if vmax - vmin > d:
     non_folded_c: Iterator[int] = list(range(d))
     offset = 0
@@ -84,7 +84,7 @@ def non_folded_divs(vmin, vmax, d) -> tuple[Iterator[int], int]:
     offset = (d-vmax%d)*q1 + (d - (d-vmin%d))*(q1+1)
   return non_folded_c, offset
 
-def fold_unrolled_divs(divs:UOp, denominator: int):
+def fold_unrolled_divs(divs:UOp, denominator: int) -> UOp|None:
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
   seen_const, ans = [], None
