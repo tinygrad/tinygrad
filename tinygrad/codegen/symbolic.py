@@ -74,7 +74,7 @@ def split_uop(x:UOp, sep:Ops):
 
 def non_folded_divs(vmin, vmax, d) -> tuple[list[int], int]:
   if vmax - vmin > d:
-    non_folded_c: Iterator[int] = list(range(d))
+    non_folded_c: list[int] = list(range(d))
     offset = 0
   elif (q1:=vmin//d)!=(q2:=vmax//d):
     non_folded_c = list(range(0, d-vmin%d)) + list(range(d-vmax%d, d))
