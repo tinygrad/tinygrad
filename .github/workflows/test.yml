@@ -55,9 +55,8 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         # Test using VIZ=1 as an external package
         VIZ=1 python -c "from tinygrad.tensor import Tensor; Tensor([1,2,3,4,5]).realize()" & VIZ_PID=$!
-        echo "VIZ process: $(ps -p "$VIZ_PID" -o pid=)"
-        test -n "$(ps -p "$VIZ_PID" -o pid=)"
-        curl localhost:8000
+        echo "started VIZ server at: $(ps -p "$VIZ_PID" -o pid=)"
+        i=0; while ((i++ < 10)); do curl localhost:8000 && break || { echo "verify attempt $i failed"; sleep 1; }; done; ((i > 10)) && echo "couldn't verify VIZ server" && exit 1
         kill $VIZ_PID
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
