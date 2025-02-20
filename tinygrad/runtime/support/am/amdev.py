@@ -67,7 +67,7 @@ class AMFirmware:
 
       # Stack
       fw_types = [getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}_P{fwnun}_STACK') for fwnun in range(fw_cnt)]
-      self.descs += [self.desc(typ, blob, hdr.data_offset_bytes, hdr.data_size_bytes) for typ in fw_types]
+      self.descs += [self.desc(fw_types, blob, hdr.data_offset_bytes, hdr.data_size_bytes)]
       self.ucode_start[fw_name] = hdr.ucode_start_addr_lo | (hdr.ucode_start_addr_hi << 32)
 
     # IMU firmware
@@ -98,7 +98,7 @@ class AMFirmware:
     blob = memoryview(bytearray(fpath.read_bytes()))
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
-  def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> tuple[int, memoryview]: return (typ, blob[offset:offset+size])
+  def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> tuple[int, memoryview]: return (typ if isinstance(typ, list) else [typ], blob[offset:offset+size])
 
 @dataclasses.dataclass(frozen=True)
 class AMMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
