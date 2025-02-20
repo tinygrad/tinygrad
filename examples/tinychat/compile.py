@@ -92,12 +92,10 @@ if __name__=="__main__":
   max_context=4096
 
   Device.DEFAULT="CLANG" # may be necessary for quantization to work, from float16 original weights
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=max_context)
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
-  state_dict["output.weight"] = state_dict["tok_embeddings.weight"]
-  state_dict["output.scale"] = state_dict["tok_embeddings.scale"]
   Device.DEFAULT="WEBGPU"
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=max_context, load_weights=False)
+  model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context, load_weights=False)
   load_state_dict(model, state_dict, consume=True)
 
   tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")

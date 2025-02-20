@@ -71,20 +71,18 @@ class Int8Linear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
     self.weight = Tensor.ones(out_features, in_features, dtype=dtypes.int8)
-    #self.scale = Tensor.ones(out_features, dtype=dtypes.half)
-    self.scale = Tensor.ones(out_features, dtype=dtypes.float32)
+    self.scale = Tensor.ones(out_features, dtype=dtypes.half)
 
   def __call__(self, x):
-    #return x.dot(self.weight.cast(dtype=dtypes.half).T*self.scale)
-    return x.dot(self.weight.cast(dtype=dtypes.float32).T*self.scale)
+    return x.dot(self.weight.cast(self.scale.dtype).T*self.scale)
 
   @staticmethod
-  def quantize(tensors, device):
+  def quantize(tensors, device, scale_dtype):
     new_tensors = {}
     for name,v in tensors.items():
       if "feed_forward" in name or "attention.w" in name or "tok_embeddings.weight" in name:
         assert "weight" in name, name
-        v = v.cast(dtypes.float32)
+        v = v.cast(scale_dtype)
         scale = v.abs().max(axis=1) / 127.0
         int8_weight = (v.T/scale).T.round().cast(dtype=dtypes.int8) # without round, cast truncates -34.9 to -34
         new_tensors[name] = int8_weight
@@ -94,18 +92,18 @@ class Int8Linear:
           new_tensors[name.replace('weight', 'scale')].shard_(device, axis=None)
       else:
         new_tensors[name] = v
+    new_tensors.update({"output.weight": new_tensors["tok_embeddings.weight"], "output.scale": new_tensors["tok_embeddings.scale"]})
     return new_tensors
 
 class Int8Embedding:
   def __init__(self, vocab_size:int, embed_size:int):
     self.vocab_sz, self.embed_sz = vocab_size, embed_size
-    self.weight, self.scale = Tensor.ones(vocab_size, embed_size, dtype=dtypes.int8), Tensor.ones(vocab_size, dtype=dtypes.float32)
+    self.weight, self.scale = Tensor.ones(vocab_size, embed_size, dtype=dtypes.int8), Tensor.ones(vocab_size, dtype=dtypes.half)
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
     big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
-    #arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), (self.weight.cast(dtype=dtypes.float32).T*self.scale).T
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), (self.weight.cast(self.scale.dtype).T*self.scale).T
     return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
 
 def NF4Linear(block_size):
@@ -129,7 +127,7 @@ def NF4Linear(block_size):
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 
     @staticmethod
-    def quantize(state_dict: dict[str, Tensor], device) -> dict[str, Tensor]:
+    def quantize(state_dict: dict[str, Tensor], device, scale_dtype) -> dict[str, Tensor]:
       new_state_dict = {}
       for k, v in state_dict.items():
         if "feed_forward" in k or "attention.w" in k:
@@ -137,7 +135,7 @@ def NF4Linear(block_size):
           scale = (grouped.abs().max(axis=1, keepdim=True))
           coded = ((grouped / scale).unsqueeze(-1) - CODE.to(v.device)).abs().argmin(axis=-1).cast(dtypes.uint8).flatten()
           new_state_dict[k] = coded[::2] * 2 ** 4 + coded[1::2]
-          new_state_dict[k.replace(".weight", ".scale")] = scale.cast(dtypes.float16)
+          new_state_dict[k.replace(".weight", ".scale")] = scale.cast(scale_dtype)
           if isinstance(device, tuple):
             new_state_dict[k].shard_(device, axis=-1)
             new_state_dict[k.replace('weight', 'scale')].shard_(device, axis=None)
@@ -160,7 +158,7 @@ MODEL_PARAMS = {
     "files": 8
   }
 }
-def build_transformer(model_path: Path, model_size="8B", quantize=None, device=None, max_context=8192, load_weights=True):
+def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dtype=dtypes.float16, device=None, max_context=8192, load_weights=True):
   # build model
   if quantize == "int8": linear, embedding = Int8Linear, Int8Embedding
   elif quantize == "nf4": linear, embedding = NF4Linear(64), nn.Embedding
@@ -185,7 +183,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
     # quantize
     if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
     elif quantize is not None:
-      weights = linear.quantize(weights, device)
+      weights = linear.quantize(weights, device, scale_dtype)
       for _,v in weights.items(): v.realize()
 
     # shard
