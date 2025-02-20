@@ -152,8 +152,11 @@ if __name__ == "__main__":
 
   hooked['cuInit'] = install_hook(cuda.cuInit, cuInit)
   hooked['cuModuleGetFunction'] = install_hook(cuda.cuModuleGetFunction, cuModuleGetFunction)
-  hooked['cuMemAlloc_v2'] = install_hook(cuda.cuMemAlloc_v2, cuMemAlloc_v2)
   hooked['cuLaunchKernel'] = install_hook(cuda.cuLaunchKernel, cuLaunchKernel)
+
+  # memory stuff
+  hooked['cuMemAlloc_v2'] = install_hook(cuda.cuMemAlloc_v2, cuMemAlloc_v2)
+  hooked['cuMemHostAlloc'] = install_hook(cuda.cuMemHostAlloc, cuMemHostAlloc)
 
   # module loading + not used module loading
   hooked['cuModuleLoadData'] = install_hook(cuda.cuModuleLoadData, cuModuleLoadData)
@@ -166,8 +169,6 @@ if __name__ == "__main__":
   #install_hook(cuda.cuLibraryLoadFromFile, dummy)
   #install_hook(cuda.cuLibraryGetModule, dummy)
 
-  # more memory stuff
-  hooked['cuMemHostAlloc'] = install_hook(cuda.cuMemHostAlloc, cuMemHostAlloc)
   #install_hook(cuda.cuMemAllocManaged, dummy)
 
   # unused
@@ -207,6 +208,8 @@ if __name__ == "__main__":
     model = models.resnet18(pretrained=True)
     model = model.cuda()
     model.eval()
+
+    if getenv("COMPILE"): model = torch.compile(model)
 
     X = torch.rand(1, 3, 288, 288, device='cuda')
     model(X)
