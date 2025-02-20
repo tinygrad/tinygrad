@@ -381,7 +381,6 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
-      check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
@@ -633,6 +632,7 @@ class Kernel:
 
           return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
+        # import ipdb; ipdb.set_trace(context=5)
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
@@ -644,6 +644,8 @@ class Kernel:
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
           local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
+          if not self.opts.has_local:
+            grouped_reduce = ret.replace(src=(grouped_reduce.replace(src=ret.src),))
           if op is self.reduceops[-1]: return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
