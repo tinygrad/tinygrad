@@ -1,7 +1,7 @@
 from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
 from extra.onnx import OnnxRunner, OnnxValue
-import onnx, os
+import onnx
 import numpy as np
 import onnxruntime as ort
 
@@ -25,8 +25,8 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
   def _get_value(name, shape, dtype):
     match name:
       case "input_ids":
-        vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 50265)
-        val = np.random.randint(0, vocab_size, shape)
+        vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 30000) # safe vocab_size
+        val = np.random.randint(0, vocab_size-1, shape)
       case "attention_mask": val = np.ones(shape)
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
       case "image_tensor": val = np.random.randint(0, 256, shape)
