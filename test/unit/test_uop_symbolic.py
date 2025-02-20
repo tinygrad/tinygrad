@@ -476,6 +476,15 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
     self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
 
+  def test_arange_unrolled_range(self):
+    for d in range(7, 10):
+      for offset in range(0, 9*10, 9):
+        for vrange in range(1,d+2):
+          gidx = Variable("gidx", offset, offset+vrange)
+          expr = sum([(gidx+i)//d for i in range(d)])
+          print(f"offset={offset}, vrange={vrange}")
+          self.helper_test_variable(expr, offset, offset+vrange, "gidx")
+
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")

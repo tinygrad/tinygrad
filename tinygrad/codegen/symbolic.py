@@ -77,7 +77,7 @@ def non_folded_divs(vmin, vmax, d) -> tuple[Iterator[int], int]:
     non_folded_c: Iterator[int] = list(range(d))
     offset = 0
   elif (q1:=vmin//d)!=(q2:=vmax//d):
-    non_folded_c = list(range(0, d-vmin%d) + list(range(d-vmax%d, d)))
+    non_folded_c = list(range(0, d-vmin%d)) + list(range(d-vmax%d, d))
     offset = ((d-vmax%d) - (d-vmin%d)) * q2
   else: # q1 == q2
     non_folded_c = list(range(d-vmax%d, d-vmin%d))
