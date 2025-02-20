@@ -87,7 +87,8 @@ generate_kfd() {
 }
 
 generate_cuda() {
-  clang2py /usr/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
+  #clang2py /usr/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
+  clang2py /usr/local/cuda/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
   fixup $BASE/cuda.py
