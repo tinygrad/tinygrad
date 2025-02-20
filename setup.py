@@ -44,6 +44,11 @@ setup(name='tinygrad',
         ],
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
         'testing_minimal': testing_minimal,
+        'testing_unit': testing_minimal + [
+            "tqdm",
+            "safetensors",
+            "tabulate"  # for sz.py
+        ],
         'testing': testing_minimal + [
             "pillow",
             "onnx==1.16.0",
