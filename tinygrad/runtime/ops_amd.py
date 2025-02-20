@@ -584,12 +584,12 @@ class AMUSBBar(AMBar):
   def copyin(self, offset, mv):
     x = mv.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(mv.nbytes)])
     print("copyin", len(x), cp_sz)
-    for i in range(len(x)): self.write(i * cp_sz, x[i], cp_sz)
+    for i in range(len(x)): self.write(offset + i * cp_sz, x[i], cp_sz)
   def copyout(self, offset, size):
     x = memoryview(bytearray(size))
     mv = x.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(size)])
     print("copyout", len(x), cp_sz)
-    for i in range(len(mv)): mv[i] = self.read(i * cp_sz, cp_sz)
+    for i in range(len(mv)): mv[i] = self.read(offset + i * cp_sz, cp_sz)
     return x
 
 class USBIface(PCIIface):
@@ -601,19 +601,22 @@ class USBIface(PCIIface):
     gpu_bus = 4 if self.usb.is_24 else 3
 
     # setup pci switch
-    self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
-    self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=0, dev=0, fn=0, value=gpu_bus, size=1)
-    self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=0, dev=0, fn=0, value=1, size=1)
-    self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=0, dev=0, fn=0, value=0, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
+    # self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=0, dev=0, fn=0, value=gpu_bus, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=1, dev=0, fn=0, value=gpu_bus, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=0, dev=0, fn=0, value=1, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=0, dev=0, fn=0, value=0, size=1)
 
-    self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1000, size=2)
-    # self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0x2000, size=2)
+    for bus in ([0, 1] if self.usb.is_24 else [0]):
+      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
 
-    self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x4000, size=2)
-    self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=0, dev=0, fn=0, value=0xffff, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
 
     for bus in ([2, 3] if self.usb.is_24 else [1, 2]):
-      print("bus", bus)
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
 
