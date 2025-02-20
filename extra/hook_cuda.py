@@ -56,15 +56,26 @@ seen_modules = set()
 
 @ctypes.CFUNCTYPE(ctypes.c_int)
 def dummy():
-  print("dummy function hook")
-  return 0
+  print("**** dummy function hook ****")
+  return -1
+
+@ctypes.CFUNCTYPE(*([cuda.cuInit.restype] + cuda.cuInit.argtypes))
+def cuInit(flags):
+  print("call cuInit", flags)
+  return hooked["cuInit"](flags)
+
+@ctypes.CFUNCTYPE(*([cuda.cuMemHostAlloc.restype] + cuda.cuMemHostAlloc.argtypes))
+def cuMemHostAlloc(pp, bytesize, flags):
+  print(f"cuMemHostAlloc {bytesize}")
+  return hooked["cuMemHostAlloc"](pp, bytesize, flags)
 
 @ctypes.CFUNCTYPE(*([cuda.cuModuleLoadData.restype] + cuda.cuModuleLoadData.argtypes))
 def cuModuleLoadData(module, image):
   ret = hooked["cuModuleLoadData"](module, image)
   module_address = ctypes.addressof(module.contents.contents)
-  print(f"cuModuleLoadData 0x{image:x} -> 0x{module_address:x}")
+  print(f"cuModuleLoadData 0x{image:x} -> 0x{module_address:X}")
   seen_modules.add(module_address)
+
   #images, sections, relocs = elf_loader(bytes(to_mv(image, 0x100000)))
   #for s in sections: print(s)
 
@@ -102,18 +113,30 @@ def cuLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockD
   name = function_names[ctypes.addressof(f.contents)]
   print(f"cuLaunchKernel <<{gridDimX:4d}, {gridDimY:4d}, {gridDimZ:4d}>> <<{blockDimX:4d}, {blockDimY:4d}, {blockDimZ:4d}>> {sharedMemBytes} {name}")
 
-  if getenv("PARAMS"):
-    i = 0
-    print(f"params @ 0x{ctypes.addressof(kernelParams.contents):X}")
+  if extra: hexdump(to_mv(extra, 0x100))
+
+  if getenv("PARAMS") and kernelParams:
+    #print(f"params @ 0x{ctypes.addressof(kernelParams.contents):X}")
+    params = []
     while True:
-      paramOffset = ctypes.c_size_t()
-      paramSize = ctypes.c_size_t()
-      ret = cuda.cuFuncGetParamInfo(f, i, ctypes.byref(paramOffset), ctypes.byref(paramSize))
+      ret = cuda.cuFuncGetParamInfo(f, len(params), ctypes.byref(paramOffset:=ctypes.c_size_t()), ctypes.byref(paramSize:=ctypes.c_size_t()))
       if ret != 0: break
-      dat = to_mv(kernelParams.contents, paramOffset.value+paramSize.value)[paramOffset.value:]
-      print(f"{i}: offset:{paramOffset.value:3d} size:{paramSize.value:3d}") # --", binascii.hexlify(dat).decode())
-      hexdump(dat)
-      i += 1
+      params.append((paramOffset.value, paramSize.value))
+    #params_dat = to_mv(kernelParams.contents, params[-1][0] + params[-1][1])
+    params_ptr = to_mv(kernelParams, len(params)*8).cast("Q")
+    #params_dat = to_mv(kernelParams.contents, params[-1][0] + params[-1][1])
+    for i,(off,sz) in enumerate(params):
+      hexdump(to_mv(params_ptr[i], sz))
+
+
+    #hexdump(params_dat)
+    #for i,(off,sz) in enumerate(params):
+    #  print(f"{i}: offset:{off:3d} size:{sz:3d}") # --", binascii.hexlify(dat).decode())
+    #  hexdump(params_dat[off:off+sz])
+    #if name == "exp2_kernel_vectorized4_kernel":
+    #  ptr_0 = struct.unpack("Q", params_dat[0x10:0x18])[0]
+    #  hexdump(to_mv(ptr_0, 0x80))
+    #ptr_1 = struct.unpack("Q", to_mv(ptr_0, 8))[0]
 
   #print(f"params 0x{ctypes.addressof(kernelParams):X}")
   #hexdump(to_mv(kernelParams, 0x100))
@@ -123,27 +146,61 @@ def cuLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockD
   return hooked["cuLaunchKernel"](f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra)
 
 if __name__ == "__main__":
+  #out = cuda.CUmoduleLoadingMode()
+  #print(cuda.cuModuleGetLoadingMode(ctypes.byref(out)))
+  #print(out.value)
+
+  hooked['cuInit'] = install_hook(cuda.cuInit, cuInit)
   hooked['cuModuleGetFunction'] = install_hook(cuda.cuModuleGetFunction, cuModuleGetFunction)
   hooked['cuMemAlloc_v2'] = install_hook(cuda.cuMemAlloc_v2, cuMemAlloc_v2)
   hooked['cuLaunchKernel'] = install_hook(cuda.cuLaunchKernel, cuLaunchKernel)
 
   # module loading + not used module loading
-  # NOTE: CUDA 12 has libraries which are more complex
   hooked['cuModuleLoadData'] = install_hook(cuda.cuModuleLoadData, cuModuleLoadData)
-  hooked['cuModuleLoad'] = install_hook(cuda.cuModuleLoad, dummy)
-  hooked['cuModuleLoadDataEx'] = install_hook(cuda.cuModuleLoadDataEx, dummy)
-  hooked['cuModuleLoadFatBinary'] = install_hook(cuda.cuModuleLoadFatBinary, dummy)
+  install_hook(cuda.cuModuleLoad, dummy)
+  install_hook(cuda.cuModuleLoadDataEx, dummy)
+  install_hook(cuda.cuModuleLoadFatBinary, dummy)
 
-  #hooked['cuLibraryLoadData'] = install_hook(cuda.cuLibraryLoadData, dummy)
+  # library stuff (doesn't seem used)
+  #install_hook(cuda.cuLibraryLoadData, dummy)
+  #install_hook(cuda.cuLibraryLoadFromFile, dummy)
+  #install_hook(cuda.cuLibraryGetModule, dummy)
 
-  #from tinygrad import Tensor
-  #(Tensor.zeros(6, device="CUDA").contiguous()*2).realize()
-  #exit(0)
+  # more memory stuff
+  hooked['cuMemHostAlloc'] = install_hook(cuda.cuMemHostAlloc, cuMemHostAlloc)
+  #install_hook(cuda.cuMemAllocManaged, dummy)
+
+  # unused
+  #install_hook(cuda.cuFuncGetModule, dummy)
+  #install_hook(cuda.cuModuleGetGlobal_v2, dummy)
+
+  # hook v1
+  #install_hook(cuda._libraries['libcuda.so'].cuModuleGetGlobal, dummy)
+  #install_hook(cuda._libraries['libcuda.so'].cuMemAlloc, dummy)
+  #install_hook(cuda._libraries['libcuda.so'].cuLinkComplete, dummy)
+
+  #nvjitlink = ctypes.CDLL("/home/tiny/.local/lib/python3.10/site-packages/nvidia/nvjitlink/lib/libnvJitLink.so.12")
+  #install_hook(nvjitlink.nvJitLinkCreate, dummy)
+  #nvrtc = ctypes.CDLL("/home/tiny/.local/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.11.2")
+  #nvrtc = ctypes.CDLL("/usr/local/cuda-12.4/targets/x86_64-linux/lib/libnvrtc.so.12.4.127")
+  #from tinygrad.runtime.autogen import nvrtc
+  #install_hook(nvrtc.nvrtcCreateProgram, dummy)
+  #install_hook(nvrtc.nvJitLinkCreate, dummy)
+
+  #import tinygrad.runtime.autogen.nvrtc as nvrtc
+  #install_hook(nvrtc.nvJitLinkCreate, dummy)
+  #install_hook(nvrtc.nvrtcCreateProgram, dummy)
+
+  #hooked['cuLinkCreate'] = install_hook(cuda.cuLinkCreate, dummy)
+
+  if getenv("TINYGRAD"):
+    from tinygrad import Tensor
+    (Tensor.zeros(6, device="CUDA").contiguous()*2).realize()
+    exit(0)
 
   print("importing torch...")
   import torch
   print("torch", torch.__version__, torch.__file__)
-
 
   if getenv("RESNET"):
     import torchvision.models as models
@@ -165,10 +222,11 @@ if __name__ == "__main__":
     a += 1
     b += 2
     a = a.exp2()
+    b = b.exp2()
     a += b
-    c = a @ b
+    #c = a @ b
     print("tensor math done", a.cpu().numpy())
 
   # confirm cuda library is right
   #maps = pathlib.Path("/proc/self/maps").read_text()
-  #print('\n'.join([x for x in maps.split("\n") if 'cuda' in x]))
+  #print('\n'.join([x for x in maps.split("\n") if 'cuda' in x or 'nv' in x]))
