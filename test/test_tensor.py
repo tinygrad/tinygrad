@@ -247,7 +247,7 @@ class TestTinygrad(unittest.TestCase):
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_rand_like_device(self):
-    a = Tensor.ones(3, 3, device="CLANG")
+    a = Tensor.ones(3, 3, device="CPU")
     b = Tensor.rand_like(a)
     self.assertEqual(b.device, a.device)
 
@@ -326,7 +326,7 @@ class TestTinygrad(unittest.TestCase):
   def test_tensor_from_blob(self):
     x = memoryview(bytearray(16)).cast('I')
 
-    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CLANG")
+    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CPU")
     z = (t+1)
     np.testing.assert_equal(z.numpy(), [1, 1, 1, 1])
 
@@ -695,7 +695,7 @@ class TestZeroShapeTensor(unittest.TestCase):
 class TestTensorCreationDevice(unittest.TestCase):
   # test auxiliary tensors are created on the same device
   def test_one_hot(self):
-    y = Tensor([1, 2, 3]).to("CLANG")
+    y = Tensor([1, 2, 3]).to("CPU")
     x = y.one_hot(10)
     x.realize()
 
