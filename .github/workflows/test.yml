@@ -53,6 +53,12 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        # Test using VIZ=1 as an external package
+        VIZ=1 python -c "from tinygrad.tensor import Tensor; Tensor([1,2,3,4,5]).realize()" & VIZ_PID=$!
+        echo "VIZ process: $(ps -p "$VIZ_PID" -o pid=)"
+        test -n "$(ps -p "$VIZ_PID" -o pid=)"
+        curl localhost:8000
+        kill $VIZ_PID
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Run beautiful_mnist with tinygrad only
