@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, Iterator
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
@@ -72,13 +72,24 @@ def split_uop(x:UOp, sep:Ops):
     for s in x.src: yield from split_uop(s, sep)
   else: yield x
 
-def fold_unrolled_divs(divs:UOp):
+def non_folded_divs(vmin, vmax, d) -> tuple[Iterator[int], int]:
+  if vmax - vmin > d:
+    non_folded_c: Iterator[int] = list(range(d))
+    offset = 0
+  elif (q1:=vmin//d)!=(q2:=vmax//d):
+    non_folded_c = list(range(0, d-vmin%d) + list(range(d-vmax%d, d)))
+    offset = ((d-vmax%d) - (d-vmin%d)) * q2
+  else: # q1 == q2
+    non_folded_c = list(range(d-vmax%d, d-vmin%d))
+    offset = (d-vmax%d)*q1 + (d - (d-vmin%d))*(q1+1)
+  return non_folded_c, offset
+
+def fold_unrolled_divs(divs:UOp, denominator: int):
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, denominator, seen_const, ans = list(split_uop(divs, Ops.ADD)), None, [], None
-  for u in add_chain:
+  seen_const, ans = [], None
+  for u in split_uop(divs, Ops.ADD):
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if denominator is None: denominator = u.src[1].arg
     if denominator != u.src[1].arg: return None
     # assumed CONST is the last of an ADD
     if (s0:=u.src[0]).op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
@@ -87,11 +98,11 @@ def fold_unrolled_divs(divs:UOp):
     else: seen_const.append(0)
     if ans is None: ans = s0
     if ans is not s0: return None
-  if denominator is None: return None
-  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
-  for i in range(denominator-len(seen_const)):
-    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
+  if ans is None: return None
+  expected_const, offset = non_folded_divs(ans.vmin, ans.vmax, denominator)
+  if len(seen_const) == len(expected_const) and sorted(seen_const)==expected_const:
+    return ans - offset
+  return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(split_uop(x, Ops.ADD), lambda u: u.const_factor() == 1)
@@ -217,7 +228,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
+  ((UPat() + UPat()//UPat.cvar("d", vec=False)).named("divs"), lambda divs, d: fold_unrolled_divs(divs, d.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
