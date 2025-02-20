@@ -218,7 +218,7 @@ jobs:
     - name: Test symbolic with Python emulator
       run: PYTHONPATH=. PYTHON=1 python3 test/test_symbolic_ops.py
     - name: test_linearizer_failures with Python emulator
-      run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
+      run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1 test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_53
 
   linter:
     name: Linters
