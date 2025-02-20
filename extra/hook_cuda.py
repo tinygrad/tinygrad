@@ -4,6 +4,7 @@ from tinygrad.helpers import to_mv, DEBUG, getenv
 from tinygrad.runtime.autogen import libc, cuda
 from tinygrad.device import CPUProgram
 from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.ops_cuda import cu_time_execution
 
 def _hook(fxn_address_value, tramp):
   page_address = (fxn_address_value//0x1000)*0x1000
@@ -110,8 +111,12 @@ def cuMemAlloc_v2(dptr, bytesize):
 
 @ctypes.CFUNCTYPE(*([cuda.cuLaunchKernel.restype] + cuda.cuLaunchKernel.argtypes))
 def cuLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra):
+  tm = cu_time_execution(lambda:
+    hooked["cuLaunchKernel"](f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra), True)
+
   name = function_names[ctypes.addressof(f.contents)]
-  print(f"cuLaunchKernel <<{gridDimX:4d}, {gridDimY:4d}, {gridDimZ:4d}>> <<{blockDimX:4d}, {blockDimY:4d}, {blockDimZ:4d}>> {sharedMemBytes} {name}")
+  print(f"{tm*1e6:9.2f} us -- cuLaunchKernel <<{gridDimX:6d}, {gridDimY:5d}, {gridDimZ:5d}>>",
+    f"<<{blockDimX:4d}, {blockDimY:4d}, {blockDimZ:4d}>> {sharedMemBytes} {name}")
 
   if extra: hexdump(to_mv(extra, 0x100))
 
@@ -143,7 +148,8 @@ def cuLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockD
   #print(f"data 0x{to_mv(kernelParams, 8).cast('Q')[0]:X}")
   #hexdump(to_mv(kernelParams.contents, 0x80))
   #for i,addr in enumerate(to_mv(kernelParams.contents, 0x100).cast("Q")): print(f"{i*8:3d}: {addr:X}")
-  return hooked["cuLaunchKernel"](f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra)
+
+  return 0
 
 if __name__ == "__main__":
   #out = cuda.CUmoduleLoadingMode()
@@ -211,7 +217,7 @@ if __name__ == "__main__":
 
     if getenv("COMPILE"): model = torch.compile(model)
 
-    X = torch.rand(1, 3, 288, 288, device='cuda')
+    X = torch.rand(getenv("BS", 1), 3, 288, 288, device='cuda')
     model(X)
 
     print("\n\n\n****** second run ******\n")
