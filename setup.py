@@ -14,7 +14,7 @@ setup(name='tinygrad',
       license='MIT',
       long_description=long_description,
       long_description_content_type='text/markdown',
-      packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.engine',
+      packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer', 'tinygrad.engine', 'tinygrad.viz',
                   'tinygrad.runtime', 'tinygrad.runtime.support', 'tinygrad.runtime.support.am', 'tinygrad.runtime.graph', 'tinygrad.shape'],
       package_data = {'tinygrad': ['py.typed']},
       classifiers=[
