@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-from typing import Any, Literal, cast, Iterator
+from typing import Any, Literal, cast
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
