@@ -81,7 +81,7 @@ jobs:
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Compile EfficientNet to C and test it
       run: |
-        CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
+        CPU=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
         clang -O2 recognize.c -lm -o recognize
         cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
@@ -355,13 +355,13 @@ jobs:
           llvm: 'true'
       - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX (CLANG)
-        run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX (CPU)
+        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run CLOUD=1 Test
         run: |
-          CLOUDDEV=CLANG CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
           CLOUDDEV=GPU CLOUD=1 python3 test/test_tiny.py
           CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
       - name: Test Optimization Helpers
@@ -378,7 +378,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testmodels:
-    name: Models (llvm+clang+gpu)
+    name: Models (llvm+cpu+gpu)
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -395,8 +395,8 @@ jobs:
         run: LLVM=1 python -m pytest -n=auto test/models --durations=20
       - name: Test models (gpu)
         run: GPU=1 python -m pytest -n=auto test/models --durations=20
-      - name: Test models (clang)
-        run: CLANG=1 python -m pytest -n=auto test/models --durations=20
+      - name: Test models (cpu)
+        run: CPU=1 python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -431,8 +431,8 @@ jobs:
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
     - name: Test LLVM=1 DEVECTORIZE=0
       run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
-    - name: Test CLANG=1 DEVECTORIZE=0
-      run: CLANG=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    - name: Test CPU=1 DEVECTORIZE=0
+      run: CPU=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
   testwebgpu:
     name: Linux (WebGPU)
@@ -464,7 +464,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
+        backend: [llvm, cpu, gpu, ptx, amd, nv] #, triton]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -482,10 +482,10 @@ jobs:
           amd: ${{ matrix.backend == 'amd' && 'true' }}
           cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CPU','CUDA','GPU','AMD','NV'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
@@ -582,7 +582,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [metal, llvm, clang]
+        backend: [metal, llvm, cpu]
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 10
@@ -596,7 +596,7 @@ jobs:
           deps: testing_minimal
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'metal' && 'METAL=1\nJIT=2'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1\nJIT=2'}}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
@@ -612,7 +612,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang]
+        backend: [llvm, cpu]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -627,7 +627,7 @@ jobs:
           deps: testing_unit
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1'}}" >> $GITHUB_ENV
       - name: Run unit tests
         if: matrix.backend=='llvm'
         run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py

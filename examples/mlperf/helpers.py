@@ -222,11 +222,11 @@ def get_mlperf_bert_model():
 
 def get_fake_data_bert(BS:int):
   return {
-    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CLANG"),
-    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CLANG"),
-    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CLANG"),
-    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CLANG"),
-    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CLANG"),
-    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CLANG"),
-    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.int32, device="CLANG"),
+    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
+    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
+    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
+    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CPU"),
+    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CPU"),
+    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CPU"),
+    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.int32, device="CPU"),
   }
