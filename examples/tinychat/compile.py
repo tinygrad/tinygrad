@@ -2,11 +2,11 @@
 # TODO: merge with compile_clang.py
 
 import os, json, hashlib, math
-from extra.export_model import compile_net, jit_model, dtype_to_js_type
+from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model
 from examples.llama3 import build_transformer
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.dtype import dtypes
-from tinygrad import Device, GlobalCounters, Variable, Tensor
+from tinygrad import Device, Variable, Tensor
 from tinygrad.helpers import fetch, Context
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
@@ -16,8 +16,7 @@ from collections import OrderedDict
 def prepare_browser_chunks(model):
   # split weights into browser-friendly chunks
   state_dict = get_state_dict(model)
-  del state_dict['output.weight'] # same as token_embeddings.weight
-  del state_dict['output.scale'] # same as token_embeddings.scale
+  del state_dict['output.weight'], state_dict['output.scale'] # same as tok_embeddings; ensures consistency with model export
   chunk_size = 16 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
   t_infos = [(v.lazydata.base.realized.nbytes, k, v.dtype) for k,v in state_dict.items() if "cache_kv" not in k]
@@ -83,6 +82,12 @@ def prepare_browser_chunks(model):
   return metadata
 
 if __name__=="__main__":
+  # Export BPE data for use with tiktoken.js
+  tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
+  mergeable_ranks = load_tiktoken_bpe(str(tokenizer_path))
+  bpe_path = os.path.join(os.path.dirname(__file__), "llama3-2.tiktoken")
+  dump_tiktoken_bpe(mergeable_ranks, bpe_path)
+
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
   Tensor.no_grad = True
   max_context=4096
@@ -95,12 +100,7 @@ if __name__=="__main__":
   Device.DEFAULT="WEBGPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", max_context=max_context, load_weights=False)
   load_state_dict(model, state_dict, consume=True)
-
-  # Export BPE data for use with tiktoken.js
-  tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
-  mergeable_ranks = load_tiktoken_bpe(str(tokenizer_path))  
-  bpe_path = os.path.join(os.path.dirname(__file__), "llama3-2.tiktoken")
-  dump_tiktoken_bpe(mergeable_ranks, bpe_path)
+  model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale # these were the same before load_state_dict
 
   tok = 128000
   TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
@@ -132,6 +132,7 @@ if __name__=="__main__":
     run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(run, special_names)
     state = get_state_dict(model)
+    del state['output.weight'], state['output.scale'] # same as tok_embeddings; ensures consistency with prepare_browser_chunks
     weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
     kernel_code = '\n\n'.join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
