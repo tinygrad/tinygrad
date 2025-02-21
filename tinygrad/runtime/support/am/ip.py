@@ -374,15 +374,9 @@ class AM_PSP(AM_IP):
 
     self._wait_for_bootloader()
 
-    self.adev.regMP0_SMN_C2PMSG_35.write(0x0)
-
     self._prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
     self.adev.regMP0_SMN_C2PMSG_35.write(compid)
-
-    # self._prep_msg1(self.adev.fw.sos_fw[fw])
-    # self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
-    # self.adev.regMP0_SMN_C2PMSG_35.write(compid)
 
     return self._wait_for_bootloader()
 
@@ -447,7 +441,7 @@ class AM_PSP(AM_IP):
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
       cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
-      return self._ring_submit()
+      self._ring_submit()
 
   def _tmr_load_cmd(self):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)
