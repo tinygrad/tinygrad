@@ -1015,8 +1015,7 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(len(sched[0].outputs), 1)
-    self.assertEqual(sched[0].outputs[0].dtype, dtypes.half)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
 
     # input float, softmax in float
     Tensor.manual_seed(0)
@@ -1024,8 +1023,7 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(len(sched[0].outputs), 1)
-    self.assertEqual(sched[0].outputs[0].dtype, dtypes.float)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
@@ -1163,12 +1161,17 @@ class TestSchedule(unittest.TestCase):
     a = shared * 2
     b = shared * 3
     sched = check_schedule([a, b], 3)
-    for si in sched[:-2]: assert all(out.dtype == dtypes.half for out in si.outputs)
+    # store reduceop in half
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
+    # fuse cast with the child kernel
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
+    self.assertEqual(sched[2].bufs[0].dtype, dtypes.float)
 
     # reduce
     a = z.sum(axis=0).half().float().sum(axis=0)
     sched = check_schedule(a, 2)
-    for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
 
     # expand
     # expand will realize just after the .float(), so requires change to realize-before-expand

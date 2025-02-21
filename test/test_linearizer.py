@@ -19,9 +19,10 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   if isinstance(r, Tensor): r = [r]
   s = Tensor.schedule(*r)
   run_schedule(s[:-1])  # run all kernels except the last one
-  # now all input LazyBuffers buffers in s[-1] should be realized
-  # create fresh buffers for the output buffer
-  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if x in s[-1].outputs else x for x in s[-1].bufs]
+  assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
+  # now all input buffers in s[-1] should be realized
+  # create fresh buffers for the outputs
+  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
