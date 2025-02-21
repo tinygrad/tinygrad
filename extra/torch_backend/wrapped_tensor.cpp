@@ -50,13 +50,24 @@ public:
   }
 };
 
+static caffe2::TypeMeta dtypeFromName(const std::string &dtype_name) {
+  if (dtype_name == "float") { return caffe2::TypeMeta::Make<float>();
+  } else if (dtype_name == "double") { return caffe2::TypeMeta::Make<double>();
+  } else if (dtype_name == "int") { return caffe2::TypeMeta::Make<int32_t>();
+  } else if (dtype_name == "long") { return caffe2::TypeMeta::Make<int64_t>();
+  } else if (dtype_name == "bool") { return caffe2::TypeMeta::Make<bool>();
+  }
+  throw std::runtime_error("Unsupported dtype: " + dtype_name);
+}
+
 at::Tensor wrap_tensor(py::object &py_obj) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
+  std::string dtype_name = py_obj.attr("dtype").attr("name").cast<std::string>();
 
   return at::detail::make_tensor<at::OpaqueTensorImpl<TinyTensor>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
-    caffe2::TypeMeta::Make<float>(),
+    dtypeFromName(dtype_name),
     at::Device(at::kPrivateUse1),
     TinyTensor(py_obj),
     sizes);
