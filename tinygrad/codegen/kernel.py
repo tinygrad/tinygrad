@@ -374,7 +374,7 @@ class Kernel:
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
-      # NOTE: LLVM/CLANG can use locals too, but they are treated the same as globals (still helpful for L1 cache)
+      # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")

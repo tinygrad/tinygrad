@@ -34,7 +34,6 @@ def huggingface_download_onnx_model(model_id:str):
 
 def get_config(root_path:Path):
   config_paths = list(root_path.rglob("config.json")) + list(root_path.rglob("preprocessor_config.json"))
-  # config_paths = list(root_path.rglob("*config*"))
   return {k:v for path in config_paths for k,v in json.load(path.open()).items()}
 
 def get_tolerances(file_name):
@@ -91,8 +90,8 @@ if __name__ == "__main__":
       print(f"report saved to {os.path.abspath('huggingface_results.json')}")
 
   # for debugging
+  # `repo_path` is `model.id`
   if repo_path:
-    # `repo_path` is the same as `model.id`
     root_path = huggingface_download_onnx_model(repo_path)
     for onnx_model_path in root_path.rglob("*.onnx"):
       rtol, atol = get_tolerances(onnx_model_path.stem)
@@ -104,6 +103,8 @@ if __name__ == "__main__":
         print(f"{relative_path} failed")
         print(e)
 
+  # for debugging
+  # `model_path` is `model.id + relative_path`
   if model_path:
     model_id, relative_path = model_path.split("/", 2)[:2], model_path.split("/", 2)[2]
     onnx_file_name = model_id[-1]

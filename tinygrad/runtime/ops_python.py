@@ -173,7 +173,7 @@ class PythonProgram:
             # C, D (8 elements on 8 threads)
             def c_map(lane, elem): return (lane, elem)
             ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
-          elif arg[4] == "CLANG":
+          elif arg[4] == "CPU":
             def elem(x, col, row, _): return x[col+row][0] # k is always 0
             def c_map(_, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
@@ -194,7 +194,7 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm80
     if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", CUDARenderer.tc_sm75
     if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", IntelRenderer.tensor_cores
-    if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CLANG", ClangRenderer.tensor_cores
+    if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", ClangRenderer.tensor_cores
 
   def render(self, uops:list[UOp]) -> str:
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
