@@ -509,7 +509,7 @@ def get_onnx_ops():
       for i in range(-len(sizes), 0):
         reshape, index = [1] * X.ndim, indexes[i]
         reshape[i] = expand[i] = sizes[i]
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
     if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
     return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
@@ -579,6 +579,7 @@ def get_onnx_ops():
   def OneHot(indices:Tensor, depth:float|int|list, values:Tensor, axis:int=-1):
     # Scalar or Rank 1 tensor containing exactly one element
     depth = int(depth[0] if isinstance(depth, list) else depth)
+    indices = indices.int()
     indices = (indices < 0).where(indices+depth, indices)
     return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
@@ -691,9 +692,10 @@ def get_onnx_ops():
       else: raise NotImplementedError("reduction doesn't support max or min")
     return x
 
-  def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul"]="none"):
+  def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
-    return x.scatter(axis, indices, updates, {"none":None, "mul": "multiply"}.get(reduction, reduction))
+    if reduction == "none": return x.scatter(axis, indices, updates)
+    return x.scatter_reduce(axis, indices, updates, {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}.get(reduction))
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     return x.gather(axis, indices)

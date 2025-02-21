@@ -13,6 +13,10 @@ inputs:
     description: 'Extra dependency groups (comma separated)'
     required: false
     default: ''
+  pydeps:
+    description: 'Extra Python dependency groups (space separated)'
+    required: false
+    default: ''
   opencl:
     description: "Install OpenCL?"
     required: false
@@ -83,11 +87,11 @@ runs:
     - name: Install dependencies (with extra)
       if: inputs.deps != ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies (without extra)
       if: inputs.deps == ''
       shell: bash
-      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e .
+      run: pip install ${{ (runner.os == 'macOS' && '--user') || (runner.os != 'macOS' && '') }} -e . ${{ inputs.pydeps }}
 
     # **** OpenCL ****
 
@@ -139,14 +143,20 @@ runs:
 
     # **** CUDA ****
 
-    - name: Install packages (cuda)
-      if: inputs.cuda == 'true'
+    - name: Install cuda packages (Linux)
+      if: inputs.cuda == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         sudo apt update -y || true
         sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
           flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
+    - name: Install gpuocelot dependencies (MacOS)
+      if: inputs.cuda == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew update
+        brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
     - name: Cache gpuocelot
       if: inputs.cuda == 'true'
       id: cache-build
@@ -155,14 +165,14 @@ runs:
         cache-name: cache-gpuocelot-build
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
     - name: Clone/compile gpuocelot
       if: inputs.cuda == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
-        git checkout 4524e34adb7eaccc6f71262f2e21d7052bb17c2f
+        git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
         mkdir build
         cd build
         cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
@@ -172,7 +182,7 @@ runs:
       shell: bash
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
+        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || ''}}lib/
 
     # **** WebGPU ****
 

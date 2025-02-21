@@ -10,7 +10,7 @@ from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -44,6 +44,7 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
+atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
 
 # **************** Profile ****************
 
@@ -208,7 +209,9 @@ class LRUAllocator(Allocator):
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
     # must be aligned to 0x20 for 256-bit ymm registers
-    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, 0x20)
+    # TODO: investigate if this is the cause of nondeterminism in speed
+    alignment = 0x1000 if size >= 0x1000 else 0x20
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else self._alloc_aligned(size, alignment)
   def _alloc_aligned(self, size:int, alignment:int):
     buffer = (ctypes.c_uint8 * (size + alignment))()
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
@@ -225,31 +228,36 @@ MAP_JIT = 0x0800
 
 # CPUProgram is a jit/shellcode program that can be just mmapped and jumped to
 class CPUProgram:
-  helper_handle = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
+  rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
+  atomic_lib = ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
+
   def __init__(self, name:str, lib:bytes):
     if sys.platform == "win32":
       PAGE_EXECUTE_READWRITE = 0x40
       MEM_COMMIT =  0x1000
       MEM_RESERVE = 0x2000
-      ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_uint64
-      ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(ptr, lib, len(lib))
-      self.fxn = ctypes.CFUNCTYPE(None)(ptr)
+      ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
+      self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(self.mem, lib, len(lib))
+      ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+      proc = ctypes.windll.kernel32.GetCurrentProcess()
+      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.mem), ctypes.c_size_t(len(lib)))
+      self.fxn = ctypes.CFUNCTYPE(None)(self.mem)
     else:
       from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
       self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)
 
-      if OSX: CPUProgram.helper_handle.pthread_jit_write_protect_np(False)
+      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(False)
       self.mem.write(lib)
-      if OSX: CPUProgram.helper_handle.pthread_jit_write_protect_np(True)
+      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      CPUProgram.helper_handle["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+      CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
@@ -262,6 +270,9 @@ class CPUProgram:
     # The bug was fixed in https://github.com/llvm/llvm-project/commit/454cc36630296262cdb6360b60f90a64a97f7f1a but was only backported to xcode 16+
     if platform.machine() == "arm64" and OSX: args = args[:8] + [ctypes.c_int64(a) if isinstance(a, int) else a for a in args[8:]]
     return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
+
+  def __del__(self):
+    if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 # **************** for Compiled Devices ****************
 
@@ -296,6 +307,11 @@ class Compiled:
     Called at the end of profiling to allow the device to finalize any profiling.
     """
     # override this in your device implementation
+  def finalize(self):
+    """
+    Called at the end of process lifetime to allow the device to finalize.
+    """
+    # override this in your device implementation
 
 # TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
@@ -304,7 +320,7 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
-                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32]
+                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs

@@ -26,9 +26,8 @@ class TestConvShapetracker(unittest.TestCase):
     print(si)
     ldb = [x for x in si.ast.toposort if x.op is Ops.LOAD][0]
     st: ShapeTracker = ldb.st_arg.simplify()
-    # NOTE: st.real_size() is broken
     print(si.inputs[0].size)
-    #self.assertEqual(si.inputs[0].size, st.real_size())
+    self.assertEqual(si.inputs[0].size, st.real_size())
     for v in st.views: print(v)
 
     # same st

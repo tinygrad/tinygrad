@@ -40,7 +40,7 @@ def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:list[Opt], name:str) ->
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master
-  return k.opts.render(name, cast(list,k.to_program().uops))
+  return k.opts.render(cast(list,k.to_program(name).uops))
 
 # *** diff a "good" recreation against the generated version
 

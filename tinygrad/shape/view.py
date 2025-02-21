@@ -107,8 +107,7 @@ class View:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:tuple[sint, ...], strides:Optional[tuple[sint, ...]]=None, offset:sint=0, mask:Optional[tuple[tuple[sint, sint], ...]]=None):
-    # TODO: this resolve shouldn't be needed
-    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -274,7 +273,7 @@ class View:
   def reshape(self, new_shape: tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
+    if not all(x >= 0 for x in new_shape): raise ValueError(f"shape can't contain negative numbers {new_shape}")
     # check for the same size
     if (self_all_int := all_int(self.shape)):
       assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"

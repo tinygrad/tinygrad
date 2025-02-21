@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib, fcntl, os
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
-from tinygrad.runtime.autogen.am import am, mp_11_0, gc_11_0_0
+from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -276,7 +276,7 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.partial_boot and (self.reg("regCP_MEC_RS64_CNTL").read() & gc_11_0_0.CP_MEC_RS64_CNTL__MEC_HALT_MASK == 0):
+    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
       self.partial_boot = False
 
@@ -300,8 +300,10 @@ class AMDev:
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def fini(self):
+    if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini()
     self.smu.set_clocks(level=0)
+    self.ih.interrupt_handler()
 
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr

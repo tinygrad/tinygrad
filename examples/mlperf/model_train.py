@@ -573,7 +573,9 @@ def train_rnnt():
 
 @TinyJit
 def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
-                    masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+                    masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
+  for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
+    t.shard_(GPUS, axis=0)
   optimizer.zero_grad()
 
   lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
@@ -593,7 +595,9 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Te
 
 @TinyJit
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor,
-                   masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+                   masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
+  for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
+    t.shard_(GPUS, axis=0)
   lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
   masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = \
     model.accuracy(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
@@ -602,7 +606,7 @@ def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:T
 def train_bert():
   # NOTE: pip install tensorflow, wandb required
   from examples.mlperf.dataloader import batch_load_train_bert, batch_load_val_bert
-  from examples.mlperf.helpers import get_mlperf_bert_model, get_data_bert, get_fake_data_bert
+  from examples.mlperf.helpers import get_mlperf_bert_model, get_fake_data_bert
   from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup
 
   config = {}
@@ -647,7 +651,7 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
-  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.0001 * math.sqrt(BS/66))
+  max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.00011 * math.sqrt(BS/66))
 
   train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
@@ -683,8 +687,14 @@ def train_bert():
 
   # ** init model **
 
-  model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
-  
+  model = get_mlperf_bert_model()
+  if RUNMLPERF:
+    model.load_from_pretrained(init_ckpt)
+  else:
+    # for init, zero out all weights
+    for p in get_parameters(model):
+      p = p.assign(Tensor.zeros_like(p).contiguous()).realize()
+
   parameters = get_parameters(model)
   for p in parameters:
     p.to_(GPUS)
@@ -741,18 +751,22 @@ def train_bert():
     eval_it = iter(batch_load_val_bert(EVAL_BS))
     train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
     for _ in range(start_step): next(train_it) # Fast forward
-
+  else:
+    # repeat fake data
+    def repeat_fake(bs):
+      while True: yield get_fake_data_bert(bs)
+    eval_it = iter(repeat_fake(EVAL_BS))
+    train_it = iter(repeat_fake(BS))
 
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
+
+  i, train_data = start_step, next(train_it)
+
   if RUNMLPERF:
-    # only load real data with RUNMLPERF
-    i, train_data = start_step, get_data_bert(GPUS, train_it)
     if MLLOGGER:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*BS, metadata={"epoch_num": i*BS})
-  else:
-    i, train_data = start_step, get_fake_data_bert(GPUS, BS)
 
   while train_data is not None and i < train_steps and not achieved:
     Tensor.training = True
@@ -761,15 +775,12 @@ def train_bert():
     GlobalCounters.reset()
     loss, global_norm = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
       train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
+      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
 
     pt = time.perf_counter()
 
     try:
-      if RUNMLPERF:
-        next_data = get_data_bert(GPUS, train_it)
-      else:
-        next_data = get_fake_data_bert(GPUS, BS)
+      next_data = next(train_it)
     except StopIteration:
       next_data = None
 
@@ -801,10 +812,11 @@ def train_bert():
             f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
 
     # ** eval loop **
-    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
+    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
-      if getenv("RESET_STEP", 1): train_step_bert.reset()
+      if getenv("RESET_STEP", 0) or INITMLPERF: train_step_bert.reset()
+      else: train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -814,16 +826,13 @@ def train_bert():
       BEAM.value = EVAL_BEAM
 
       for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
-        if RUNMLPERF:
-          eval_data = get_data_bert(GPUS, eval_it)
-        else:
-          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
+        eval_data = next(eval_it)
         GlobalCounters.reset()
         st = time.time()
 
         lm_acc, clsf_acc, lm_loss, clsf_loss = eval_step_bert(model,
           eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], eval_data["masked_lm_positions"],
-          eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
+          eval_data["masked_lm_ids"], eval_data["masked_lm_weights"], eval_data["next_sentence_labels"], GPUS)
         lm_acc, clsf_acc, lm_loss, clsf_loss = lm_acc.item(), clsf_acc.item(), lm_loss.item(), clsf_loss.item()
 
         eval_lm_losses.append(lm_loss)
@@ -840,7 +849,8 @@ def train_bert():
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      if getenv("RESET_STEP", 1): eval_step_bert.reset()
+      if getenv("RESET_STEP", 0): eval_step_bert.reset()
+      else: eval_step_bert.captured.free_intermediates()
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)

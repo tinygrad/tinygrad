@@ -26,6 +26,8 @@ jobs:
         key: llvm-speed
         deps: testing_minimal
         llvm: 'true'
+    - name: External Benchmark Schedule
+      run: PYTHONPATH="." python3 test/external/external_benchmark_schedule.py
     - name: Speed Test
       run: LLVM=1 LLVMOPT=1 python3 test/test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
@@ -42,8 +44,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
-    - name: Install capstone for CLANG disassembly
-      run: pip install capstone
+        pydeps: "capstone"
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -52,6 +53,11 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        # Test using VIZ=1 after package installation
+        VIZ=1 python -c "from tinygrad.tensor import Tensor; Tensor([1,2,3,4,5]).realize()" & VIZ_PID=$!
+        echo "started VIZ server at: $(ps -p "$VIZ_PID" -o pid=)"
+        i=0; while ((i++ < 10)); do curl -sSf localhost:8000 > /dev/null && break || { echo "VIZ verification attempt $i/10"; sleep 1; }; done; ((i > 10)) && echo "Could not verify VIZ server" && exit 1
+        kill $VIZ_PID
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Run beautiful_mnist with tinygrad only
@@ -75,7 +81,7 @@ jobs:
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Compile EfficientNet to C and test it
       run: |
-        CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
+        CPU=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
         clang -O2 recognize.c -lm -o recognize
         cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
@@ -257,13 +263,13 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-12
-        deps: testing
+        deps: testing_unit
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
-    - name: Repo line count < 11200 lines
-      run: MAX_LINE_COUNT=11200 python sz.py
+    - name: Repo line count < 11300 lines
+      run: MAX_LINE_COUNT=11300 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -349,13 +355,13 @@ jobs:
           llvm: 'true'
       - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX (CLANG)
-        run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX (CPU)
+        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run CLOUD=1 Test
         run: |
-          CLOUDDEV=CLANG CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
           CLOUDDEV=GPU CLOUD=1 python3 test/test_tiny.py
           CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
       - name: Test Optimization Helpers
@@ -371,6 +377,29 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testmodels:
+    name: Models (llvm+cpu+gpu)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: models
+          deps: testing
+          opencl: 'true'
+          llvm: 'true'
+      - name: Test models (llvm)
+        run: LLVM=1 python -m pytest -n=auto test/models --durations=20
+      - name: Test models (gpu)
+        run: GPU=1 python -m pytest -n=auto test/models --durations=20
+      - name: Test models (cpu)
+        run: CPU=1 python -m pytest -n=auto test/models --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
   testdsp:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
@@ -380,6 +409,11 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
+      with:
+        key: dsp-minimal
+        deps: testing_minimal
+        pydeps: "onnx==1.16.0 onnxruntime"
+        llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build QEMU Docker with cache
@@ -393,6 +427,12 @@ jobs:
         cache-to: type=gha,mode=min
     - name: Run test_tiny on DSP
       run: DEBUG=2 DSP=1 python test/test_tiny.py
+    - name: Test quantize onnx
+      run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
+    - name: Test LLVM=1 DEVECTORIZE=0
+      run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    - name: Test CPU=1 DEVECTORIZE=0
+      run: CPU=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
   testwebgpu:
     name: Linux (WebGPU)
@@ -404,8 +444,8 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: webgpu
-        deps: testing
+        key: webgpu-minimal
+        deps: testing_minimal
         python-version: '3.11'
         webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
@@ -414,18 +454,17 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 python3 -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit \
-          --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py --ignore=test/test_speed_v_torch.py --ignore=test/test_transcendental.py \
+          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit \
+          --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py \
           --ignore=test/test_fuzz_shape_ops.py --ignore=test/test_linearizer_failures.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
-
 
   tests:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
+        backend: [llvm, cpu, gpu, ptx, amd, nv] #, triton]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -437,23 +476,23 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}
-          deps: testing${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
+          key: ${{ matrix.backend }}-minimal
+          deps: testing_minimal${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
           opencl: ${{ matrix.backend == 'gpu' && 'true' }}
           amd: ${{ matrix.backend == 'amd' && 'true' }}
           cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
+          PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CPU','CUDA','GPU','AMD','NV'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
-        run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='ptx'||matrix.backend=='triton'||matrix.backend=='nv'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --durations=20
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
@@ -478,8 +517,12 @@ jobs:
         key: metal2
         deps: testing
         python-version: '3.11'
+        amd: 'true'
+        cuda: 'true'
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+    - name: Test models (Metal)
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Run ONNX
       run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
@@ -496,29 +539,21 @@ jobs:
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
-
-  testmetal:
-    name: MacOS (metal)
-    runs-on: macos-14
-    timeout-minutes: 10
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: metal
-        deps: testing
-        python-version: '3.11'
-    - name: Check Device.DEFAULT (METAL) and print some source
+    - name: Run pytest (amd)
+      env:
+        MOCKGPU: 1
+        AMD: 1
+        FORWARD_ONLY: 1
       run: |
-        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
-        METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    - name: Run metal test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --ignore=test/unit --durations=20
+        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+    - name: Run pytest (ptx)
+      env:
+        MOCKGPU: 1
+        PTX: 1
+        NV: 1
+        FORWARD_ONLY: 1
+      run: |
+        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -535,7 +570,7 @@ jobs:
         key: osx-webgpu
         webgpu: 'true'
     - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 python3 -m examples.compile_efficientnet
+      run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
     - name: Clean npm cache
       run: npm cache clean --force
     - name: Install Puppeteer
@@ -543,27 +578,12 @@ jobs:
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
 
-  osxclang:
-    name: MacOS (clang)
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: macos-clang
-          deps: testing
-      - name: Run pytest (clang)
-        env:
-          CLANG: 1
-        run: |
-          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
-          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
-
   osxtests:
-    name: MacOS (amd+llvm)
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [metal, llvm, cpu]
+    name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -572,23 +592,19 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: macos-other
-          deps: testing
-          amd: 'true'
-          llvm: 'true'
-      - name: Run pytest (amd)
-        env:
-          MOCKGPU: 1
-          AMD: 1
-          FORWARD_ONLY: 1
+          key: macos-${{ matrix.backend }}-minimal
+          deps: testing_minimal
+          llvm: ${{ matrix.backend == 'llvm' && 'true' }}
+      - name: Set env
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1\nJIT=2'}}" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
         run: |
-          python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
-      - name: Run pytest (llvm)
-        env:
-          LLVM: 1
-        run: |
-          python3 -m pytest -n=auto test/ --ignore=test/unit --durations=20
-          ! (DEBUG=7 python3 test/test_zero_copy.py 2>&1 || true) | grep -E '^0x.*[^0](x18|w18).*$'
+          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
+          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run pytest (${{ matrix.backend }})
+        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
 
 # ****** Windows Tests ******
 
@@ -596,7 +612,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang]
+        backend: [llvm, cpu]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -608,9 +624,15 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: windows-minimal
-          deps: testing_minimal
+          deps: testing_unit
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1'}}"
+        shell: bash
+        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1'}}" >> $GITHUB_ENV
+      - name: Run unit tests
+        if: matrix.backend=='llvm'
+        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
-        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
+          python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20

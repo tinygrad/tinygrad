@@ -1,14 +1,14 @@
 from __future__ import annotations
 from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
-from tinygrad.device import BufferSpec
+from tinygrad.device import BufferSpec, CPUProgram
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
@@ -151,13 +151,11 @@ class AMDComputeQueue(HWQueue):
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
-    dev.compute_queue.write_ptr[0] = dev.compute_queue.put_value
-    dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
+    dev.compute_queue.signal_doorbell()
 
-SDMA_MAX_COPY_SIZE = 0x400000
 class AMDCopyQueue(HWQueue):
-  def __init__(self):
-    self.internal_cmd_sizes = []
+  def __init__(self, max_copy_size=0x40000000):
+    self.internal_cmd_sizes, self.max_copy_size = [], max_copy_size
     super().__init__()
 
   def q(self, *arr):
@@ -165,10 +163,10 @@ class AMDCopyQueue(HWQueue):
     self.internal_cmd_sizes.append(len(arr))
 
   def copy(self, dest:sint, src:sint, copy_size:int):
-    copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
+    copied, copy_commands = 0, (copy_size + self.max_copy_size - 1) // self.max_copy_size
 
     for _ in range(copy_commands):
-      step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
+      step_copy_size = min(copy_size - copied, self.max_copy_size)
 
       self.q(amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
         amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied))
@@ -237,8 +235,7 @@ class AMDCopyQueue(HWQueue):
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
-    dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
-    dev.sdma_queue.doorbell[0] = dev.sdma_queue.put_value
+    dev.sdma_queue.signal_doorbell()
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -280,8 +277,6 @@ class AMDProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
-  def __init__(self, dev:AMDDevice): super().__init__(dev, batch_size=SDMA_MAX_COPY_SIZE)
-
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.dev_iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
@@ -300,6 +295,13 @@ class AMDQueueDesc:
   write_ptr: memoryview
   doorbell: memoryview
   put_value: int = 0
+
+  def signal_doorbell(self):
+    self.write_ptr[0] = self.put_value
+
+    # Ensure all prior writes are visible to the GPU.
+    if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+    self.doorbell[0] = self.put_value
 
 class KFDIface:
   kfd:HWInterface|None = None
@@ -435,25 +437,23 @@ class PCIIface:
     self.dev = dev
 
     if first_dev:=len(PCIIface.gpus) == 0:
-      libpciaccess.pci_system_init()
-      pci_iter = libpciaccess.pci_id_match_iterator_create(None)
-      while pcidev:=libpciaccess.pci_device_next(pci_iter):
-        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id in PCIIface.supported_devs: PCIIface.gpus.append(pcidev.contents)
+      for pcibus in HWInterface("/sys/bus/pci/devices").listdir():
+        vendor = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
+        device = int(HWInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
+        if vendor == 0x1002 and device in PCIIface.supported_devs: PCIIface.gpus.append(pcibus)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
       PCIIface.gpus = [PCIIface.gpus[x] for x in visible_devices] if visible_devices else PCIIface.gpus
 
-    self.pcidev = PCIIface.gpus[dev_id]
-    self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
+    self.pcibus = PCIIface.gpus[dev_id]
 
     # Unbind the device from the kernel driver
     if HWInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-      HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write("15")
 
-    # Probe device
-    libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
+    supported_sizes = int(HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
+    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:
@@ -486,16 +486,20 @@ class PCIIface:
       irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
         argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
-    else: libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
+    else: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
     self.pagemap = HWInterface("/proc/self/pagemap", os.O_RDONLY)
-    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC) for bar in [0, 2, 5]}
+    self.cfg_fd = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+    self.bar_fds = {bar: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for bar in [0, 2, 5]}
+
+    bar_info = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
+    self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
     self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
     self.doorbell_cpu_addr = mv_address(dbell)
 
-    libpciaccess.pci_device_cfg_read_u16(self.pcidev, ctypes.byref(val:=ctypes.c_uint16()), libpciaccess.PCI_COMMAND)
-    libpciaccess.pci_device_cfg_write_u16(self.pcidev, val.value | libpciaccess.PCI_COMMAND_MASTER, libpciaccess.PCI_COMMAND)
+    pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
+    self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
     simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
@@ -504,7 +508,7 @@ class PCIIface:
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
-    fd, sz = self.bar_fds[bar], size or self.pcidev.regions[bar].size
+    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return to_mv(loc, sz)
 
@@ -532,8 +536,7 @@ class PCIIface:
     if self.dev in mem.meta.mapped_devs: return
     mem.meta.mapped_devs.append(self.dev)
 
-    owner_sys_base = mem.meta.owner.dev_iface.pcidev.regions[0].base_addr
-    paddrs = [(paddr if mem.meta.mapping.system else (paddr + owner_sys_base), size) for paddr, size in mem.meta.mapping.paddrs]
+    paddrs = [(paddr if mem.meta.mapping.system else (paddr+mem.meta.owner.dev_iface.bar_info[0][0]), size) for paddr,size in mem.meta.mapping.paddrs]
     self.adev.mm.map_range(mem.va_addr, mem.size, paddrs, system=True, snooped=mem.meta.mapping.snooped, uncached=mem.meta.mapping.uncached)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
@@ -598,8 +601,6 @@ class AMDDevice(HCQCompiled):
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
-    atexit.register(self.device_fini)
-
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
@@ -629,6 +630,6 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
 
-  def device_fini(self):
+  def finalize(self):
     self.synchronize()
     if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()
