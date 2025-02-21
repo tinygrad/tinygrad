@@ -23,10 +23,10 @@ def multidevice_test(fxn):
 
 class TestExample(unittest.TestCase):
   @multidevice_test
-  def test_convert_to_clang(self, device):
+  def test_convert_to_cpu(self, device):
     a = Tensor([[1,2],[3,4]], device=device)
     assert a.numpy().shape == (2,2)
-    b = a.to("CLANG")
+    b = a.to("CPU")
     assert b.numpy().shape == (2,2)
 
   @multidevice_test
