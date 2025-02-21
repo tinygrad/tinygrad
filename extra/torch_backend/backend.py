@@ -52,7 +52,7 @@ def as_strided(tensor, size, stride, storage_offset=None):
     # TODO: is this right?
     return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+1].reshape(()))
   print(tensor.shape, size, stride, storage_offset)
-  raise NotImplementedError
+  raise NotImplementedError("fix as_strided")
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout, device, pin_memory):
