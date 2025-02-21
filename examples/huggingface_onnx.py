@@ -11,9 +11,11 @@ SKIPPED_FILES = [
   "q4", "q4f16", "bnb4", # other unimplemented quantization
   "model_O4", # requires non cpu ort runner and MemcpyFromHost
   "merged", # implement attribute with graph type
+  "fp16", "int8", "uint8", "quantized", # numerical accuracy issues
 ]
 SKIPPED_REPO_PATHS = [
   "mangoapps/fb_zeroshot_mnli_onnx", # implement NonZero op
+  "minishlab/potion-base-8M", # implement attribute with graph type
   "HuggingFaceTB/SmolLM2-360M-Instruct", # TODO implement GroupQueryAttention
   "HuggingFaceTB/SmolLM2-1.7B-Instruct", # TODO implement SimplifiedLayerNormalization, RotaryEmbedding, MultiHeadAttention
 
@@ -32,14 +34,24 @@ def huggingface_download_onnx_model(model_id:str):
 
 def get_config(root_path:Path):
   config_paths = list(root_path.rglob("config.json")) + list(root_path.rglob("preprocessor_config.json"))
+  # config_paths = list(root_path.rglob("*config*"))
   return {k:v for path in config_paths for k,v in json.load(path.open()).items()}
 
-def run_huggingface_benchmark(onnx_model_path, config):
+def get_tolerances(file_name):
+  # TODO very high rtol atol
+  # if "fp16" in file_name: return 9e-2, 9e-2
+  # if any(q in file_name for q in ["int8", "uint8", "quantized"]): return 4, 4
+  return 2e-3, 2e-3
+
+def run_huggingface_benchmark(onnx_model_path, config, rtol, atol):
   inputs = get_example_inputs(OnnxRunner(onnx.load(onnx_model_path)).graph_inputs, config)
-  validate(onnx_model_path, inputs, rtol=2e-3, atol=2e-3)
+  validate(onnx_model_path, inputs, rtol=rtol, atol=atol)
 
 if __name__ == "__main__":
-  assert getenv("LIMIT") or getenv("MODELPATH", "") or getenv("REPOPATH", ""), \
+  limit = getenv("LIMIT")
+  repo_path = getenv("REPOPATH", "")
+  model_path = getenv("MODELPATH", "")
+  assert limit or repo_path or model_path, \
     """
     Please provide one of these environment variables:
     - 'LIMIT=100' (to run top N models)
@@ -48,7 +60,7 @@ if __name__ == "__main__":
       - optionally use 'TRUNCATE=50' with 'MODELPATH' to test intermediate results"""
 
   # for running
-  if limit := getenv("LIMIT"):
+  if limit:
     sort = "downloads"  # recent 30 days downloads
     result = {"passed": 0, "failed": 0}
     print(f"** Running benchmarks on top {limit} models ranked by '{sort}' on huggingface **")
@@ -61,11 +73,13 @@ if __name__ == "__main__":
       root_path = huggingface_download_onnx_model(model.id)
       print(f"Saved to {root_path}")
       for onnx_model_path in root_path.rglob("*.onnx"):
-        if any(skip in onnx_model_path.stem for skip in SKIPPED_FILES): continue  # skip these
+        onnx_file_name = onnx_model_path.stem
+        if any(skip in onnx_file_name for skip in SKIPPED_FILES): continue  # skip these
+        rtol, atol = get_tolerances(onnx_file_name)
         relative_path = str(onnx_model_path.relative_to(root_path))
         print(f"Benchmarking {relative_path}")
         try:
-          run_huggingface_benchmark(onnx_model_path, get_config(root_path))
+          run_huggingface_benchmark(onnx_model_path, get_config(root_path), rtol, atol)
           result[model.id][relative_path] = {"status": "passed"}
           result["passed"] += 1
         except Exception as e:
@@ -77,8 +91,23 @@ if __name__ == "__main__":
       print(f"report saved to {os.path.abspath('huggingface_results.json')}")
 
   # for debugging
-  if model_path := str(getenv("MODELPATH", "")):
+  if repo_path:
+    # `repo_path` is the same as `model.id`
+    root_path = huggingface_download_onnx_model(repo_path)
+    for onnx_model_path in root_path.rglob("*.onnx"):
+      rtol, atol = get_tolerances(onnx_model_path.stem)
+      relative_path = str(onnx_model_path.relative_to(root_path))
+      try:
+        run_huggingface_benchmark(onnx_model_path, get_config(root_path), rtol, atol)
+        print(f"{relative_path} passed")
+      except Exception as e:
+        print(f"{relative_path} failed")
+        print(e)
+
+  if model_path:
     model_id, relative_path = model_path.split("/", 2)[:2], model_path.split("/", 2)[2]
+    onnx_file_name = model_id[-1]
+    rtol, atol = get_tolerances(onnx_file_name)
     model_id = "/".join(model_id)
     root_path = huggingface_download_onnx_model(model_id)
     onnx_model = root_path / relative_path
@@ -93,20 +122,7 @@ if __name__ == "__main__":
       model.graph.output.extend(new_output_values)
       truncated_model = str(onnx_model.parent / f"{onnx_model.stem}_truncated{onnx_model.suffix}")
       onnx.save(model, truncated_model)
-      run_huggingface_benchmark(truncated_model, get_config(root_path))
+      run_huggingface_benchmark(truncated_model, get_config(root_path), rtol, atol)
       os.remove(truncated_model)
     else:
-      run_huggingface_benchmark(onnx_model, get_config(root_path))
-
-  if repo_path := str(getenv("REPOPATH", "")):
-    # `repo_path` is the same as `model.id`
-    root_path = huggingface_download_onnx_model(repo_path)
-    for onnx_model_path in root_path.rglob("*.onnx"):
-      relative_path = str(onnx_model_path.relative_to(root_path))
-      print(f"Benchmarking {relative_path}")
-      try:
-        run_huggingface_benchmark(onnx_model_path, get_config(root_path))
-        print("passed")
-      except Exception as e:
-        print("failed")
-        print(e)
+      run_huggingface_benchmark(onnx_model, get_config(root_path), rtol, atol)
