@@ -17,14 +17,15 @@ window.renderGraph = function(graph, additions) {
   g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
   for (const [k,v] of Object.entries(graph)) {
     const [label, src, color] = v;
-    let node = {label, labelType:"text", style:`fill: ${color};`};
+    const node = {label, labelType:"text", style:`fill: ${color};`};
     // for PROGRAM UOp we render the node with a code block
     if (label.includes("PROGRAM")) {
       const [name, ...rest] = label.split("\n");
       const labelEl = Object.assign(document.createElement("div"));
       labelEl.appendChild(Object.assign(document.createElement("p"), {innerText: name, className: "label", style: "margin-bottom: 2px" }));
       labelEl.appendChild(highlightedCodeBlock(rest.join("\n"), "cpp", true));
-      node = {label: labelEl, labelType:"html", style:`fill: ${color}`};
+      node.label = labelEl;
+      node.labelType = "html";
     }
     g.setNode(k, node);
     for (const s of src) g.setEdge(s, k, {curve: d3.curveBasis});
