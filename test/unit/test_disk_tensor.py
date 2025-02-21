@@ -211,7 +211,7 @@ class TestSafetensors(unittest.TestCase):
 def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
   if tinygrad_fxn is None: tinygrad_fxn = np_fxn
   pathlib.Path(temp(fn)).unlink(missing_ok=True)
-  tinygrad_tensor = Tensor(data, device="CLANG").to(f"disk:{temp(fn)}")
+  tinygrad_tensor = Tensor(data, device="CPU").to(f"disk:{temp(fn)}")
   numpy_arr = np.array(data)
   tinygrad_fxn(tinygrad_tensor)
   np_fxn(numpy_arr)
@@ -251,7 +251,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_write_ones(self):
     pathlib.Path(temp("dt_write_ones")).unlink(missing_ok=True)
 
-    out = Tensor.ones(10, 10, device="CLANG").contiguous()
+    out = Tensor.ones(10, 10, device="CPU").contiguous()
     outdisk = out.to(f"disk:{temp('dt_write_ones')}")
     print(outdisk)
     outdisk.realize()
@@ -289,13 +289,13 @@ class TestDiskTensor(unittest.TestCase):
   def test_bitcast(self):
     with open(temp('dt_bitcast'), "wb") as f: f.write(bytes(range(10,20)))
     t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('dt_bitcast')}")
-    ret = t.to("CLANG").bitcast(dtypes.uint16) + 1
+    ret = t.to("CPU").bitcast(dtypes.uint16) + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
 
   def test_bitcast_view(self):
     with open(temp('dt_bitcast_view'), "wb") as f: f.write(bytes(range(10, 24)))
     t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{temp('dt_bitcast_view')}").shrink([(0, 2)])
-    ret = t.bitcast(dtypes.uint16).to("CLANG") + 1
+    ret = t.bitcast(dtypes.uint16).to("CPU") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
   @unittest.skipIf(OSX, "new LLVM has an issue on OSX")
@@ -363,10 +363,10 @@ class TestPathTensor(unittest.TestCase):
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_with_device(self):
-    t = Tensor(self.test_file, device="CLANG")
+    t = Tensor(self.test_file, device="CPU")
     self.assertEqual(t.shape, (100,))
     self.assertEqual(t.dtype, dtypes.uint8)
-    self.assertEqual(t.device, "CLANG")
+    self.assertEqual(t.device, "CPU")
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_empty_file(self):
@@ -391,8 +391,8 @@ class TestPathTensor(unittest.TestCase):
 
   def test_path_tensor_copy_to_device(self):
     t = Tensor(self.test_file)
-    t_cpu = t.to("CLANG")
-    self.assertEqual(t_cpu.device, "CLANG")
+    t_cpu = t.to("CPU")
+    self.assertEqual(t_cpu.device, "CPU")
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
 if __name__ == "__main__":
