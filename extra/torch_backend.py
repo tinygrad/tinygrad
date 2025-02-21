@@ -21,13 +21,11 @@ def fill_scalar(x, y):
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-  print("Custom PrivateUse1 empty called!", size, dtype, layout, device, pin_memory, memory_format)
   ret = Tensor.empty(*size)
   return mod.wrap(ret)
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
-  print("copy from")
   dest[:] = torch.from_numpy(mod.unwrap(src).numpy())
 
 @torch.library.impl("aten::add.Tensor", "privateuseone")
