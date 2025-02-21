@@ -233,16 +233,6 @@ class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...]
-  @property
-  def outputs(self) -> tuple[Buffer, ...]:
-    """Read/write or write only buffers in the schedule."""
-    return tuple(b for i,b in enumerate(self.bufs) if i in self.output_idxs)
-  @property
-  def inputs(self) -> tuple[Buffer, ...]:
-    """Read only buffers in the schedule."""
-    return tuple(b for i,b in enumerate(self.bufs) if i not in self.output_idxs)
-  @functools.cached_property
-  def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
 
 # **** Kernel creation
 
