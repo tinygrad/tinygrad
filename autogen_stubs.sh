@@ -211,6 +211,7 @@ generate_libc() {
   clang2py -k cdefstum \
     $(dpkg -L libc6-dev | grep sys/mman.h) \
     $(dpkg -L libc6-dev | grep sys/syscall.h) \
+    /usr/include/string.h \
     /usr/include/elf.h \
     /usr/include/unistd.h \
     /usr/include/asm-generic/mman-common.h \

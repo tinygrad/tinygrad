@@ -76,13 +76,14 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph": (sink_json:=uop_to_json(sink:=ctx.sink)), "uop":str(sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0,u1,upat in tqdm(ctx.matches):
     replaces[u0] = u1
-    sink = sink.substitute(replaces)
-    yield {"graph": (sink_json:=uop_to_json(sink)), "uop":str(sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
+    new_sink = next_sink.substitute(replaces)
+    yield {"graph": (sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
+    if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
