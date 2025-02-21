@@ -202,14 +202,14 @@ def get_onnx_ops():
 
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
 
-  def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
+  def _prepare_quantize(x:Tensor, scale:Tensor, zero_point:Tensor|int, axis=1, block_size=0):
     if axis < 0: axis += x.ndim
-    if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point, dtype=dtypes.uint8)._broadcast_to(scale.shape)
-    if scale.numel() == 1 and zero_point.numel() == 1: return scale, zero_point
-    if block_size == 0:
-      shape = [scale.shape[0] if dim == axis else 1 for dim in range(x.ndim)]
-      return scale.reshape(shape), zero_point.reshape(shape)
-    return scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
+    # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_quantize_linear.py#L31
+    def reshape(val:Tensor):
+      if val.numel() == 1: return val
+      if block_size == 0: return val.reshape([val.shape[0] if dim == axis else 1 for dim in range(x.ndim)])
+      return val.repeat_interleave(block_size, axis)
+    return (reshape(scale), reshape(zero_point) if isinstance(zero_point, Tensor) else zero_point)
 
   def _op_integer(op, inputs:list[Tensor], zero_points:list[Tensor], **opts):
     adjusted_inputs = [inp.int() - zp for inp, zp in zip(inputs, zero_points)]
