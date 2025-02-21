@@ -1,4 +1,4 @@
-import sys, functools, atexit, pickle
+import sys, atexit, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
