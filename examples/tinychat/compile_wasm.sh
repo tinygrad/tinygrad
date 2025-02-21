@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
 
 # TODO: generate (and/or run?) this logic with python compile script
-# point below path at your emscripten installation location
+# prereq: install emscripten: https://emscripten.org/docs/getting_started/downloads.html
 source ~/emsdk/emsdk_env.sh
-which emcc
-inputs=("transformer")
+step="transformer"
 # TODO: auto generate initial memories
-initial_memories=(71499776)
+initial_memory=71499776
 # TODO: tune max memories
-maximum_memories=(2500001792)
-for i in "${!inputs[@]}"; do
-  input="${inputs[i]}"
-  initial_memory="${initial_memories[i]}"
-  maximum_memory="${maximum_memories[i]}"
+max_memory=2500001792
+exported_functions='["_net", "_malloc", "_free", "_set_buf"]'
 
-  if [[ "$input" == "transformer" ]]; then
-    exported_functions='["_net", "_malloc", "_free", "_set_buf"]'
-  else
-    exported_functions='["_net", "_malloc", "_free"]'
-  fi
-
-  echo "Processing $input with INITIAL_MEMORY=$initial_memory and MAXIMUM_MEMORY=$maximum_memory"
-  echo $exported_functions
-
-  emcc "${input}.c" \
-    -O3 -msimd128 -ffast-math -flto \
-    -o "${input}.js" \
-    -s MODULARIZE=1 \
-    -s EXPORT_ES6=1 \
-    -s EXPORTED_FUNCTIONS="${exported_functions}" \
-    -s ENVIRONMENT='worker' \
-    -s FILESYSTEM=0 \
-    -s EVAL_CTORS \
-    -s ALLOW_MEMORY_GROWTH=1 \
-    -s INITIAL_MEMORY="$initial_memory" \
-    -s MAXIMUM_MEMORY="$maximum_memory"
-done
+emcc "${step}.c" \
+  -O3 -msimd128 -ffast-math -flto \
+  -o "${step}.js" \
+  -s MODULARIZE=1 \
+  -s EXPORT_ES6=1 \
+  -s EXPORTED_FUNCTIONS="${exported_functions}" \
+  -s ENVIRONMENT='worker' \
+  -s FILESYSTEM=0 \
+  -s EVAL_CTORS \
+  -s ALLOW_MEMORY_GROWTH=1 \
+  -s INITIAL_MEMORY="$initial_memory" \
+  -s MAXIMUM_MEMORY="$max_memory"

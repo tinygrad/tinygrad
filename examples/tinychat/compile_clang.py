@@ -1,11 +1,11 @@
 # TODO: merge with examples/tinychat/compile.py
 
 import os, re
-from extra.export_model import compile_net, jit_model, export_model
+from extra.export_model import compile_net, jit_model
 from examples.llama3 import build_transformer
 from tinygrad import Device, Variable, Tensor, dtypes
 from tinygrad.helpers import fetch, Context
-from typing import List, Tuple, Any, NamedTuple
+from typing import List, Any, NamedTuple
 from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Ops
 from collections import OrderedDict
@@ -13,16 +13,14 @@ from collections import OrderedDict
 if __name__=="__main__":
   Device.DEFAULT = "CLANG"
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
-  model_size="1B"
   Tensor.no_grad = True
   max_context=1024
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", device=Device.DEFAULT, max_context=max_context)
+  model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   model.output.weight = model.tok_embeddings.weight
   model.output.scale = model.tok_embeddings.scale
 
-  TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
-
   tok = 128000
+  TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   model_input = [Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P]
   out = model.forward(*model_input)
 

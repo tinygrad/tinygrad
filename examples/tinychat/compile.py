@@ -2,12 +2,11 @@
 # TODO: merge with compile_clang.py
 
 import os, json, hashlib, math
-from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model, export_model_clang
-from examples.llama3 import build_transformer, Tokenizer
+from extra.export_model import compile_net, jit_model, dtype_to_js_type
+from examples.llama3 import build_transformer
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad.dtype import dtypes
-from tinygrad.tensor import Tensor
-from tinygrad import Device, GlobalCounters, Variable
+from tinygrad import Device, GlobalCounters, Variable, Tensor
 from tinygrad.helpers import fetch, Context
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
@@ -84,41 +83,27 @@ def prepare_browser_chunks(model):
   return metadata
 
 if __name__=="__main__":
-  default_device = Device.DEFAULT
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
-  model_size="1B"
   Tensor.no_grad = True
-  f32_fn = os.path.join(os.path.dirname(__file__), "llama3_1B_f32.safetensors")
   max_context=4096
 
-  Device.DEFAULT="CLANG" # may be necessary for quantization to work, from float16 original weights
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
+  # float16 is not yet supported for WebGPU/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
+  # therefore for now, use CLANG to quantize the float16 llama to int8 with float32 scales, then load to WEBGPU
+  Device.DEFAULT="CLANG"
+  model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
   Device.DEFAULT="WEBGPU"
-  model = build_transformer(model_path, model_size=model_size, quantize="int8", max_context=max_context, load_weights=False)
+  model = build_transformer(model_path, model_size="1B", quantize="int8", max_context=max_context, load_weights=False)
   load_state_dict(model, state_dict, consume=True)
 
-  tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
-  tokenizer = Tokenizer(str(tokenizer_path))
-  # TODO: refactor to consolidate these encode functions with those in examples/llama3.py
-  def encode_role(role: str):
-    return [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode(role) + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
-  def encode_message(role: str, content: str):
-    return encode_role(role) + tokenizer.encode(content.strip()) + [tokenizer.special_tokens["<|eot_id|>"]]
-  toks = [tokenizer.bos_id] + encode_message("user", "hi")
-  toks = toks + encode_role("assistant")
-
   # Export BPE data for use with tiktoken.js
+  tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
   mergeable_ranks = load_tiktoken_bpe(str(tokenizer_path))  
   bpe_path = os.path.join(os.path.dirname(__file__), "llama3-2.tiktoken")
   dump_tiktoken_bpe(mergeable_ranks, bpe_path)
 
-  # TODO: make these variables tunable by client?
-  TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
-  GlobalCounters.reset()
-
-  # initialize stuff not included in downloaded weights: kv cache, freqs_cis, tok_embeddings.arange
   tok = 128000
+  TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   out = model.forward(Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
 
   # We waited to prepare the chunks until here, because model.freqs_cis and model.tok_embeddings.arange are only ready now
@@ -132,7 +117,6 @@ if __name__=="__main__":
 
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   sub_steps = [Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, show_progress=True),]
-
   prg = ""
 
   def fixup_code(code, key):
@@ -140,7 +124,6 @@ if __name__=="__main__":
       .replace("var<uniform> INFINITY : f32;\n", "fn inf(a: f32) -> f32 { return a/0.0; }\n")\
       .replace("@group(0) @binding(0)", "")\
       .replace("INFINITY", "inf(1.0)")
-
     for i in range(1,9): code = code.replace(f"binding({i})", f"binding({i-1})")
     return code
 
