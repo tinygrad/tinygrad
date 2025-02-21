@@ -1,7 +1,7 @@
 # based on ./examples/webgpu/stable_diffusion/compile.py
 # TODO: merge with compile_clang.py
 
-import os, json, hashlib, math
+import os, sys, json, hashlib, math
 from extra.export_model import compile_net, jit_model, dtype_to_js_type, export_model
 from examples.llama3 import build_transformer
 from tinygrad.nn.state import get_state_dict, load_state_dict
@@ -166,7 +166,6 @@ if __name__=="__main__":
             global_size[j] = f"data{input_idx}[0] + {val}"
 
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-    # TODO: don't duplicate output.weight and tok_embeddings.weight
     buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
     exported_bufs, buf_prog, buf_prog_chunks, pipeline_prog = [], 0.10, 20, 0.05
     for i, (name,(size,dtype,_key)) in enumerate(bufs.items()):
@@ -223,14 +222,26 @@ if __name__=="__main__":
   }}
   """
 
+  for step in sub_steps:
+    print(f'Executing step={step.name}')
+    with Context(BEAM=0):
+      model.__call__ = model.forward
+      prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *step.input, model_name=step.name)
+
+    if step.name == "transformer":
+      prg = prg.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale") # ensure consistency with exported weights
+
+    with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
+      text_file.write(prg + f"export {{ {step.name} }}")
+
+  sys.exit()
+
   exports = []
   for step in sub_steps:
     print(f'Executing step={step.name}')
     with Context(BEAM=3):
       prg += compile_step(model, step)
       exports.append(step.name)
-
-  partStartOffsets=[]
 
   prekernel = f"""
   const createEmptyBuf = (device, size) => {{
