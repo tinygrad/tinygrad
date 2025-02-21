@@ -48,7 +48,7 @@ class AMFirmware:
 
     # Load other fw
     self.ucode_start: dict[str, int] = {}
-    self.descs: list[tuple[int, memoryview]] = []
+    self.descs: list[tuple[list[int], memoryview]] = []
 
     blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v1_0)
     self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
