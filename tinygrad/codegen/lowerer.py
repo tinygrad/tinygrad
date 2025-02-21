@@ -3,7 +3,7 @@ import functools, itertools, operator, math
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
-from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
+from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten, unwrap
 from tinygrad.codegen.expander import expand_rewrite
@@ -153,7 +153,14 @@ pm_lowerer = PatternMatcher([
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
+  (UPat(Ops.IGNORE, name="x"), lambda x: x.src[0]),
 ])
+
+def view_to_mask(x:UOp):
+  from tinygrad.shape.shapetracker import ShapeTracker, View
+  if len(x.st.views) > 1: return None
+  if x.st.views[-1].mask is None: return None
+  return ShapeTracker((View(x.st.shape, (0,)*len(x.st.shape), 0, x.st.views[-1].mask, False),))
 
 FP = (1 << 16)
 from tinygrad.codegen.symbolic import symbolic
@@ -191,6 +198,14 @@ pm_quant = symbolic+PatternMatcher([
   ((UPat.var('x') * UPat.var('v1').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0)) *
     UPat.var('v2').where(UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0))).named("mul"), lambda x, mul, v1, v2:
     x * (v1&v2).where(UOp.const(mul.dtype, 1), UOp.const(mul.dtype, 0))),
+  # don't care
+  (UPat(Ops.STORE, name="x"), lambda x:
+    x.replace(src=(x.src[0], UOp(Ops.IGNORE, src=(x.src[1],), arg=mm), UOp(Ops.IGNORE, x.src[2].dtype, src=(x.src[2],), arg=mm),)) \
+      if x.src[1].op is not Ops.IGNORE and (mm:=view_to_mask(x.src[1])) is not None else None),
+  (UPat(Ops.IGNORE, src=(UPat((*GroupOp.ALU, Ops.CAST), name="alu"),), name="ig"),
+   lambda ig,alu: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x,), ig.arg) for x in alu.src))),
+  (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
+  (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
