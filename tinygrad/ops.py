@@ -503,7 +503,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   @property
-  def metadata(self) -> Metadata|None: return all_metadata.get(self, None)
+  def metadata(self) -> tuple[Metadata, ...]|Metadata|None: return self.arg.metadata if self.op is Ops.KERNEL else all_metadata.get(self, None)
 
   # *** uop movement ops ***
 
