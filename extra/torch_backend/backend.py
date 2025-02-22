@@ -107,6 +107,8 @@ tiny_backend = {
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
   "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
+  "aten.abs": Tensor.abs,
+  "aten.sgn": Tensor.sign,
   "aten.exp2": Tensor.exp2,
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
