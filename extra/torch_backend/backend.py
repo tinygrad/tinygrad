@@ -52,7 +52,7 @@ def as_strided(tensor, size, stride, storage_offset=None):
     return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+1].reshape(()))
   # broadcast
   if len(tensor.shape) == 0: return wrap(unwrap(tensor).reshape((1,)*len(size)).expand(size))
-  print(tensor.shape, size, stride, storage_offset, "NOTE: this as_strided is wrong")
+  print("******* NOTE: this as_strided is wrong ***********\n", tensor.shape, size, stride, storage_offset)
   return wrap(Tensor.zeros(*size))
   raise NotImplementedError("fix as_strided")
 
@@ -113,6 +113,7 @@ tiny_backend = {
   "aten.relu": Tensor.relu,
   "aten.mean": Tensor.mean,
   "aten.neg": Tensor.neg,
+  "aten.mm": Tensor.matmul,
 }
 
 # there's earlier things to hook here
