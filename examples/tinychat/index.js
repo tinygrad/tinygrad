@@ -696,7 +696,7 @@ document.addEventListener("alpine:init", () => {
       let lastTok = tokens[tokens.length - 1];
       while (true) {
         //if (this.cancelGeneration) return;
-        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0];}
+        if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0][0];}
         else {var tok = await this.nets["transformer"](lastTok, startPos);}
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
         startPos += 1;
