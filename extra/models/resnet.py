@@ -26,10 +26,10 @@ class BasicBlock:
       ]
 
   def __call__(self, x):
-    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
+    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .relu() to .leakyrelu()
     out = self.bn2(self.conv2(out))
     out = out + x.sequential(self.downsample)
-    out = out.leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
+    out = out.leakyrelu()  # Changed from .relu() to .leakyrelu()
     return out
 
 
@@ -54,11 +54,11 @@ class Bottleneck:
       ]
 
   def __call__(self, x):
-    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
-    out = self.bn2(self.conv2(out)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
+    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .relu() to .leakyrelu()
+    out = self.bn2(self.conv2(out)).leakyrelu()  # Changed from .relu() to .leakyrelu()
     out = self.bn3(self.conv3(out))
     out = out + x.sequential(self.downsample)
-    out = out.leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
+    out = out.leakyrelu()  # Changed from .relu() to .leakyrelu()
     return out
 
 
@@ -107,7 +107,7 @@ class ResNet:
   def forward(self, x):
     is_feature_only = self.fc is None
     if is_feature_only: features = []
-    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
+    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .relu() to .leakyrelu()
     out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
     if is_feature_only: features.append(out)
