@@ -11,7 +11,30 @@ torch_to_tiny_dtype = {
 }
 
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-  return TTensor(Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype]))
+  if dtype is not None: return TTensor(Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype]))
+  return TTensor(Tensor.empty(*size))
+
+def to_copy_impl(input, dtype=None, device=None, layout=None, non_blocking=False, **kwargs):
+    input_data = input.tiny.numpy()  
+    if dtype is not None: return TTensor(Tensor(input_data, dtype=torch_to_tiny_dtype[dtype]))
+    return TTensor(Tensor(input_data))
+
+def detach_impl(input):
+    input_data = input.tiny.numpy()
+    new_tensor = TTensor(Tensor(input_data))
+    new_tensor.requires_grad = False 
+    return new_tensor
+
+def uniform_impl(input, from_=0.0, to=1.0):
+    random_values = torch.rand(input.shape, dtype=input.dtype, device=input.device)
+    uniform_values = from_ + (to - from_) * random_values
+    input.copy_(uniform_values) 
+    return input  
+
+def copy_impl(self, src):
+    src_data = src.numpy()  
+    self.tiny.numpy()[:] = src_data  
+    return self 
 
 tiny_backend = {
   "aten.empty.memory_format": empty_memory_format,
@@ -22,6 +45,11 @@ tiny_backend = {
   "aten.ne.Scalar": lambda x,y: TTensor(x.tiny != y),
   "aten.mul.Tensor": lambda x,y: TTensor(x.tiny * y.tiny),
   "aten.masked_select.default": lambda x,y: TTensor(Tensor(x.tiny.numpy()[y.tiny.numpy()])),
+  "aten.lift_fresh.default": lambda x: TTensor(x),
+  "aten._to_copy.default": to_copy_impl,
+  "aten.detach.default": detach_impl,
+  "aten.uniform_.default": uniform_impl,
+  "aten.copy_.default": copy_impl,
 }
 
 class TTensor(torch.Tensor):
