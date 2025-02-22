@@ -61,12 +61,12 @@ class TestTensorUOp(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: UOp = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const_like(1).const_arg == 1
-    assert type(lb.const_like(1).const_arg) is int
+    assert lb.const_like(1).base.arg == 1
+    assert type(lb.const_like(1).base.arg) is int
 
     lb: UOp = Tensor([1], dtype=dtypes.float).lazydata
-    assert lb.const_like(1).const_arg == 1.0
-    assert type(lb.const_like(1).const_arg) is float
+    assert lb.const_like(1).base.arg == 1.0
+    assert type(lb.const_like(1).base.arg) is float
 
   def test_contiguous_alu(self):
     a = Tensor.randn(2, 2).realize()
@@ -83,6 +83,14 @@ class TestTensorUOp(unittest.TestCase):
     empty = Tensor.empty(1).contiguous()
     sched = empty.schedule()
     self.assertEqual(len(sched), 0)
+
+  def test_contiguous_folded_alu(self):
+    a = Tensor.empty(8, 8)
+    # NOTE: the buffer for mul_0 late folds to just a CONST
+    mul_0 = a*0
+    out = mul_0.shrink(((4, 8), (0, 8))).contiguous()
+    out.realize()
+    self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
 
 reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, src=(UPat(), UPat(), UPat(Ops.REDUCE_AXIS)))))
 class TestReduceOp(unittest.TestCase):
