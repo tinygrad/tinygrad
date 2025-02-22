@@ -746,6 +746,22 @@ class TestInferenceMode(unittest.TestCase):
 
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
+
+  def test_metadata_const_folded(self):
+    a = Tensor.rand(4, 4)*1
+    self.assertEqual(a.lazydata.metadata.name, "__mul__")
+    k = a.schedule()[-1]
+    # const folded ops aren't included in kernel metadata
+    self.assertEqual([m.name for m in k.metadata], ["rand"])
+
+  # we exclude consts from kernel metadata because they are deduped in tensor methods
+  def test_exclude_const_metadata(self):
+    a = Tensor.arange(4)
+    b = Tensor.full((4,), -1, dtype=dtypes.int).contiguous()
+    sched = Tensor.schedule(a, b)
+    self.assertEqual([m.name for m in sched[0].metadata], ["arange"])
+    self.assertEqual([m.name for m in sched[1].metadata], ["contiguous"])
+
   def test_matmul(self):
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)
