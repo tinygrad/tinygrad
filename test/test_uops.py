@@ -106,11 +106,11 @@ class TestUOps(unittest.TestCase):
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
-  @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
+  @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
   def test_exp2(self): self._test_uop_fxn(Ops.EXP2, lambda a: np.exp2(a))
-  @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
+  @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
   def test_log2(self): self._test_uop_fxn(Ops.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
-  @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
+  @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
   def test_sin(self): self._test_uop_fxn(Ops.SIN, lambda a: math.sin(a))
   def test_recip(self): self._test_uop_fxn(Ops.RECIP, lambda a: 1/a if a != 0 else float('inf'))
   def test_sqrt(self): self._test_uop_fxn(Ops.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))

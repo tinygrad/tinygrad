@@ -7,7 +7,7 @@
 
 print("******** first, the runtime ***********")
 
-from tinygrad.runtime.ops_clang import ClangJITCompiler, MallocAllocator, CPUProgram
+from tinygrad.runtime.ops_cpu import ClangJITCompiler, MallocAllocator, CPUProgram
 
 # allocate some buffers
 out = MallocAllocator.alloc(4)
@@ -34,7 +34,7 @@ assert val == 5
 
 print("******** second, the Device ***********")
 
-DEVICE = "CLANG"   # NOTE: you can change this!
+DEVICE = "CPU"   # NOTE: you can change this!
 
 import struct
 from tinygrad.dtype import dtypes
@@ -90,7 +90,7 @@ out = a.alu(Ops.ADD, b)
 
 # schedule the computation as a list of kernels
 sched, _, becomes_map = create_schedule_with_vars(out.sink())
-for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
+for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CPU
 # NOTE: UOps are no longer mutable, the scheduler gives you a map to lookup which BUFFER the result was written to
 out = becomes_map[out]
 

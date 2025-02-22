@@ -38,7 +38,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")
-    t = Tensor.rand(10, 10).to("CLANG").realize()
+    t = Tensor.rand(10, 10).to("CPU").realize()
     st = pickle.dumps(t)
     t_values = t.numpy()
     del t # free buffers
@@ -50,7 +50,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_realized_tensor_alt2(self):
     print("** init")
-    t = Tensor.rand(10, 10).to("CLANG").realize()
+    t = Tensor.rand(10, 10).to("CPU").realize()
     tensor_uop = t.lazydata
     assert tensor_uop.is_realized, f"expected {tensor_uop} to be realized"
     t_values = t.numpy()
@@ -93,7 +93,7 @@ class TestPickle(unittest.TestCase):
     np.testing.assert_equal(vt2.numpy(), 20)
 
   def test_pickle_buffer_view(self):
-    t = Tensor.arange(10, device="CLANG").contiguous().realize()
+    t = Tensor.arange(10, device="CPU").contiguous().realize()
     vt = t[3:5].contiguous().realize()
     assert hasattr(vt.lazydata.buffer, 'base')
     ref_value = vt.tolist()
