@@ -1,5 +1,6 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEBUG, getenv
+TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 
@@ -46,10 +47,16 @@ def masked_select(self, mask):
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
 @torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor, size, stride, storage_offset=None):
+def as_strided(tensor:Tensor, size, stride, storage_offset=None):
   if size == [] and storage_offset is not None:
     # TODO: is this right?
     return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+1].reshape(()))
+
+  from tinygrad.shape.view import strides_for_shape
+  if strides_for_shape(tuple(size)) == tuple([0 if s == 1 else st for s,st in zip(size, stride)]) and storage_offset is None:
+    # this is a reshape
+    return tensor.reshape(size)
+
   # broadcast
   if len(tensor.shape) == 0: return wrap(unwrap(tensor).reshape((1,)*len(size)).expand(size))
   print("******* NOTE: this as_strided is wrong ***********\n", tensor.shape, size, stride, storage_offset)
@@ -57,16 +64,20 @@ def as_strided(tensor, size, stride, storage_offset=None):
   raise NotImplementedError("fix as_strided")
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
-def empty_strided(size, stride, dtype, layout, device, pin_memory=False):
-  if DEBUG >= 2: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
+def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
+  if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
   ret = Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype])
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-  if DEBUG >= 2: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
-  ret = Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype])
+  if TORCH_DEBUG: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
+  ret = Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype or torch.get_default_dtype()])
   return wrap(ret)
+
+@torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
+def max_pool2d_with_indices(input, options):
+  print(options)
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
@@ -94,26 +105,61 @@ def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
+# register some decompositions
+from torch._decomp import get_decompositions
+aten = torch.ops.aten
+decomps = [
+  aten.native_batch_norm,
+  #aten.var_mean,
+  #aten.var,
+  aten.addmm,
+  #aten.rsqrt,
+  #aten.max_pool2d_with_indices,
+]
+for k,v in get_decompositions(decomps).items():
+  key = str(k._schema).split("(")[0]
+  if DEBUG >= 2: print("register decomp for", k)
+  torch.library.impl(key, "privateuseone")(v)
+
 tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
-  "aten.add_.Tensor": lambda x,y: x.assign(x.add(y)),
+  "aten.add_.Tensor": lambda x,y,alpha=1: x.assign(x.add(y)*alpha),
   "aten.pow.Tensor_Scalar": Tensor.pow,
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
   "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
   "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
+  "aten.le.Tensor": Tensor.__le__, "aten.le.Scalar": Tensor.__le__,
+  "aten.exp": Tensor.exp,
   "aten.exp2": Tensor.exp2,
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
   "aten.relu": Tensor.relu,
+  "aten.relu_": lambda x: x.assign(x.relu()),
   "aten.mean": Tensor.mean,
   "aten.neg": Tensor.neg,
+  "aten.rsqrt": Tensor.rsqrt,
   "aten.mm": Tensor.matmul,
+  "aten.var.correction": Tensor.var,
+  # TODO: support var_mean in tinygrad
+  "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
+  # NOTE: axis=[] in torch means all, change tinygrad?
+  "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
+    out.replace(Tensor.sum(self, axis if len(axis) else None, keepdim), allow_shape_mismatch=True),
+  "aten.argmax": Tensor.argmax,
+  "aten.scatter.value": Tensor.scatter,
+  "aten.gather": Tensor.gather,
+  "aten.where.self": Tensor.where,
+  "aten._log_softmax": lambda self,dim,half_to_float: self.softmax(dim),
+  "aten.random_": lambda self:
+    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
+  "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
+  "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
 }
 
 # there's earlier things to hook here
@@ -124,15 +170,19 @@ tiny_backend = {
 
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
-    #print(k, len(args), kwargs.keys())
+    if TORCH_DEBUG: print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
+                          {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-    return wrap(f(*args, **kwargs))
+    out = f(*args, **kwargs)
+    if isinstance(out, Tensor): return wrap(out)
+    elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
+    else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
-if getenv("TORCH_DEBUG"):
+if TORCH_DEBUG:
   from torch.utils._python_dispatch import TorchDispatchMode
   class DispatchLog(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args, kwargs=None):
