@@ -2,10 +2,13 @@
 import unittest
 import torch
 import numpy as np
-import extra.torch_backend.backend
-device = "tiny"
-#import extra.torch_backend.backend2
-#device = "cpu"
+from tinygrad.helpers import getenv
+if getenv("TINY_BACKEND2"):
+  import extra.torch_backend.backend2
+  device = "cpu"
+else:
+  import extra.torch_backend.backend
+  device = "tiny"
 
 class TestTorchBackend(unittest.TestCase):
   def test_numpy_ones(self):
