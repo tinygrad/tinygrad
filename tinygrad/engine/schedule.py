@@ -391,10 +391,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
       else: becomes_map[k] = v
     elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
-  # create kernels
-  if len(realize_map) == 0: return [], {}, becomes_map
   # map tensor metadata to simplified ops
   ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE}}
+  # create kernels
   kernel_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
