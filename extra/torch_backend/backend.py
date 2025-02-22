@@ -21,18 +21,9 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend)
 torch.utils.generate_methods_for_privateuse1_backend()
 
-@torch.library.impl("aten::view", "privateuseone")
-def view(x, sz): return mod.wrap(mod.unwrap(x).reshape(sz))
-
-@torch.library.impl("aten::min", "privateuseone")
-def min(x): return mod.wrap(mod.unwrap(x).min())
-
-@torch.library.impl("aten::max", "privateuseone")
-def max(x): return mod.wrap(mod.unwrap(x).max())
-
 @torch.library.impl("aten::zero_", "privateuseone")
 def zero_(x):
-  tt = mod.unwrap(x)
+  tt = unwrap(x)
   tt.replace(tt.zeros_like())
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
@@ -71,7 +62,7 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
-  print(input, weight, bias)
+  #print(input, weight, bias)
   raise NotImplementedError("need convolution")
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
@@ -85,47 +76,34 @@ def _copy_from(src, dest):
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
-@torch.library.impl("aten::exp2.out", "privateuseone")
-def exp2_out(x, out): unwrap(out).replace(unwrap(x).exp2(), allow_shape_mismatch=True)
-
-@torch.library.impl("aten::ceil.out", "privateuseone")
-def ceil_out(x, out): unwrap(out).replace(unwrap(x).ceil(), allow_shape_mismatch=True)
-
-@torch.library.impl("aten::abs.out", "privateuseone")
-def abs_out(x, out): unwrap(out).replace(unwrap(x).abs(), allow_shape_mismatch=True)
-
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
 @torch.library.impl("aten::bitwise_and.Tensor", "privateuseone")
 def bitwise_and_tensor(x, y): return wrap(unwrap(x) & unwrap(y))
 
-@torch.library.impl("aten::add.Tensor", "privateuseone")
-def add_tensor(x, y): return wrap(unwrap(x) + unwrap(y))
-
-@torch.library.impl("aten::mul.Tensor", "privateuseone")
-def mul_tensor(x, y): return wrap(unwrap(x) * unwrap(y))
-
-@torch.library.impl("aten::div.Tensor", "privateuseone")
-def div_tensor(x, y): return wrap(unwrap(x) / unwrap(y))
-
-@torch.library.impl("aten::eq.Tensor", "privateuseone")
-def eq_tensor(x, y): return wrap(unwrap(x).eq(unwrap(y)))
-
-@torch.library.impl("aten::ne.Tensor", "privateuseone")
-def ne_tensor(x, y): return wrap(unwrap(x).ne(unwrap(y)))
-
-@torch.library.impl("aten::ne.Scalar", "privateuseone")
-def ne_scalar(x, y): return wrap(unwrap(x).ne(y))
-
-@torch.library.impl("aten::lt.Scalar", "privateuseone")
-def lt_scalar(x, y): return wrap(unwrap(x) < y)
-
-@torch.library.impl("aten::gt.Scalar", "privateuseone")
-def gt_scalar(x, y): return wrap(unwrap(x) > y)
-
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
+
+tiny_backend = {
+  "aten.add.Tensor": lambda x,y: wrap(unwrap(x) + unwrap(y)),
+  "aten.mul.Tensor": lambda x,y: wrap(unwrap(x) * unwrap(y)),
+  "aten.div.Tensor": lambda x,y: wrap(unwrap(x) / unwrap(y)),
+  "aten.eq.Tensor": lambda x,y: wrap(unwrap(x) == unwrap(y)),
+  "aten.ne.Tensor": lambda x,y: wrap(unwrap(x) != unwrap(y)),
+  "aten.eq.Scalar": lambda x,y: wrap(unwrap(x) == y),
+  "aten.ne.Scalar": lambda x,y: wrap(unwrap(x) != y),
+  "aten.lt.Scalar": lambda x,y: wrap(unwrap(x) < y),
+  "aten.gt.Scalar": lambda x,y: wrap(unwrap(x) > y),
+  "aten.abs.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).abs(), allow_shape_mismatch=True)),
+  "aten.exp2.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).exp2(), allow_shape_mismatch=True)),
+  "aten.ceil.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).ceil(), allow_shape_mismatch=True)),
+  "aten.view": lambda x,sz: wrap(unwrap(x).reshape(sz)),
+  "aten.min": lambda x: wrap(unwrap(x).min()),
+  "aten.max": lambda x: wrap(unwrap(x).max()),
+}
+
+for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(v)
 
 if getenv("TORCH_DEBUG"):
   from torch.utils._python_dispatch import TorchDispatchMode
