@@ -90,27 +90,31 @@ def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
 tiny_backend = {
-  "aten.bitwise_and.Tensor": lambda x,y: wrap(unwrap(x) & unwrap(y)),
-  "aten.add.Tensor": lambda x,y: wrap(unwrap(x) + unwrap(y)),
-  "aten.mul.Tensor": lambda x,y: wrap(unwrap(x) * unwrap(y)),
-  "aten.div.Tensor": lambda x,y: wrap(unwrap(x) / unwrap(y)),
-  "aten.eq.Tensor": lambda x,y: wrap(unwrap(x) == unwrap(y)),
-  "aten.ne.Tensor": lambda x,y: wrap(unwrap(x) != unwrap(y)),
-  "aten.eq.Scalar": lambda x,y: wrap(unwrap(x) == y),
-  "aten.ne.Scalar": lambda x,y: wrap(unwrap(x) != y),
-  "aten.lt.Scalar": lambda x,y: wrap(unwrap(x) < y),
-  "aten.gt.Scalar": lambda x,y: wrap(unwrap(x) > y),
-  "aten.add.out": lambda x,y,out: wrap(unwrap(out).replace(unwrap(x) + y, allow_shape_mismatch=True)), # unwrapping y?
-  "aten.abs.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).abs(), allow_shape_mismatch=True)),
-  "aten.exp2.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).exp2(), allow_shape_mismatch=True)),
-  "aten.ceil.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).ceil(), allow_shape_mismatch=True)),
-  "aten.view": lambda x,sz: wrap(unwrap(x).reshape(sz)),
-  "aten.min": lambda x: wrap(unwrap(x).min()),
-  "aten.max": lambda x: wrap(unwrap(x).max()),
-  "aten.relu": lambda x: wrap(unwrap(x).relu()),
+  "aten.view": Tensor.reshape,
+  "aten.add.Tensor": Tensor.add,
+  "aten.mul.Tensor": Tensor.mul,
+  "aten.div.Tensor": Tensor.div,
+  "aten.bitwise_and.Tensor": Tensor.bitwise_and,
+  "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
+  "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
+  "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
+  "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
+  "aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
+  "aten.abs.out": lambda x,out: out.replace(x.abs(), allow_shape_mismatch=True),
+  "aten.ceil.out": lambda x,out: out.replace(x.ceil(), allow_shape_mismatch=True),
+  "aten.exp2.out": lambda x,out: out.replace(x.exp2(), allow_shape_mismatch=True),
+  "aten.min": Tensor.min,
+  "aten.max": Tensor.max,
+  "aten.relu": Tensor.relu,
 }
 
-for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(v)
+def wrap_fxn(f):
+  def nf(*args, **kwargs):
+    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
+    kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
+    return wrap(f(*args, **kwargs))
+  return nf
+for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(v))
 
 if getenv("TORCH_DEBUG"):
   from torch.utils._python_dispatch import TorchDispatchMode
