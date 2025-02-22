@@ -1,5 +1,5 @@
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad.helpers import DEBUG, getenv, prod
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib
 torch.autograd.grad_mode.set_multithreading_enabled(False)
@@ -47,20 +47,19 @@ def masked_select(self, mask):
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
 @torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  if size == [] and storage_offset is not None:
-    # TODO: is this right?
-    return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+1].reshape(()))
+def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+  #return tensor.cpu().as_strided(size, stride).tiny()
+  if TORCH_DEBUG >= 1: print("** NOTE: this as_strided is wrong", tensor.shape, size, stride, storage_offset)
 
-  from tinygrad.shape.view import strides_for_shape
-  if strides_for_shape(tuple(size)) == tuple([0 if s == 1 else st for s,st in zip(size, stride)]) and storage_offset is None:
-    # this is a reshape
+  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1):
+    # this is squeeze/unsqueeze
     return tensor.reshape(size)
 
-  # broadcast
-  if len(tensor.shape) == 0: return wrap(unwrap(tensor).reshape((1,)*len(size)).expand(size))
-  print("******* NOTE: this as_strided is wrong ***********\n", tensor.shape, size, stride, storage_offset)
-  return wrap(Tensor.zeros(*size))
+  # TODO: how do i know this is permute?
+  if tensor.shape == (1000, 512) and size == [512, 1000] and stride == [0, 1]:
+    return wrap(unwrap(tensor).permute(1,0))
+
+  #print(tensor.cpu().numpy())
   raise NotImplementedError("fix as_strided")
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
@@ -76,12 +75,16 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
   return wrap(ret)
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
-def max_pool2d_with_indices(input, options):
-  print(options)
+def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
+  # TODO: support return_indices in tinygrad
+  ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode)
+  # TODO: this is wrong
+  return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
-  #print(f"{input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+  if TORCH_DEBUG >= 1:
+    print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
   #raise NotImplementedError("need convolution")
@@ -110,15 +113,16 @@ from torch._decomp import get_decompositions
 aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm,
+  aten.addmm,
+  # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
-  aten.addmm,
   #aten.rsqrt,
   #aten.max_pool2d_with_indices,
 ]
 for k,v in get_decompositions(decomps).items():
   key = str(k._schema).split("(")[0]
-  if DEBUG >= 2: print("register decomp for", k)
+  if TORCH_DEBUG >= 2: print("register decomp for", k)
   torch.library.impl(key, "privateuseone")(v)
 
 tiny_backend = {
@@ -135,6 +139,7 @@ tiny_backend = {
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
   "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
   "aten.le.Tensor": Tensor.__le__, "aten.le.Scalar": Tensor.__le__,
+  "aten.abs": Tensor.abs,
   "aten.exp": Tensor.exp,
   "aten.exp2": Tensor.exp2,
   "aten.min": Tensor.min,
@@ -142,7 +147,10 @@ tiny_backend = {
   "aten.relu": Tensor.relu,
   "aten.relu_": lambda x: x.assign(x.relu()),
   "aten.mean": Tensor.mean,
+  "aten.mean.dim": Tensor.mean,
   "aten.neg": Tensor.neg,
+  "aten.reciprocal": Tensor.reciprocal,
+  "aten.sqrt": Tensor.sqrt,
   "aten.rsqrt": Tensor.rsqrt,
   "aten.mm": Tensor.matmul,
   "aten.var.correction": Tensor.var,
@@ -162,7 +170,7 @@ tiny_backend = {
   "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
 }
 
-# there's earlier things to hook here
+# NOTE: there's earlier things to hook these, so the .out form isn't needed
 #"aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
 #"aten.abs.out": lambda x,out: out.replace(x.abs(), allow_shape_mismatch=True),
 #"aten.ceil.out": lambda x,out: out.replace(x.ceil(), allow_shape_mismatch=True),
