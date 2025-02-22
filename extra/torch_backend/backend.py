@@ -1,6 +1,8 @@
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 import torch, pathlib
+
+# https://pytorch.org/docs/stable/torch.compiler_ir.html
 
 # TODO: don't replicate this in cpp
 torch_to_tiny_dtype = {
@@ -51,7 +53,8 @@ def as_strided(tensor, size, stride, storage_offset=None):
   if size == [] and storage_offset is not None:
     # TODO: is this right?
     return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+1].reshape(()))
-  print(tensor.shape, size, stride, storage_offset)
+  print(tensor.shape, size, stride, storage_offset, "NOTE: this as_strided is wrong")
+  return wrap(Tensor.zeros(*size))
   raise NotImplementedError("fix as_strided")
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
@@ -69,7 +72,7 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   print(input, weight, bias)
-  raise NotImplementedError
+  raise NotImplementedError("need convolution")
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
@@ -90,6 +93,9 @@ def ceil_out(x, out): unwrap(out).replace(unwrap(x).ceil(), allow_shape_mismatch
 
 @torch.library.impl("aten::abs.out", "privateuseone")
 def abs_out(x, out): unwrap(out).replace(unwrap(x).abs(), allow_shape_mismatch=True)
+
+@torch.library.impl("aten::cat.out", "privateuseone")
+def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
 @torch.library.impl("aten::bitwise_and.Tensor", "privateuseone")
 def bitwise_and_tensor(x, y): return wrap(unwrap(x) & unwrap(y))
@@ -112,5 +118,20 @@ def ne_tensor(x, y): return wrap(unwrap(x).ne(unwrap(y)))
 @torch.library.impl("aten::ne.Scalar", "privateuseone")
 def ne_scalar(x, y): return wrap(unwrap(x).ne(y))
 
+@torch.library.impl("aten::lt.Scalar", "privateuseone")
+def lt_scalar(x, y): return wrap(unwrap(x) < y)
+
 @torch.library.impl("aten::gt.Scalar", "privateuseone")
 def gt_scalar(x, y): return wrap(unwrap(x) > y)
+
+@torch.library.impl("aten::index.Tensor", "privateuseone")
+def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
+
+if getenv("TORCH_DEBUG"):
+  from torch.utils._python_dispatch import TorchDispatchMode
+  class DispatchLog(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args, kwargs=None):
+      #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
+      print(f"Dispatch Log: {func}")
+      return func(*args, **(kwargs or {}))
+  DispatchLog().__enter__()
