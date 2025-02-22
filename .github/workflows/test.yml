@@ -165,7 +165,7 @@ jobs:
     - name: Test ResNet-18
       run: PYTHONPATH=. python3 extra/torch_backend/example.py
     - name: Test Ops with TINY_BACKEND (expect failure)
-      run: PYTHONPATH=. TINY_BACKEND=1 pytest test/test_ops.py || true
+      run: PYTHONPATH=. TINY_BACKEND=1 python3 -m pytest test/test_ops.py || true
     - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
       run: PYTHONPATH=. TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
 
