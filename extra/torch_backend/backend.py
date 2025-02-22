@@ -71,7 +71,8 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   #print(f"{input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias), groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+                                   groups=groups, stride=stride, dilation=dilation, padding=padding))
   #raise NotImplementedError("need convolution")
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
@@ -111,6 +112,7 @@ tiny_backend = {
   "aten.max": Tensor.max,
   "aten.relu": Tensor.relu,
   "aten.mean": Tensor.mean,
+  "aten.neg": Tensor.neg,
 }
 
 # there's earlier things to hook here
