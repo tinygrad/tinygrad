@@ -8,6 +8,10 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
+if getenv("TINY_BACKEND"):
+  import extra.torch_backend.backend # noqa: F401 # pylint: disable=unused-import
+  torch.set_default_device("tiny")
+
 if CI:
   warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
@@ -46,8 +50,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
-    print(out.detach().numpy())
-  compare("forward pass", ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
+    print(out.detach().cpu().numpy())
+  compare("forward pass", ret.numpy(), out.detach().cpu().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
@@ -90,7 +94,7 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
-  tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
+  tst = [Tensor(x.detach().cpu().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):

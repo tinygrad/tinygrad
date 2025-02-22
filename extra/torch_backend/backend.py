@@ -67,8 +67,7 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
-  #print(input, weight, bias)
-  print(f"{input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+  #print(f"{input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias), groups=groups, stride=stride, dilation=dilation, padding=padding))
   #raise NotImplementedError("need convolution")
 
@@ -77,7 +76,9 @@ def _copy_from(src, dest):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
     unwrap(dest).replace(unwrap(src), allow_shape_mismatch=True)
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
-    dest[:] = torch.from_numpy(unwrap(src).numpy())
+    # TODO: is there a better way?
+    dest.resize_(src.numel()).resize_(src.shape)
+    dest.copy_(torch.from_numpy(unwrap(src).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
     unwrap(dest).assign(Tensor(src.numpy()))
   else:
@@ -92,6 +93,8 @@ def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
+  "aten.add_.Tensor": lambda x,y: x.assign(x.add(y)),
+  "aten.pow.Tensor_Scalar": Tensor.pow,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
@@ -99,22 +102,28 @@ tiny_backend = {
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
   "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
-  "aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
-  "aten.abs.out": lambda x,out: out.replace(x.abs(), allow_shape_mismatch=True),
-  "aten.ceil.out": lambda x,out: out.replace(x.ceil(), allow_shape_mismatch=True),
-  "aten.exp2.out": lambda x,out: out.replace(x.exp2(), allow_shape_mismatch=True),
+  "aten.exp2": Tensor.exp2,
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
   "aten.relu": Tensor.relu,
+  "aten.mean": Tensor.mean,
 }
 
-def wrap_fxn(f):
+# there's earlier things to hook here
+#"aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
+#"aten.abs.out": lambda x,out: out.replace(x.abs(), allow_shape_mismatch=True),
+#"aten.ceil.out": lambda x,out: out.replace(x.ceil(), allow_shape_mismatch=True),
+#"aten.exp2.out": lambda x,out: out.replace(x.exp2(), allow_shape_mismatch=True),
+
+def wrap_fxn(k,f):
   def nf(*args, **kwargs):
+    #print(k, len(args), kwargs.keys())
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     return wrap(f(*args, **kwargs))
   return nf
-for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(v))
+
+for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
 if getenv("TORCH_DEBUG"):
   from torch.utils._python_dispatch import TorchDispatchMode

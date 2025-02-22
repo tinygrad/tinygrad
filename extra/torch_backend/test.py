@@ -26,6 +26,11 @@ class TestTorchBackend(unittest.TestCase):
     c = a+b
     np.testing.assert_equal(c.cpu().numpy(), [2,2,2,2])
 
+  def test_exp2(qself):
+    a = torch.ones(4, device=device)
+    b = a.exp2()
+    print(b)
+
   def test_eq(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
