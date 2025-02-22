@@ -129,8 +129,8 @@ class TestImageDType(unittest.TestCase):
       self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
-        if s.outputs[0].dtype == dtypes.float:
-          lst = s.outputs[0].as_buffer().cast("f").tolist()
+        if s.bufs[0].dtype == dtypes.float:
+          lst = s.bufs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
 

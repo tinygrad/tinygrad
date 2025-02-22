@@ -22,7 +22,7 @@ def _simple_test(add, extract=lambda x: x, N=10):
 class TestJit(unittest.TestCase):
 
   @settings(deadline=2e4)
-  @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CLANG"], f"no support on {Device.DEFAULT}")
+  @unittest.skipUnless(Device.DEFAULT in ["LLVM", "CPU"], f"no support on {Device.DEFAULT}")
   @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
   def test_approx_jit_timeout(self, op):
     with Context(TRANSCENDENTAL=2):
@@ -497,8 +497,8 @@ class TestCopyInsideJit(unittest.TestCase):
     @TinyJit
     def add(x,y) -> Tensor: return x.to(Device.DEFAULT)+y
     for _ in range(5):
-      # create a Tensor in CLANG
-      a = Tensor.rand(16,16,device="CLANG").realize()
+      # create a Tensor on CPU
+      a = Tensor.rand(16,16,device="CPU").realize()
       b = Tensor.rand(16,16).realize()
       out = add(a,b)
       np.testing.assert_allclose(out.flatten().tolist(), [x+y for x,y in zip(a.flatten().tolist(), b.flatten().tolist())])
@@ -529,12 +529,12 @@ class TestJitPrune(unittest.TestCase):
     w2_prune = TinyJit(w2, prune=True)
 
     for _ in range(3):
-      a = Tensor.rand(16, device="CLANG").realize()
+      a = Tensor.rand(16, device="CPU").realize()
       out = w2_noprune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
     for _ in range(3):
-      a = Tensor.rand(16, device="CLANG").realize()
+      a = Tensor.rand(16, device="CPU").realize()
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
