@@ -1255,7 +1255,10 @@ class TestLinearizerFailures(unittest.TestCase):
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   def test_failure_53(self):
-    # COMPILE_ERROR, val scope issue
+    #Defining these upfront
+    x20 = UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=())
+    x23 = UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=())
+    
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(), arg=0, src=()),
@@ -1277,11 +1280,11 @@ class TestLinearizerFailures(unittest.TestCase):
                         UOp(Ops.VALID, dtypes.bool, arg=None, src=(
                           UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(50001, 99999), strides=(0, 0), offset=0, mask=((0, 50001), (49999, 99999)), contiguous=False), View(shape=(1024, 50000, 50000), strides=(0, 1, 100000), offset=0, mask=None, contiguous=False))), src=()),)),
                         UOp(Ops.CONST, dtypes.int, arg=1, src=(
-                          x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 50000), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                          x20,)),
                         UOp(Ops.CONST, dtypes.int, arg=0, src=(
                            x20,)),)),)),
                     UOp(Ops.CONST, dtypes.int, arg=-1, src=(
-                      x23:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                      x23,)),)),)),
                 UOp(Ops.CONST, dtypes.bool, arg=True, src=(
                    x23,)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=1, arg=16)]
