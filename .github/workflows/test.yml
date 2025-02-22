@@ -155,6 +155,10 @@ jobs:
       with:
         key: torch-backend
         deps: testing_minimal
+    - name: Install ninja
+      run: |
+        sudo apt update || true
+        sudo apt install -y --no-install-recommends ninja-build
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test Ops with TINY_BACKEND (expect failure)
