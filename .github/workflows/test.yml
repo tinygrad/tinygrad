@@ -156,11 +156,11 @@ jobs:
         key: torch-backend
         deps: testing_minimal
     - name: Test one op
-      run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
+      run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test Ops with TINY_BACKEND (expect failure)
-      run: TINY_BACKEND=1 pytest test/test_ops.py || true
+      run: PYTHONPATH=. TINY_BACKEND=1 pytest test/test_ops.py || true
     - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
-      run: TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
+      run: PYTHONPATH=. TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
 
   tc:
     name: Tensor Core tests
