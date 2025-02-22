@@ -8,6 +8,8 @@ import torch, pathlib
 torch_to_tiny_dtype = {
   torch.float32: dtypes.float32,
   torch.float64: dtypes.float64,
+  torch.uint8: dtypes.uint8,
+  torch.int8: dtypes.int8,
   torch.int32: dtypes.int32,
   torch.int64: dtypes.int64,
   torch.bool: dtypes.bool,
@@ -15,7 +17,10 @@ torch_to_tiny_dtype = {
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[pathlib.Path(__file__).parent / "wrapped_tensor.cpp"])
-wrap, unwrap = mod.wrap, mod.unwrap
+def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x)
+def unwrap(x:torch.Tensor) -> Tensor:
+  assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
+  return mod.unwrap(x)
 class TinyBackend: pass
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend)
@@ -63,7 +68,9 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   #print(input, weight, bias)
-  raise NotImplementedError("need convolution")
+  print(f"{input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias), groups=groups, stride=stride, dilation=dilation, padding=padding))
+  #raise NotImplementedError("need convolution")
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
@@ -79,13 +86,11 @@ def _copy_from(src, dest):
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
-@torch.library.impl("aten::bitwise_and.Tensor", "privateuseone")
-def bitwise_and_tensor(x, y): return wrap(unwrap(x) & unwrap(y))
-
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
 tiny_backend = {
+  "aten.bitwise_and.Tensor": lambda x,y: wrap(unwrap(x) & unwrap(y)),
   "aten.add.Tensor": lambda x,y: wrap(unwrap(x) + unwrap(y)),
   "aten.mul.Tensor": lambda x,y: wrap(unwrap(x) * unwrap(y)),
   "aten.div.Tensor": lambda x,y: wrap(unwrap(x) / unwrap(y)),
@@ -95,12 +100,14 @@ tiny_backend = {
   "aten.ne.Scalar": lambda x,y: wrap(unwrap(x) != y),
   "aten.lt.Scalar": lambda x,y: wrap(unwrap(x) < y),
   "aten.gt.Scalar": lambda x,y: wrap(unwrap(x) > y),
+  "aten.add.out": lambda x,y,out: wrap(unwrap(out).replace(unwrap(x) + y, allow_shape_mismatch=True)), # unwrapping y?
   "aten.abs.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).abs(), allow_shape_mismatch=True)),
   "aten.exp2.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).exp2(), allow_shape_mismatch=True)),
   "aten.ceil.out": lambda x,out: wrap(unwrap(out).replace(unwrap(x).ceil(), allow_shape_mismatch=True)),
   "aten.view": lambda x,sz: wrap(unwrap(x).reshape(sz)),
   "aten.min": lambda x: wrap(unwrap(x).min()),
   "aten.max": lambda x: wrap(unwrap(x).max()),
+  "aten.relu": lambda x: wrap(unwrap(x).relu()),
 }
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(v)

@@ -56,6 +56,8 @@ static caffe2::TypeMeta dtypeFromName(const std::string &dtype_name) {
   } else if (dtype_name == "int") { return caffe2::TypeMeta::Make<int32_t>();
   } else if (dtype_name == "long") { return caffe2::TypeMeta::Make<int64_t>();
   } else if (dtype_name == "bool") { return caffe2::TypeMeta::Make<bool>();
+  } else if (dtype_name == "char") { return caffe2::TypeMeta::Make<char>();
+  } else if (dtype_name == "unsigned char") { return caffe2::TypeMeta::Make<unsigned char>();
   }
   throw std::runtime_error("Unsupported dtype: " + dtype_name);
 }
