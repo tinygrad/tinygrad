@@ -93,10 +93,11 @@ def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
-  "aten.add_.Tensor": lambda x,y: x.assign(x.add(y)),
-  "aten.pow.Tensor_Scalar": Tensor.pow,
+  "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
+  "aten.add_.Tensor": lambda x,y: x.assign(x.add(y)),
+  "aten.pow.Tensor_Scalar": Tensor.pow,
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
   "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
