@@ -174,9 +174,8 @@ const createInfinityUniformBuf = (device) => {{
 }};
 
 const createWeightBuf = (device, size, data) => {{
-  const buf = device.createBuffer({{ size, usage: GPUBufferUsage.STORAGE{f""", mappedAtCreation: true, }});
-  new Uint8Array(buf.getMappedRange()).set(data);
-  buf.unmap();""" if not stream_weights else f""" | GPUBufferUsage.COPY_DST }})\n  data.bytes = buf;"""}
+  const buf = device.createBuffer({{ size, usage: GPUBufferUsage.STORAGE{" | GPUBufferUsage.COPY_DST" if stream_weights else ", mappedAtCreation: true"} }});
+  {"data.bytes = buf;" if stream_weights else "new Uint8Array(buf.getMappedRange()).set(data);\n    buf.unmap();"}
   return buf;
 }};
 
