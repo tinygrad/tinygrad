@@ -142,18 +142,17 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
   outbuf_copies = '\n        '.join([f"commandEncoder.copyBufferToBuffer({output_name}, 0, gpuReadBuffer{i}, 0, output{i}.size);" for i,output_name in enumerate(output_names)])
   output_readers = '\n        '.join([f"await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);\n        const resultBuffer{i} = new {output_buffer_types[i]}(gpuReadBuffer{i}.size/{bufs[output_names[i]][1].itemsize});\n        resultBuffer{i}.set(new {output_buffer_types[i]}(gpuReadBuffer{i}.getMappedRange()));\n        gpuReadBuffer{i}.unmap();" for i in range(len(output_names))])
   output_return = '[{}]'.format(",".join([f'resultBuffer{i}' for i in range(len(output_names))]))
+  getTensorMetadata = f"""\nconst getTensorMetadata = (safetensorBuffer) => {{
+    const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+    const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+    return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
+}};\n""" if not stream_weights else ""
   return f"""
 const {exported_name} = (() => {{
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
 }};
-
-{f"""const getTensorMetadata = (safetensorBuffer) => {{
-    const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
-    const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
-    return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
-}};""" if not stream_weights else ""}
-
+{getTensorMetadata}
 const createEmptyBuf = (device, size) => {{
     return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
 }};
@@ -176,7 +175,7 @@ const createInfinityUniformBuf = (device) => {{
 
 const createWeightBuf = (device, size, data) => {{
   const buf = device.createBuffer({{ size, usage: GPUBufferUsage.STORAGE{" | GPUBufferUsage.COPY_DST" if stream_weights else ", mappedAtCreation: true"} }});
-  {"data.bytes = buf;" if stream_weights else "new Uint8Array(buf.getMappedRange()).set(data);\n    buf.unmap();"}
+  {"data.bytes = buf;" if stream_weights else "new Uint8Array(buf.getMappedRange()).set(data); buf.unmap();"}
   return buf;
 }};
 
