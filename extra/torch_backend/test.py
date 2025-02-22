@@ -2,9 +2,10 @@
 import unittest
 import torch
 import numpy as np
-import extra.torch_backend.backend2  # "tiny" backend is installed
-
-device = "cpu"
+import extra.torch_backend.backend
+device = "tiny"
+#import extra.torch_backend.backend2
+#device = "cpu"
 
 class TestTorchBackend(unittest.TestCase):
   def test_numpy_ones(self):
@@ -30,7 +31,7 @@ class TestTorchBackend(unittest.TestCase):
 
   def test_isfinite(self):
     a = torch.ones(4, device=device)
-    np.testing.assert_equal(torch.isfinite(a), [True, True, True, True])
+    np.testing.assert_equal(torch.isfinite(a).cpu().numpy(), [True, True, True, True])
 
   # TODO: why
   def test_str(self):

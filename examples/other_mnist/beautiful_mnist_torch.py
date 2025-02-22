@@ -26,9 +26,12 @@ class Model(nn.Module):
     return self.lin(torch.flatten(x, 1))
 
 if __name__ == "__main__":
-  if getenv("TINY_BACKEND"):
+  if getenv("TINY_BACKEND2"):
     import extra.torch_backend.backend2
     device = torch.device("cpu")
+  elif getenv("TINY_BACKEND"):
+    import extra.torch_backend.backend
+    device = torch.device("tiny")
   else:
     device = torch.device("mps")
   X_train, Y_train, X_test, Y_test = mnist()
