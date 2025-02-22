@@ -38,6 +38,7 @@ async function getDevice() {
   const maxBufferSize = 322122544;
   requiredLimits.maxStorageBufferBindingSize = maxBufferSize;
   requiredLimits.maxBufferSize = maxBufferSize;
+  requiredLimits.maxComputeInvocationsPerWorkgroup = 512; // may need to vary based on what the WEBGPU backend produces
             
   try {
     return await adapter.requestDevice({ requiredLimits });
@@ -282,7 +283,10 @@ async function load_state_dict (data, device, progress) {
   // instantiates empty weight buffers on WebGPU, attaches buffers to state_dict
   let model;
   if (window.BACKEND === "WebGPU") {
-    model = await transformer().setup(device, state_dict, progress);
+    //model = await transformer().setup(device, state_dict, progress);
+    model = await transformer.setupNet(device, state_dict);
+    progress(0.15 * progress.total);
+
   }
   else if (window.BACKEND === "WASM") {
     progress(0.02 * progress.total);
@@ -413,7 +417,8 @@ document.addEventListener("alpine:init", () => {
         if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);} // TODO: is cache-busting necessary
         else if (window.BACKEND === "WebGPU" && !window.isMobile) {var exports = await import(`${PC_WEBGPU_EXPORT}?version=${Date.now()}`);}
         else if (window.BACKEND === "WebGPU" && window.isMobile) {var exports = await import(`${MOBILE_WEBGPU_EXPORT}?version=${Date.now()}`);}
-        Object.assign(self, exports);
+        //Object.assign(self, exports);
+        self.transformer = exports.default;
       })();
 
       const response = await fetch(`${window.MODEL_BASE_URL}/net_metadata.json`);

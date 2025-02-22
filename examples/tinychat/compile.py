@@ -92,7 +92,7 @@ if __name__=="__main__":
   Tensor.no_grad = True
   max_context=4096
 
-  # float16 is not yet supported for WebGPU/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
+  # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
   # therefore for now, use CLANG to quantize the float16 llama to int8 with float32 scales, then load to WEBGPU
   Device.DEFAULT="CLANG"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
@@ -224,15 +224,15 @@ if __name__=="__main__":
 
   for step in sub_steps:
     print(f'Executing step={step.name}')
-    with Context(BEAM=0):
+    with Context(BEAM=3):
       model.__call__ = model.forward
-      prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *step.input, model_name=step.name)
+      prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *step.input, model_name=step.name, stream_weights=True)
 
     if step.name == "transformer":
       prg = prg.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale") # ensure consistency with exported weights
 
     with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
-      text_file.write(prg + f"export {{ {step.name} }}")
+      text_file.write(prg)
 
   sys.exit()
 
