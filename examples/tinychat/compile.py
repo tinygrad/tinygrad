@@ -94,7 +94,7 @@ if __name__=="__main__":
 
   # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
   # therefore for now, use CLANG to quantize the float16 llama to int8 with float32 scales, then load to WEBGPU
-  Device.DEFAULT="CLANG"
+  Device.DEFAULT="CPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
   Device.DEFAULT="WEBGPU"
