@@ -368,7 +368,9 @@ class TestMultiTensor(unittest.TestCase):
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     from tinygrad.nn.optim import LARS
+    import numpy as np
 
+    # Test case 1: Random input data
     fake_image = Tensor.rand((2, 3, 224//8, 224//8))
     fake_image_sharded = fake_image.shard(devices_2, axis=0)
     labels = Tensor.randint(2, low=0, high=1000)
@@ -389,7 +391,52 @@ class TestMultiTensor(unittest.TestCase):
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
-    # sometimes there is zeros in these grads... why?
+    np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+    # Test case 2: All zeros input data
+    fake_image = Tensor.zeros((2, 3, 224//8, 224//8))
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    labels = Tensor.randint(2, low=0, high=1000)
+    labels_sharded = labels.shard(devices_2, axis=0)
+
+    m = ResNet18()
+    optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
+
+    optimizer.zero_grad()
+    m.load_from_pretrained()
+    output = m(fake_image).sparse_categorical_crossentropy(labels, label_smoothing=0.1)
+    output.backward()
+    grad = m.conv1.weight.grad.numpy()
+
+    for p in get_parameters(m): p.shard_(devices_2).realize()
+    GlobalCounters.reset()
+    optimizer.zero_grad()
+    shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
+    shard_output.backward()
+    shard_grad = m.conv1.weight.grad.numpy()
+    np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+
+    # Test case 3: All ones input data
+    fake_image = Tensor.ones((2, 3, 224//8, 224//8))
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    labels = Tensor.randint(2, low=0, high=1000)
+    labels_sharded = labels.shard(devices_2, axis=0)
+
+    m = ResNet18()
+    optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
+
+    optimizer.zero_grad()
+    m.load_from_pretrained()
+    output = m(fake_image).sparse_categorical_crossentropy(labels, label_smoothing=0.1)
+    output.backward()
+    grad = m.conv1.weight.grad.numpy()
+
+    for p in get_parameters(m): p.shard_(devices_2).realize()
+    GlobalCounters.reset()
+    optimizer.zero_grad()
+    shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
+    shard_output.backward()
+    shard_grad = m.conv1.weight.grad.numpy()
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   def test_assign_kv_cache_multi(self):

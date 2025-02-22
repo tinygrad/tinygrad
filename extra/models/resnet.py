@@ -26,10 +26,10 @@ class BasicBlock:
       ]
 
   def __call__(self, x):
-    out = self.bn1(self.conv1(x)).relu()
+    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
     out = self.bn2(self.conv2(out))
     out = out + x.sequential(self.downsample)
-    out = out.relu()
+    out = out.leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
     return out
 
 
@@ -54,12 +54,13 @@ class Bottleneck:
       ]
 
   def __call__(self, x):
-    out = self.bn1(self.conv1(x)).relu()
-    out = self.bn2(self.conv2(out)).relu()
+    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
+    out = self.bn2(self.conv2(out)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
     out = self.bn3(self.conv3(out))
     out = out + x.sequential(self.downsample)
-    out = out.relu()
+    out = out.leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
     return out
+
 
 class ResNet:
   def __init__(self, num, num_classes=None, groups=1, width_per_group=64, stride_in_1x1=False):
@@ -106,7 +107,7 @@ class ResNet:
   def forward(self, x):
     is_feature_only = self.fc is None
     if is_feature_only: features = []
-    out = self.bn1(self.conv1(x)).relu()
+    out = self.bn1(self.conv1(x)).leakyrelu()  # Changed from .leakyrelu() to .leakyrelu()
     out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
     if is_feature_only: features.append(out)
@@ -152,12 +153,14 @@ class ResNet:
       if 'bn' not in k and 'downsample' not in k: assert obj.shape == dat.shape, (k, obj.shape, dat.shape)
       obj.assign(dat.to(obj.device).reshape(obj.shape))
 
+
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
 ResNet34 = lambda num_classes=1000: ResNet(34, num_classes=num_classes)
 ResNet50 = lambda num_classes=1000: ResNet(50, num_classes=num_classes)
 ResNet101 = lambda num_classes=1000: ResNet(101, num_classes=num_classes)
 ResNet152 = lambda num_classes=1000: ResNet(152, num_classes=num_classes)
 ResNeXt50_32X4D = lambda num_classes=1000: ResNet(50, num_classes=num_classes, groups=32, width_per_group=4)
+
 
 if __name__ == "__main__":
   model = ResNet18()
