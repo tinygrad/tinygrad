@@ -143,6 +143,29 @@ jobs:
         ./autogen_stubs.sh llvm
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
 
+  torchbackend:
+    name: Torch Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: torch-backend
+        deps: testing_minimal
+    - name: Install ninja
+      run: |
+        sudo apt update || true
+        sudo apt install -y --no-install-recommends ninja-build
+    - name: Test one op
+      run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
+    - name: Test Ops with TINY_BACKEND (expect failure)
+      run: PYTHONPATH=. TINY_BACKEND=1 pytest test/test_ops.py || true
+    - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
+      run: PYTHONPATH=. TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
+
   tc:
     name: Tensor Core tests
     runs-on: ubuntu-latest
