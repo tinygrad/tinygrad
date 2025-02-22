@@ -69,7 +69,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt_grad) in enumerate(zip(ts, tst_grads)):
-      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
+      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
 
     """
     (ret+1).square().mean().backward()

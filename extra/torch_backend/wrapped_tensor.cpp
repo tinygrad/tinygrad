@@ -10,6 +10,17 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::
 }
 }
 
+struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
+  // NOTE: no idea what this is
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
+};
+
+int register_hook() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
+  return 0;
+}
+int temp_register_hook = register_hook();
+
 // code from chatgpt
 struct GILSafeDeleter {
   void operator()(PyObject* ptr) const {

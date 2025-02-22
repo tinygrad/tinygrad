@@ -1,6 +1,7 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEBUG, getenv
 import torch, pathlib
+torch.autograd.grad_mode.set_multithreading_enabled(False)
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
@@ -49,12 +50,14 @@ def as_strided(tensor, size, stride, storage_offset=None):
   if size == [] and storage_offset is not None:
     # TODO: is this right?
     return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+1].reshape(()))
+  # broadcast
+  if len(tensor.shape) == 0: return wrap(unwrap(tensor).reshape((1,)*len(size)).expand(size))
   print(tensor.shape, size, stride, storage_offset, "NOTE: this as_strided is wrong")
   return wrap(Tensor.zeros(*size))
   raise NotImplementedError("fix as_strided")
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
-def empty_strided(size, stride, dtype, layout, device, pin_memory):
+def empty_strided(size, stride, dtype, layout, device, pin_memory=False):
   if DEBUG >= 2: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
   ret = Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype])
   return wrap(ret)
