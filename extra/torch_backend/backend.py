@@ -114,10 +114,6 @@ def random(tensor, low=0, high=None):
   if high is None: high = float(2**(dtypes.finfo(dt)[1]+1)) if dtypes.is_float(dt:=tensor.dtype) else dtypes.max(dt)
   tensor.assign(Tensor.uniform(*tensor.shape, low=low, high=high, dtype=tensor.dtype))
 
-def arange(start, stop=None, step=1, dtype=None, *, device, pin_memory=False) -> Tensor:
-  assert dtype is not None
-  return Tensor.arange(start, stop, step, dtype=to_tiny_dtype(dtype))
-
 def arange_start(start, stop=None, step=1, dtype=None, *, out) -> Tensor:
   if dtype is None: dtype = torch.get_default_dtype() if any(isinstance(x, float) for x in (start, stop, step)) else torch.int64
   out.replace(Tensor.arange(start, stop, step, dtype=to_tiny_dtype(dtype)), allow_shape_mismatch=True)
