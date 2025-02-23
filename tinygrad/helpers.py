@@ -27,7 +27,6 @@ def all_same(items:Union[tuple[T, ...], list[T]]): return all(x == items[0] for 
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
-def memsize_to_str(b: int) -> str: return next((f"{(b / d):.2f} {pr}" for d,pr in [(1e9,"GB"),(1e6,"MB"),(1e3,"KB"),(1,"B")] if b >= d), "0.00 B")
 def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,pr in [(1, "s "),(1e3, "ms")] if t > 10/d), f"{t * 1e6:{w}.2f}us")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
@@ -51,7 +50,7 @@ def data64_le(data:Any) -> tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 3
 def getbits(value: int, start: int, end: int): return (value >> start) & ((1 << end-start+1) - 1)
 def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
-  kvs = set([(k,v) for d in ds for k,v in d.items()])
+  kvs = set((k,v) for d in ds for k,v in d.items())
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
 def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]]:
@@ -76,7 +75,7 @@ def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else 
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
 @functools.lru_cache(maxsize=None)
-def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
+def to_function_name(s:str): return ''.join(c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s))
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str, append_user:bool=False) -> str:
@@ -191,8 +190,7 @@ def diskcache_clear():
 def diskcache_get(table:str, key:Union[dict, str, int]) -> Any:
   if CACHELEVEL < 1: return None
   if isinstance(key, (str,int)): key = {"key": key}
-  conn = db_connection()
-  cur = conn.cursor()
+  cur = db_connection().cursor()
   try:
     res = cur.execute(f"SELECT val FROM '{table}_{VERSION}' WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
@@ -211,7 +209,7 @@ def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=Fals
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
   conn.commit()
   cur.close()
   return val
@@ -219,7 +217,7 @@ def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=Fals
 def diskcache(func):
   def wrapper(*args, **kwargs) -> bytes:
     table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
-    if (ret:=diskcache_get(table, key)): return ret
+    if (ret:=diskcache_get(table, key)) is not None: return ret
     return diskcache_put(table, key, func(*args, **kwargs))
   return wrapper
 
