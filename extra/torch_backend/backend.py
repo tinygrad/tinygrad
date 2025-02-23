@@ -1,4 +1,5 @@
 from tinygrad import Tensor, dtypes
+from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, getenv
 import torch, pathlib
 torch.autograd.grad_mode.set_multithreading_enabled(False)
@@ -15,6 +16,8 @@ torch_to_tiny_dtype = {
   torch.int64: dtypes.int64,
   torch.bool: dtypes.bool,
 }
+
+def to_tiny_dtype(torch_dtype:str|None) -> DType|None: return None if torch_dtype is None else torch_to_tiny_dtype[torch_dtype]
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[pathlib.Path(__file__).parent / "wrapped_tensor.cpp"])
@@ -59,13 +62,13 @@ def as_strided(tensor, size, stride, storage_offset=None):
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout, device, pin_memory=False):
   if DEBUG >= 2: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype])
+  ret = Tensor.empty(*size, dtype=to_tiny_dtype(dtype))
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
   if DEBUG >= 2: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
-  ret = Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype])
+  ret = Tensor.empty(*size, dtype=to_tiny_dtype(dtype))
   return wrap(ret)
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
@@ -123,6 +126,8 @@ tiny_backend = {
   "aten.any.out": lambda x, axis, keepdim, out: out.assign(x.any(axis, keepdim)),
   "aten.argmin": Tensor.argmin,
   "aten.argmax": Tensor.argmax,
+  "aten.sum": lambda x, dim=None, keepdim=False, *, dtype=None: x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype)),
+  "aten.sum.IntList_out": lambda x, dim=None, keepdim=False, *, dtype=None, out: out.assign(x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype))),
   "aten._softmax": lambda x, dim, half_to_float: x.softmax(dim, dtypes.float if half_to_float else None),
   "aten._log_softmax": lambda x, dim, half_to_float: x.log_softmax(dim, dtypes.float if half_to_float else None),
   "aten._logcumsumexp": Tensor.logcumsumexp,
