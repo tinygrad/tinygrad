@@ -170,6 +170,7 @@ tiny_backend = {
   "aten.sin": Tensor.sin,
   "aten.sinh": Tensor.sinh,
   "aten.sqrt": Tensor.sqrt,
+  "aten.std.correction": Tensor.std,
   "aten.tan": Tensor.tan,
   "aten.tanh": Tensor.tanh,
   "aten.trunc": Tensor.trunc,
