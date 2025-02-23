@@ -142,9 +142,11 @@ tiny_backend = {
   "aten.mm": Tensor.matmul,
   "aten.neg": Tensor.neg,
   "aten.relu": Tensor.relu,
+  "aten.rsqrt": Tensor.rsqrt,
   "aten.sgn": Tensor.sign,
   "aten.sin": Tensor.sin,
   "aten.sinh": Tensor.sinh,
+  "aten.sqrt": Tensor.sqrt,
   "aten.tan": Tensor.tan,
   "aten.tanh": Tensor.tanh,
 }
