@@ -109,6 +109,12 @@ tiny_backend = {
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
   "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
+
+  "aten.all": Tensor.all,
+  "aten.all.out": lambda x, axis, keepdim, out: out.assign(x.all(axis, keepdim)),
+  "aten.any": Tensor.any,
+  "aten.any.out": lambda x, axis, keepdim, out: out.assign(x.any(axis, keepdim)),
+
   "aten.abs": Tensor.abs,
   "aten.acos": Tensor.acos,
   "aten.acosh": Tensor.acosh,
