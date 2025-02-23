@@ -145,6 +145,7 @@ tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.addmv.out": addmv,
   "aten.addmm.out": addmm,
+  "aten.dot": Tensor.dot,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
