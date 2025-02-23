@@ -135,6 +135,7 @@ tiny_backend = {
   "aten.erf": Tensor.erf,
   "aten.exp": Tensor.exp,
   "aten.exp2": Tensor.exp2,
+  "aten.floor": Tensor.floor,
   "aten.hardtanh": Tensor.hardtanh,
   "aten.max": Tensor.max,
   "aten.mean": Tensor.mean,
