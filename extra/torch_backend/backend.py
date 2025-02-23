@@ -126,12 +126,25 @@ def arange_start(start, stop=None, step=1, dtype=None, *, out) -> Tensor:
 reduction_by_value = {_Reduction.get_enum(x): x for x in ("none", "mean", "sum")}
 def nll_loss(tensor, target, weight=None, reduction=None, ignore_index=None):
   reduction = "mean" if reduction is None else reduction_by_value[reduction]
-  return tensor.nll_loss(target, weight, ignore_index, reduction)
+  r = tensor.nll_loss(target, weight, ignore_index, reduction)
+  return r, r # TODO: What we should return?
+
+# inline ::std::tuple<at::Tensor, at::Tensor, at::Tensor>
+# at::native_batch_norm(const at::Tensor &input, const ::std::optional<at::Tensor> &weight, const ::std::optional<at::Tensor> &bias, const ::std::optional<at::Tensor> &running_mean, const ::std::optional<at::Tensor> &running_var, bool training, double momentum, double eps)
+def native_batch_norm(tensor, *args, **kwargs):
+  return tensor, tensor, tensor # TODO
+
+def addmv(tensor, mat, vec, *, beta=1, alpha=1, out): out.assign(beta * tensor + alpha * mat.dot(vec))
+def addmm(tensor, mat1, mat2, *, beta=1, alpha=1, out): out.assign(beta * tensor + alpha * mat1.dot(mat2))
 
 tiny_backend = {
   "aten.nll_loss_forward": nll_loss,
   "aten.nll_loss2d_forward": nll_loss,
+  "aten.native_batch_norm": native_batch_norm,
+
   "aten.view": Tensor.reshape,
+  "aten.addmv.out": addmv,
+  "aten.addmm.out": addmm,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
