@@ -119,6 +119,7 @@ tiny_backend = {
   "aten.any.out": lambda x, axis, keepdim, out: out.assign(x.any(axis, keepdim)),
   "aten.argmin": Tensor.argmin,
   "aten.argmax": Tensor.argmax,
+  "aten._softmax": lambda x, dim, half_to_float: x.softmax(dim, dtypes.float if half_to_float else None),
 
   "aten.abs": Tensor.abs,
   "aten.acos": Tensor.acos,
