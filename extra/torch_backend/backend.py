@@ -121,6 +121,7 @@ tiny_backend = {
   "aten.argmax": Tensor.argmax,
   "aten._softmax": lambda x, dim, half_to_float: x.softmax(dim, dtypes.float if half_to_float else None),
   "aten._log_softmax": lambda x, dim, half_to_float: x.log_softmax(dim, dtypes.float if half_to_float else None),
+  "aten._logcumsumexp": Tensor.logcumsumexp,
 
   "aten.abs": Tensor.abs,
   "aten.acos": Tensor.acos,
