@@ -103,6 +103,10 @@ def max_pool2d(x, kernel_size, stride=(), padding=0, dilation=1, ceil_mode=False
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
+def mean_out(tensor, axis=None, keepdim=False, *, dtype=None, out):
+  tensor = tensor if dtype is None else tensor.cast(to_tiny_dtype(tensor))
+  return out.replace(tensor.mean(axis, keepdim), allow_shape_mismatch=True)
+
 tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
@@ -170,6 +174,7 @@ tiny_backend = {
   "aten.log2": Tensor.log2,
   "aten.max": Tensor.max,
   "aten.mean": Tensor.mean,
+  "aten.mean.out": mean_out,
   "aten.min": Tensor.min,
   "aten.mm": Tensor.matmul,
   "aten.neg": Tensor.neg,
