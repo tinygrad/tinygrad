@@ -8,6 +8,10 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
+if getenv("TINY_BACKEND"):
+  import extra.torch_backend.backend # noqa: F401 # pylint: disable=unused-import
+  torch.set_default_device("tiny")
+
 if CI:
   warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
@@ -46,8 +50,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
-    print(out.detach().numpy())
-  compare("forward pass", ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
+    print(out.detach().cpu().numpy())
+  compare("forward pass", ret.numpy(), out.detach().cpu().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
@@ -65,7 +69,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt_grad) in enumerate(zip(ts, tst_grads)):
-      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
+      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
 
     """
     (ret+1).square().mean().backward()
@@ -90,7 +94,7 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
-  tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
+  tst = [Tensor(x.detach().cpu().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
@@ -610,7 +614,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x**0.0)
     helper_test_op([(45,65)], lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0)
+    helper_test_op([(45,65)], lambda x: x**8.0)
+    helper_test_op([(45,65)], lambda x: x**5.5)
+    helper_test_op([(45,65)], lambda x: x**-5.5)
+    # helper_test_op([(45,65)], lambda x: x**-8.0)  # TODO: fix this
     helper_test_op([(45,65)], lambda x: 1.0**x)
+    helper_test_op([(45,65)], lambda x: 5.5**x)
+    helper_test_op([(45,65)], lambda x: (-5.5)**x)
+    helper_test_op([(45,65)], lambda x: 8.0**x)
     helper_test_op([(45,65)], lambda x: x**2.0)
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
@@ -628,6 +639,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
     helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
@@ -1260,6 +1272,25 @@ class TestOps(unittest.TestCase):
   def test_all_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
 
+  def test_isclose(self):
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)
+    helper_test_op([(3, 4, 5, 6), (3, 4, 5, 6)], lambda x,y: x.isclose(y), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x, equal_nan=True), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6, atol=0.0), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, atol=0.0), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6, rtol=0.01), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, rtol=0.01), forward_only=True)
+    helper_test_op(None, lambda x,y: x.isclose(y), vals=[[1e-7, 1e-8, 1e-9], [0.0, 0.0, 0.0]], forward_only=True)
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "isinf check of 'nan' fails on CI software-based vulkan")
+  def test_isclose_edge_cases(self):
+    for a in [math.inf, -math.inf, math.nan, 0.0]:
+      for b in [math.inf, -math.inf, math.nan, 0.0]:
+        helper_test_op(None, lambda x,y: x.isclose(y), vals=[[a], [b]], forward_only=True)
+        helper_test_op(None, lambda x,y: x.isclose(y, equal_nan=True), vals=[[a], [b]], forward_only=True)
+
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
     helper_test_op([()], lambda x: x.mean())
@@ -1387,7 +1418,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=-1), lambda x: x.logcumsumexp(-1), atol=1e-7, grad_atol=1e-7)
 
-  @unittest.expectedFailure  # TODO: fix numerical instability
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
 
@@ -2560,12 +2590,16 @@ class TestOps(unittest.TestCase):
                                        lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     helper_test_op([(10,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                             lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
+
     self.helper_test_exception([(2,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                                        lambda x,src: x.scatter(dim=1, index=a, src=src), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(10,3,10), (10,3,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                                        lambda x,src: x.scatter(dim=1, index=a, src=src), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(3,4,5), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src, mode="typo"),
-                                       lambda x,src: x.scatter(dim=1, index=a, src=src, mode="typo"), expected=TypeError)
+                                                   lambda x,src: x.scatter(dim=1, index=a, src=src, mode="typo"), expected=TypeError)
+    self.helper_test_exception([(3,4,5), (3,4,5)], lambda x,src: x.half().scatter(dim=1, index=b, src=src),
+                                                   lambda x,src: x.half().scatter(dim=1, index=a, src=src), expected=RuntimeError)
+
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=3), lambda x: x.scatter(dim=1, index=a, src=3), forward_only=True)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf")),
       lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
@@ -2627,12 +2661,18 @@ class TestOps(unittest.TestCase):
       lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
       lambda src: x.scatter_reduce(dim=1, index=a, src=src, reduce="prod"), forward_only=True)
 
-  def test_scatter_reduce_invalid_reduce_op(self):
+  def test_scatter_reduce_errors(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    # invalid reduce arg
     self.helper_test_exception([(4,5,6), (4,5,6)],
       lambda x,src: x.scatter_reduce(dim=0, index=b, src=src, reduce="INVALID"),
       lambda x,src: x.scatter_reduce(dim=0, index=a, src=src, reduce="INVALID"),
+      RuntimeError)
+    # dtype mismatch
+    self.helper_test_exception([(4,5,6), (4,5,6)],
+      lambda x,src: x.half().scatter_reduce(dim=0, index=b, src=src, reduce="sum"),
+      lambda x,src: x.half().scatter_reduce(dim=0, index=a, src=src, reduce="sum"),
       RuntimeError)
 
   def test_scaled_dot_product_attention(self):

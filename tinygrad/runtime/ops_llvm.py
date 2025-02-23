@@ -1,4 +1,4 @@
-import ctypes, platform, sys
+import ctypes, platform
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -17,7 +17,7 @@ class LLVMCompiler(Compiler):
 
     triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_clang.py, see comments there for why it's needed on arm osx
+    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
@@ -55,4 +55,4 @@ class LLVMCompiler(Compiler):
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
     compiler = LLVMCompiler({'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()])
-    super().__init__(device, MallocAllocator, LLVMRenderer('win64cc' if sys.platform == 'win32' else None), compiler, CPUProgram)
+    super().__init__(device, MallocAllocator, LLVMRenderer(), compiler, CPUProgram)

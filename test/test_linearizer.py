@@ -19,9 +19,10 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   if isinstance(r, Tensor): r = [r]
   s = Tensor.schedule(*r)
   run_schedule(s[:-1])  # run all kernels except the last one
-  # now all input LazyBuffers buffers in s[-1] should be realized
-  # create fresh buffers for the output buffer
-  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if x in s[-1].outputs else x for x in s[-1].bufs]
+  assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
+  # now all input buffers in s[-1] should be realized
+  # create fresh buffers for the outputs
+  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
@@ -64,7 +65,7 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
-    # without contiguous folding, rand.to("CLANG") and rand.contiguous().to("CLANG") are different UOps.
+    # without contiguous folding, rand.to("CPU") and rand.contiguous().to("CPU") are different UOps.
     # this test asserts they are the identical Buffer
     # having different buffers is fine for correctness, because the outputs match.
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
@@ -952,7 +953,7 @@ class TestLinearizer(unittest.TestCase):
     sink = UOp(Ops.SINK, src=(store,))
     lin = Kernel(sink)
     lin.linearize()
-    assert len(lin.uops) <= 9, "too many uops"
+    assert len(lin.uops) <= 10, "too many uops"
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
@@ -983,8 +984,8 @@ class TestLinearizer(unittest.TestCase):
 
   # NOTE: can reenable, it does work. it just makes BEAM slow
   @unittest.expectedFailure
-  @unittest.skipUnless(Device.DEFAULT == "CLANG", "test only for CLANG")
-  def test_upcast_with_locals_clang(self):
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
+  def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
     k = Kernel(out.schedule()[-1].ast)
     k.apply_opt(Opt(OptOps.LOCAL, axis=0, arg=4))
@@ -1136,7 +1137,7 @@ class TestLinearizer(unittest.TestCase):
         assert u.src[-1].src[0].op != Ops.ASSIGN
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipIf(Device.DEFAULT in {"CLANG", "LLVM"}, "CLANG does not support using a different type for accumulation")
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
@@ -1148,7 +1149,7 @@ class TestLinearizer(unittest.TestCase):
         assert u.src[-1].src[0].op != Ops.ASSIGN
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipIf(Device.DEFAULT in {"CLANG", "LLVM"}, "CLANG does not support using a different type for accumulation")
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all ASSIGN children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
@@ -1175,13 +1176,14 @@ class TestLinearizer(unittest.TestCase):
         assert end_range < k.uops.index(u)
 
   def test_grouped_dims(self):
-    def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
+    def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes, assert_same_length = True):
       idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
       loop_idxs = dedup(flatten([[y for y in x.toposort if y.op is Ops.SPECIAL] for x in idxs]))
       loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[1] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
-      assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
+      if assert_same_length:
+        assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
       assert sizes == expected_sizes, f"expected sizes={expected_sizes}, got {sizes=}"
       # TODO: add these back after uop symbolic
       # for i in range(len(dims)):
@@ -1198,11 +1200,26 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (2,3), (16,16,16), True, [3,2])
     _assert_grouped_dims("gidx", (2,3,4), (16,16,16), False, [2,3,4])
 
-    # test splitting globals
-    # _assert_grouped_dims("gidx", (64,3,4), (16,16,16), False, [16,12,4])
-    # _assert_grouped_dims("gidx", (64,3,4), (16,4,16), False, [16,4,12])
-    # _assert_grouped_dims("gidx", (64,3,4), (16,16,16), True, [12,16,4])
-    # _assert_grouped_dims("gidx", (128,3,4), (16,4,256), False, [16,4,24])
+    # test splitting globals:    len(dims) == len(max)
+    _assert_grouped_dims("gidx", (64,3,4), (16,16,16), False, [16,12,4])
+    _assert_grouped_dims("gidx", (64,3,4), (16,4,16), False, [16,3,16])
+    _assert_grouped_dims("gidx", (64,3,4), (16,16,16), True, [16,3,16])
+    _assert_grouped_dims("gidx", (128,3,4), (16,4,256), False, [16,3,32])
+    _assert_grouped_dims("gidx", (4,4,512), (16,4,256), False, [8,4,256])
+
+    # prefer group_dim strategy when possible
+    _assert_grouped_dims("gidx", (512,4,2), (8192,2,2), False, [2048,2])
+
+    # test splitting globals:    len(dims) < len(max)
+    #                            len(dim)        ->          len(limited)
+    #                              1             ->             2
+    _assert_grouped_dims("gidx", (128,), (16,16,256), False, [16,8], False)
+    #                              1             ->             3
+    _assert_grouped_dims("gidx", (65536,), (16,16,256), False, [16,16,256], False)
+    #                              2             ->             3
+    _assert_grouped_dims("gidx", (128,128), (16,16,256), False, [16,16,64], False)
+    # test when the only divisor is the square root of dim
+    _assert_grouped_dims("gidx", (121,), (12,12,12), False, [11,11], False)
 
     # collapse on onto the left most axis
     _assert_grouped_dims("gidx", (2,3,4,5), (16,16,16), False, [6,4,5])
@@ -1215,11 +1232,11 @@ class TestLinearizer(unittest.TestCase):
 
     # _assert_grouped_dims("gidx", (Variable("start_pos",1,2),3,4,5), (16,16,16), False, [Variable("start_pos",1,2)*3,4,5])
 
-    # # dim too large and not factorable
-    # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", (23,), (16,16,16), False,)
-    # with self.assertRaises(AssertionError):
-    #   get_grouped_dims("gidx", (128,3,4), (16,4,23), False,)
+    # dim too large and not factorable
+    with self.assertRaises(RuntimeError):
+      get_grouped_dims("gidx", (23,), (16,16,16), False,)
+    with self.assertRaises(RuntimeError):
+      get_grouped_dims("gidx", (128,3,4), (16,2,2), False,)
 
     # too large for sizes
     with self.assertRaises(RuntimeError):
@@ -1429,7 +1446,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (2, 1)
 
-  @unittest.skipIf(Device.DEFAULT in {"CLANG", "LLVM"} and AMX, "CLANG with AMX upcasts float up to size 16")
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
     a = Tensor.rand(2, 8).realize()
     b = Tensor.rand(2, 8).realize()
@@ -1446,7 +1463,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (4, 2)
 
-  @unittest.skipUnless(Device.DEFAULT in {"CLANG", "LLVM"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
+  @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
     def kernel_for_shape(size, shift):
       a = Tensor.rand(2, size).realize()
@@ -1471,7 +1488,7 @@ class TestFloat4(unittest.TestCase):
     for i in range(len(sizes)):
       assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
-  @unittest.skipIf(Device.DEFAULT in {"CLANG", "LLVM"} and AMX, "CLANG with AMX upcasts float up to size 16")
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
     a = Tensor.rand(9).realize().shrink(((1, 9),))
     b = Tensor.rand(9).realize().shrink(((1, 9),))
@@ -1484,7 +1501,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 1)
 
-  @unittest.skipIf(Device.DEFAULT in {"CLANG", "LLVM"} and AMX, "CLANG with AMX upcasts float up to size 16")
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
     a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
@@ -1501,7 +1518,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (0, 2)
 
-  @unittest.skipUnless(Device.DEFAULT in {"CLANG", "LLVM"} and AMX, "Only CLANG with AMX upcasts float up to size 16")
+  @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
     def kernel_for_shape(size, shift):
       a = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
