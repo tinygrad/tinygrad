@@ -73,7 +73,7 @@ class TestContribOnnxOps(TestOnnxOps):
     num_heads, head_size = 4, 64
     hidden_size = num_heads * head_size
     v_hidden_size = hidden_size
-    past_seq_len = 4
+    # past_seq_len = 4
 
     base_inps = {
       "input": np.random.randn(batch_size, seq_len, input_hidden_size).astype(np.float32),
