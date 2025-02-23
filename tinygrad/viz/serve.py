@@ -14,7 +14,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0"}
+               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.NAME:"#808080"}
 
 # VIZ API
 
@@ -30,12 +30,13 @@ class GraphRewriteMetadata(TypedDict):
   match_count: int                       # total match count in this context
   code_line: str                         # source code calling graph_rewrite
   kernel_code: str|None                  # optionally render the final kernel code
+  name: str|None                         # optional name of the rewrite
 
 @functools.lru_cache(None)
 def _prg(k:Kernel): return k.to_program().src
 def to_metadata(k:Any, v:TrackedGraphRewrite) -> GraphRewriteMetadata:
   return {"loc":v.loc, "match_count":len(v.matches), "code_line":lines(v.loc[0])[v.loc[1]-1].strip(),
-          "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None}
+          "kernel_code":pcall(_prg, k) if isinstance(k, Kernel) else None, "name":v.name}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[tuple[str, list[GraphRewriteMetadata]]]:
   return [(k.name if isinstance(k, Kernel) else str(k), [to_metadata(k, v) for v in vals]) for k,vals in zip(keys, contexts)]
 
@@ -54,8 +55,8 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   graph: dict[int, tuple[str, list[int], str]] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
-    # always exclude DEVICE/CONST
-    if u.op in {Ops.DEVICE, Ops.CONST}: excluded.add(u)
+    # always exclude DEVICE/CONST/UNIQUE
+    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE}: excluded.add(u)
     # only exclude CONST VIEW source if it has no other children in the graph
     if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
       excluded.update(u.src)
@@ -75,13 +76,14 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph": (sink_json:=uop_to_json(sink:=ctx.sink)), "uop":str(sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink:=ctx.sink), "uop":str(ctx.sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0,u1,upat in tqdm(ctx.matches):
     replaces[u0] = u1
-    sink = sink.substitute(replaces)
-    yield {"graph": (sink_json:=uop_to_json(sink)), "uop":str(sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
+    new_sink = next_sink.substitute(replaces)
+    yield {"graph": (sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())), "upat":(upat.location, upat.printable())}
+    if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
@@ -122,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
     elif (url:=urlparse(self.path)).path == "/profiler":
       with open(os.path.join(os.path.dirname(__file__), "perfetto.html"), "rb") as f: ret = f.read()
-    elif self.path.startswith("/assets/") and '/..' not in self.path:
+    elif (self.path.startswith("/assets/") or self.path.startswith("/lib/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
         if url.path.endswith(".js"): content_type = "application/javascript"
@@ -132,16 +134,19 @@ class Handler(BaseHTTPRequestHandler):
       if "kernel" in (query:=parse_qs(url.query)):
         def getarg(k:str,default=0): return int(query[k][0]) if k in query else default
         kidx, ridx = getarg("kernel"), getarg("idx")
-        # stream details
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
-          self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-          self.wfile.flush()
-        self.wfile.write("data: END\n\n".encode("utf-8"))
-        return self.wfile.flush()
+        try:
+          # stream details
+          self.send_response(200)
+          self.send_header("Content-Type", "text/event-stream")
+          self.send_header("Cache-Control", "no-cache")
+          self.end_headers()
+          for r in get_details(contexts[0][kidx], contexts[1][kidx][ridx]):
+            self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+          self.wfile.write("data: END\n\n".encode("utf-8"))
+          return self.wfile.flush()
+        # pass if client closed connection
+        except (BrokenPipeError, ConnectionResetError): return
       ret, content_type = json.dumps(kernels).encode(), "application/json"
     elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
     else: status_code = 404

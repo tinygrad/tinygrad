@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, AMX
 from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.rewriter import full_graph_rewrite, graph_rewrite, sym
+from tinygrad.codegen.devectorizer import full_graph_rewrite, graph_rewrite, sym
 from tinygrad.codegen.expander import expander, expand_rewrite
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
@@ -661,7 +661,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.toposort if x.op is Ops.LOAD]) == 1
 
-  @unittest.skipIf(Device.DEFAULT in {"CLANG"} and AMX, "CLANG with AMX upcasts float up to size 16")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_two_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)]

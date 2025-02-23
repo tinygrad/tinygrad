@@ -195,18 +195,16 @@ def get_bert_qa_prediction(features, example, start_end_logits):
   return "empty"
 
 def get_mlperf_bert_config():
-  """Config is BERT-large"""
-  return {
-    "attention_probs_dropout_prob": 0.1,
-    "hidden_dropout_prob": 0.1,
-    "hidden_size": 1024,
-    "intermediate_size": 4096,
-    "max_position_embeddings": 512,
-    "num_attention_heads": 16,
-    "num_hidden_layers": getenv("BERT_LAYERS", 24),
-    "type_vocab_size": 2,
-    "vocab_size": 30522
-  }
+  """benchmark is BERT-large"""
+  ret = {"attention_probs_dropout_prob": 0.1, "hidden_dropout_prob": 0.1, "vocab_size": 30522, "type_vocab_size": 2, "max_position_embeddings": 512}
+
+  match (bert_size:=getenv("BERT_SIZE", "large")):
+    case "large": ret.update({"hidden_size": 1024, "intermediate_size": 4096, "num_attention_heads": 16, "num_hidden_layers": 24})
+    case "tiny": ret.update({"hidden_size": 128, "intermediate_size": 512, "num_attention_heads": 2, "num_hidden_layers": 2})
+    case _: raise RuntimeError(f"unhandled {bert_size=}")
+
+  if (bert_layers:=getenv("BERT_LAYERS")): ret["num_hidden_layers"] = bert_layers
+  return ret
 
 def get_mlperf_bert_model():
   from extra.models import bert
@@ -222,18 +220,13 @@ def get_mlperf_bert_model():
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
   return BertForPretraining(**config)
 
-def get_data_bert(GPUS:list[str], it):
-  data: dict[str, Tensor] = next(it)
-  for key in data.keys(): data[key].shard_(GPUS, axis=0)
-  return data
-
-def get_fake_data_bert(GPUS:list[str], BS:int):
+def get_fake_data_bert(BS:int):
   return {
-    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.default_float).contiguous().shard_(GPUS, axis=0),
-    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
-    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
+    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
+    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
+    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
+    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CPU"),
+    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CPU"),
+    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CPU"),
+    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.int32, device="CPU"),
   }

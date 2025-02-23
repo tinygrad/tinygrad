@@ -262,19 +262,19 @@ class Tensor(SimpleMathTrait):
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
-  def replace(self, x:Tensor) -> Tensor:
+  def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:
     """
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
+    assert self.shape == x.shape or allow_shape_mismatch, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
     return self
 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CLANG", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
       self.contiguous().realize().lazydata.base.realized.ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -297,11 +297,11 @@ class Tensor(SimpleMathTrait):
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
+    cpu = self.cast(self.dtype.base).contiguous().to("CPU").realize()
     buf = cast(UOp, cpu.lazydata).base.realized
     assert buf is not None, f"{cast(UOp, cpu.lazydata).base} was not realized"
-    if self.device != "CLANG": buf.options = BufferSpec(nolru=True)
-    return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
+    if self.device != "CPU": buf.options = BufferSpec(nolru=True)
+    return buf.as_buffer(allow_zero_copy=True if self.device != "CPU" else False)
 
   def data(self) -> memoryview:
     """
@@ -520,8 +520,8 @@ class Tensor(SimpleMathTrait):
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
     num = ceildiv(numel * dtype.itemsize, 4)
 
-    # when using MOCKGPU and NV generate rand on CLANG
-    if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
+    # when using MOCKGPU and NV generate rand on CPU
+    if getenv("MOCKGPU") and device.startswith("NV"): device = "CPU"
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
@@ -1117,7 +1117,7 @@ class Tensor(SimpleMathTrait):
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(size, 0) + index # treat negative index values
+          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -1724,16 +1724,18 @@ class Tensor(SimpleMathTrait):
     By default, two `NaN` values are not close to each other. If `equal_nan` is `True`, two `NaN` values are considered close.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.numpy())
+    print(Tensor([1e-7, 1e-8, 1e-9, float('nan')]).isclose(Tensor([0.0, 0.0, 0.0, float('nan')])).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.isclose(Tensor([1, 2, 3.1])).numpy())
+    print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
     ```
     """
-    is_close = (self - other).abs() <= atol + rtol * other.abs()
-    return is_close | (self.isnan() & other.isnan()) if equal_nan else is_close & (self.isnan() | other.isnan()).logical_not()
+    # TODO: Tensor.isfinite
+    def isfinite(t): return (t.isinf()|t.isnan()).logical_not()
+    is_finite_close = isfinite(self) & isfinite(other) & ((self - other).abs() <= atol + rtol * other.abs())
+    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
+    return is_finite_close | is_infinite_close | is_nan_close
 
   def mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
@@ -2451,7 +2453,7 @@ class Tensor(SimpleMathTrait):
       reshape[i] = expand[i] = size[i]
       if mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else:
         index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
@@ -3556,6 +3558,7 @@ class Tensor(SimpleMathTrait):
 
   # helper function commonly used for indexing
   def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=-1):
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
     offset = self.ndim - self._resolve_dim(dim) - 1
     return self == Tensor.arange(num_classes, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
 
@@ -3570,6 +3573,7 @@ class Tensor(SimpleMathTrait):
     print(t.one_hot(5).numpy())
     ```
     """
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 

@@ -6,6 +6,7 @@
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <script src="assets/d3js.org/d3.v5.min.js" charset="utf-8"></script>
   <script src="assets/dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <script src="lib/graph.js"></script>
   <link rel="stylesheet" href="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
@@ -233,53 +234,6 @@
     contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
   }));
 
-  // **** D3
-  function recenterRects(svg, zoom) {
-    const svgBounds = svg.node().getBoundingClientRect();
-    for (const rect of svg.node().querySelectorAll("rect")) {
-      const rectBounds = rect.getBoundingClientRect();
-      const outOfBounds = rectBounds.top < svgBounds.top || rectBounds.left < svgBounds.left ||
-        rectBounds.bottom > svgBounds.bottom || rectBounds.right > svgBounds.right;
-      // if there's at least one rect in view we don't do anything
-      if (!outOfBounds) return;
-    }
-    svg.call(zoom.transform, d3.zoomIdentity)
-  }
-  function renderGraph(graph, additions) {
-    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
-    for (const [k,u] of Object.entries(graph)) {
-      let node = {label: u[0], labelType: "text", style: `fill: ${u[2]};`};
-      // for PROGRAM UOp we render the node with a code block
-      if (u[0].includes("PROGRAM")) {
-        const [name, ...rest] = u[0].split("\n");
-        const label = Object.assign(document.createElement("div"));
-        label.appendChild(Object.assign(document.createElement("p"), {innerText: name, className: "label", style: "margin-bottom: 2px" }))
-        label.appendChild(highlightedCodeBlock(rest.join("\n"), "cpp", true));
-        node = {label, labelType: "html", style: `fill: ${u[2]}`};
-      }
-      g.setNode(k, node);
-      for (const src of u[1]) {
-        g.setEdge(src, k, {curve: d3.curveBasis})
-      }
-      if (additions.includes(parseInt(k))) {
-        g.setParent(k, "addition");
-      }
-    }
-    const svg = d3.select("#graph-svg");
-    const inner = svg.select("g");
-    var zoom = d3.zoom()
-      .scaleExtent([0.05, 2])
-      .on("zoom", () => {
-        const transform = d3.event.transform;
-        inner.attr("transform", transform);
-      });
-    recenterRects(svg, zoom);
-    svg.call(zoom);
-    const render = new dagreD3.render();
-    render(inner, g);
-  }
-
   // **** extra helpers
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
@@ -307,6 +261,7 @@
   var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
+  const evtSources = [];
   async function main() {
     const mainContainer = document.querySelector('.main-container');
     // ***** LHS kernels list
@@ -326,7 +281,8 @@
       const p = Object.assign(document.createElement("p"), { id: `kernel-${key}`, innerHTML: coloredToHTML(key), style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       items.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
+        const rwUl = Object.assign(document.createElement("ul"), {
+          innerText: u.name ? `${u.name} - ${u.match_count}` : `${toPath(u.loc)} - ${u.match_count}`, key: `uop-rewrite-${j}`,
           className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         if (j === currentUOp) {
           requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
@@ -357,13 +313,23 @@
     });
     // ***** UOp graph
     if (currentKernel == -1) return;
-    const cacheKey = `${currentKernel}-${currentUOp}`;
+    const kernel = kernels[currentKernel][1][currentUOp];
+    const cacheKey = `kernel=${currentKernel}&idx=${currentUOp}`;
+    // close any pending event sources
+    let activeSrc = null;
+    for (const e of evtSources) {
+      if (e.url.split("?")[1] !== cacheKey) e.close();
+      else if (e.readyState === EventSource.OPEN) activeSrc = e;
+    }
     if (cacheKey in cache) {
       ret = cache[cacheKey];
     }
-    else {
+    // if we don't have a complete cache yet we start streaming this kernel
+    if (!(cacheKey in cache) || (cache[cacheKey].length !== kernel.match_count+1 && activeSrc == null)) {
       ret = [];
+      cache[cacheKey] = ret;
       const eventSource = new EventSource(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`);
+      evtSources.push(eventSource);
       eventSource.onmessage = (e) => {
         if (e.data === "END") return eventSource.close();
         const chunk = JSON.parse(e.data);
@@ -374,14 +340,12 @@
         const gUl = document.getElementById(`rewrite-${ret.length-1}`);
         if (gUl != null) gUl.classList.remove("disabled");
       };
-      cache[cacheKey] = ret;
     }
     if (ret.length === 0) return;
     renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    const kernel = kernels[currentKernel][1][currentUOp];
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
     metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
     // ** code blocks
@@ -394,7 +358,7 @@
     const codeBlock = highlightedCodeBlock(code, lang, false);
     metadata.appendChild(codeBlock);
     // ** rewrite list
-    if (kernel.match_count > 1) {
+    if (kernel.match_count >= 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
       for (let i=0; i<=kernel.match_count; i++) {

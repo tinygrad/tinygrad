@@ -1,15 +1,18 @@
 from typing import cast
 from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
-from tinygrad.helpers import all_int, all_same, dedup, prod
+from tinygrad.helpers import all_same, dedup, prod
+
+buffer_spec = PatternMatcher([
+  (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
+  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="buf"),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+])
 
 # *** this is the spec of a Tensor in UOp ***
 
-tensor_uop_spec = PatternMatcher([
-  (UPat(Ops.DEVICE, dtypes.void, (), name="device"), lambda device: isinstance(device.arg, str)),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),), name="buf"),
-   lambda buf: isinstance(buf.arg, tuple) and len(buf.arg) == 2 and all_int(buf.arg) and isinstance(buf.dtype, (DType, ImageDType))),
-
+tensor_uop_spec = buffer_spec+PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
@@ -110,7 +113,7 @@ spec = PatternMatcher([
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
-  (UPat(Ops.SINK, dtypes.void), lambda: True),
+  (UPat((Ops.NAME, Ops.SINK), dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOM)), lambda: True),
 
   # PTX LOAD/STORE
@@ -119,13 +122,12 @@ spec = PatternMatcher([
 
 # *** this is the spec of a Kernel in UOp ***
 
-kernel_spec = PatternMatcher([
-  (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE),)), lambda: True),
+kernel_spec = buffer_spec+PatternMatcher([
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
   # assign has a buffer view and kernel source, it can optionally depend on other assigns
   (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
-  # device/view/sink/const can also exist in the kernel graph
-  (UPat((Ops.DEVICE, Ops.VIEW, Ops.SINK, Ops.CONST)), lambda: True),
+  # view/sink/const/bind/var can also exist in the kernel graph
+  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST, Ops.BIND, Ops.DEFINE_VAR)), lambda: True),
   (UPat(GroupOp.All), lambda: False),
 ])
 

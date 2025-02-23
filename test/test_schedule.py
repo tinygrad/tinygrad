@@ -1015,8 +1015,7 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(len(sched[0].outputs), 1)
-    self.assertEqual(sched[0].outputs[0].dtype, dtypes.half)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
 
     # input float, softmax in float
     Tensor.manual_seed(0)
@@ -1024,8 +1023,7 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(len(sched[0].outputs), 1)
-    self.assertEqual(sched[0].outputs[0].dtype, dtypes.float)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
@@ -1163,12 +1161,17 @@ class TestSchedule(unittest.TestCase):
     a = shared * 2
     b = shared * 3
     sched = check_schedule([a, b], 3)
-    for si in sched[:-2]: assert all(out.dtype == dtypes.half for out in si.outputs)
+    # store reduceop in half
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
+    # fuse cast with the child kernel
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
+    self.assertEqual(sched[2].bufs[0].dtype, dtypes.float)
 
     # reduce
     a = z.sum(axis=0).half().float().sum(axis=0)
     sched = check_schedule(a, 2)
-    for si in sched[:-1]: assert all(out.dtype == dtypes.half for out in si.outputs)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
 
     # expand
     # expand will realize just after the .float(), so requires change to realize-before-expand
@@ -1732,16 +1735,16 @@ class TestIndexing(unittest.TestCase):
     self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
-  @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
+  @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_shrink_copy(self):
-    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
+    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CPU")
     sched = self.check_schedule(a, 1)
     self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
-  @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
+  @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_expand_copy(self):
-    a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CLANG")
+    a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
     sched = self.check_schedule(a, 1)
     self.assertIs(sched[1].ast.op, Ops.COPY)
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.ADD)
@@ -2279,23 +2282,23 @@ class TestConst(unittest.TestCase):
     run_schedule(sched, var_vals)
     self.assertEqual(a.tolist(), 3)
 
-@unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from another device to clang")
+@unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from another device to cpu")
 class TestCopyFolding(unittest.TestCase):
   def test_const_copy_is_free(self):
-    b = Tensor(1).to("CLANG")
+    b = Tensor(1).to("CPU")
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
-    b = (a*zeros).to("CLANG")
+    b = (a*zeros).to("CPU")
     run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
   def test_alu_after_copy(self):
-    a = Tensor.ones((4,)).to("CLANG").lazydata
-    b = Tensor.empty(4, device="CLANG").lazydata
+    a = Tensor.ones((4,)).to("CPU").lazydata
+    b = Tensor.empty(4, device="CPU").lazydata
     add = a+b
     add = schedule_graph_rewrite(add)
     assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
@@ -2348,13 +2351,13 @@ class TestCopyFolding(unittest.TestCase):
   def test_permute_on_disk(self):
     with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().lazydata.base.buffer.as_buffer())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
-    b = a.reshape(2, 2).permute(1, 0).to("CLANG")
+    b = a.reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_after_shrink(self):
     a = Tensor.arange(5)
-    b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CLANG")
+    b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
@@ -2364,7 +2367,7 @@ class TestCopyFolding(unittest.TestCase):
   def test_permute_after_shrink_on_disk(self):
     with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).realize().lazydata.base.buffer.as_buffer())
     a = Tensor.empty(5, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_5_permute')}")
-    b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CLANG")
+    b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
