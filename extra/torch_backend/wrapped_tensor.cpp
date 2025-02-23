@@ -63,6 +63,7 @@ public:
 
 static caffe2::TypeMeta dtypeFromName(const std::string &dtype_name) {
   if (dtype_name == "float") { return caffe2::TypeMeta::Make<float>();
+  } else if (dtype_name == "half") { return caffe2::TypeMeta::Make<at::Half>();
   } else if (dtype_name == "double") { return caffe2::TypeMeta::Make<double>();
   } else if (dtype_name == "int") { return caffe2::TypeMeta::Make<int32_t>();
   } else if (dtype_name == "long") { return caffe2::TypeMeta::Make<int64_t>();

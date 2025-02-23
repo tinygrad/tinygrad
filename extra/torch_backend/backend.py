@@ -8,6 +8,7 @@ torch.autograd.grad_mode.set_multithreading_enabled(False)
 
 # TODO: don't replicate this in cpp
 torch_to_tiny_dtype = {
+  torch.float16: dtypes.float16,
   torch.float32: dtypes.float32,
   torch.float64: dtypes.float64,
   torch.uint8: dtypes.uint8,
