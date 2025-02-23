@@ -113,6 +113,14 @@ def random(tensor, low=0, high=None):
   if high is None: high = float(2**(dtypes.finfo(dt)[1]+1)) if dtypes.is_float(dt:=tensor.dtype) else dtypes.max(dt)
   tensor.assign(Tensor.uniform(*tensor.shape, low=low, high=high, dtype=tensor.dtype))
 
+def arange(start, stop=None, step=1, dtype=None, *, device, pin_memory=False) -> Tensor:
+  assert dtype is not None
+  return Tensor.arange(start, stop, step, dtype=to_tiny_dtype(dtype))
+
+def arange_start(start, stop=None, step=1, dtype=None, *, out) -> Tensor:
+  if dtype is None: dtype = torch.get_default_dtype() if any(isinstance(x, float) for x in (start, stop, step)) else torch.int64
+  out.replace(Tensor.arange(start, stop, step, dtype=to_tiny_dtype(dtype)), allow_shape_mismatch=True)
+
 tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
@@ -151,6 +159,7 @@ tiny_backend = {
   "aten.sum": lambda x, dim=None, keepdim=False, *, dtype=None: x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype)),
   "aten.sum.IntList_out": lambda x, dim=None, keepdim=False, *, dtype=None, out: out.assign(x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype))),
 
+  "aten.arange.start_out": arange_start,
   "aten.random_": random, "aten.random_.from": random, "aten.random_.to": random,
   "aten.flip": Tensor.flip,
 
