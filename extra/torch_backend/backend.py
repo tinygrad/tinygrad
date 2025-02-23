@@ -147,6 +147,8 @@ tiny_backend = {
   "aten.floor": Tensor.floor,
   "aten.hardsigmoid": Tensor.hardsigmoid,
   "aten.hardtanh": Tensor.hardtanh,
+  "aten.log": Tensor.log,
+  "aten.log2": Tensor.log2,
   "aten.max": Tensor.max,
   "aten.mean": Tensor.mean,
   "aten.min": Tensor.min,
