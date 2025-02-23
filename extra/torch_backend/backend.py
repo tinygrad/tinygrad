@@ -212,7 +212,8 @@ tiny_backend = {
   "aten.sinh": Tensor.sinh,
   "aten.softplus": Tensor.softplus,
   "aten.sqrt": Tensor.sqrt,
-  "aten.std.correction": Tensor.std,
+  "aten.std.correction": Tensor.std, # TODO: Do we need to reshuffle args like in std_mean?
+  "aten.std_mean.correction": lambda x,dim=None,correction=1,keepdim=False: x.std_mean(dim, keepdim, correction),
   "aten.tan": Tensor.tan,
   "aten.tanh": Tensor.tanh,
   "aten.trunc": Tensor.trunc,
@@ -230,7 +231,8 @@ def wrap_fxn(k,f):
     #print(k, len(args), kwargs.keys())
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-    return wrap(r) if (r:=f(*args, **kwargs)) is not None else r
+    r = f(*args, **kwargs)
+    return None if r is None else (wrap(r) if isinstance(r, Tensor) else tuple(map(wrap, r)))
   return nf
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
