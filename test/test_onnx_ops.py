@@ -3,7 +3,7 @@
 # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md
 
 from typing import Any
-import unittest, os, onnx
+import unittest, onnx, tempfile
 import numpy as np
 from extra.onnx_helpers import validate
 
@@ -15,12 +15,11 @@ class TestOnnxOps(unittest.TestCase):
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
     model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
-    file_name = f"test_{op.lower()}.onnx"
-    onnx.save(model, file_name)
-    validate(file_name, inps, rtol, atol)
-    os.remove(file_name)
+    with tempfile.NamedTemporaryFile(delete=True) as tmp:
+      onnx.save(model, tmp.name)
+      validate(tmp.name, inps, rtol, atol)
 
-class TestMainOps(TestOnnxOps):
+class TestMainOnnxOps(TestOnnxOps):
   DOMAIN = ""
   def test_reshape(self):
     inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
@@ -66,10 +65,91 @@ class TestMainOps(TestOnnxOps):
         outputs = ["Y"]
         self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs, atol=1)
 
-class TestContribOps(TestOnnxOps):
+class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = "com.microsoft"
+
   def test_attention(self):
-    ...
+    batch_size, seq_len, input_hidden_size = 2, 8, 256
+    num_heads, head_size = 4, 64
+    hidden_size = num_heads * head_size
+    v_hidden_size = hidden_size
+    past_seq_len = 4
+
+    base_inps = {
+      "input": np.random.randn(batch_size, seq_len, input_hidden_size).astype(np.float32),
+      "weights": np.random.randn(input_hidden_size, hidden_size * 3).astype(np.float32),
+      # bias is required in ORT (segfaults otherwise), eventhough docs says it's optional
+      "bias": np.random.randn(hidden_size * 2 + v_hidden_size).astype(np.float32),
+    }
+    base_opts = {"num_heads": num_heads}
+
+    tests = [
+        ({}, {}),
+        ({"mask_index": np.random.randint(0, seq_len, size=(batch_size,), dtype=np.int32)}, {}),
+        ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len), dtype=np.int32)}, {"mask_filter_value": -5000.0}),
+        ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len, seq_len), dtype=np.int32)}, {}),
+        ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, 1), dtype=np.int32)}, {}),
+        ({"mask_index": np.random.randint(0, seq_len, size=(1, 1), dtype=np.int32)}, {}),
+        ({}, {"scale": 0.1}),
+        ({}, {"scale": 1.0}),
+        ({}, {"unidirectional": 1}),
+
+        # TODO support these
+        # ({"mask_index": np.random.randint(0, seq_len, size=(2 * batch_size,), dtype=np.int32)}, {}),
+        # ({"mask_index": np.random.randint(0, seq_len, size=(3 * batch_size + 2,), dtype=np.int32)}, {}),
+
+        # TODO: past and attention bias are invalid models according to ORT (input type error?)
+        # # Past state only: shape (2, B, N, P, H)
+        # ({"past": np.random.randn(2, batch_size, num_heads, past_seq_len, head_size).astype(np.float32),
+        #   "past_seq_len": np.array([past_seq_len], dtype=np.int32)}, {}),
+        # # Attention bias only: shape (B, N, S, S)
+        # ({"attention_bias": np.random.randn(batch_size, num_heads, seq_len, seq_len).astype(np.float32)}, {}),
+        # # Past state with mask index shape (B, T) where T = seq_len + past_seq_len.
+        # ({"past": np.random.randn(2, batch_size, num_heads, past_seq_len, head_size).astype(np.float32),
+        #   "past_seq_len": np.array([past_seq_len], dtype=np.int32),
+        #   "mask_index": np.random.randint(0, seq_len + past_seq_len, size=(batch_size, seq_len + past_seq_len), dtype=np.int32)}, {}),
+        # # Past state with mask index shape (B, S, T).
+        # ({"past": np.random.randn(2, batch_size, num_heads, past_seq_len, head_size).astype(np.float32),
+        #   "past_seq_len": np.array([past_seq_len], dtype=np.int32),
+        #   "mask_index": np.random.randint(0, seq_len + past_seq_len, size=(batch_size, seq_len, seq_len + past_seq_len), dtype=np.int32)}, {}),
+    ]
+
+    for i, (extra_inps, extra_opts) in enumerate(tests):
+      with self.subTest(f"test_attention_{i}"):
+        inps = {**base_inps, **extra_inps}
+        opts = {**base_opts, **extra_opts}
+        outputs = ["output", "present"] if "past" in inps else ["output"]
+        self.helper_test_single_op("Attention", inps, opts, outputs, atol=1e4)
+
+  def test_skip_layer_normalization(self):
+    batch_size, seq_len, hidden_size = 2, 8, 32
+    skip_shapes = [(batch_size, seq_len, hidden_size), (1, seq_len, hidden_size), (seq_len, hidden_size)]
+    for skip_shape in skip_shapes:
+      for has_beta in [True, False]:
+        for has_bias in [True, False]:
+          with self.subTest(skip_shape=skip_shape, has_beta=has_beta, has_bias=has_bias):
+            inputs = {
+              "input": np.random.randn(batch_size, seq_len, hidden_size).astype(np.float32),
+              "skip": np.random.randn(*skip_shape).astype(np.float32),
+              "gamma": np.random.randn(hidden_size).astype(np.float32),
+            }
+            if has_beta: inputs["beta"] = np.random.randn(hidden_size).astype(np.float32)
+            if has_bias: inputs["bias"] = np.random.randn(hidden_size).astype(np.float32)
+            attributes = {"epsilon": 1e-12}
+            outputs = ["output", "mean", "inv_std_var", "input_skip_bias_sum"]
+            self.helper_test_single_op("SkipLayerNormalization", inputs, attributes, outputs)
+
+  def test_bias_gelu(self):
+    # Test BiasGelu with a single input shape
+    shape = (2,3,4)
+    inputs = {
+      "A": np.random.randn(*shape).astype(np.float32),
+      "B": np.random.randn(shape[-1]).astype(np.float32)
+    }
+    attributes = {}
+    outputs = ["C"]
+    self.helper_test_single_op("BiasGelu", inputs, attributes, outputs)
+
   def test_qlinear_add(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       with self.subTest(dtype=dtype, zero_point=zero_point):
@@ -88,7 +168,6 @@ class TestContribOps(TestOnnxOps):
         outputs = ["C"]
         self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
 
-  # TODO: test channels_last
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       with self.subTest(dtype=dtype, zero_point=zero_point):
