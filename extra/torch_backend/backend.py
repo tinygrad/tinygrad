@@ -118,6 +118,7 @@ tiny_backend = {
   "aten.any": Tensor.any,
   "aten.any.out": lambda x, axis, keepdim, out: out.assign(x.any(axis, keepdim)),
   "aten.argmin": Tensor.argmin,
+  "aten.argmax": Tensor.argmax,
 
   "aten.abs": Tensor.abs,
   "aten.acos": Tensor.acos,
