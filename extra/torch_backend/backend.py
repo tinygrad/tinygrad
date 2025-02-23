@@ -110,6 +110,10 @@ def mean_out(tensor, axis=None, keepdim=False, *, dtype=None, out):
   tensor = tensor if dtype is None else tensor.cast(to_tiny_dtype(tensor))
   return out.replace(tensor.mean(axis, keepdim), allow_shape_mismatch=True)
 
+def prod(tensor, dim=None, keepdim=False, *, dtype=None):
+  tensor = tensor if dtype is None else tensor.cast(to_tiny_dtype(tensor))
+  return tensor.prod(dim, keepdim)
+
 def random(tensor, low=0, high=None):
   if high is None: high = float(2**(dtypes.finfo(dt)[1]+1)) if dtypes.is_float(dt:=tensor.dtype) else dtypes.max(dt)
   tensor.assign(Tensor.uniform(*tensor.shape, low=low, high=high, dtype=tensor.dtype))
@@ -185,6 +189,7 @@ tiny_backend = {
   "aten.hardsigmoid": Tensor.hardsigmoid,
   "aten.hardtanh": Tensor.hardtanh,
   "aten.isnan": Tensor.isnan,
+  "aten.prod": prod, "aten.prod.dim_int": prod,
   "aten.lerp.Tensor_out": lambda x,y,weight,*,out: out.assign(x.lerp(y, weight)),
   "aten.log": Tensor.log,
   "aten.log2": Tensor.log2,
