@@ -124,6 +124,7 @@ tiny_backend = {
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
+  "aten.remainder.Tensor": Tensor.mod, # TODO: Fix type mismatch in test_mod (int32 vs int64)
   "aten.floor_divide": Tensor.idiv,
   "aten.add_.Tensor": lambda x,y: x.assign(x.add(y)),
   "aten.pow.Tensor_Scalar": Tensor.pow,
