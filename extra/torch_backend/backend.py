@@ -105,6 +105,7 @@ tiny_backend = {
   "aten.pow.Tensor_Tensor": Tensor.pow,
   "aten.pow.Scalar": lambda x,y: y.pow(x, reverse=True),
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
+  "aten.bitwise_xor.Tensor": Tensor.xor,
   "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
