@@ -50,7 +50,7 @@ def data64_le(data:Any) -> tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 3
 def getbits(value: int, start: int, end: int): return (value >> start) & ((1 << end-start+1) - 1)
 def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
-  kvs = set((k,v) for d in ds for k,v in d.items())
+  kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
 def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]]:
@@ -75,7 +75,7 @@ def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else 
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
 @functools.lru_cache(maxsize=None)
-def to_function_name(s:str): return ''.join(c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s))
+def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str, append_user:bool=False) -> str:
