@@ -187,6 +187,7 @@ tiny_backend = {
   "aten.gelu": lambda x, approximate: x.gelu(),
   "aten.hardsigmoid": Tensor.hardsigmoid,
   "aten.hardtanh": Tensor.hardtanh,
+  "aten.isnan": Tensor.isnan,
   "aten.lerp.Tensor_out": lambda x,y,weight,*,out: out.assign(x.lerp(y, weight)),
   "aten.log": Tensor.log,
   "aten.log2": Tensor.log2,
