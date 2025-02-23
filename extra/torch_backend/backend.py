@@ -80,11 +80,13 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
+  # TODO: shape desync
+  # assert src.shape == unwrap(src)
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
     unwrap(dest).replace(unwrap(src), allow_shape_mismatch=True)
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
     # TODO: is there a better way?
-    dest.resize_(src.numel()).resize_(src.shape)
+    dest.resize_(src.numel()).resize_(unwrap(src).shape)
     dest.copy_(torch.from_numpy(unwrap(src).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
     unwrap(dest).assign(Tensor(src.numpy()))
