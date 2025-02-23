@@ -100,6 +100,7 @@ tiny_backend = {
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
+  "aten.floor_divide": Tensor.idiv,
   "aten.add_.Tensor": lambda x,y: x.assign(x.add(y)),
   "aten.pow.Tensor_Scalar": Tensor.pow,
   "aten.pow.Tensor_Tensor": Tensor.pow,
