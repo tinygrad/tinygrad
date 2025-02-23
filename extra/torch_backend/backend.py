@@ -108,6 +108,7 @@ tiny_backend = {
   "aten.bitwise_or.Tensor": Tensor.bitwise_or,
   "aten.bitwise_xor.Tensor": Tensor.xor,
   "aten.bitwise_not": Tensor.bitwise_not,
+  "aten.logical_not": Tensor.logical_not,
   "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
