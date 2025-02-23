@@ -54,6 +54,16 @@ def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
     if (replace_src:=ctx.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+def check_augmented_assign(a:UOp, b:UOp):
+  if not (self_views:=[x for x in b.toposort if x.op is Ops.VIEW and x.base is a.base]): return None
+  for v in self_views:
+    st = unwrap(v.st)
+    if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: continue
+    # if it has a single view and it's equal when you shrink a contig, it's fine
+    if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): continue
+    # otherwise, it's not fine
+    return a.assign(b.contiguous())
+
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -89,6 +99,8 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
    lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
+  # check if we can fuse self augmented assigns
+  (UPat.assign(UPat.var("a"), UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="b")), check_augmented_assign),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
@@ -332,16 +344,6 @@ unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"),
 
 # ** fix_kernel_ops
 
-def check_load_st(glbl:UOp, view:UOp):
-  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
-  # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
-  if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
-  # if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): return
-  # otherwise, it's not fine
-  raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                     +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-
 fix_kernel_ops = PatternMatcher([
   # BIND in shapetracker becomes DEFINE_VAR
   (UPat(Ops.VIEW, name="x"), unbind_shapetracker),
@@ -351,8 +353,6 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
   # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
-  (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
 # TODO: replace this with the KERNEL UOp
