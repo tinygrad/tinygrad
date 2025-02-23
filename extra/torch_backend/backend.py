@@ -130,6 +130,7 @@ tiny_backend = {
   "aten.flip": Tensor.flip,
 
   "aten.tril": Tensor.tril,
+  "aten.triu": Tensor.triu,
 
   "aten.abs": Tensor.abs,
   "aten.acos": Tensor.acos,
