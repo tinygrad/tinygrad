@@ -154,6 +154,7 @@ tiny_backend = {
   "aten.exp": Tensor.exp,
   "aten.exp2": Tensor.exp2,
   "aten.floor": Tensor.floor,
+  "aten.gelu": lambda x, approximate: x.gelu(),
   "aten.hardsigmoid": Tensor.hardsigmoid,
   "aten.hardtanh": Tensor.hardtanh,
   "aten.log": Tensor.log,
