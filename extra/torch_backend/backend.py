@@ -89,7 +89,7 @@ def _copy_from(src, dest):
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
 @torch.library.impl("aten::cat.out", "privateuseone")
-def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
+def cat_out(tensors, dim=0, *, out): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
