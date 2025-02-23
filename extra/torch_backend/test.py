@@ -15,7 +15,7 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
 
-  def test_numpy_ones(self):
+  def test_numpy_ones_int32(self):
     a = torch.ones(4, dtype=torch.int32, device=device)
     assert a.dtype == torch.int32
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
