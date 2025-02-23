@@ -107,6 +107,10 @@ def mean_out(tensor, axis=None, keepdim=False, *, dtype=None, out):
   tensor = tensor if dtype is None else tensor.cast(to_tiny_dtype(tensor))
   return out.replace(tensor.mean(axis, keepdim), allow_shape_mismatch=True)
 
+def random(tensor, low=0, high=None):
+  if high is None: high = float(2**(dtypes.finfo(dt)[1]+1)) if dtypes.is_float(dt:=tensor.dtype) else dtypes.max(dt)
+  tensor.assign(Tensor.uniform(*tensor.shape, low=low, high=high, dtype=tensor.dtype))
+
 tiny_backend = {
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
@@ -145,6 +149,7 @@ tiny_backend = {
   "aten.sum": lambda x, dim=None, keepdim=False, *, dtype=None: x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype)),
   "aten.sum.IntList_out": lambda x, dim=None, keepdim=False, *, dtype=None, out: out.assign(x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype))),
 
+  "aten.random_": random, "aten.random_.from": random, "aten.random_.to": random,
   "aten.flip": Tensor.flip,
 
   "aten.tril": Tensor.tril,
@@ -204,7 +209,7 @@ def wrap_fxn(k,f):
     #print(k, len(args), kwargs.keys())
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-    return wrap(f(*args, **kwargs))
+    return wrap(r) if (r:=f(*args, **kwargs)) is not None else r
   return nf
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
