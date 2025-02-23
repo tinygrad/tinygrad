@@ -97,6 +97,9 @@ def cat_out(tensors, dim=0, *, out): unwrap(out).replace(Tensor.cat(*[unwrap(x) 
 def avg_pool2d(x, kernel_size, stride=(), padding=0, ceil_mode=False, count_include_pad=True):
   return x.avg_pool2d(kernel_size, None if len(stride) == 0 else stride, 1, padding, ceil_mode, count_include_pad)
 
+def max_pool2d(x, kernel_size, stride=(), padding=0, dilation=1, ceil_mode=False):
+  return x.max_pool2d(kernel_size, None if len(stride) == 0 else stride, dilation, padding, ceil_mode)
+
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
@@ -134,6 +137,7 @@ tiny_backend = {
   "aten.argmin": Tensor.argmin,
   "aten.avg_pool2d": avg_pool2d,
   "aten.avg_pool3d": avg_pool2d,
+  "aten.max_pool2d": max_pool2d,
   "aten.sum": lambda x, dim=None, keepdim=False, *, dtype=None: x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype)),
   "aten.sum.IntList_out": lambda x, dim=None, keepdim=False, *, dtype=None, out: out.assign(x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype))),
 
