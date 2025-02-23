@@ -207,6 +207,7 @@ tiny_backend = {
   "aten.sgn": Tensor.sign,
   "aten.sigmoid": Tensor.sigmoid,
   "aten.sign": Tensor.sign,
+  "aten.silu": Tensor.silu,
   "aten.sin": Tensor.sin,
   "aten.sinh": Tensor.sinh,
   "aten.sqrt": Tensor.sqrt,
