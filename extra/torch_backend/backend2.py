@@ -16,26 +16,26 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
   return TTensor(Tensor.empty(*size))
 
 def to_copy_impl(input, dtype=None, device=None, layout=None, non_blocking=False, **kwargs):
-  input_data = input.tiny.numpy()  
+  input_data = input.tiny.numpy()
   if dtype is not None: return TTensor(Tensor(input_data, dtype=torch_to_tiny_dtype[dtype]))
   return TTensor(Tensor(input_data))
 
 def detach_impl(input):
   input_data = input.tiny.numpy()
   new_tensor = TTensor(Tensor(input_data))
-  new_tensor.requires_grad = False 
+  new_tensor.requires_grad = False
   return new_tensor
 
 def uniform_impl(input, from_=0.0, to=1.0):
   random_values = torch.rand(input.shape, dtype=input.dtype, device=input.device)
   uniform_values = from_ + (to - from_) * random_values
-  input.copy_(uniform_values) 
-  return input  
+  input.copy_(uniform_values)
+  return input
 
 def copy_impl(self, src):
-  src_data = src.numpy()  
-  self.tiny.numpy()[:] = src_data  
-  return self 
+  src_data = src.numpy()
+  self.tiny.numpy()[:] = src_data
+  return self
 
 def zeros_impl(size, dtype=None, layout=None, device=None, pin_memory=False):
   if dtype is None: return TTensor(Tensor.zeros(size), dtype=torch.float32)
@@ -47,7 +47,7 @@ def ones_impl(size, dtype=None, layout=None, device=None, pin_memory=False):
 
 def zero_impl(input):
   if input.dim() == 0:
-    input.tiny.numpy()[()] = 0  
+    input.tiny.numpy()[()] = 0
   else:
     input.tiny.numpy()[:] = 0
   return TTensor(input)
@@ -57,12 +57,20 @@ def fill_scalar_impl(input, value):
   return TTensor(input)
 
 tiny_backend = {
+  "aten.add.Tensor": lambda x, y: TTensor(x.tiny + y.tiny),
+  "aten.sub.Tensor": lambda x, y: TTensor(x.tiny - y.tiny),
+  "aten.div.Tensor": lambda x, y: TTensor(x.tiny / y.tiny),
+  "aten.gt.Tensor": lambda x, y: TTensor(x.tiny > y.tiny),
+  "aten.lt.Tensor": lambda x, y: TTensor(x.tiny < y.tiny),
+  "aten.sum.default": lambda x: TTensor(x.tiny.sum()),
+  "aten.mean.default": lambda x: TTensor(x.tiny.mean()),
   "aten.empty.memory_format": empty_memory_format,
   "aten.view.default": lambda x,sz: TTensor(x.tiny.reshape(sz)),
   "aten.abs.default": lambda x: TTensor(x.tiny.abs()),
   "aten.eq.Tensor": lambda x,y: TTensor(x.tiny == y.tiny),
   "aten.bitwise_and.Tensor": lambda x,y: TTensor(x.tiny & y.tiny),
-  "aten.ne.Scalar": lambda x,y: TTenso1r(x.tiny != y),
+  "aten.bitwise_or.Tensor": lambda x,y: TTensor(x.tiny | y.tiny),
+  "aten.ne.Scalar": lambda x,y: TTensor(x.tiny != y),
   "aten.mul.Tensor": lambda x,y: TTensor(x.tiny * y.tiny),
   "aten.masked_select.default": lambda x,y: TTensor(Tensor(x.tiny.numpy()[y.tiny.numpy()])),
   "aten.lift_fresh.default": lambda x: TTensor(x),
@@ -77,8 +85,7 @@ tiny_backend = {
   "aten.neg.default": lambda x: TTensor(-x.tiny),
   "aten._local_scalar_dense.default": lambda x: TTensor(x.tiny.numpy(), dtype=x.dtype).item(),
   "aten.item.default": lambda x: x.tiny.item() if isinstance(x.tiny, (np.ndarray)) else TTensor(x.tiny.numpy(), dtype=x.dtype).item(),
-  "aten.invert": lambda x: TTensor(~x.tiny) if x.tiny.dtype.is_int() or x.tiny.dtype == dtypes.bool else RuntimeError('Only integers and booleans are supported'),
-  # "aten.bitwise_not.default": lambda x: TTensor(~x.tiny) if x.tiny.dtype.is_int() or x.tiny.dtype == dtypes.bool else raise(),
+  "aten.invert": lambda x: TTensor(~x.tiny),
 }
 
 class TTensor(torch.Tensor):
@@ -103,4 +110,6 @@ class Dispatcher(TorchDispatchMode): __torch_dispatch__ = TTensor.__torch_dispat
 Dispatcher().__enter__()
 
 if __name__ == "__main__":
-  a = torch.empty((4,), dtype=torch.int)
+  a = torch.zeros((4,), dtype=torch.int)
+  b = torch.ones((4,), dtype=torch.int)
+  print(a + b, a-b)
