@@ -219,6 +219,7 @@ tiny_backend = {
   "aten.tanh": Tensor.tanh,
   "aten.trunc": Tensor.trunc,
   "aten.var.correction": Tensor.var,
+  "aten.where.self": Tensor.where,
 }
 
 # there's earlier things to hook here
