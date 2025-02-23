@@ -152,6 +152,7 @@ tiny_backend = {
   "aten.sqrt": Tensor.sqrt,
   "aten.tan": Tensor.tan,
   "aten.tanh": Tensor.tanh,
+  "aten.trunc": Tensor.trunc,
 }
 
 # there's earlier things to hook here
