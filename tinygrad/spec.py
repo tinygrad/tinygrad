@@ -19,7 +19,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.CONST, Ops.DEVICE}),)), lambda: False),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.BUFFER_VIEW, Ops.CONST, Ops.DEVICE}),)), lambda: False),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -39,6 +39,9 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
   # ASSIGN changes the value of a realized buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
    lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
+
+  # offset buffer
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)),)), lambda:True),
 ])
 
 # ***** uop type spec *****
@@ -123,11 +126,11 @@ spec = PatternMatcher([
 # *** this is the spec of a Kernel in UOp ***
 
 kernel_spec = buffer_spec+PatternMatcher([
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN))), lambda: True),
   # assign has a buffer view and kernel source, it can optionally depend on other assigns
-  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
   # view/sink/const/bind/var can also exist in the kernel graph
-  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST, Ops.BIND, Ops.DEFINE_VAR)), lambda: True),
+  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST, Ops.BUFFER_VIEW, Ops.BIND, Ops.DEFINE_VAR)), lambda: True),
   (UPat(GroupOp.All), lambda: False),
 ])
 
