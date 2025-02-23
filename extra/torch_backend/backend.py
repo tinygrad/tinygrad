@@ -94,6 +94,10 @@ def _copy_from(src, dest):
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, *, out): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
+@torch.library.impl("aten::avg_pool2d", "privateuseone")
+def avg_pool2d(tensor, kernel_size, stride=(), padding=0, ceil_mode=False, count_include_pad=True):
+  return wrap(unwrap(tensor).avg_pool2d(kernel_size, None if len(stride) == 0 else stride, 1, padding, ceil_mode, count_include_pad))
+
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
