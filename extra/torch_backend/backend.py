@@ -203,6 +203,7 @@ tiny_backend = {
   "aten.prod": prod, "aten.prod.dim_int": prod,
   "aten.reciprocal": Tensor.reciprocal,
   "aten.relu": Tensor.relu,
+  "aten.round": Tensor.round,
   "aten.rsqrt": Tensor.rsqrt,
   "aten.sgn": Tensor.sign,
   "aten.sigmoid": Tensor.sigmoid,
