@@ -199,6 +199,7 @@ tiny_backend = {
   "aten.mean.out": mean_out,
   "aten.min": Tensor.min,
   "aten.minimum": Tensor.minimum,
+  "aten.mish": Tensor.mish,
   "aten.mm": Tensor.matmul,
   "aten.neg": Tensor.neg,
   "aten.prod": prod, "aten.prod.dim_int": prod,
