@@ -138,6 +138,7 @@ tiny_backend = {
   "aten.celu": Tensor.celu,
   "aten.cos": Tensor.cos,
   "aten.cosh": Tensor.cosh,
+  "aten.elu": Tensor.elu,
   "aten.erf": Tensor.erf,
   "aten.exp": Tensor.exp,
   "aten.exp2": Tensor.exp2,
