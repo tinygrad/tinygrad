@@ -176,8 +176,9 @@ class RegressionHead:
 
   def _compute_loss(self, x:Tensor, bboxes:Tensor, matches:Tensor, anchors:Tensor) -> Tensor:
     mask = (fg_idxs := matches >= 0).reshape(matches.shape[0], -1, 1)
-    tgt = self.box_coder.encode(bboxes, anchors)
-    loss = mask.where(l1_loss(x, tgt), 0).sum(-1).sum(-1)
+    x = x * mask
+    tgt = self.box_coder.encode(bboxes, anchors) * mask
+    loss = l1_loss(x, tgt).sum(-1).sum(-1)
     loss = (loss / fg_idxs.sum(-1)).sum() / matches.shape[0]
     return loss
 

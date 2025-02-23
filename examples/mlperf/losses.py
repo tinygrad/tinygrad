@@ -8,7 +8,7 @@ def dice_ce_loss(pred, tgt):
   dice = (1.0 - dice_score(pred, tgt, argmax=False, to_one_hot_x=False)).mean()
   return (dice + ce) / 2
 
-def sigmoid_focal_loss(pred:Tensor, tgt:Tensor, alpha:float = 0.25, gamma:float = 2, reduction:str = "none") -> Tensor:
+def sigmoid_focal_loss(pred:Tensor, tgt:Tensor, alpha:float = 0.25, gamma:float = 2.0, reduction:str = "none") -> Tensor:
   assert reduction in ["mean", "sum", "none"], f"unsupported reduction {reduction}"
   p, ce_loss = pred.sigmoid(), pred.binary_crossentropy_logits(tgt, reduction="none")
   p_t = p * tgt + (1 - p) * (1 - tgt)
