@@ -1,6 +1,7 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, getenv
+from torch.nn import _reduction as _Reduction
 import torch, pathlib
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 
@@ -122,7 +123,14 @@ def arange_start(start, stop=None, step=1, dtype=None, *, out) -> Tensor:
   if dtype is None: dtype = torch.get_default_dtype() if any(isinstance(x, float) for x in (start, stop, step)) else torch.int64
   out.replace(Tensor.arange(start, stop, step, dtype=to_tiny_dtype(dtype)), allow_shape_mismatch=True)
 
+reduction_by_value = {_Reduction.get_enum(x): x for x in ("none", "mean", "sum")}
+def nll_loss(tensor, target, weight=None, reduction=None, ignore_index=None):
+  reduction = "mean" if reduction is None else reduction_by_value[reduction]
+  return tensor.nll_loss(target, weight, ignore_index, reduction)
+
 tiny_backend = {
+  "aten.nll_loss_forward": nll_loss,
+  "aten.nll_loss2d_forward": nll_loss,
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
