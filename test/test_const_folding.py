@@ -1,7 +1,10 @@
-import unittest, math
+import unittest, itertools, math
+from typing import Any
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import Ops
+from tinygrad.dtype import DType
+from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import CI
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 import numpy as np
 from tinygrad.device import is_dtype_supported
 
@@ -97,6 +100,39 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
+class TestBitcastConstFolding(unittest.TestCase):
+  def test_scalar_bitcast(self):
+    def t(cases: dict[DType, Any]):
+      for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
+        if not math.isnan(from_v):
+          r = full_graph_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
+          self.assertEqual(r.dtype, to_dt, msg)
+          np.testing.assert_equal(r.arg, to_v, msg)
+
+    t({dtypes.int8: 0, dtypes.uint8: 0, dtypes.bool: False})
+    t({dtypes.int8: 1, dtypes.uint8: 1, dtypes.bool: True})
+
+    t({dtypes.int8:  -1, dtypes.uint8:  2**8-1})
+    t({dtypes.int16: -1, dtypes.uint16: 2**16-1, dtypes.float16: float('nan')})
+    t({dtypes.int32: -1, dtypes.uint32: 2**32-1, dtypes.float32: float('nan')})
+    t({dtypes.int64: -1, dtypes.uint64: 2**64-1, dtypes.float64: float('nan')})
+
+    t({dtypes.int8:  -2**7,  dtypes.uint8:  2**7})
+    t({dtypes.int16: -2**15, dtypes.uint16: 2**15})
+    t({dtypes.int32: -2**31, dtypes.uint32: 2**31})
+    t({dtypes.int64: -2**63, dtypes.uint64: 2**63})
+
+    t({dtypes.int16: 13496, dtypes.uint16: 13496, dtypes.float16: 0.294921875})
+    t({dtypes.int32: 1050081145, dtypes.uint32: 1050081145, dtypes.float32: 0.29485681653022766})
+    t({dtypes.int64: 4598983288165178391, dtypes.uint64: 4598983288165178391, dtypes.float64: 0.29485681936461233})
+
+  def test_vec_bitcast(self):
+    r = full_graph_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
+    self.assertEqual(r.op, Ops.VECTORIZE)
+    self.assertEqual(r.dtype, dtypes.uint32.vec(3))
+    self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))
+
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
@@ -130,12 +166,11 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_cast_padded(self):
     # NOTE: this is folded due to CAST_BEFORE_VIEW
-    # update: CAST_BEFORE_VIEW=1 is no longer supported
     if is_dtype_supported(dtypes.int16):
-      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+      _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
       np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
     if is_dtype_supported(dtypes.uint16):
-      _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+      _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
       np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # not folded
     if is_dtype_supported(dtypes.int64):

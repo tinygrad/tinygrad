@@ -3,7 +3,7 @@ import unittest, pickle
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite, sym
+from tinygrad.codegen.devectorizer import full_graph_rewrite, sym
 from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
@@ -617,6 +617,7 @@ class TestSymInfer(unittest.TestCase):
     c = Variable("c", 0, 10)
     var_vals = {a: 2, b: 3, c: 4}
     assert sym_infer(5, var_vals) == 5
+    assert sym_infer(4.2, var_vals) == 4.2
     assert sym_infer(a, var_vals) == 2
     assert sym_infer(b, var_vals) == 3
     assert sym_infer(a+b, var_vals) == 5

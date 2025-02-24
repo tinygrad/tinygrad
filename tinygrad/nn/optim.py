@@ -88,7 +88,9 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        # TODO: this contiguous is required for correctness becuase self.b[i] becomes a non contiguous view
+        # the scheduler should detect this and just insert contiguous
+        self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr

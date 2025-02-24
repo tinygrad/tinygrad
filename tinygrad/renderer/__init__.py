@@ -1,10 +1,23 @@
 from __future__ import annotations
 from typing import Optional, Callable
 import functools, math
+from enum import Enum, auto
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import DType
+
+class OptOps(Enum):
+  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
+  def __lt__(self, x:OptOps): return self.value < x.value
+
+@dataclass(frozen=True, order=True)
+class Opt:
+  op: OptOps
+  axis: Optional[int] = None
+  arg: Optional[int | tuple] = None
+  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
@@ -70,7 +83,9 @@ class ProgramSpec:
   name:str
   src:str
   device:str
+  ast:UOp  # save the base ast (this is method cache key)
   uops:Optional[list[UOp]]=None
+  applied_opts:Optional[list[Opt]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
   # filled in from uops (if we have uops)
@@ -121,12 +136,13 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
-  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
+  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
+  pre_matcher: Optional[PatternMatcher] = None
   extra_matcher: Optional[PatternMatcher] = None
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, name:str, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

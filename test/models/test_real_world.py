@@ -48,7 +48,7 @@ class TestRealWorld(unittest.TestCase):
   def tearDown(self):
     dtypes.default_float = self.old_float
 
-  @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow, covered by METAL")
+  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow, covered by METAL")
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_stable_diffusion(self):
     params = unet_params
@@ -95,7 +95,7 @@ class TestRealWorld(unittest.TestCase):
       with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")
+  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
     from examples.beautiful_mnist import Model
     with Tensor.train():
@@ -113,7 +113,7 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 92)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CLANG", "GPU", "LLVM"}, "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "GPU", "LLVM"}, "slow")
   def test_train_cifar(self):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
@@ -128,7 +128,7 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 123)
+      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 126)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_train_cifar_hyp(self):

@@ -1,12 +1,14 @@
 import unittest, decimal, json
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites, symbolic
-from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UOp, graph_rewrite, track_rewrites
+from tinygrad.codegen.symbolic import symbolic
+from tinygrad.ops import tracked_ctxs as contexts, tracked_keys as keys, _name_cnt, _substitute
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_metadata, uop_to_json, to_perfetto
 
 # NOTE: VIZ tests always use the tracked PatternMatcher instance
 symbolic = TrackedPatternMatcher(symbolic.patterns)
+substitute = TrackedPatternMatcher(_substitute.patterns)
 
 class TestViz(unittest.TestCase):
   def setUp(self):
@@ -82,6 +84,21 @@ class TestViz(unittest.TestCase):
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
 
+  def test_track_rewrites_name_fxn(self):
+    @track_rewrites(name_fxn=lambda r: f"output_{r}")
+    def do_rewrite(x:UOp):
+      x = graph_rewrite(x, symbolic)
+      return x.render()
+    expr = UOp.variable("a",0,10)*UOp.variable("b",0,10)
+    do_rewrite(expr)
+    key = get_metadata(keys, contexts)[0][0]
+    self.assertEqual(key, "output_(a*b) n1")
+
+    expr2 = UOp.variable("a",0,10)+UOp.variable("b",0,10)
+    do_rewrite(expr2)
+    key = get_metadata(keys, contexts)[1][0]
+    self.assertEqual(key, "output_(a+b) n2")
+
   # NOTE: CONST UOps do not get nodes in the graph
   def test_dont_create_const_nodes(self):
     a = UOp.variable("a", 0, 10)
@@ -89,16 +106,18 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(uop_to_json(a*1)), 2)
     self.assertEqual(len(uop_to_json(a*b)), 3)
 
-  @unittest.skip("TODO: bring this back with better testing")
   def test_bottom_up_rewrite(self):
     a = UOp.variable("a", 0, 10)
     b = UOp.variable("b", 0, 10)
     c = UOp.variable("c", 0, 10)
-    UOp.substitute(a+b, {a+b:c})
+    @track_rewrites(named=True)
+    def fxn(sink): return graph_rewrite(sink, substitute, ctx={a+b:c}, bottom_up=True)
+    fxn(a+b)
+    #UOp.substitute(a+b, {a+b:c})
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
-    _, _, vals = ret[0][0]
-    self.assertEqual(len(vals.upats), 1)
+    _, m = ret[0]
+    self.assertEqual(m[0]["match_count"], 1)
 
   # NOTE: calling graph_rewrite when the function isn't decorated with track_rewrites should not VIZ
   def test_rewrite_without_context(self):
