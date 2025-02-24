@@ -84,6 +84,21 @@ class TestViz(unittest.TestCase):
     ret = get_metadata(keys, contexts)
     self.assertEqual(len(ret), 1)
 
+  def test_track_rewrites_name_fxn(self):
+    @track_rewrites(name_fxn=lambda r: f"output_{r}")
+    def do_rewrite(x:UOp):
+      x = graph_rewrite(x, symbolic)
+      return x.render()
+    expr = UOp.variable("a",0,10)*UOp.variable("b",0,10)
+    do_rewrite(expr)
+    key = get_metadata(keys, contexts)[0][0]
+    self.assertEqual(key, "output_(a*b) n1")
+
+    expr2 = UOp.variable("a",0,10)+UOp.variable("b",0,10)
+    do_rewrite(expr2)
+    key = get_metadata(keys, contexts)[1][0]
+    self.assertEqual(key, "output_(a+b) n2")
+
   # NOTE: CONST UOps do not get nodes in the graph
   def test_dont_create_const_nodes(self):
     a = UOp.variable("a", 0, 10)
