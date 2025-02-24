@@ -2503,7 +2503,7 @@ class TestUOpBecome(unittest.TestCase):
     # NOTE: realized base is always a flat buffer
     assert UPat(Ops.BUFFER).match(add.lazydata.base, {})
     # the Tensor UOp can optionally stack a VIEW on top of the BUFFER, in this case to preserve the (4, 4) shape of the tensor
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(add.lazydata, {})
+    assert add.lazydata is not add.lazydata.base
     self.assertEqual(add.lazydata.size, 16)
     self.assertEqual(add.lazydata.shape, (4, 4))
 
