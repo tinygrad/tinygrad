@@ -217,6 +217,15 @@ def cat_after_store(cat:UOp, data:UOp):
     offset += s.dtype.count
   return UOp.sink(ret[0], *ret[1:])
 
+def gep_on_store(gep:UOp, st:UOp):
+  # NOTE: we need to invert the gep here, but it may be an expanding gep
+  #print(gep.src[0].dtype, x.dtype, gep.arg, len(gep.arg))
+  # fake argsort. TODO: handle duplicates
+  a = {}
+  for i,x in enumerate(gep.arg): a[x] = i
+  new_arg = tuple(x[1] for x in sorted(a.items()))
+  return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
+
 devectorize_load_store = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
                         UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
@@ -226,7 +235,8 @@ devectorize_load_store = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=gep.src).gep(gep.arg)),
   # GEP on data of STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("x"))), lambda gep, x: UOp(Ops.STORE, src=(gep.src[0], x.gep(argsort(gep.arg))))),
+  #(UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), lambda gep, st: UOp(Ops.STORE, src=(gep.src[0], st.gep(argsort(gep.arg))))),
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
   # put CAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
