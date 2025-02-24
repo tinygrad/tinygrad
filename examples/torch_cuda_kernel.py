@@ -18,13 +18,13 @@ def custom_kernel(data: torch.Tensor, device="CUDA") -> torch.Tensor:
   out = torch.empty((data.shape[0], data.shape[1]), dtype=data.dtype, device=data.device)
   tg_out = Tensor.from_blob(out.data_ptr(), out.shape, dtype=_from_torch_dtype(out.dtype), device=device)
 
-  # Need sync torch to make sure the data is valid.
+  # Need to sync torch to make sure the data is valid.
   if data.device.type == "mps": torch.mps.synchronize()
   else: torch.cuda.synchronize()
 
   with Context(BEAM=2): f(tg_out, tg_data)
 
-  # Since realize() is called in f(), tt this point tinygrad has finished the computation and the data is valid.
+  # Since realize() is called in f(), at this point tinygrad has finished the computation and the data is valid.
   return out
 
 if __name__ == "__main__":
