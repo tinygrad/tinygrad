@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 
-# TODO: generate (and/or run?) this logic with python compile script
 # prereq: install emscripten: https://emscripten.org/docs/getting_started/downloads.html
-source ~/emsdk/emsdk_env.sh
+EMSCRIPTEN_PATH=~/emsdk/emsdk_env.sh
+source $EMSCRIPTEN_PATH
 step="transformer"
-# TODO: auto generate initial memories
-initial_memory=71499776
-# TODO: tune max memories
-max_memory=2500001792
+initial_memory=6553600
+max_memory=1500053504
 exported_functions='["_net", "_malloc", "_free", "_set_buf"]'
 
 emcc "${step}.c" \
