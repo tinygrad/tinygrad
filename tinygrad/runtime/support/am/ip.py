@@ -356,10 +356,10 @@ class AM_PSP(AM_IP):
     self._tmr_init()
 
     # SMU fw should be loaded before TMR.
-    self._load_ip_fw_cmd(self.adev.fw.smu_psp_desc)
+    self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
     self._tmr_load_cmd()
 
-    for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(psp_desc)
+    for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
 
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
@@ -433,16 +433,15 @@ class AM_PSP(AM_IP):
     cmd.cmd_id = hdr
     return cmd
 
-  def _load_ip_fw_cmd(self, psp_desc):
-    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[psp_desc[0]]}")
-    fw_type, fw_bytes = psp_desc
-
+  def _load_ip_fw_cmd(self, fw_types, fw_bytes):
     self._prep_msg1(fw_bytes)
-    cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
-    cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
-    cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
-    return self._ring_submit()
+    for fw_type in fw_types:
+      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
+      cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
+      cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
+      cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
+      cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
+      self._ring_submit()
 
   def _tmr_load_cmd(self):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)
