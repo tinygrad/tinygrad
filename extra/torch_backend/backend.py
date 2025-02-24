@@ -55,20 +55,28 @@ def masked_select(self, mask):
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor, size, stride, storage_offset=None):
-  if TORCH_DEBUG >= 1: print("** NOTE: this as_strided is wrong", tensor.shape, size, stride, storage_offset)
+  print(tensor.shape, size, stride)
   tg_tensor = unwrap(tensor)
-  if len(size) != len(stride): raise ValueError
+  if len(size) != len(stride):raise ValueError(f"Length of size ({len(size)}) must match length of stride ({len(stride)})")
   storage_offset = storage_offset if storage_offset is not None else tensor.storage_offset()
   tg_tensor.realize()
-  # print(size, stride, tg_tensor.shape)
-  # TODO: May need to use lazydata.buffer to generate a new tensor, Stride needed here
-  if size != []: tg_tensor = tg_tensor.reshape(size)
+  total_elements = prod(tg_tensor.shape)
+  target_elements = prod(size) if size else 0
+  
+  if size and total_elements != target_elements: raise ValueError(f"Size mismatched, can't reshape {tg_tensor.shape} ({total_elements} elements) -> {size} ({target_elements} elements)")
+  if size: tg_tensor = tg_tensor.reshape(size)
   if storage_offset: tg_tensor = tg_tensor[storage_offset:]
+  print(type(tg_tensor))
   return wrap(tg_tensor)
+
+def prod(shape):
+  result = 1
+  for dim in shape:
+    result *= dim
+  return result
 
 @torch.library.impl("aten::nll_loss_forward", "privateuseone")
 def nll_loss_forward_output(self, target, weight=None, reduction=1, ignore_index=-100):
-  if TORCH_DEBUG >= 1: print(f"nll_loss_forward: {self.shape=}, {target.shape=}, {weight=}, {reduction=}, {ignore_index=}")
   input_tg = unwrap(self)
   target_tg = unwrap(target) if isinstance(target, torch.Tensor) else target
   weight_tg = unwrap(weight) if weight is not None else None
@@ -79,7 +87,6 @@ def nll_loss_forward_output(self, target, weight=None, reduction=1, ignore_index
 
 @torch.library.impl("aten::nll_loss_backward.grad_input", "privateuseone")
 def nll_loss_backward_grad_input(grad_output, self, target, weight=None, reduction=1, ignore_index=-100, total_weight=None, *, grad_input):
-  if TORCH_DEBUG >= 1: print(f"nll_loss_backward: {grad_output.shape=}, {self.shape=}, {target.shape=}, {weight=}, {reduction=}, {ignore_index=}")
   grad_output_tg = unwrap(grad_output)
   input_tg = unwrap(self).requires_grad_(True)
   target_tg = unwrap(target) if isinstance(target, torch.Tensor) else target
@@ -87,9 +94,68 @@ def nll_loss_backward_grad_input(grad_output, self, target, weight=None, reducti
   total_weight_tg = unwrap(total_weight) if total_weight is not None else Tensor.ones(1)
   reduction_str = {0: "none", 1: "mean", 2: "sum"}.get(reduction, "mean")
   loss = input_tg.nll_loss(target_tg, weight=weight_tg, ignore_index=ignore_index, reduction=reduction_str)
-  grad = input_tg.backward(grad_output_tg if reduction_str == "none" else grad_output_tg * total_weight_tg)
+  loss.backward()
+  grad = input_tg.grad * grad_output_tg if reduction_str != "none" else input_tg.grad
   unwrap(grad_input).replace(grad)
   return grad_input
+
+@torch.library.impl("aten::_log_softmax_backward_data.out", "privateuseone")
+def log_softmax_backward_data_out(grad_output, output, dim, input_dtype, *, out):
+  grad_output_tg = unwrap(grad_output)
+  output_tg = unwrap(output).requires_grad_(True)
+  input_tg = output_tg.softmax(dim)
+  input_tg.backward(grad_output_tg)
+  unwrap(out).replace(output_tg.grad)
+  return out
+
+@torch.library.impl("aten::max_pool2d_with_indices_backward.grad_input", "privateuseone")
+def max_pool2d_with_indices_backward_grad_input(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices, *, grad_input):
+  grad_output_tg = unwrap(grad_output)
+  input_tg = unwrap(self).requires_grad_(True)
+  stride = stride if stride is not None else kernel_size
+  out = input_tg.max_pool2d(kernel_size, stride, dilation, padding, ceil_mode)
+  out.backward(grad_output_tg)
+  unwrap(grad_input).replace(input_tg.grad)
+  return grad_input
+
+# @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
+# def native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
+#   grad_output_tg = unwrap(grad_output)
+#   input_tg = unwrap(input).requires_grad_(True)
+#   weight_tg = unwrap(weight).requires_grad_(True) if weight is not None else None
+#   running_mean_tg = unwrap(running_mean) if running_mean is not None else None
+#   running_var_tg = unwrap(running_var) if running_var is not None else None
+#   save_mean_tg = unwrap(save_mean) if save_mean is not None else None
+#   save_invstd_tg = unwrap(save_invstd) if save_invstd is not None else None
+#   out = input_tg.batchnorm(weight=weight_tg, bias=None, mean=running_mean_tg, invstd=running_var_tg)
+#   out.backward(grad_output_tg)
+#   grad_input = input_tg.grad if output_mask[0] else None
+#   grad_weight = weight_tg.grad if output_mask[1] and weight_tg is not None else None
+#   grad_bias = weight_tg.grad if output_mask[2] and weight_tg is not None else None
+#   return tuple(wrap(g) if g is not None else None for g in (grad_input, grad_weight, grad_bias))
+
+# @torch.library.impl("aten::threshold_backward.grad_input", "privateuseone")
+# def threshold_backward_grad_input(grad_output, self, threshold, *, grad_input):
+#   grad_output_tg = unwrap(grad_output)
+#   input_tg = unwrap(self).requires_grad_(True)
+#   print(threshold)
+#   out = (input_tg <= threshold).where(input_tg, 0) # TODO: What is the function for this
+#   out.backward(grad_output_tg)
+#   unwrap(grad_input).replace(input_tg.grad)
+#   return grad_input
+
+@torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
+def convolution_backward_overrideable(grad_output, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
+  grad_output_tg = unwrap(grad_output)
+  input_tg = unwrap(input).requires_grad_(True)
+  weight_tg = unwrap(weight).requires_grad_(True)
+  output_tg = input_tg.conv2d(weight_tg,stride=stride,padding=padding,dilation=dilation,groups=groups)
+  output_tg.backward(grad_output_tg)
+  grad_input = input_tg.grad if output_mask[0] else None
+  grad_weight = weight_tg.grad if output_mask[1] else None
+  print(output_mask, "D:", type(grad_input), type(grad_weight))
+  if grad_input is None: return (None, None)
+  return tuple(wrap(g) for g in (grad_input, grad_weight))
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -142,7 +208,9 @@ from torch._decomp import get_decompositions
 aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm,
+  aten.native_batch_norm_backward,
   aten.addmm,
+  aten.threshold_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -162,17 +230,22 @@ def call_func(obj, func_str):
         print(f"Function {func_str} not found")
 
 # TODO: Categorize these functions and move them to a separate file
-IDENTICAL_FUNCS = ["flip", "tril", "triu", "acos", "acosh", "asin", "asinh", "atan", "atanh", "ceil", "celu", "clamp", "cos", "cosh", "elu", "erf", "hardsigmoid", "hardswish", "hardtanh", "tan", "tanh", "trunc", "sigmoid", "sign", "silu", "sin", "sinh", "softplus", "round", "log", "log2", "min", "mish", "gather", "argmax", "reciprocal", "mean", "sqrt", "rsqrt", "neg", "atan", "acos", "acosh", "asin", "asinh", "atanh", "ceil", "celu", "clamp", "cos", "cosh", "elu", "erf", "abs", "exp", "exp2", "min", "max", "relu"]
+IDENTICAL_FUNCS = ["abs", "bitwise_not", "logical_not", "argmin", "argmin", "all", "flip", "tril", "triu", "acos", "acosh", "asin", "asinh", "atan", "atanh", "ceil", "celu", "clamp", "cos", "cosh", "elu", "erf", "hardsigmoid", "hardswish", "hardtanh", "tan", "tanh", "trunc", "sigmoid", "sign", "silu", "sin", "sinh", "softplus", "round", "log", "log2", "min", "mish", "gather", "argmax", "reciprocal", "mean", "sqrt", "rsqrt", "neg", "atan", "acos", "acosh", "asin", "asinh", "atanh", "ceil", "celu", "clamp", "cos", "cosh", "elu", "erf", "abs", "exp", "exp2", "min", "max", "relu"]
+IDENTICAL_ASSIGN_FUNCS = ["relu", "softmax"]
 identical_dict = {f"aten.{func}": getattr(Tensor, func) for func in IDENTICAL_FUNCS}
+identical_assign_dict = {f"aten.{func}": lambda x: x.assign(getattr(Tensor, func)(x)) for func in IDENTICAL_ASSIGN_FUNCS}
 
 tiny_backend = {
+  "aten.bitwise_and.Tensor_out": lambda x,y,*,out: out.assign(x & y),
+  "aten.bitwise_or.Tensor_out": lambda x,y,*,out: out.assign(x | y),
+  "aten.bitwise_xor.Tensor_out": lambda x,y,*,out: out.assign(x ^ y),
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
   "aten.add_.Tensor": lambda x,y,alpha=1: x.assign(x.add(y)*alpha),
-  "aten.pow.Tensor_Scalar": Tensor.pow,
+  "aten.pow.Tensor_Scalar": Tensor.pow, "aten.pow.Tensor_Tensor": Tensor.pow, "aten.pow.Scalar": lambda x,y: y.pow(x, reverse=True),
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
   "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
@@ -198,6 +271,7 @@ tiny_backend = {
 }
 
 tiny_backend.update(identical_dict)
+tiny_backend.update(identical_assign_dict)
 
 # NOTE: there's earlier things to hook these, so the .out form isn't needed
 #"aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
