@@ -87,13 +87,19 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
   # TODO: this is wrong
   return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
-@torch.library.impl("aten::convolution_overrideable", "privateuseone")
-def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
+def convolution(tensor, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
-    print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
-                                   groups=groups, stride=stride, dilation=dilation, padding=padding))
-  #raise NotImplementedError("need convolution")
+    print(f"convolution {tensor.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+  return tensor.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+def convolution_backward(gradient, tensor, weight, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, output_mask):
+  # TODO: Support all len
+  # TODO: Is it correct?
+  assert len(bias_sizes) == 1
+  bias = Tensor([0.0] * bias_sizes[0])
+  r = convolution(tensor, weight, bias, stride, padding, dilation, transposed, output_padding, groups).gradient(tensor, weight, bias, gradient=gradient)
+  # TODO: What about output_mask?
+  return tuple(r)
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
@@ -116,8 +122,11 @@ def cat_out(tensors, dim=0, *, out): unwrap(out).replace(Tensor.cat(*[unwrap(x) 
 def avg_pool2d(x, kernel_size, stride=(), padding=0, ceil_mode=False, count_include_pad=True):
   return x.avg_pool2d(kernel_size, None if len(stride) == 0 else stride, 1, padding, ceil_mode, count_include_pad)
 
-def max_pool2d(x, kernel_size, stride=(), padding=0, dilation=1, ceil_mode=False):
-  return x.max_pool2d(kernel_size, None if len(stride) == 0 else stride, dilation, padding, ceil_mode)
+def max_pool2d(tensor, kernel_size, stride=(), padding=0, dilation=1, ceil_mode=False):
+  return tensor.max_pool2d(kernel_size, None if len(stride) == 0 else stride, dilation, padding, ceil_mode)
+
+def max_pool2d_backward(gradient, tensor, kernel_size, stride=(), padding=0, dilation=1, ceil_mode=False):
+  return max_pool2d(tensor, kernel_size, stride, padding, dilation, ceil_mode).gradient(tensor, gradient=gradient)[0]
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
@@ -149,9 +158,13 @@ from torch._decomp import get_decompositions
 aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm,
+  aten.native_batch_norm_backward,
+  aten.threshold_backward,
   aten.addmm,
   aten.addmv,
   aten._log_softmax_backward_data,
+  aten.nll_loss_forward,
+  aten.nll_loss_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -164,9 +177,6 @@ for k,v in get_decompositions(decomps).items():
   torch.library.impl(key, "privateuseone")(v)
 
 tiny_backend = {
-  "aten.nll_loss_forward": nll_loss,
-  "aten.nll_loss2d_forward": nll_loss,
-
   "aten.view": Tensor.reshape,
   "aten.bmm": Tensor.dot,
   "aten.dot": Tensor.dot,
@@ -203,7 +213,10 @@ tiny_backend = {
   "aten.argmin": Tensor.argmin,
   "aten.avg_pool2d": avg_pool2d,
   "aten.avg_pool3d": avg_pool2d,
+  "aten.convolution": convolution,
+  "aten.convolution_backward": convolution_backward,
   "aten.max_pool2d": max_pool2d,
+  "aten.max_pool2d_backward": max_pool2d_backward,
   "aten.sum": lambda x, dim=None, keepdim=False, *, dtype=None: x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype)),
   # "aten.sum.IntList_out": lambda x, dim=None, keepdim=False, *, dtype=None, out: out.assign(x.sum(dim, keepdim, acc_dtype=to_tiny_dtype(dtype))),
 
