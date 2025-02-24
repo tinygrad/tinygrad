@@ -19,7 +19,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.is_realized)),
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.CONST, Ops.DEVICE}),)), lambda: False),
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}),)), lambda: False),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -126,8 +126,8 @@ kernel_spec = buffer_spec+PatternMatcher([
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.ASSIGN))), lambda: True),
   # assign has a buffer view and kernel source, it can optionally depend on other assigns
   (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
-  # view/sink/const can also exist in the kernel graph
-  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST)), lambda: True),
+  # view/sink/const/bind/var can also exist in the kernel graph
+  (UPat((Ops.VIEW, Ops.SINK, Ops.CONST, Ops.BIND, Ops.DEFINE_VAR)), lambda: True),
   (UPat(GroupOp.All), lambda: False),
 ])
 

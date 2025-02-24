@@ -1,7 +1,7 @@
 # An example to compile a small Tensorflow model to extremely portable C code
 
 import os, sys
-os.environ["CLANG"] = '1'
+os.environ["CPU"] = '1'
 os.environ["JIT"] = '2'
 
 import numpy as np

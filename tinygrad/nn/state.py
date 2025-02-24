@@ -195,8 +195,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     if tuple(permute_indexes) != tuple(range(len(permute_indexes))):
       intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
-      if DEBUG >= 3: print(f"WARNING: this torch load is slow. CLANG to permute {intermediate_shape} with {permute_indexes}")
-      assert storage[1] != dtypes.bfloat16, "can't CLANG permute BF16"
+      if DEBUG >= 3: print(f"WARNING: this torch load is slow. to permute {intermediate_shape} with {permute_indexes}")
+      assert storage[1] != dtypes.bfloat16, "can't permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
 

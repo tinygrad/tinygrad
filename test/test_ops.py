@@ -8,6 +8,10 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
+if getenv("TINY_BACKEND"):
+  import extra.torch_backend.backend # noqa: F401 # pylint: disable=unused-import
+  torch.set_default_device("tiny")
+
 if CI:
   warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
@@ -46,8 +50,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
-    print(out.detach().numpy())
-  compare("forward pass", ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
+    print(out.detach().cpu().numpy())
+  compare("forward pass", ret.numpy(), out.detach().cpu().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY:
@@ -65,7 +69,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt_grad) in enumerate(zip(ts, tst_grads)):
-      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
+      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
 
     """
     (ret+1).square().mean().backward()
@@ -90,7 +94,7 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
-  tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
+  tst = [Tensor(x.detach().cpu().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
@@ -624,6 +628,23 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2.0**x)
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
+
+  def test_pow_const_direct(self):
+    # x ** c
+    def get_tiny_gradient(x, c):
+      t = Tensor([x], dtype=dtypes.float)
+      return (t ** c)[0].gradient(t)[0].item()
+    def get_torch_gradient(x, c):
+      t = torch.tensor([x], dtype=torch.float, requires_grad=True)
+      return torch.autograd.grad(t ** c, t)[0].item()
+    for x in [0, 1]:
+      for c in [-1, 0, 0.3, 1, 2]:
+        tiny_out = get_tiny_gradient(x, c)
+        torch_out = get_torch_gradient(x, c)
+        if math.isnan(tiny_out):
+          assert math.isnan(torch_out)
+        else:
+          self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
 
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])

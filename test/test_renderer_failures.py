@@ -38,7 +38,7 @@ class TestCStyleFailures(unittest.TestCase):
     store = UOp.store(a.index(idx), alu)
     sink = UOp(Ops.SINK, dtypes.void, (store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
-    # CLANG doesn't use the max function
+    # CPU doesn't use the max function
     ret = _test_uop_result([Tensor([1])], uops)[0]
     self.assertEqual(ret[0], 1)
 

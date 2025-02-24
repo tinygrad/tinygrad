@@ -1,5 +1,4 @@
 import gzip, unittest
-from PIL import Image
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str
@@ -126,11 +125,13 @@ class TestFetch(unittest.TestCase):
     assert (len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
   def test_fetch_img(self):
+    from PIL import Image
     img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False)
     with Image.open(img) as pimg:
       assert pimg.size == (77, 77), pimg.size
 
   def test_fetch_subdir(self):
+    from PIL import Image
     img = fetch("https://avatars.githubusercontent.com/u/132956020", allow_caching=False, subdir="images")
     with Image.open(img) as pimg:
       assert pimg.size == (77, 77), pimg.size
