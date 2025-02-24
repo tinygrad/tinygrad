@@ -62,7 +62,7 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
     return tensor.reshape(size)
 
   # TODO: how do i know this is permute?
-  if size == [tensor.shape[1], tensor.shape[0]] and stride == [0, 1]:
+  if len(size) == 2 and size == [tensor.shape[1], tensor.shape[0]] and stride == [0, 1]:
     return wrap(unwrap(tensor).permute(1,0))
 
   #print(tensor.cpu().numpy())
