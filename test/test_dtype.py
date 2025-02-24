@@ -794,8 +794,7 @@ class TestAutoCastType(unittest.TestCase):
         if DEBUG >= 2:
           print(f"testing {default_dtype=}, {dtype=}")
         a = Tensor([1, 2, 3], dtype=dtype, requires_grad=True)
-        # NOTE: this is broken without default_dtype because of CAST_BEFORE_VIEW
-        b = (a * 5).sum(acc_dtype=default_dtype)
+        b = (a * 5).sum()
         b.backward()  # if there is dtype mismatch, lazy should assert
         assert a.grad.dtype == a.dtype
         np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
