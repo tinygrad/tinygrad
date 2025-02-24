@@ -25,7 +25,7 @@ tinygrad provides interoperability with OpenCL and PyTorch, allowing efficient t
 You can seamlessly work with CUDA tensors between PyTorch and tinygrad without data copying:
 ```python
 tensor1 = torch.tensor([1.0, 2.0, 3.0], device=torch.device("cuda"))
-tiny_tensor1 = Tensor.from_blob(tensor1.data_ptr(), tensor1.shape, dtype=dtypes.float, device='CUDA')
+tiny_tensor1 = Tensor.from_blob(tensor1.data_ptr(), tensor1.shape, dtype={torch.float:dtypes.float}[tensor1.dtype], device='CUDA')
 ```
 
 ### `QCOM` OpenCL Interoperability
