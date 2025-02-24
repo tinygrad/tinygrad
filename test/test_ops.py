@@ -637,7 +637,7 @@ class TestOps(unittest.TestCase):
     def get_torch_gradient(x, c):
       t = torch.tensor([x], dtype=torch.float, requires_grad=True)
       return torch.autograd.grad(t ** c, t)[0].item()
-    for x in [0, 1]:
+    for x in [-math.inf, 0, 1, math.inf]:
       for c in [-1, 0, 0.3, 1, 2]:
         tiny_out = get_tiny_gradient(x, c)
         torch_out = get_torch_gradient(x, c)
