@@ -207,13 +207,13 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
+
 @functools.lru_cache(None)
 def _to_torch_dtype(dtype:DType) -> Optional['torch.dtype']:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
+  # NOTE: torch doesn't expose this mapping with a stable API
   try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
   except TypeError: return None
-_from_torch_dtype_dict: dict['torch.dtype', DType] = {} # type: ignore [name-defined] # noqa: F821
+@functools.lru_cache(None)
 def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
-  global _from_torch_dtype_dict
-  if not len(_from_torch_dtype_dict): _from_torch_dtype_dict = {v:k for k in dtypes.all if (v:=_to_torch_dtype(k)) is not None}
-  return _from_torch_dtype_dict[torchdtype]
+  return {v:k for k in dtypes.all if (v:=_to_torch_dtype(k)) is not None}[torchdtype]
