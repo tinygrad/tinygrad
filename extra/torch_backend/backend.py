@@ -151,6 +151,7 @@ decomps = [
   aten.native_batch_norm,
   aten.addmm,
   aten.addmv,
+  aten._log_softmax_backward_data,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
