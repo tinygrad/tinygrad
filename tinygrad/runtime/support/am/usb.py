@@ -9,6 +9,7 @@ class USBConnector:
 
     # Open device
     self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2464)
+    if not self.handle: libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
     if not self.handle: raise Exception("Failed to open device")
 
     # Detach kernel driver if needed
