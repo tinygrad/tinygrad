@@ -362,18 +362,24 @@ class AM_PSP(AM_IP):
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
 
-  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
+  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0x0FFFFFFF, value=0x00000000)
 
   def _prep_msg1(self, data):
     assert data.nbytes <= 267552, f"{data.nbytes}"
+    # print("msg1", hex(self.msg1_paddr), data.nbytes)
+
     self.adev.vram.copyin(self.msg1_paddr, data)
     self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(267552 - data.nbytes)))
+    # assert self.adev.vram.copyout(self.msg1_paddr, data.nbytes) == data
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
     if fw not in self.adev.fw.sos_fw: return 0
 
+    # self.adev.regMP0_SMN_C2PMSG_35.write(0x80000000)
+    # print(hex(self.adev.regMP0_SMN_C2PMSG_35.read()))
     self._wait_for_bootloader()
+    print("load", hex(compid))
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)

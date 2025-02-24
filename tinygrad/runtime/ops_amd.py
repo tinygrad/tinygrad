@@ -588,7 +588,7 @@ class AMUSBBar(AMBar):
   def copyout(self, offset, size):
     x = memoryview(bytearray(size))
     mv = x.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(size)])
-    print("copyout", len(x), cp_sz)
+    print("copyout", len(mv), cp_sz)
     for i in range(len(mv)): mv[i] = self.read(offset + i * cp_sz, cp_sz)
     return x
 
@@ -596,7 +596,7 @@ class USBIface(PCIIface):
   def __init__(self, dev, dev_id):
     self.dev = dev
     connector_t = USBConnector if getenv("LIBUSB", 0) else SCSIConnector
-    self.usb = connector_t("/dev/sg1")
+    self.usb = connector_t("/dev/sg2")
 
     gpu_bus = 4 if self.usb.is_24 else 3
 
