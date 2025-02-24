@@ -5,10 +5,10 @@
 from tinygrad import Tensor
 import torch, contextlib
 from torch.utils._python_dispatch import TorchDispatchMode
-from extra.torch_backend.backend import torch_to_tiny_dtype
+from tinygrad.dtype import _from_torch_dtype
 
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-  return TTensor(Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype]))
+  return TTensor(Tensor.empty(*size, dtype=_from_torch_dtype(dtype)))
 
 # NOTE: if we have a way to change wrap/unwrap, these can be the same methods from backend.py
 tiny_backend = {
