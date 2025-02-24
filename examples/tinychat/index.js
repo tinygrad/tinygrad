@@ -377,6 +377,15 @@ async function load_state_dict (data, device, progress) {
     completed = 0;
   }
 
+  // initialize empty kv_caches, which were part of exported model's state_dict, but which we didn't want to package/download
+  if (window.BACKEND === "WASM") {
+    for (const [k, v] of Object.entries(state_dict).filter(([_, v]) => v.empty === true)) {
+      v.parts[0].file_start_pos = 0;
+      const file = { parts: v.parts, size: v.size, bytes: new Uint8Array(v.size).fill(0) };
+      await loadFileToStateDict(file);
+    }
+  }
+
   return model;
 };
 
@@ -453,6 +462,7 @@ document.addEventListener("alpine:init", () => {
       for (const [k,v] of sortedEntries) {
         const files_in_tensor = [];
         for (const part of v.parts) {
+          part.key = k;
           if (part.empty) state_dict[k].empty = true; // assumes no other parts of this weight exist and are non-empty
           else {
             const file = data.metadata.files[part.file];
@@ -461,7 +471,6 @@ document.addEventListener("alpine:init", () => {
               files_in_tensor.push(file);
             }
             totalSize += part.size;
-            part.key = k;
             part.dtype = v.dtype;
             if (!data.metadata.files[part.file].parts) data.metadata.files[part.file].parts = [];
             data.metadata.files[part.file].size ??= 0;
