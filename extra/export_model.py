@@ -57,7 +57,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(output.lazydata.base.realized)] = f'output{i}'
   return run, special_names
 
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], 
+def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]],
   bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name=None, wasm=False) -> str:
   cprog = ["#include <tgmath.h>"]
 
@@ -71,7 +71,6 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
     buf_to_name = tuple((f"{name}", f"{weight_names[data[2]]}") for name, data in bufs_to_save.items())
     cprog.append(f"void* bufs[{len(buf_to_name)}];")
     cprog.append(f"""void set_buf(size_t index, void* ptr) {{\n  bufs[index] = ptr;\n}}""")
-    
 
   # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
   dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
@@ -96,30 +95,31 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
     outputs = sorted([name for name in output_names], key=lambda x: x.split("output")[1])
     output_c_args = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in outputs]) # TODO: always arrays only?
     cprog += [f"void net({output_c_args}, {input_c_args}) {{"]
-    
+
     conv_map = {buf_name: i for i, (buf_name, weight_name) in enumerate(buf_to_name)}
     convert = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{conv_map[x]}]" if x in bufs_to_save else x
     cprog += [f"  {name}({', '.join(map(convert, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
-    
 
-    input_ptrs = OrderedDict((f"inputPtr{name.split("input")[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
-    output_ptrs = OrderedDict((f"outputPtr{name.split("output")[1]}", (name, bufs[name][0])) for name in outputs)
-    top = f"""import {model_name}Module from './{model_name}.js'
-{f"""\nconst weightNames = [{", ".join([f"\"{weight_name}\"" for buf, weight_name in buf_to_name])}];
-const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n""" if bufs_to_save else ""}"""
 
+    input_ptrs = OrderedDict((f"inputPtr{name.split('input')[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
+    output_ptrs = OrderedDict((f"outputPtr{name.split('output')[1]}", (name, bufs[name][0])) for name in outputs)
+    weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for buf, weight_name in buf_to_name])}];
+const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n"""
+    top = f"""import {model_name}Module from './{model_name}.js'{weightMapping}"""
+
+    whitespace = "\n      "
     js_wrapper = f"""{top}\nvar {model_name} = async function() {{
 
   const wasm = await {model_name}Module();
 
   return {{
     run: ({",".join(name for name,_,_ in inputs)}) => {{
-      {"\n      ".join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-      {"\n      ".join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-      {"\n      ".join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+      {whitespace.join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+      {whitespace.join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+      {whitespace.join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
       wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))});
-      {"\n      ".join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-      {"\n      ".join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
+      {whitespace.join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
+      {whitespace.join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
       return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}];
     }},
     wasm: wasm
