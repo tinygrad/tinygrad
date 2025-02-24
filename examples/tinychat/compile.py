@@ -4,8 +4,7 @@ import os, json, hashlib, math
 from extra.export_model import export_model
 from examples.llama3 import build_transformer
 from tinygrad.nn.state import get_state_dict, load_state_dict
-from tinygrad.dtype import dtypes
-from tinygrad import Device, Variable, Tensor
+from tinygrad import Device, Variable, Tensor, dtypes
 from tinygrad.helpers import fetch, Context
 from typing import NamedTuple, Any, List
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
@@ -78,6 +77,11 @@ def prepare_browser_chunks(model):
   with open(os.path.join(os.path.dirname(__file__), f'./net_metadata.json'), "w") as writer: json.dump(metadata, writer, indent=4)
   return metadata
 
+class Step(NamedTuple):
+  name: str = ""
+  input: List[Tensor] = []
+  forward: Any = None
+
 if __name__=="__main__":
   # Export BPE data for use with tiktoken.js
   tokenizer_path = fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
@@ -87,43 +91,42 @@ if __name__=="__main__":
 
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
   Tensor.no_grad = True
-  max_context=4096
+  max_context=1024
+  tok = 128000
+  TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
+  start_pos = Variable("start_pos", 0, max_context).bind(0)
 
-  # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
-  # therefore for now, use CLANG to quantize the float16 llama to int8 with float32 scales, then load to WEBGPU
   Device.DEFAULT="CPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
+  out = model.forward(Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+  step = Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward)
+
+  with Context(BEAM=3):
+    cprog, js_wrapper = export_model(model, "wasm", *step.input, model_name=step.name)
+    js_wrapper = js_wrapper.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale")
+
+  with open(os.path.join(os.path.dirname(__file__), f"{step.name}.c"), "w") as text_file:
+    text_file.write(cprog)
+  with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as text_file:
+    text_file.write(js_wrapper)
+
+  # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
+  # therefore for now, we used CLANG to quantize the float16 llama to int8 with float32 scales, then load to WEBGPU
   Device.DEFAULT="WEBGPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", max_context=max_context, load_weights=False)
-  load_state_dict(model, state_dict, consume=True)
-  model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale # these were the same before load_state_dict
+  load_state_dict(model, state_dict)
+  # these were the same before load_state_dict
+  model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
 
-  tok = 128000
-  TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
   out = model.forward(Tensor([[tok]]), 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
-
-  # We waited to prepare the chunks until here, because model.freqs_cis and model.tok_embeddings.arange are only ready now
   metadata = prepare_browser_chunks(model)
 
-  class Step(NamedTuple):
-    name: str = ""
-    input: List[Tensor] = []
-    forward: Any = None
-    show_progress: bool = False
+  step = Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward)
+  with Context(BEAM=3):
+    model.__call__ = model.forward
+    prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *step.input, model_name=step.name, stream_weights=True)
 
-  start_pos = Variable("start_pos", 0, max_context).bind(0)
-  sub_steps = [Step(name = "transformer", input = [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P], forward = model.forward, show_progress=True),]
-  prg = ""
-
-  for step in sub_steps:
-    print(f'Executing step={step.name}')
-    with Context(BEAM=3):
-      model.__call__ = model.forward
-      prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *step.input, model_name=step.name, stream_weights=True)
-
-    if step.name == "transformer":
-      prg = prg.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale") # ensure consistency with exported weights
-
-    with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
-      text_file.write(prg)
+  prg = prg.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale") # ensure consistency with exported weights
+  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
+    text_file.write(prg)
