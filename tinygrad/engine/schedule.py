@@ -408,9 +408,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # map tensors to buffer/const
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # NOTE: tensors can also map to a VIEW, if it's contiguous and we can reshape it it's fine
-    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN and a.size == k.size and unwrap(v.st).contiguous:
-      becomes_map[k] = k.src[0] if k.op is Ops.ASSIGN else a.buf_uop.reshape(k.shape)
+    # NOTE: tensors can also map to a VIEW, we just apply this VIEW on top of the BUFFER
+    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
+      becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
     if v is k: continue
     if v.base.op is Ops.BUFFER: becomes_map[k] = v
     elif v.base.op is Ops.CONST:
