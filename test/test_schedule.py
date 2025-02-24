@@ -2528,12 +2528,12 @@ class TestUOpBecome(unittest.TestCase):
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
   @unittest.expectedFailure
-  def test_new_buffer_mops(self):
+  def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
-    self.assertEqual(b.lazydata.base.realized.size, 4)
-    assert UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE),)).match(b.lazydata, {}), f"{b.lazydata}"
+    self.assertEqual(b.lazydata.base.buffer.size, 4)
+    self.assertEqual(b.lazydata.st, ShapeTracker.from_shape((4, 1)).expand((4, 4)))
 
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
