@@ -847,7 +847,7 @@ def track_rewrites(named=False, name_fxn:Callable|None=None):
         tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else self)
         tracked_ctxs.append([])
       ret = func(self, *args, **kwargs)
-      if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = name_fxn(ret)
+      if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = f"{name_fxn(ret)} n{_name_cnt[func.__name__]}"
       return ret
     return __wrapper
   return _decorator
