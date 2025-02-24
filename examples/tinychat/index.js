@@ -9,7 +9,7 @@ if (window.isMobile) document.documentElement.classList.add('mobile'); // preven
 // MODEL_BASE_URL is where the weights are hosted, WEBGPU_EXPORT is the JS-wrapped WebGPU code exported from tinygrad
 window.PC_MODEL_BASE_URL = ".";
 window.PC_WEBGPU_EXPORT = './net.js'
-window.PC_MAX_CONTEXT = 4096;
+window.PC_MAX_CONTEXT = 1024;
 window.MOBILE_MODEL_BASE_URL = ".";
 window.MOBILE_WEBGPU_EXPORT = './net.js'
 window.MOBILE_MAX_CONTEXT = 1024;
