@@ -163,7 +163,7 @@ jobs:
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
-      run: PYTHONPATH=. python3 extra/torch_backend/example.py
+      run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/example.py
     - name: Test Ops with TINY_BACKEND (expect failure)
       run: PYTHONPATH=. TINY_BACKEND=1 python3 -m pytest test/test_ops.py || true
     - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)

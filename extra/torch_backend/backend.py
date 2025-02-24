@@ -16,10 +16,11 @@ torch_to_tiny_dtype = {
   torch.int64: dtypes.int64,
   torch.bool: dtypes.bool,
 }
+tiny_to_torch_dtype = {v: k for k, v in torch_to_tiny_dtype.items()}
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[pathlib.Path(__file__).parent / "wrapped_tensor.cpp"])
-def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x)
+def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, tiny_to_torch_dtype[x.dtype])
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)

@@ -3373,6 +3373,12 @@ class Tensor(SimpleMathTrait):
     print((2.0 ** Tensor([-1, 2, 3])).numpy())
     ```
     """
+    # TODO: combine this with gradient
+    if not reverse and isinstance(x, get_args(ConstType)) and int(x) == x:
+      if x < 0: return self.reciprocal().pow(-x)
+      if x == 0: return self*0+1
+      return self.pow(int(x)//2).square() * (self if x%2 == 1 else 1)
+
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
     if not base.is_floating_point(): raise RuntimeError("base needs to be float")
