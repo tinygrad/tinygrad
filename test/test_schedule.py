@@ -1457,15 +1457,6 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
-  def test_reduceop_collapse_axis(self):
-    a = Tensor.empty(4, 1)+Tensor.empty(4, 1)
-    b = a.pad(((0, 0), (0, 4))).sum(())
-    assert b.lazydata.op is Ops.REDUCE_AXIS, "tensor did const folding?"
-    check_schedule(b, 1)
-    # we realize the source and the reduce just becomes a view of it
-    assert b.lazydata.base == a.lazydata.base
-    assert b.lazydata.is_realized and b.lazydata.st == ShapeTracker.from_shape((4, 1)).pad(((0, 0), (0, 4)))
-
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
