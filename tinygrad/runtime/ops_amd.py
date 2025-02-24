@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
@@ -12,7 +12,9 @@ from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
+from tinygrad.runtime.support.am.amdev import AMDev, AMMapping, AMBar
+from tinygrad.runtime.support.am.usb import USBConnector, SCSIConnector
+
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 regBIF_BX_PF1_GPU_HDP_FLUSH_REQ, regBIF_BX_PF1_GPU_HDP_FLUSH_DONE = 0x0106, 0x0107
@@ -495,7 +497,7 @@ class PCIIface:
     bar_info = HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
-    self.adev = AMDev(self.pcibus, self._map_pci_range(0), dbell:=self._map_pci_range(2).cast('Q'), self._map_pci_range(5).cast('I'))
+    self.adev = AMDev(self.pcibus, self._map_pci_bar(0), dbell:=self._map_pci_bar(2), self._map_pci_bar(5))
     self.doorbell_cpu_addr = mv_address(dbell)
 
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
@@ -506,6 +508,11 @@ class PCIIface:
     self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': self.adev.ip_versions[am.GC_HWIP],
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
+
+  def _map_pci_bar(self, bar, off=0, addr=0, size=None):
+    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
+    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
+    return AMBar(loc, sz)
 
   def _map_pci_range(self, bar, off=0, addr=0, size=None):
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
@@ -561,6 +568,96 @@ class PCIIface:
 
   def device_fini(self): self.adev.fini()
 
+class AMUSBBar(AMBar):
+  def __init__(self, addr, usb): (self.addr, self.size), self.usb = addr, usb
+  def read(self, off, sz):
+    assert sz in [1, 2, 4, 8]
+    # print('rd', self.addr + off, sz)
+    upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, None, 4)
+    return self.usb.pcie_mem_req(self.addr + off, None, min(sz, 4)) | (upper << 32)
+  def write(self, off, val, sz):
+    assert sz in [1, 2, 4, 8]
+    # print('wr', self.addr + off, sz, val)
+    if sz >= 4: self.usb.pcie_mem_req(self.addr + off + 4, val >> 32, 4)
+    self.usb.pcie_mem_req(self.addr + off, val & 0xffffffff, min(sz, 4))
+  def _copy_size(self, sz): return next(x for x in [4, 2, 1] if sz % x == 0)
+  def copyin(self, offset, mv):
+    x = mv.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(mv.nbytes)])
+    print("copyin", len(x), cp_sz)
+    for i in range(len(x)): self.write(offset + i * cp_sz, x[i], cp_sz)
+  def copyout(self, offset, size):
+    x = memoryview(bytearray(size))
+    mv = x.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(size)])
+    print("copyout", len(mv), cp_sz)
+    for i in range(len(mv)): mv[i] = self.read(offset + i * cp_sz, cp_sz)
+    return x
+
+class USBIface(PCIIface):
+  def __init__(self, dev, dev_id):
+    self.dev = dev
+    connector_t = USBConnector if getenv("LIBUSB", 0) else SCSIConnector
+    self.usb = connector_t("/dev/sg2")
+
+    gpu_bus = 4 if self.usb.is_24 else 3
+
+    # setup pci switch
+    # self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
+    # self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=0, dev=0, fn=0, value=gpu_bus, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=1, dev=0, fn=0, value=gpu_bus, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=0, dev=0, fn=0, value=1, size=1)
+    # self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=0, dev=0, fn=0, value=0, size=1)
+
+    for bus in ([0, 1] if self.usb.is_24 else [0]):
+      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
+
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+
+    for bus in ([2, 3] if self.usb.is_24 else [1, 2]):
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
+
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)      
+      self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+
+    bar_next_addr, bar_off, self.bars = [0x10000000, 0x20000000], 0, {}
+    for bar_id in range(4):
+      bar_cfg = self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
+      if bar_cfg & pci.PCI_BASE_ADDRESS_SPACE == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
+        self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
+        bar_size = 0xffffffff - (self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xFFFFFFF0) + 1
+        if bar_id in {0, 1, 3}:
+          is_pref = int(bool(bar_cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH))
+          self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
+          self.bars[bar_id] = (bar_next_addr[is_pref], bar_size)
+          bar_next_addr[is_pref] += round_up(bar_size, 2 << 20)
+          print(bar_id, bar_size, hex(self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)))
+      print(bar_id, hex(bar_cfg))
+      bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
+
+    # pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
+    # self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=1)
+    # print("PM cap now", pm_state)
+
+    self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+
+    vram_bar = AMUSBBar(self.bars[0], self.usb)
+    doorbell_bar = AMUSBBar(self.bars[1], self.usb)
+    mmio_bar = AMUSBBar(self.bars[3], self.usb)
+
+    AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
+
 class AMDDevice(HCQCompiled):
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
   signals_page:Any = None
@@ -568,7 +665,9 @@ class AMDDevice(HCQCompiled):
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    # self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
+    self.dev_iface = USBIface(self, self.device_id)
+
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
