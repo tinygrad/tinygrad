@@ -839,14 +839,16 @@ class TrackedGraphRewrite:
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, int] = {}
-def track_rewrites(named=False):
+def track_rewrites(named=False, name_fxn:Callable|None=None):
   def _decorator(func):
     def __wrapper(self, *args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        if named: _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
-        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if named else self)
+        if (count_names:=(named or name_fxn)): _name_cnt[func.__name__] = _name_cnt.get(func.__name__, 0)+1
+        tracked_keys.append(f"{func.__name__}_{_name_cnt[func.__name__]}" if count_names else self)
         tracked_ctxs.append([])
-      return func(self, *args, **kwargs)
+      ret = func(self, *args, **kwargs)
+      if TRACK_MATCH_STATS >= 2 and name_fxn is not None: tracked_keys[-1] = name_fxn(ret)
+      return ret
     return __wrapper
   return _decorator
 

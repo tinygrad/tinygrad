@@ -384,7 +384,7 @@ if CAPTURE_PROCESS_REPLAY:
 
 # **** schedule creation and toposort
 
-@track_rewrites(named=True)
+@track_rewrites(name_fxn=lambda r:f"schedule_{len(r[0])}_kernels"+(f" (with_{len(r[1])}_var{'s' if len(r[1]) > 1 else ''})" if len(r[1])!=0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # remove_movement_ops + sym
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
