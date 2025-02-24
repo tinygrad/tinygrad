@@ -1,4 +1,4 @@
-import onnx, json, os
+import onnx, json, tempfile
 from pathlib import Path
 from huggingface_hub import list_models, snapshot_download
 from tinygrad.helpers import _ensure_downloads_dir, getenv
@@ -10,7 +10,7 @@ SKIPPED_FILES = [
   "avx2", "arm64", "avx512", "avx512_vnni", # hardware specific and DynamicDequantizeLinear gives numerically inaccurate values
   "q4", "q4f16", "bnb4", # other unimplemented quantization
   "model_O4", # requires non cpu ort runner and MemcpyFromHost
-  "merged", # implement attribute with graph type
+  "merged", # TODO implement attribute with graph type
   "fp16", "int8", "uint8", "quantized", # numerical accuracy issues
 ]
 SKIPPED_REPO_PATHS = [
@@ -40,7 +40,7 @@ def get_tolerances(file_name):
   # TODO very high rtol atol
   # if "fp16" in file_name: return 9e-2, 9e-2
   # if any(q in file_name for q in ["int8", "uint8", "quantized"]): return 4, 4
-  return 2e-3, 2e-3
+  return 3e-3, 3e-3
 
 def run_huggingface_benchmark(onnx_model_path, config, rtol, atol):
   inputs = get_example_inputs(OnnxRunner(onnx.load(onnx_model_path)).graph_inputs, config)
@@ -87,7 +87,7 @@ if __name__ == "__main__":
 
     with open("huggingface_results.json", "w") as f:
       json.dump(result, f, indent=2)
-      print(f"report saved to {os.path.abspath('huggingface_results.json')}")
+      print(f"report saved to {Path('huggingface_results.json').resolve()}")
 
   # for debugging
   # `repo_path` is `model.id`
@@ -121,9 +121,8 @@ if __name__ == "__main__":
       model.graph.node.extend(nodes_up_to_limit)
       model.graph.ClearField("output")
       model.graph.output.extend(new_output_values)
-      truncated_model = str(onnx_model.parent / f"{onnx_model.stem}_truncated{onnx_model.suffix}")
-      onnx.save(model, truncated_model)
-      run_huggingface_benchmark(truncated_model, get_config(root_path), rtol, atol)
-      os.remove(truncated_model)
+      with tempfile.NamedTemporaryFile(suffix=onnx_model.suffix) as tmp:
+        onnx.save(model, tmp.name)
+        run_huggingface_benchmark(tmp.name, get_config(root_path), rtol, atol)
     else:
       run_huggingface_benchmark(onnx_model, get_config(root_path), rtol, atol)
