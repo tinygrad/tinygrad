@@ -1,8 +1,8 @@
 from tinygrad import Tensor, dtypes
 import torch, contextlib
 from torch.utils._python_dispatch import TorchDispatchMode
-import numpy as np, os
-os.environ["TORCHDYNAMO_DISABLE"] = "1"
+from tinygrad.dtype import _from_torch_dtype
+import numpy as np
 
 torch_to_tiny_dtype = {
   torch.float32: dtypes.float32,
@@ -10,6 +10,7 @@ torch_to_tiny_dtype = {
   torch.int32: dtypes.int32,
   torch.int64: dtypes.int64,
   torch.bool: dtypes.bool,
+  torch.uint8: dtypes.uint8
 }
 
 torch_into_uint = {
@@ -17,7 +18,7 @@ torch_into_uint = {
 }
 
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-  if dtype is not None: return TTensor(Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype]))
+  if dtype is not None: return TTensor(Tensor.empty(*size, dtype=_from_torch_dtype[dtype]))
   return TTensor(Tensor.empty(*size))
 
 def to_copy_impl(input, dtype=None, device=None, layout=None, non_blocking=False, **kwargs):
@@ -38,15 +39,18 @@ def uniform_impl(input, from_=0.0, to=1.0):
   return input
 
 def copy_impl(self, src):
-  if type(src) == torch.Tensor: 
+  if type(src) == torch.Tensor:
     src_data = src.numpy()
-  elif type(src) == TTensor: 
+  elif type(src) == TTensor:
     src_data = src.tiny.numpy()
   else:
     # TODO: Why? type inconsistency when tensors are initiated differently
     print(type(src))
   # src_data = src.numpy()
-  self.tiny.numpy()[:] = src_data
+  if self.dim() == 0:
+    self.tiny.numpy()[()] = src_data
+  else:
+    self.tiny.numpy()[:] = src_data
   return self
 
 def zeros_impl(size, dtype=None, layout=None, device=None, pin_memory=False):
@@ -68,17 +72,26 @@ def fill_scalar_impl(input, value):
   input.tiny.numpy()[:] = value
   return TTensor(input)
 
+def rt(inp):
+  if inp is None: return None
+  if isinstance(inp, TTensor): return inp.tiny
+  return inp
+
 tiny_backend = {
-  "aten.add.Tensor": lambda x,y: TTensor(x.tiny + y.tiny),
-  "aten.add_.Tensor": lambda x,y: x.copy_(x.tiny + y.tiny),
+  "aten.add.Tensor": lambda x,y: TTensor(rt(x) + rt(y)),
+  "aten.add_.Tensor": lambda x,y: x.copy_(rt(x) + rt(y)),
   "aten.sub.Tensor": lambda x,y: TTensor(x.tiny - y.tiny),
   "aten.sub_.Tensor": lambda x,y: x.copy_(x.tiny - y.tiny),
   "aten.div.Tensor": lambda x,y: TTensor(x.tiny / y.tiny),
   "aten.div_.Tensor": lambda x,y: x.copy_(x.tiny / y.tiny),
   "aten.gt.Tensor": lambda x,y: TTensor(x.tiny > y.tiny),
+  "aten.gt.Scalar": lambda x, y: TTensor(x.tiny > y),
   "aten.ge.Tensor": lambda x,y: TTensor(x.tiny >= y.tiny),
+  "aten.ge.Scalar": lambda x,y: TTensor(x.tiny >= y),
   "aten.lt.Tensor": lambda x,y: TTensor(x.tiny < y.tiny),
+  "aten.lt.Scalar": lambda x, y: TTensor(x.tiny < y),
   "aten.le.Tensor": lambda x,y: TTensor(x.tiny <= y.tiny),
+  "aten.le.Scalar": lambda x,y: TTensor(x.tiny <= y),
   "aten.ne.Tensor": lambda x,y: TTensor(x.tiny != y.tiny),
   "aten.sum.default": lambda x: TTensor(x.tiny.sum()),
   "aten.mean.default": lambda x: TTensor(x.tiny.mean()),
@@ -86,14 +99,20 @@ tiny_backend = {
   "aten.view.default": lambda x,sz: TTensor(x.tiny.reshape(sz)),
   "aten.abs.default": lambda x: TTensor(x.tiny.abs()),
   "aten.eq.Tensor": lambda x,y: TTensor(x.tiny == y.tiny),
+  "aten.eq.Scalar": lambda x,y: TTensor(x.tiny == y),
   "aten.bitwise_and.Tensor": lambda x,y: TTensor(x.tiny & y.tiny),
+  "aten.bitwise_and.Scalar": lambda x, y: TTensor(x.tiny & y),
   "aten.bitwise_and_.Tensor": lambda x,y: x.copy_(x.tiny & y.tiny),
   "aten.bitwise_or.Tensor": lambda x,y: TTensor(x.tiny | y.tiny),
+  "aten.bitwise_or.Scalar": lambda x,y: TTensor(x.tiny | y),
   "aten.bitwise_or_.Tensor": lambda x,y: x.copy_(x.tiny | y.tiny),
   "aten.bitwise_xor.Tensor": lambda x, y: TTensor(x.tiny ^ y.tiny),
+  "aten.bitwise_xor.Scalar": lambda x, y: TTensor(x.tiny ^ y),
   "aten.bitwise_xor_.Tensor": lambda x, y: x.copy_(x.tiny ^ y.tiny),
+  "aten.bitwise_left_shift.Scalar_Tensor": lambda x, y: TTensor(y.tiny.cast(torch_into_uint[y.dtype]) << x),
+  "aten.bitwise_right_shift.Scalar_Tensor": lambda x, y: TTensor(y.tiny.cast(torch_into_uint[y.dtype]) >> x),
   "aten.ne.Scalar": lambda x,y: TTensor(x.tiny != y),
-  "aten.mul.Tensor": lambda x,y: TTensor(x.tiny * y.tiny),
+  "aten.mul.Tensor": lambda x, y: TTensor(x.tiny * rt(y)),
   "aten.mul_.Tensor": lambda x, y: x.copy_(TTensor(x.tiny * y.tiny)),
   "aten.masked_select.default": lambda x,y: TTensor(Tensor(x.tiny.numpy()[y.tiny.numpy()])),
   "aten.lift_fresh.default": lambda x: TTensor(x, dtype=x.dtype),
@@ -112,16 +131,36 @@ tiny_backend = {
   "aten.bitwise_not.default": lambda x: TTensor(x.tiny.bitwise_not()),
   "aten.pow_.Tensor": lambda x, y: x.copy_(TTensor(x.tiny.pow(y.tiny))),
   "aten.pow.Tensor_Tensor": lambda x, y: TTensor(x.tiny.pow(y.tiny)),
+  "aten.pow.Scalar": lambda exp,tensor: TTensor(tensor.tiny.pow(exp)),
   "aten.dot.default": lambda x,w: TTensor(x.tiny.dot(w.tiny)),
-  "aten.floor_divide.default": lambda x,y: TTensor(x.tiny // y.tiny),
-  "aten.floor_divide_.Tensor": lambda x, y: x.copy_(x.tiny // y.tiny),
+  "aten.floor_divide.default": lambda x, y: TTensor(rt(x) // rt(y)),
+  "aten.floor_divide_.Tensor": lambda x, y: x.copy_(rt(x) // rt(y)),
   "aten.remainder.Tensor": lambda x,y: TTensor(x.tiny.mod(y.tiny)),
   "aten.remainder_.Tensor": lambda x,y: x.copy_(x.tiny.mod(y.tiny)),
+  "aten.remainder.Scalar_Tensor": lambda x, y: TTensor(rt(x) % rt(y)),
   "aten.__lshift__.Scalar": lambda x,y: TTensor(x.tiny.cast(torch_into_uint[x.dtype]) >> y),
   "aten.__ilshift__.Scalar": lambda x, y: x.copy_(x.tiny.cast(torch_into_uint[x.dtype]) >> y),
   "aten.__rshift__.Scalar": lambda x,y: TTensor(x.tiny.cast(torch_into_uint[x.dtype]) << y),
   "aten.__irshift__.Scalar": lambda x, y: x.copy_(x.tiny.cast(torch_into_uint[x.dtype]) << y),
-  "aten.select.int": lambda x, dim, index: TTensor(x.tiny.interpolate(dim, index)),
+  "aten.select.int": lambda x, dim, index: TTensor(x.tiny[(slice(None),) * dim + (index,)]),
+  "aten.reciprocal.default": lambda x: TTensor(1 / x.tiny),
+  "aten.rsub.Scalar": lambda x, y: TTensor(y - x.tiny),
+  "aten.randint.low": lambda low, high, size, dtype=None, layout=None, device=None, pin_memory=False: TTensor(Tensor.randint(size, low=low, high=high, dtype=torch_to_tiny_dtype[dtype] if dtype else dtypes.int32)),
+  "aten.index.Tensor": lambda x,indices: TTensor(x.tiny._getitem([rt(idx).cast(dtypes.int32) for idx in indices])),
+  "aten.stack.default": lambda x: TTensor(Tensor.cat(*[t.tiny.unsqueeze(0) for t in x])),
+  "aten.unsqueeze.default": lambda x,dim: Tensor.unsqueeze(x.tiny, dim),
+  "aten.convolution.default": lambda input, weight, bias, stride, padding, dilation, transposed, output_padding, groups: 
+    TTensor(input.tiny.conv2d(weight=weight.tiny, bias=rt(bias), groups=groups, stride=stride, padding=padding, dilation=dilation)),
+  "aten.relu.default": lambda x: TTensor(x.tiny.relu()),
+  "aten.native_batch_norm.default": lambda input, weight, bias, running_mean, running_var, training, momentum, eps: (
+    TTensor(input.tiny.batchnorm(
+        rt(weight),
+        rt(bias),
+        rt(running_mean) if training else input.tiny.mean(axis=1),
+        rt(running_var).add(eps).rsqrt() if training else input.tiny.var(axis=1).add(eps).rsqrt(),
+        axis=1 
+    )
+))
 }
 
 class TTensor(torch.Tensor):
@@ -136,9 +175,9 @@ class TTensor(torch.Tensor):
     out = torch.Tensor._make_wrapper_subclass(cls, tiny.shape, dtype=dtype)
     torch._C._set_throw_on_mutable_data_ptr(out)
     # TODO: why? torch.tensor gives Tinygrad tensor, but torch.ones/zeros gives torch tensor
-    if type(tiny) == torch.Tensor: 
+    if type(tiny) == torch.Tensor:
       out.tiny = tiny.to(dtype)
-    elif type(tiny) == Tensor: 
+    elif type(tiny) == Tensor:
       out.tiny = tiny.cast(torch_to_tiny_dtype[dtype])
     else:
       out.tiny = tiny

@@ -4,6 +4,7 @@ import time, math, itertools, functools, struct, sys, inspect, pathlib, string, 
 from contextlib import ContextDecorator
 from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
@@ -3531,6 +3532,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     axis_ = argfix(axis)
+    print(axis_, axis)
     shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
     x = self - mean.reshape(shape)
     if weight is not None: x = x * weight.reshape(shape)
