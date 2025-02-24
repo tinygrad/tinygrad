@@ -643,15 +643,24 @@ def get_onnx_ops():
     if scale is None: scale = 1.0 / math.sqrt(q_head_size)
     attn_scores = q @ k.transpose(-1, -2) * scale
 
+    if mask_index is not None:
+      assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+      if mask_index.ndim != 1: mask = mask_index.bool()
+      else:
+        if mask_index.shape[0] == batch_size:
+          mask = Tensor.arange(attn_scores.shape[-1], requires_grad=False, device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
+        elif mask_index.shape[0] == 2*batch_size:
+          end_positions = mask_index[:batch_size]
+          start_positions = mask_index[batch_size:]
+          arange = Tensor.arange(seq_len).unsqueeze(0)
+          mask = (arange < end_positions.unsqueeze(1)) & (arange >= start_positions.unsqueeze(1))
+        else: raise NotImplementedError("mask_index with shape (3 * batch_size + 2) is not implemented")
+      while mask.ndim < 4: mask = mask.unsqueeze(1)
+      attn_scores = mask.where(attn_scores, mask_filter_value)
+
     if unidirectional:
       causal_mask = attn_scores.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
       attn_scores = causal_mask.where(attn_scores, mask_filter_value)
-
-    if mask_index is not None:
-      assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
-      mask = Tensor.arange(attn_scores.shape[-1]).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index.bool()
-      while mask.ndim < 4: mask = mask.unsqueeze(1)
-      attn_scores = mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
     output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)

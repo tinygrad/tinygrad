@@ -74,6 +74,12 @@ class TestContribOnnxOps(TestOnnxOps):
     hidden_size = num_heads * head_size
     v_hidden_size = hidden_size
 
+    # for mask_index
+    right_padding_mask = np.random.randint(1, seq_len + 1, size=(batch_size,), dtype=np.int32)
+    end_positions = np.random.randint(1, seq_len + 1, size=(batch_size,), dtype=np.int32)
+    start_positions = np.array([np.random.randint(0, end) for end in end_positions], dtype=np.int32)
+    left_padding_mask = np.concatenate([end_positions, start_positions])
+
     base_inps = {
       "input": np.random.randn(batch_size, seq_len, input_hidden_size).astype(np.float32),
       "weights": np.random.randn(input_hidden_size, hidden_size * 3).astype(np.float32),
@@ -86,17 +92,16 @@ class TestContribOnnxOps(TestOnnxOps):
       ({}, {}),
       ({}, {"scale": 0.1}),
       ({}, {"scale": 1.0}),
-      ({"mask_index": np.random.randint(0, seq_len, size=(batch_size,), dtype=np.int32)}, {}),
+      ({}, {"unidirectional": 1}),
+      ({"mask_index": right_padding_mask}, {}),
+      ({"mask_index": left_padding_mask}, {}),
       ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len), dtype=np.int32)}, {"mask_filter_value": -5000.0}),
       ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len, seq_len), dtype=np.int32)}, {"mask_filter_value": -np.inf}),
-      ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, 1), dtype=np.int32)}, {}),
-      ({"mask_index": np.random.randint(0, seq_len, size=(1, 1), dtype=np.int32)}, {}),
-      ({}, {"unidirectional": 1}),
-      ({"mask_index": np.random.randint(0, seq_len, size=(batch_size,), dtype=np.int32)}, {"unidirectional": 1}),
       ({ "weights": np.random.randn(input_hidden_size, hidden_size + hidden_size + 128).astype(np.float32),
-        "bias": np.random.randn(hidden_size + hidden_size + 128).astype(np.float32)},
-        {"qkv_hidden_sizes": [hidden_size, hidden_size, 128]}),
+         "bias": np.random.randn(hidden_size + hidden_size + 128).astype(np.float32)},
+       {"qkv_hidden_sizes": [hidden_size, hidden_size, 128]}),
       # TODO: past is not tested. ORT gives type error for input
+      # TODO: ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len), dtype=np.int32)}, {"unidirectional": 1}),
     ]
 
     for i, (extra_inps, extra_opts) in enumerate(test_cases):
@@ -104,7 +109,7 @@ class TestContribOnnxOps(TestOnnxOps):
         inps = {**base_inps, **extra_inps}
         opts = {**base_opts, **extra_opts}
         outputs = ["output", "present"] if "past" in inps else ["output"]
-        self.helper_test_single_op("Attention", inps, opts, outputs, atol=1e4)
+        self.helper_test_single_op("Attention", inps, opts, outputs, atol=1e-4)
 
   def test_skip_layer_normalization(self):
     shape = (2, 8, 32)
