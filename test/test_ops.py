@@ -2329,7 +2329,7 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  def test_avg_pool3d(self):
+  def test_avg_pool3d_opt(self):
     with Context(NOOPT=0):
       helper_test_op([(1,1,16,16,16)],
         lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
