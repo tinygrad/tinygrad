@@ -261,13 +261,12 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.lazydata.base.realized
     bb1 = b.lazydata.base.realized
-    with self.assertRaises((RuntimeError, AssertionError)):
-      a = a.permute(1,0)
-      a += b
-      a.realize()
-      ba2 = a.lazydata.base.realized
-      assert ba1 != ba2 and ba1 != bb1
-      np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+    a = a.permute(1,0)
+    a += b
+    a.realize()
+    ba2 = a.lazydata.base.realized
+    assert ba1 == ba2 and ba1 != bb1
+    np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   def test_post_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -275,15 +274,17 @@ class TestAssign(unittest.TestCase):
     a.realize()
     b.realize()
     #GlobalCounters.cache = []
-    ba1 = a.lazydata.base.realized # noqa: F841
-    bb1 = b.lazydata.base.realized # noqa: F841
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      a.assign(a.permute(1,0) + b)   # this should not work!
-      a.realize()
-      ba2 = a.lazydata.base.realized # noqa: F841
-      # NOTE: don't test that it's assigned
-      #assert ba1 == ba2 and ba1 != bb1
-      np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+    ba1 = a.lazydata.base.realized
+    bb1 = b.lazydata.base.realized
+    a.assign(a.permute(1,0) + b)   # this should work!
+    kc = GlobalCounters.kernel_count
+    a.realize()
+    # it will split the permute part to its own kernel, so two kernels total
+    assert GlobalCounters.kernel_count - kc == 2
+    ba2 = a.lazydata.base.realized
+    # that way the output is correct
+    assert ba1 == ba2 and ba1 != bb1
+    np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
@@ -309,20 +310,17 @@ class TestAssign(unittest.TestCase):
   def test_permuted_assignment_correct(self):
     a = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
     b = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
-    # TODO: scheduler limitation, should NOT raise AssertionError from numpy.
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      a = a.permute(1, 0)
-      new_val = a + b
-      a.assign(new_val)
-      np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
+    a = a.permute(1, 0)
+    new_val = a + b
+    a.assign(new_val)
+    np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
 
   def test_permuted_reduceop_child_dual_use(self):
     a = Tensor.randn(32, 32, 32).realize()
     b = Tensor.full((32, 32), 1.).contiguous().realize()
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      r = a.sum(axis=1)
-      b.assign(r + b.permute(1, 0))
-      b.realize()
+    r = a.sum(axis=1)
+    b.assign(r + b.permute(1, 0))
+    b.realize()
 
   @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use(self):
@@ -364,10 +362,9 @@ class TestAssign(unittest.TestCase):
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
     a = Tensor.ones(4, 4).contiguous().realize()
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2).permute(1, 0)
-      a.assign(a + b)
-      a.realize()
+    b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2).permute(1, 0)
+    a.assign(a + b)
+    a.realize()
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
