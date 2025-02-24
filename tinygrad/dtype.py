@@ -201,12 +201,12 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 
 # numpy and torch dtype interop
 
-def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
-  import numpy as np
-  return dtypes.fields()[np.dtype(npdtype).name]
 def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
+def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+  import numpy as np
+  return dtypes.fields()[np.dtype(npdtype).name]
 
 @functools.lru_cache(None)
 def _to_torch_dtype(dtype:DType) -> Optional['torch.dtype']:  # type: ignore [name-defined] # noqa: F821
