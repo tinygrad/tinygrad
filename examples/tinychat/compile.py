@@ -1,5 +1,3 @@
-# TODO: merge with compile_clang.py
-
 import os, json, hashlib, math
 from extra.export_model import export_model
 from examples.llama3 import build_transformer

@@ -94,12 +94,9 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
     outputs = sorted([name for name in output_names], key=lambda x: x.split("output")[1])
     output_c_args = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in outputs]) # TODO: always arrays only?
     cprog += [f"void net({output_c_args}, {input_c_args}) {{"]
-
     conv_map = {buf_name: i for i, (buf_name, weight_name) in enumerate(buf_to_name)}
     convert = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{conv_map[x]}]" if x in bufs_to_save else x
     cprog += [f"  {name}({', '.join(map(convert, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
-
-
     input_ptrs = OrderedDict((f"inputPtr{name.split('input')[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
     output_ptrs = OrderedDict((f"outputPtr{name.split('output')[1]}", (name, bufs[name][0])) for name in outputs)
     weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for buf, weight_name in buf_to_name])}];
@@ -108,7 +105,6 @@ const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index)
 
     whitespace = "\n      "
     js_wrapper = f"""{top}\nvar {model_name} = async function() {{
-
   const wasm = await {model_name}Module();
 
   return {{
@@ -141,13 +137,8 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
   exported_name = "model" if model_name == None else model_name
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _, _, _) in statements])
-
-
-
   input_buffer_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
   output_buffer_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
-
-
 
   # handle symbolic variables; TODO: fix some of this stuff upstream
   symbolic_vars, symbolic_name_to_input = OrderedDict(), {}
@@ -159,9 +150,7 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
           symbolic_vars[var] = f"input{next_input_idx}"
           input_names.append(symbolic_vars[var])
           next_input_idx += 1
-          #input_names.append(var.arg[0])
           input_buffer_types.append(dtype_to_js_type(var.dtype))
-          #special_names[var.arg[0]] = symbolic_vars[var]
           bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, var.arg[0])
         statements[i][1][j] = symbolic_vars[var]
     symbolic_name_to_input.update({k.arg[0]:v for k,v in symbolic_vars.items()})
@@ -171,15 +160,9 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
         if {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
           name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
           name, val = name.arg[0], val.arg
-          # TODO: use something less tedious than repeated enumeration for input order canonicalization
-          #input_idx = list(i for i, (k,v) in enumerate((k,v) for (k,v) in special_names.items() if "output" not in v) if v == special_names[name])[0]
-          # TODO: check that using input_names order is a robust canonicalization
-          #input_idx = [i for i,x in enumerate(input_names) if x == name]
           input_idx = symbolic_name_to_input[name].split("input")[1]
           global_size[j] = f"_input{input_idx}[0] + {val}"
-
   assert len(symbolic_name_to_input) == len(symbolic_vars)
-
 
   buf_type = lambda x: "uniform" if x in set(symbolic_vars.values()) else "storage"
   create_bind_group_layouts = ",".join([
@@ -189,12 +172,7 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
     for _, (_, args, _, _) in enumerate(statements)
   ])
   layouts = f"const layouts=[{create_bind_group_layouts}]"
-
-  #kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-  #kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, pipelines[{i}], layouts[{i}], infinityBuf, [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
   kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, pipelines[{i}], layouts[{i}], infinityBuf, [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-
-
 
   buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
   map_to_external_weight = lambda _key: f"state_dict['{weight_names[_key]}']" if stream_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[_key]}'])"
