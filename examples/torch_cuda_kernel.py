@@ -2,10 +2,9 @@
 #!POPCORN gpu A100
 # not a stable API, but works
 
-import torch, functools
-from tinygrad import Tensor, TinyJit
-from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import get_single_element, Context, OSX
+import torch
+from tinygrad import Tensor, TinyJit, Device
+from tinygrad.helpers import Context, OSX
 from tinygrad.dtype import _from_torch_dtype
 
 @TinyJit
@@ -25,6 +24,8 @@ if __name__ == "__main__":
   for i in range(3):
     if OSX:
       out = custom_kernel(inp:=torch.rand(16, 16, 3, device=torch.device("mps")), device="METAL")
+      # TODO: which sync works?
+      Device["METAL"].synchronize()
       torch.mps.synchronize()
     else:
       out = custom_kernel(inp:=torch.rand(16, 16, 3, device=torch.device("cuda")), device="CUDA")
