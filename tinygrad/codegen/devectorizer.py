@@ -1,11 +1,11 @@
-from typing import Optional, Any, Callable
-import functools, operator
+from typing import Optional, Any, Callable, cast
+import functools, operator, itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, mulacc_unrolled
-from tinygrad.helpers import getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.helpers import getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, argsort
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
@@ -181,9 +181,71 @@ devectorize = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
+def expand_index(buf:UOp, base_index:UOp, c:UOp, mask:Optional[UOp]=None):
+  assert isinstance(buf.dtype, PtrDType)
+  ordered_one = sorted([(x,i) for i,x in enumerate(c.arg)])
+  ordered = [(k, [y[1] for y in g]) for k,g in itertools.groupby(ordered_one, key=lambda x: x[0])]
+  groups = []
+  group: list[tuple[int, list[int]]] = []
+  for x in ordered:
+    if len(group) == 0 or group[-1][0]+1 == x[0]: group.append(x)
+    else:
+      groups.append(group)
+      group = [x]
+  groups.append(group)
+  #print(len(c.arg), len(groups), groups)
+  # NOTE: ptr size is the base size
+  idxs = [UOp(Ops.INDEX, buf.dtype, (buf, base_index+g[0][0])).cast(buf.dtype.base.vec(len(g)).ptr(buf.dtype.size)) for g in groups]
+
+  big_gep: list[Optional[int]] = [None]*len(c.arg)
+  bj = 0
+  for g in groups:
+    for j,(_,ii) in enumerate(g):
+      #big_gep[ii] = bj+j
+      for i in ii: big_gep[i] = bj+j
+    bj += len(g)
+  loads = UOp(Ops.CAT, buf.dtype.base.vec(len(c.arg)).ptr(buf.dtype.size), tuple(idxs)) if len(idxs) > 1 else idxs[0]
+  assert all(x is not None for x in big_gep)
+  return loads.gep(tuple(cast(list[int], big_gep))) if tuple(big_gep) != tuple(range(0, len(big_gep))) else loads
+
+def cat_after_store(cat:UOp, data:UOp):
+  # TODO: this is written in many places
+  offset = 0
+  ret = []
+  for s in cat.src:
+    ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
+    offset += s.dtype.count
+  return UOp.sink(ret[0], *ret[1:])
+
+def gep_on_store(gep:UOp, st:UOp):
+  # NOTE: we need to invert the gep here, but it may be an expanding gep
+  #print(gep.src[0].dtype, x.dtype, gep.arg, len(gep.arg))
+  # fake argsort. TODO: handle duplicates
+  a = {}
+  for i,x in enumerate(gep.arg): a[x] = i
+  new_arg = tuple(x[1] for x in sorted(a.items()))
+  return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
+
 devectorize_load_store = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
+                        UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")),
+                        UPat(Ops.VECTORIZE, src=UPat.var("base_index"))+UPat.cvar("c"), UPat.var("mask"))), expand_index),
+  # GEP after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld"),
+   lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=gep.src).gep(gep.arg)),
+  # GEP on data of STORE
+  #(UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), lambda gep, st: UOp(Ops.STORE, src=(gep.src[0], st.gep(argsort(gep.arg))))),
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
+  # put CAT after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
+   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
+  # put CAT after STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
   # TODO: add vectorized support to transcendental
-  (UPat((Ops.INDEX, Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
+  (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
+  # fallback
+  (UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 

@@ -94,6 +94,7 @@ class MathTrait(SimpleMathTrait):
 class Ops(FastEnum):
   # uops that aren't rendered
   NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
+  IGNORE = auto()
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
@@ -152,6 +153,7 @@ class Ops(FastEnum):
   DEVICE = auto()
   MULTI = auto()
   CUSTOM = auto()
+  CUSTOMI = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
