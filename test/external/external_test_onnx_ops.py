@@ -97,11 +97,15 @@ class TestContribOnnxOps(TestOnnxOps):
       ({"mask_index": left_padding_mask}, {}),
       ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len), dtype=np.int32)}, {"mask_filter_value": -5000.0}),
       ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len, seq_len), dtype=np.int32)}, {"mask_filter_value": -np.inf}),
+      # BUG: when `mask_index` is used with `unidirectional`, the first value must be True
+      # otherwise this will trigger a different ORT behavior where start consecutive Falses will be turned True
+      # e.g. mask_index = [[0, 0, 1, 0, 1, 1, 1, 1], [0, 0, 1, 0, 1, 1, 1, 1]]
+      # will need mask[:, :, 0:1, 0:1] = True
+      ({"mask_index": np.array([[1, 0, 1, 0, 1, 1, 1, 1], [1, 0, 1, 0, 1, 1, 1, 1]], dtype=np.int32)}, {"unidirectional": 1}),
       ({ "weights": np.random.randn(input_hidden_size, hidden_size + hidden_size + 128).astype(np.float32),
          "bias": np.random.randn(hidden_size + hidden_size + 128).astype(np.float32)},
        {"qkv_hidden_sizes": [hidden_size, hidden_size, 128]}),
       # TODO: past is not tested. ORT gives type error for input
-      # TODO: ({"mask_index": np.random.randint(0, seq_len, size=(batch_size, seq_len), dtype=np.int32)}, {"unidirectional": 1}),
     ]
 
     for i, (extra_inps, extra_opts) in enumerate(test_cases):

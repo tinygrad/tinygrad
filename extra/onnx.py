@@ -625,12 +625,10 @@ def get_onnx_ops():
                 past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None,
                 scale:float|None=None, unidirectional:int=0):
     assert not do_rotary and not attention_bias, "TODO"
-    # project x to q, k, v
     if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
     qkv = x.linear(weights, bias)
     q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
-    # reshape to multi-head format
     batch_size, seq_len, _ = x.shape
     q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
     q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
@@ -659,7 +657,7 @@ def get_onnx_ops():
       attn_scores = mask.where(attn_scores, mask_filter_value)
 
     if unidirectional:
-      causal_mask = attn_scores.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
       attn_scores = causal_mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
