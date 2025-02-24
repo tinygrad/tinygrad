@@ -103,18 +103,17 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n"""
     top = f"""import {model_name}Module from './{model_name}.js'{weightMapping}"""
 
-    whitespace = "\n      "
+    whitespace = "\n  "
     js_wrapper = f"""{top}\nvar {model_name} = async function() {{
   const wasm = await {model_name}Module();
+  {whitespace.join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+  {whitespace.join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
 
   return {{
     run: ({",".join(name for name,_,_ in inputs)}) => {{
-      {whitespace.join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-      {whitespace.join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-      {whitespace.join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
+      {(whitespace + "    ").join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
       wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))});
-      {whitespace.join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-      {whitespace.join(f"wasm._free({ptr});" for ptr in list(output_ptrs.keys()) + list(input_ptrs.keys()))}
+      {(whitespace + "    ").join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
       return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}];
     }},
     wasm: wasm
