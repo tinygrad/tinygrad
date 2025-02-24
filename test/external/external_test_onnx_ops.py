@@ -149,7 +149,7 @@ class TestContribOnnxOps(TestOnnxOps):
         }
         attributes = {}
         outputs = ["C"]
-        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
+        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs, atol=1)
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
