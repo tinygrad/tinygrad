@@ -185,8 +185,8 @@ class AMMemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
           assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers,
-            uncached=uncached, system=system, snooped=snooped, frag=0 if pte_covers == 0x1000 else 0x9, valid=True)
+          frg = min(((vaddr+off) & -(vaddr+off)).bit_length() - 1, (pte_cnt * pte_covers).bit_length() - 1) - 12
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, frag=frg, valid=True)
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
@@ -212,12 +212,21 @@ class AMMemoryManager:
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       paddrs = []
-      try:
-        ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
-        for _, _, _, seg_cnt, seg_size in ctx.next(size): paddrs += [(self.palloc(seg_size, zero=False), seg_size) for _ in range(seg_cnt)]
-      except MemoryError:
-        for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-        raise
+      ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
+      for off, _, _, seg_cnt, seg_size in ctx.next(size):
+        # Try to allocate as long as possible
+        while seg_cnt > 0:
+          cont_seg_sz, paddr = 1 << min(((va+off) & -(va+off)).bit_length() - 1, (seg_cnt * seg_size).bit_length() - 1), None
+          while cont_seg_sz >= seg_size:
+            try: paddr = self.palloc(cont_seg_sz, zero=True)
+            except MemoryError: cont_seg_sz //= 2
+            else: break
+
+          if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
+          else:
+            for paddr, _ in paddrs: self.pa_allocator.free(paddr)
+            raise MemoryError(f"Failed to allocate {cont_seg_sz=:#x} bytes")
+          seg_cnt -= cont_seg_sz // seg_size
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
@@ -226,10 +235,10 @@ class AMMemoryManager:
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
-  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
+  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, allow_fail=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
-    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
+    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align, allow_fail=allow_fail)
+    if zero and paddr is not None: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)

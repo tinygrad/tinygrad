@@ -61,7 +61,7 @@ class TLSFAllocator:
     while (x:=self.blocks[start][2]) is not None and self.blocks[x][3] is True: start = x
     self._merge_right(start)
 
-  def alloc(self, req_size:int, align:int=1) -> int:
+  def alloc(self, req_size:int, align:int=1, allow_fail=False) -> int:
     req_size = max(self.block_size, req_size) # at least block size.
     size = max(self.block_size, req_size + align - 1)
 
@@ -88,6 +88,8 @@ class TLSFAllocator:
           if nsize > req_size: self._split_block(start, nsize, req_size)
           self._remove_block(start, req_size) # Mark the block as allocated.
           return start + self.base
+
+    if allow_fail: return None
     raise MemoryError(f"Can't allocate {req_size} bytes")
 
   def free(self, start:int):
