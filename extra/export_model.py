@@ -140,28 +140,23 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
   output_buffer_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
 
   # handle symbolic variables; TODO: fix some of this stuff upstream
-  symbolic_vars, symbolic_name_to_input = OrderedDict(), {}
-  next_input_idx = max(int(name.split("input")[1]) for name in input_names) + 1
+  symbolic_vars = OrderedDict()
   for i, (_, args, global_size, _) in enumerate(statements):
     for j, var in enumerate(args):
       if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
         if var not in symbolic_vars:
-          symbolic_vars[var] = f"input{next_input_idx}"
+          symbolic_vars[var] = var.arg[0]
           input_names.append(symbolic_vars[var])
-          next_input_idx += 1
           input_buffer_types.append(dtype_to_js_type(var.dtype))
           bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, var.arg[0])
         statements[i][1][j] = symbolic_vars[var]
-    symbolic_name_to_input.update({k.arg[0]:v for k,v in symbolic_vars.items()})
 
     for j, dim in enumerate(global_size):
       if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2:
         if {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
           name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
           name, val = name.arg[0], val.arg
-          input_idx = symbolic_name_to_input[name].split("input")[1]
-          global_size[j] = f"_input{input_idx}[0] + {val}"
-  assert len(symbolic_name_to_input) == len(symbolic_vars)
+          global_size[j] = f"_{name}[0] + {val}"
 
   buf_type = lambda x: "uniform" if x in set(symbolic_vars.values()) else "storage"
   create_bind_group_layouts = ",".join([
