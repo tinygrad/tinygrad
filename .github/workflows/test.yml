@@ -379,11 +379,11 @@ jobs:
           python-version: '3.11'
           opencl: 'true'
           llvm: 'true'
-      - name: Test ONNX Test (GPU)
+      - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX Test (CPU)
+      - name: Test ONNX (CPU)
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX Test (LLVM)
+      - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test Additional ONNX Ops (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py

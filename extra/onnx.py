@@ -549,8 +549,11 @@ def get_onnx_ops():
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
   def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
-    x = x + skip + (bias if bias is not None else 0)
-    return x.layernorm(eps=epsilon) * gamma + (beta if beta is not None else 0), None, None, x
+    x = x + skip
+    if bias is not None: x = x + bias
+    ret = x.layernorm(eps=epsilon) * gamma
+    if beta is not None: ret = ret + beta
+    return ret, None, None, x
   def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embedding:Tensor, position_embedding:Tensor,
                               segment_embedding:Tensor, gamma=None, beta=None, mask:Tensor|None=None,
                               position_ids:Tensor|None=None, epsilon=1e-12, mask_index_type=0):
@@ -619,8 +622,9 @@ def get_onnx_ops():
 
   def Attention(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
                 past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
-                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
-    assert not do_rotary, "TODO"
+                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None,
+                scale:float|None=None, unidirectional:int=0):
+    assert not do_rotary and not attention_bias, "TODO"
     # project x to q, k, v
     if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
     qkv = x.linear(weights, bias)
@@ -629,34 +633,28 @@ def get_onnx_ops():
     # reshape to multi-head format
     batch_size, seq_len, _ = x.shape
     q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
-    q = q.reshape(batch_size, seq_len, num_heads, q_head_size).transpose(1, 2)
-    k = k.reshape(batch_size, seq_len, num_heads, k_head_size).transpose(1, 2)
-    v = v.reshape(batch_size, seq_len, num_heads, v_head_size).transpose(1, 2)
+    q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
 
-    # concatenate with past keys/values
-    if past is not None: k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
+    present = None
+    if past is not None:
+      k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
+      present = k.stack(v)
 
-    # compute attention scores
     if scale is None: scale = 1.0 / math.sqrt(q_head_size)
     attn_scores = q @ k.transpose(-1, -2) * scale
 
-    # apply attention bias
-    if attention_bias is not None: attn_scores += attention_bias
+    if unidirectional:
+      causal_mask = attn_scores.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
+      attn_scores = causal_mask.where(attn_scores, mask_filter_value)
 
-    # apply attention masks
     if mask_index is not None:
       assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
       mask = Tensor.arange(attn_scores.shape[-1]).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index.bool()
-      mask = mask.reshape(mask.shape[0], *(1,)*(4 - mask.ndim), *mask.shape[1:])
-      attn_scores = attn_scores + ~mask * mask_filter_value
-
-    if unidirectional:
-      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
-      attn_scores = attn_scores + ~causal_mask * mask_filter_value
+      while mask.ndim < 4: mask = mask.unsqueeze(1)
+      attn_scores = mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
     output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
-    present = k.stack(v)
     return output, present
 
   # ***** Indexing Ops *****
