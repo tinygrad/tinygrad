@@ -58,7 +58,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   return run, special_names
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]],
-  bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name=None, wasm=False) -> str:
+  bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name="model", symbolic_vars={}, wasm=False) -> str:
   cprog = ["#include <tgmath.h>"]
 
   if not wasm:
@@ -82,13 +82,6 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
 
     inputs = sorted([(name, bufs[name][1], True) for name in input_names], key=lambda x: x[0].split("input")[1]) # (name, dtype, True)
-    symbolic_vars = set()
-    for i, (_, args, _, _) in enumerate(statements):
-      for j, var in enumerate(args):
-        if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
-          symbolic_vars.add(var)
-          statements[i][1][j] = var.arg[0] # name assigned in Variable(name, ...), e.g. "start_pos"
-
     inputs += sorted([(var.arg[0], var.dtype, False) for var in symbolic_vars]) # (name, dtype, False)
     input_c_args = ", ".join(f"{dtype_map[dtype]}* {name}" if isArray else f"{dtype_map[dtype]} {name}" for name,dtype,isArray in inputs)
     outputs = sorted([name for name in output_names], key=lambda x: x.split("output")[1])
@@ -132,31 +125,12 @@ const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index)
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
-def export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, stream_weights=False) -> Tuple[str,int,int]:
-  exported_name = "model" if model_name == None else model_name
+def export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars={}, stream_weights=False) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _, _, _) in statements])
+  input_names += list(symbolic_vars.values())
   input_buffer_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
   output_buffer_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
-
-  # handle symbolic variables; TODO: fix some of this stuff upstream
-  symbolic_vars = OrderedDict()
-  for i, (_, args, global_size, _) in enumerate(statements):
-    for j, var in enumerate(args):
-      if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
-        if var not in symbolic_vars:
-          symbolic_vars[var] = var.arg[0]
-          input_names.append(symbolic_vars[var])
-          input_buffer_types.append(dtype_to_js_type(var.dtype))
-          bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, var.arg[0])
-        statements[i][1][j] = symbolic_vars[var]
-
-    for j, dim in enumerate(global_size):
-      if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2:
-        if {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
-          name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
-          name, val = name.arg[0], val.arg
-          global_size[j] = f"_{name}[0] + {val}"
 
   buf_type = lambda x: "uniform" if x in set(symbolic_vars.values()) else "storage"
   create_bind_group_layouts = ",".join([
@@ -183,7 +157,7 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
 }};\n""" if not stream_weights else ""
   return f"""
-const {exported_name} = (() => {{
+const {model_name} = (() => {{
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
 }};
@@ -274,10 +248,10 @@ const setupNet = async (device, {"state_dict" if stream_weights else "safetensor
 const load = async (device, weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}
 return {{ load, setupNet }};
 }})();
-export default {exported_name};
+export default {model_name};
 """
 
-def export_model(model, target:str, *inputs, model_name: Optional[str] = None, stream_weights=False):
+def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", stream_weights=False):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, CPU, CUDA, GPU, METAL are supported"
   with Context(JIT=2): run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
@@ -285,13 +259,30 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = None, s
   weight_names = {id(x.lazydata.base.realized): name for name, x in state.items()}
   input_names = [name for _,name in special_names.items() if "input" in name]
   output_names = [name for _,name in special_names.items() if "output" in name]
+
+  # handle symbolic variables; TODO: refactor to fix some of this stuff upstream in tinygrad
+  symbolic_vars = OrderedDict()
+  for i, (_, args, global_size, _) in enumerate(statements):
+    for j, var in enumerate(args):
+      if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
+        if var not in symbolic_vars:
+          symbolic_vars[var] = var.arg[0]
+          bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, symbolic_vars[var])
+        statements[i][1][j] = symbolic_vars[var]
+
+    if global_size:
+      for j, dim in enumerate(global_size):
+        if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
+          name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
+          global_size[j] = f"_{name.arg[0]}[0] + {val.arg}"
+
   prg = ""
   if target == "clang":
     prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
   elif target == "wasm":
-    return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names=weight_names, model_name=model_name, wasm=True)
+    return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names, model_name, symbolic_vars, wasm=True)
   elif target == "webgpu":
-    prg = export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, stream_weights)
+    prg = export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars, stream_weights)
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,
