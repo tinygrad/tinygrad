@@ -3,6 +3,19 @@ import os, math, time
 import numpy as np
 from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
+from tinygrad.helpers import prod, getenv
+
+GPUS = tuple(f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2)))
+
+def fsdp(obj, devices: tuple[str]):
+  for param in nn.state.get_parameters(obj):
+    if(param.shape[0] == 1 or prod(param.shape) <= 1):
+      param.to_(devices)
+    elif (param.shape[0] == 50304):
+      param.shard_(devices, axis=1)
+    else:
+      param.shard_(devices, axis=0)
+  return
 
 @dataclass
 class GPTConfig:
@@ -17,7 +30,9 @@ class CausalSelfAttention:
   def __init__(self, config:GPTConfig):
     assert config.n_embd % config.n_head == 0
     # key, query, value projections for all heads, but in a batch
-    self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+    self.q = nn.Linear(config.n_embd, config.n_embd)
+    self.k = nn.Linear(config.n_embd, config.n_embd)
+    self.v = nn.Linear(config.n_embd, config.n_embd)
     # output projection
     self.c_proj = nn.Linear(config.n_embd, config.n_embd)
     # regularization
@@ -29,11 +44,9 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    qkv = self.c_attn(x)
-    q, k, v = qkv.split(self.n_embd, dim=2)
-    k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-    q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-    v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+    q = self.q(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)# (B, nh, T, hs)
+    k = self.k(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)# (B, nh, T, hs)
+    v = self.v(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2)# (B, nh, T, hs)
 
     # manual implementation of attention
     att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -77,15 +90,21 @@ class GPT:
     self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
   def load_pretrained(self):
-    weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
+    weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2-large/resolve/main/pytorch_model.bin')) # Large model OOM on 8GB VRAM without FSDP
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    attn_splitted = {} 
     for k in weights:
       if k == "wte.weight":
         weights[k] = weights[k].pad(((0, self.config.padded_vocab_size-self.config.vocab_size), (0,0))).to(None).contiguous()
       if k.endswith(transposed):
         weights[k] = weights[k].to(None).T.contiguous()
+      if "c_attn" in k:
+        attn_splitted[k.replace("c_attn", "q")] = weights[k].split(self.config.n_embd, dim=0)[0]
+        attn_splitted[k.replace("c_attn", "k")] = weights[k].split(self.config.n_embd, dim=0)[1]
+        attn_splitted[k.replace("c_attn", "v")] = weights[k].split(self.config.n_embd, dim=0)[2]
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
+    weights.update(attn_splitted)
     nn.state.load_state_dict(self, weights)
 
   def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
@@ -99,8 +118,7 @@ class GPT:
 
   def __call__(self, idx:Tensor, targets=None):
     b, t = idx.shape
-    pos = Tensor.arange(0, t)
-
+    pos = Tensor.arange(0, t).to_(GPUS)
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
     x = tok_emb + pos_emb
@@ -128,9 +146,14 @@ if __name__ == "__main__":
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
 
-  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
+  default_device = Device.DEFAULT
+  Device.DEFAULT = "CLANG" #initialize the parameters on CPU
+  model = GPT(GPTConfig(n_layer=36, n_head=20, n_embd=1280))
   model.load_pretrained()
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+  Device.DEFAULT = default_device #Revert default device to GPU
 
+  fsdp(optimizer, GPUS) #We call FSDP on optimizer.
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
   encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
@@ -163,7 +186,9 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+
+  x.to_(GPUS)
+  y.to_(GPUS)
 
   @TinyJit
   def step(x, y):
@@ -184,7 +209,7 @@ if __name__ == "__main__":
   if not args.skip_test:
     start = "<|endoftext|>"
     start_ids = encode(start)
-    x = (Tensor(start_ids)[None, ...])
+    x = (Tensor(start_ids)[None, ...]).to_(GPUS)
     max_new_tokens = 16
     temperature = 1.0
     top_k = 40
