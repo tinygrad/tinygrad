@@ -1284,7 +1284,7 @@ class TestLinearizerFailures(unittest.TestCase):
                       x23:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1024, 50000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
                 UOp(Ops.CONST, dtypes.bool, arg=True, src=(
                    x23,)),)),)),)),)),)),))
-    opts = [Opt(op=OptOps.LOCAL, axis=0, arg=16)]
+    opts = [Opt(op=OptOps.GROUPTOP, axis=0, arg=16)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
