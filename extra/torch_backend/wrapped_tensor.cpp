@@ -10,6 +10,17 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::
 }
 }
 
+struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
+  // NOTE: no idea what this is
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
+};
+
+int register_hook() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
+  return 0;
+}
+int temp_register_hook = register_hook();
+
 // code from chatgpt
 struct GILSafeDeleter {
   void operator()(PyObject* ptr) const {
@@ -56,6 +67,8 @@ static caffe2::TypeMeta dtypeFromName(const std::string &dtype_name) {
   } else if (dtype_name == "int") { return caffe2::TypeMeta::Make<int32_t>();
   } else if (dtype_name == "long") { return caffe2::TypeMeta::Make<int64_t>();
   } else if (dtype_name == "bool") { return caffe2::TypeMeta::Make<bool>();
+  } else if (dtype_name == "char") { return caffe2::TypeMeta::Make<char>();
+  } else if (dtype_name == "unsigned char") { return caffe2::TypeMeta::Make<unsigned char>();
   }
   throw std::runtime_error("Unsupported dtype: " + dtype_name);
 }

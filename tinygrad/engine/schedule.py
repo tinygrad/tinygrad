@@ -1,11 +1,11 @@
-import sys, functools, atexit, pickle
+import sys, atexit, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
 from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND
+from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv, pluralize
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -29,6 +29,23 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
     case Ops.MUL: return ret.pow(prshape)
     case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
 
+def split_reduceop(reduce:UOp, x:UOp):
+  if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
+  # if there are few globals, make some reduces into globals by splitting into two kernels
+  # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
+  #   ~2**10 should be enough if GROUP is used
+  # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
+  # split is moved to the end to provide maximum locality for the second phase reduce.
+  real_strides = unwrap(x.st).real_strides(ignore_valid=True)
+  if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
+                             if x.shape[i]%d==0 and real_strides[i]!=0]): return None
+  dim_to_split, divisor = split_candidates[0]
+  splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
+  splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
+  if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
+  # reduce original axes, then split
+  return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   if (sti:=unwrap(src.st).invert(src.base.shape)) is not None: ctx[src.base] = contig.view(sti)
 def replace_contiguous(ctx:dict[UOp, UOp], alu:UOp):
@@ -48,6 +65,8 @@ sym = symbolic_simple+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # reduce on stride 0 is collapsed
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_stride0_reduce),
+  # split_reduceop
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
   (UPat(Ops.COPY, name="root", src=(UPat(), UPat.cvar("x"),)), lambda root,x: root.const_like(x.arg)),
   # no COPY to same device, except clone (arg is True)
@@ -226,25 +245,24 @@ create_kernels = merge_views+PatternMatcher([
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
 ])
 
-# **** convert Kernel to a ScheduleItem (for legacy reasons)
+# **** fix kernel AST
 
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: tuple[Buffer, ...]
-  metadata: tuple[Metadata, ...]
-  @property
-  def outputs(self) -> tuple[Buffer, ...]:
-    """Read/write or write only buffers in the schedule."""
-    return tuple(b for i,b in enumerate(self.bufs) if i in self.output_idxs)
-  @property
-  def inputs(self) -> tuple[Buffer, ...]:
-    """Read only buffers in the schedule."""
-    return tuple(b for i,b in enumerate(self.bufs) if i not in self.output_idxs)
-  @functools.cached_property
-  def output_idxs(self) -> tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
+# ** create buffer ops + enumerate buffers
 
-# **** Kernel creation
+def load_buf(ctx:list[UOp], x:UOp):
+  if x not in ctx: ctx.append(x)
+  return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop()))
+
+add_buffer_ops = PatternMatcher([
+  # LOAD
+  (UPat(Ops.BUFFER, name="x"), load_buf),
+  # STORE (except for COPY/BUFFER_VIEW)
+  (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
+  (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
+   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
+])
+
+# ** push views to buffer ops
 
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
@@ -298,12 +316,21 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def _append_st_vars(ctx:dict[Variable, int], x:UOp) -> UOp|None:
+# ** unbind variables
+
+def unbind_shapetracker(ctx:dict[Variable, int], x:UOp) -> UOp|None:
   st = unwrap(x.st).simplify()
   if any(x.op is Ops.BIND for x in st.vars()):
     st, var_vals = st.unbind()
     ctx.update(var_vals)
   return st.to_uop() if st != x.st else None
+
+def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
+  ctx[var.replace(src=())] = val.arg
+  return var
+unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
+
+# ** fix_kernel_ops
 
 def check_load_st(glbl:UOp, view:UOp):
   if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
@@ -317,7 +344,7 @@ def check_load_st(glbl:UOp, view:UOp):
 
 fix_kernel_ops = PatternMatcher([
   # BIND in shapetracker becomes DEFINE_VAR
-  (UPat(Ops.VIEW, name="x"), _append_st_vars),
+  (UPat(Ops.VIEW, name="x"), unbind_shapetracker),
   # remove CONTIGUOUS/ASSIGN/DEVICE
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
@@ -328,23 +355,12 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-def load_buf(ctx:list[UOp], x:UOp):
-  if x not in ctx: ctx.append(x)
-  return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop()))
-
-add_buffer_ops = PatternMatcher([
-  # LOAD
-  (UPat(Ops.BUFFER, name="x"), load_buf),
-  # STORE (except for COPY/BUFFER_VIEW)
-  (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
-  (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
-   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
-])
-
-def unbind_variable(ctx:dict[Variable, int], bind:UOp, var:UOp, val:UOp):
-  ctx[var.replace(src=())] = val.arg
-  return var
-unbind_vars = PatternMatcher([(UPat(Ops.BIND, name="bind", src=(UPat.var("var"), UPat.cvar("val"))), unbind_variable),])
+# TODO: replace this with the KERNEL UOp
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: UOp
+  bufs: tuple[Buffer, ...]
+  metadata: tuple[Metadata, ...]
 
 def schedule_uop(sink:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
   assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
@@ -368,7 +384,7 @@ if CAPTURE_PROCESS_REPLAY:
 
 # **** schedule creation and toposort
 
-@track_rewrites(named=True)
+@track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
   # remove_movement_ops + sym
   tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
@@ -376,37 +392,29 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
-  # do_realize + group_realizes
+  # get realizes
   sink = tensor_map[big_sink]
   realize_map = group_realizes(sink)
-
-  # map tensors to new uops
-  becomes_map: dict[UOp, UOp] = {}
-  rev_tensor_map: dict[UOp, list[UOp]] = {}
-  ops_metadata: dict[UOp, Metadata] = {}
-  for k,v in tensor_map.items():
-    rev_tensor_map.setdefault(v, []).append(k)
-    if k is v: continue
-    if v.base.op is Ops.BUFFER:
-      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
-      if v.op is Ops.VIEW:
-        mop = [x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st][0]
-        if k is not mop: becomes_map[k] = mop
-      else: becomes_map[k] = v
-    elif v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
-    # if we're not realizing this tensor, map its metadata to the simplified uop
-    elif isinstance(k.metadata, Metadata): ops_metadata[v] = k.metadata
-
+  # map tensor metadata to simplified ops
+  ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
   # create kernels
-  if len(realize_map) == 0: return [], {}, becomes_map
   kernel_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # map realized tensors to buffers
-  for k,v in kernel_map.items():
-    if k is v or v.op is not Ops.ASSIGN: continue
-    for t in rev_tensor_map[k]: becomes_map[t] = t.src[0] if t.op is Ops.ASSIGN else v.buf_uop.reshape(t.shape)
+  # map tensors to buffer/const
+  becomes_map: dict[UOp, UOp] = {}
+  for k,v in tensor_map.items():
+    # NOTE: tensors can also map to a VIEW, if it's contiguous and we can reshape it it's fine
+    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN and a.size == k.size and unwrap(v.st).contiguous:
+      becomes_map[k] = k.src[0] if k.op is Ops.ASSIGN else a.buf_uop.reshape(k.shape)
+    if v is k: continue
+    if v.base.op is Ops.BUFFER:
+      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
+      if v.op is Ops.VIEW: v = next(iter(x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st))
+      if k is not v: becomes_map[k] = v
+    elif v.base.op is Ops.CONST:
+      if all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
