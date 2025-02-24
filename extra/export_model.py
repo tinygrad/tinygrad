@@ -72,16 +72,15 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
     cprog.append(f"void* bufs[{len(buf_to_name)}];")
     cprog.append(f"""void set_buf(size_t index, void* ptr) {{\n  bufs[index] = ptr;\n}}""")
 
-  # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
-  dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
-  for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(input_names + output_names):
-    n_bytes, dtype, weightbuf_id = bufs[name]
-    cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
-
-
   cprog += list(functions.values())
 
   if wasm:
+    # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
+    dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
+    for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(input_names + output_names):
+      n_bytes, dtype, weightbuf_id = bufs[name]
+      cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
+
     inputs = sorted([(name, bufs[name][1], True) for name in input_names], key=lambda x: x[0].split("input")[1]) # (name, dtype, True)
     symbolic_vars = set()
     for i, (_, args, _, _) in enumerate(statements):
