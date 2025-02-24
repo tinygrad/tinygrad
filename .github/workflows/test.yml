@@ -385,6 +385,8 @@ jobs:
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test Additional ONNX Ops (CPU)
+        run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
