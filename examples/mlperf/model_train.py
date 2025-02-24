@@ -1,11 +1,11 @@
-import os, time, math, functools
+import os, time, math, functools, random
 from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -136,7 +136,7 @@ def train_resnet():
 
   # ** resume from checkpointing **
   start_epoch = 0
-  if ckpt:=getenv("RESUME", ""):
+  if (ckpt:=getenv("RESUME", "")):
     load_training_state(model, optimizer_group, scheduler_group, safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
@@ -145,7 +145,7 @@ def train_resnet():
   WANDB = getenv("WANDB")
   if WANDB:
     import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id:=getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args)
 
   BENCHMARK = getenv("BENCHMARK")
@@ -343,8 +343,251 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
-  # TODO: Retinanet
-  pass
+  from contextlib import redirect_stdout
+  from examples.mlperf.dataloader import batch_load_retinanet
+  from examples.mlperf.initializers import FrozenBatchNorm2d
+  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
+  from extra.models.retinanet import RetinaNet
+  from extra.models import resnet
+  from extra.lr_scheduler import LambdaLR
+  from pycocotools.coco import COCO
+  from pycocotools.cocoeval import COCOeval
+  from tinygrad.helpers import colored
+  
+  import numpy as np
+
+  config, target_metric = {}, 0.34
+
+  NUM_CLASSES = len(MLPERF_CLASSES)
+  BASE_DIR = getenv("BASE_DIR", BASEDIR)
+  BENCHMARK = getenv("BENCHMARK")
+  config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+
+  for x in GPUS: Device[x]
+  print(f"training on {GPUS}")
+
+  def _freeze_backbone_layers(backbone, trainable_layers):
+    layers_to_train = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
+    for k, v in get_state_dict(backbone).items():
+      if all([not k.startswith(layer) for layer in layers_to_train]):
+        v.requires_grad = False
+
+  def _data_get(it, val=False):
+    if val:
+      x, img_ids, img_sizes, cookie = next(it)
+      return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, cookie
+
+    x, y_boxes, y_labels, matches, anchors, cookie = next(it)
+    return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
+  
+  def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
+    def _lr_lambda(e):
+      e = e + start_iter
+      if e >= warmup_iters: return 1.0
+      alpha = float(e) / warmup_iters
+      return warmup_factor * (1 - alpha) + alpha
+    return LambdaLR(optim, _lr_lambda)
+
+  @TinyJit
+  def _train_step(model, optim, lr_scheduler, x, **kwargs):
+    optim.zero_grad()
+
+    losses = model(normalize(x, GPUS), **kwargs)
+    loss = sum([l for l in losses.values()])
+
+    loss.backward()
+    optim.step()
+    lr_scheduler.step()
+
+    return loss.realize(), losses
+  
+  @TinyJit
+  def _eval_step(model, x, **kwargs):
+    out = model(normalize(x, GPUS), **kwargs)
+    return out.realize()
+
+  # ** hyperparameters **
+  config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
+  config["bs"] = BS = getenv("BS", 256)
+  config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
+  config["lr"] = lr = getenv("LR", 0.0001)
+  config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
+  config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
+
+  if SEED:
+    Tensor.manual_seed(SEED)
+    np.random.seed(seed=SEED)
+
+  # ** model initializers **
+  resnet.BatchNorm = FrozenBatchNorm2d
+
+  # ** model setup **
+  backbone = resnet.ResNeXt50_32X4D(num_classes=None)
+  backbone.load_from_pretrained()
+  _freeze_backbone_layers(backbone, 3)
+
+  model = RetinaNet(backbone, num_classes=NUM_CLASSES)
+  params = get_parameters(model)
+
+  for p in params: p.to_(GPUS)
+
+  step_times, start_epoch = [], 0
+
+  # ** optimizer **
+  optim = Adam(params, lr=lr)
+
+  # ** dataset **
+  train_dataset = COCO(download_dataset(BASE_DIR, "train"))
+  val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
+  coco_val = COCOeval(cocoGt=val_dataset, iouType="bbox")
+
+  # ** lr scheduler **
+  config["steps_in_train_epoch"] = steps_in_train_epoch = round_up(len(train_dataset.imgs.keys()), BS) // BS
+  config["steps_in_val_epoch"] = steps_in_val_epoch = (round_up(len(val_dataset.imgs.keys()), BS) // BS)
+  start_iter, warmup_iters = start_epoch * steps_in_train_epoch, lr_warmup_epochs * steps_in_train_epoch
+  lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, lr_warmup_factor)
+
+  # ** resume from checkpointing **
+  if (ckpt:=getenv("RESUME", "")):
+    load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
+    start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
+    print(f"resuming from {ckpt} at epoch {start_epoch}")
+
+  # ** initialize wandb **
+  if (WANDB:=getenv("WANDB")):
+    import wandb
+
+    wandb_args = {"project": "MLPerf-RetinaNet"}
+    if (wandb_id:=getenv("WANDB_RESUME", "")):
+      wandb_args["id"] = wandb_id
+      wandb_args["resume"] = "must"
+
+    wandb.init(config=config, **wandb_args)
+
+  print(f"training with batch size {BS} for {EPOCHS} epochs")
+
+  for e in range(start_epoch, EPOCHS):
+    # ** training loop **
+    train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
+    it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
+    i, proc = 0, _data_get(it)
+
+    prev_cookies = []
+    st = time.perf_counter()
+
+    while proc is not None:
+      GlobalCounters.reset()
+
+      x, y_bboxes, y_labels, matches, anchors, proc = proc
+      loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
+
+      pt = time.perf_counter()
+
+      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+      try:
+        next_proc = _data_get(it)
+      except StopIteration:
+        next_proc = None
+
+      dt = time.perf_counter()
+
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.item()
+
+      cl = time.perf_counter()
+      if BENCHMARK: step_times.append(cl - st)
+
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {losses['classification_loss'].item():5.4f} classification loss, {losses['regression_loss'].item():5.4f} regression loss, "
+        f"{optim.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS"
+      )
+
+      if WANDB:
+        wandb.log({"lr": optim.lr.numpy(), "train/loss": loss, "train/classification_loss": losses["classification_loss"].item(), "train/regression_loss": losses["regression_loss"].item(),
+                  "train/step_time": cl - st, "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": e + (i + 1) / steps_in_train_epoch})
+
+      st = cl
+      prev_cookies.append(proc)
+      proc, next_proc = next_proc, None  # return old cookie
+      i += 1
+
+      if i == BENCHMARK:
+        assert not math.isnan(loss)
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_minutes = int(median_step_time * steps_in_train_epoch * EPOCHS / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {steps_in_train_epoch * GlobalCounters.global_mem:_}")
+        return
+      
+    # ** eval loop **
+    with Tensor.train(mode=False), Tensor.test():
+      val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=BS, shuffle=False, seed=SEED)
+      it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
+      i, proc = 0, _data_get(it, val=val)
+
+      eval_times, prev_cookies = [], []
+      val_img_ids, val_imgs, ncats, narea = [], [], len(coco_val.params.catIds), len(coco_val.params.areaRng)
+
+      while proc is not None:
+        GlobalCounters.reset()
+        st = time.time()
+
+        out, img_ids, img_sizes, proc = _eval_step(model, (x:=proc[0])).numpy(), proc[1], proc[2], proc[3]
+        out = model.postprocess_detections(out, input_size=x.shape[1:3], orig_image_sizes=img_sizes)
+        coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
+          for i, prediction in enumerate(out) for box, score, label in zip(*prediction.values())]
+
+        with redirect_stdout(None):
+          coco_val.cocoDt = val_dataset.loadRes(coco_results)
+          coco_val.params.imgIds = img_ids
+          coco_val.evaluate()
+
+        val_img_ids.extend(img_ids)
+        val_imgs.append(np.array(coco_val.evalImgs).reshape(ncats, narea, len(img_ids)))
+
+        if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+        try:
+          next_proc = _data_get(it, val=val)
+        except StopIteration:
+          next_proc = None
+
+        prev_cookies.append(proc)
+        proc, next_proc = next_proc, None
+        i += 1
+
+        et = time.time()
+        eval_times.append(et - st)
+
+      total_fw_time = sum(eval_times) / len(eval_times)
+
+      tqdm.write(f"eval time: {total_fw_time:.2f}")
+
+      if WANDB:
+        wandb.log({"eval/forward_time": total_fw_time, "epoch": e + 1})
+
+      coco_val.params.imgIds = val_img_ids
+      coco_val._paramsEval.imgIds = val_img_ids
+      coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
+      coco_val.accumulate()
+      coco_val.summarize()
+
+      if getenv("CKPT"):
+        if not os.path.exists(ckpt_dir := Path(getenv("CKPT_DIR", "./ckpts"))): os.mkdir(ckpt_dir)
+        if WANDB and wandb.run is not None:
+          fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}_seed{SEED}.safe")
+        else:
+          fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_e{e}_seed{SEED}.safe")
+
+        print(f"saving ckpt to {fn}")
+        if (val_metric:=coco_val.stats[0]) >= target_metric:
+          safe_save(get_state_dict(model), fn)
+          print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}"))
+          break
+        else:
+          safe_save(get_training_state(model, optim, lr_scheduler), fn)
 
 def train_unet3d():
   """
