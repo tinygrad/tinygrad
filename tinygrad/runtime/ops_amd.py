@@ -580,14 +580,14 @@ class AMUSBBar(AMBar):
     # print('wr', self.addr + off, sz, val)
     if sz >= 4: self.usb.pcie_mem_req(self.addr + off + 4, val >> 32, 4)
     self.usb.pcie_mem_req(self.addr + off, val & 0xffffffff, min(sz, 4))
-  def _copy_size(self, sz): return next(x for x in [8, 4, 2, 1] if sz % x == 0)
+  def _copy_size(self, sz): return next(x for x in [4, 2, 1] if sz % x == 0)
   def copyin(self, offset, mv):
-    x = mv.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(mv.nbytes)])
+    x = mv.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(mv.nbytes)])
     print("copyin", len(x), cp_sz)
     for i in range(len(x)): self.write(offset + i * cp_sz, x[i], cp_sz)
   def copyout(self, offset, size):
     x = memoryview(bytearray(size))
-    mv = x.cast({1:'B', 2:'H', 4:'I', 8:'Q'}[cp_sz:=self._copy_size(size)])
+    mv = x.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(size)])
     print("copyout", len(mv), cp_sz)
     for i in range(len(mv)): mv[i] = self.read(offset + i * cp_sz, cp_sz)
     return x
@@ -613,14 +613,14 @@ class USBIface(PCIIface):
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
 
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
 
     for bus in ([2, 3] if self.usb.is_24 else [1, 2]):
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
 
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x4000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
 
       self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
@@ -631,7 +631,7 @@ class USBIface(PCIIface):
       self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)      
       self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
-    bar_next_addr, bar_off, self.bars = [0x10000000, 0x40000000], 0, {}
+    bar_next_addr, bar_off, self.bars = [0x10000000, 0x20000000], 0, {}
     for bar_id in range(4):
       bar_cfg = self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
       if bar_cfg & pci.PCI_BASE_ADDRESS_SPACE == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:

@@ -3,14 +3,12 @@ from tinygrad.runtime.autogen import libc, libusb
 
 class USBConnector:
   def __init__(self, name):
-    assert False
-
     self.usb_ctx = ctypes.POINTER(libusb.struct_libusb_context)()
     ret = libusb.libusb_init(ctypes.byref(self.usb_ctx))
     if ret != 0: raise Exception(f"Failed to init libusb: {ret}")
 
     # Open device
-    self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2362)
+    self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2464)
     if not self.handle: raise Exception("Failed to open device")
 
     # Detach kernel driver if needed
@@ -79,8 +77,7 @@ class USBConnector:
         cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
       else: cdb = struct.pack('>BBBHB', 0xe4, buf_len, 0x00, current_addr, 0x00)
       data[i:i+buf_len] = self._send(cdb, buf_len)
-
-    return bytes(data)
+    return bytes(data[:read_len])
 
   def write(self, start_addr, data):
     for offset, value in enumerate(data):

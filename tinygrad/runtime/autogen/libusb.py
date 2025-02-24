@@ -154,7 +154,7 @@ if ctypes.sizeof(ctypes.c_longdouble) == 16:
 else:
     c_long_double_t = ctypes.c_ubyte*16
 
-_libraries['libusb-1.0.so'] = None # ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libusb-1.0.so')
+_libraries['libusb-1.0.so'] = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libusb-1.0.so')
 
 
 LIBUSB_H = True # macro
