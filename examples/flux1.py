@@ -16,6 +16,7 @@ import math, time, argparse, tempfile
 from typing import List, Dict, Optional, Union, Tuple, Callable
 from dataclasses import dataclass
 from pathlib import Path
+import os
 from PIL import Image
 
 urls:dict = {
@@ -325,36 +326,42 @@ class Flux:
 
     return self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
+def get_local_path(url: str, base_path: str, url_parts:int) -> str:
+    base_path = os.path.join(base_path, "")  # This adds trailing slash/backslash depending on OS
+    parts = url.split("/")[url_parts:]
+    return os.path.join(base_path, *parts)
+
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/util.py
 def load_flow_model(name:str, model_path:str):
   # Loading Flux
   print("Init model")
   model = Flux(guidance_embed=(name != "flux-schnell"))
-  if not model_path: model_path = fetch(urls[name])
+  model_path = get_local_path(urls[name], model_path, -1) if model_path else fetch(urls[name])
   state_dict = {k.replace("scale", "weight"): v for k, v in safe_load(model_path).items()}
   load_state_dict(model, state_dict)
   return model
 
-def load_T5(max_length:int=512):
+def load_T5(model_path:str, max_length:int=512):
   # max length 64, 128, 256 and 512 should work (if your sequence is short enough)
   print("Init T5")
-  T5 = T5Embedder(max_length, fetch(urls["T5_tokenizer"]))
-  pt_1 = fetch(urls["T5_1_of_2"])
-  pt_2 = fetch(urls["T5_2_of_2"])
-  load_state_dict(T5.encoder, safe_load(pt_1) | safe_load(pt_2), strict=False)
+  T5 = T5Embedder(max_length, get_local_path(urls["T5_tokenizer"], model_path, -2) if model_path else fetch(urls["T5_tokenizer"]))
+  pt_1_path = get_local_path(urls["T5_1_of_2"], model_path, -2) if model_path else fetch(urls["T5_1_of_2"])
+  pt_2_path = get_local_path(urls["T5_2_of_2"], model_path, -2) if model_path else fetch(urls["T5_2_of_2"])
+  load_state_dict(T5.encoder, safe_load(pt_1_path) | safe_load(pt_2_path), strict=False)
   return T5
 
-def load_clip():
+def load_clip(model_path:str):
   print("Init Clip")
   clip = ClipEmbedder()
-  load_state_dict(clip.transformer, safe_load(fetch(urls["clip"])))
+  clip_path = get_local_path(urls["clip"], model_path, -2) if model_path else fetch(urls["clip"])
+  load_state_dict(clip.transformer, safe_load(clip_path))
   return clip
 
-def load_ae() -> AutoEncoder:
-  # Loading the autoencoder
+def load_ae(model_path:str) -> AutoEncoder:
   print("Init AE")
   ae = AutoEncoder(0.3611, 0.1159)
-  load_state_dict(ae, safe_load(fetch(urls["ae"])))
+  ae_path = get_local_path(urls["ae"], model_path, -1) if model_path else fetch(urls["ae"])
+  load_state_dict(ae, safe_load(ae_path))
   return ae
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/sampling.py
@@ -452,8 +459,8 @@ if __name__ == "__main__":
   x = Tensor.randn(1, 16, 2 * math.ceil(height / 16), 2 * math.ceil(width / 16), dtype="bfloat16")
 
   # load text embedders
-  T5 = load_T5(max_length=256 if args.name == "flux-schnell" else 512)
-  clip = load_clip()
+  T5 = load_T5(args.model_path, max_length=256 if args.name == "flux-schnell" else 512)
+  clip = load_clip(args.model_path)
 
   # embed text to get inputs for model
   inp = prepare(T5, clip, x, prompt=args.prompt)
@@ -472,7 +479,7 @@ if __name__ == "__main__":
   del model, run
 
   # load autoencoder
-  ae = load_ae()
+  ae = load_ae(args.model_path)
 
   # decode latents to pixel space
   x = unpack(x.float(), height, width)
