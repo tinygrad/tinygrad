@@ -198,6 +198,14 @@
     border-radius: 8px;
     padding: 8px;
   }
+  .progress-message {
+    position: absolute;
+    z-index: 2;
+    left: 50%;
+    top: 2%;
+    color: #ffd230;
+    display: none;
+  }
   </style>
 </head>
 <body>
@@ -210,6 +218,7 @@
     </div>
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
     <div class="graph">
+      <div class="progress-message">Rendering new layout...</div>
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
           <g id="edges"></g>
