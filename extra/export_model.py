@@ -59,68 +59,56 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]],
   bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name="model", symbolic_vars={}, wasm=False) -> str:
-  cprog = ["#include <tgmath.h>"]
+  headers = ["#include <tgmath.h>"]
+  cprog = list(functions.values())
 
   if not wasm:
     for name,cl in bufs_to_save.items():
       weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
-  elif wasm and bufs_to_save:
-    cprog += ["#include <stddef.h>"]
-    bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weight_names}
-    buf_to_name = tuple((f"{name}", f"{weight_names[data[2]]}") for name, data in bufs_to_save.items())
-    cprog.append(f"void* bufs[{len(buf_to_name)}];")
-    cprog.append(f"""void set_buf(size_t index, void* ptr) {{\n  bufs[index] = ptr;\n}}""")
+    inputs = ", ".join([f'float* {input}' for input in input_names])
+    outputs = ", ".join([f'float* {output}' for output in output_names])
+    cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
+    cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    return '\n'.join(headers + cprog)
+  else:
+    if bufs_to_save:
+      headers += ["#include <stddef.h>"]
+      bufs_to_save = {k:v for k,v in bufs.items() if v[2] in weight_names} # causes random seeds to be set as zeroes, not exported as a model weight
+      buf_to_name = OrderedDict((buf_name, {"name": weight_names[data[2]], "idx": i}) for i, (buf_name, data) in enumerate(bufs_to_save.items()))
+      cprog.append(f"void* bufs[{len(buf_to_name)}];")
+      cprog.append(f"""void set_buf(size_t index, void* ptr) {{\n  bufs[index] = ptr;\n}}""")
 
-  cprog += list(functions.values())
-
-  if wasm:
-    # TODO: import the same type names used in each function declaration. Below mapping is not comprehensive, and may go out of date
     dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
     for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(input_names + output_names):
-      n_bytes, dtype, weightbuf_id = bufs[name]
+      n_bytes, dtype, _ = bufs[name]
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
 
-    inputs = sorted([(name, bufs[name][1], True) for name in input_names], key=lambda x: x[0].split("input")[1]) # (name, dtype, True)
-    inputs += sorted([(var.arg[0], var.dtype, False) for var in symbolic_vars]) # (name, dtype, False)
-    input_c_args = ", ".join(f"{dtype_map[dtype]}* {name}" if isArray else f"{dtype_map[dtype]} {name}" for name,dtype,isArray in inputs)
-    outputs = sorted([name for name in output_names], key=lambda x: x.split("output")[1])
-    output_c_args = ", ".join([f'{dtype_map[bufs[output][1]]}* {output}' for output in outputs]) # TODO: always arrays only?
-    cprog += [f"void net({output_c_args}, {input_c_args}) {{"]
-    conv_map = {buf_name: i for i, (buf_name, weight_name) in enumerate(buf_to_name)}
-    convert = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{conv_map[x]}]" if x in bufs_to_save else x
-    cprog += [f"  {name}({', '.join(map(convert, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
-    input_ptrs = OrderedDict((f"inputPtr{name.split('input')[1]}", (name, bufs[name][0])) for name,_,isArray in inputs if isArray)
-    output_ptrs = OrderedDict((f"outputPtr{name.split('output')[1]}", (name, bufs[name][0])) for name in outputs)
-    weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for buf, weight_name in buf_to_name])}];
+    inputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in input_names + list(symbolic_vars.values())]
+    outputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in output_names]
+    forward_args = [f"{dtype}{'*' if name not in symbolic_vars.values() else ''} {name}" for name,dtype,_ in outputs+inputs]
+    cprog += [f"void net({', '.join(forward_args)})"] + ["{"]
+    get_weight_ptr = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{buf_to_name[x]['idx']}]" if x in bufs_to_save else x
+    cprog += [f"  {name}({', '.join(map(get_weight_ptr, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for weight_name in [v["name"] for v in buf_to_name.values()]])}];
 const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n"""
     top = f"""import {model_name}Module from './{model_name}.js'{weightMapping}"""
-
     whitespace = "\n  "
     js_wrapper = f"""{top}\nvar {model_name} = async function() {{
   const wasm = await {model_name}Module();
-  {whitespace.join(f"const {inputPtr} = wasm._malloc({n_bytes});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-  {whitespace.join(f"const {outputPtr} = wasm._malloc({n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-
+  {whitespace.join(f"const {name}Ptr = wasm._malloc({n_bytes});" for name, _, n_bytes in outputs+inputs if name not in symbolic_vars.values())}
   return {{
     run: ({",".join(name for name,_,_ in inputs)}) => {{
-      {(whitespace + "    ").join(f"wasm.HEAPU8.set({name}, {inputPtr});" for inputPtr, (name, n_bytes) in input_ptrs.items())}
-      wasm._net({", ".join(list(output_ptrs.keys()) + list(input_ptrs.keys()) + sorted([var.arg[0] for var in symbolic_vars]))});
-      {(whitespace + "    ").join(f"const {name} = wasm.HEAPU8.slice({outputPtr}, {outputPtr} + {n_bytes});" for outputPtr, (name, n_bytes) in output_ptrs.items())}
-      return [{", ".join(f"{name}" for name, n_bytes in output_ptrs.values())}];
+      {(whitespace + "    ").join(f"wasm.HEAPU8.set({name}, {name}Ptr);" for name,_,_ in inputs if name not in symbolic_vars.values())}
+      wasm._net({", ".join(f"{name}{'Ptr' if name not in symbolic_vars.values() else ''}" for name,_,_ in outputs+inputs)});
+      {(whitespace + "    ").join(f"const {name} = wasm.HEAPU8.slice({name}Ptr, {name}Ptr + {n_bytes});" for name,_,n_bytes in outputs)}
+      return [{", ".join(f"{name}" for name,_,_ in outputs)}];
     }},
     wasm: wasm
   }}
 }}\nexport {{ {model_name}, {model_name}_name_to_id }};"""
 
-    return '\n'.join(cprog), js_wrapper
-
-  else:
-    inputs = ", ".join([f'float* {input}' for input in input_names])
-    outputs = ", ".join([f'float* {output}' for output in output_names])
-    cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
-    cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
-    return '\n'.join(cprog)
+    return '\n'.join(headers + cprog), js_wrapper
 
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
