@@ -192,6 +192,8 @@ class MetalAllocator(LRUAllocator):
     self.dev:MetalDevice = dev
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
+    if options.external_ptr: return MetalBuffer(objc_id(options.external_ptr), size)
+
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
