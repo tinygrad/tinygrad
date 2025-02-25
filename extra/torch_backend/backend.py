@@ -18,6 +18,9 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend)
 torch.utils.generate_methods_for_privateuse1_backend()
 
+@torch.library.impl("aten::addmm", "privateuseone")
+def addmm(input, mat1, mat2, *, beta=1, alpha=1): return wrap(unwrap(input) * beta + (unwrap(mat1).matmul(unwrap(mat2))) * alpha)
+
 @torch.library.impl("aten::zero_", "privateuseone")
 def zero_(x):
   tt = unwrap(x)
@@ -55,18 +58,20 @@ def masked_select(self, mask):
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor, size, stride, storage_offset=None):
+  # print('as_strided:', tensor.shape, size, stride, storage_offset, end='')
   tg_tensor = unwrap(tensor)
   if len(size) != len(stride):raise ValueError(f"Length of size ({len(size)}) must match length of stride ({len(stride)})")
   storage_offset = storage_offset if storage_offset is not None else tensor.storage_offset()
   storage_offset = unwrap(storage_offset) if isinstance(storage_offset, torch.Tensor) else storage_offset
   if storage_offset: tg_tensor = tg_tensor[storage_offset:]
-  tg_tensor.realize()
+  tg_tensor = tg_tensor.contiguous().realize()
   total_elements = prod(tg_tensor.shape)
   target_elements = prod(size) if size else 0
   if tuple(x for x in tg_tensor.shape if x != 1) == tuple(x for x in size if x != 1): return wrap(tg_tensor.reshape(size))
   if type(storage_offset) == Tensor: print(storage_offset.shape)
   if size and total_elements != target_elements: raise ValueError(f"Size mismatched, can't reshape {tg_tensor.shape} ({total_elements} elements) -> {size} ({target_elements} elements)")
   if size: tg_tensor = tg_tensor.reshape(size)
+  # print(', END:', tg_tensor.shape, tg_tensor.requires_grad)
   return wrap(tg_tensor)
 
 def prod(shape):
@@ -172,27 +177,6 @@ def lerp_scalar_out(self, end, weight, out):
   unwrap(out).replace(result_tg)
   return out
 
-@torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
-def convolution_backward_overrideable(grad_output, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
-  grad_output_tg = unwrap(grad_output)
-  input_tg = unwrap(input).requires_grad_(True)
-  weight_tg = unwrap(weight).requires_grad_(True)
-  output_tg = input_tg.conv2d(weight_tg,stride=stride,padding=padding,dilation=dilation,groups=groups)
-  output_tg.backward(grad_output_tg)
-  grad_input = input_tg.grad if output_mask[0] else None
-  grad_weight = weight_tg.grad if output_mask[1] else None
-  if grad_input is None and grad_weight is None: 
-    return (Tensor.empty(), Tensor.empty(), Tensor.empty())
-  elif grad_input is None:
-    # print(grad_input, grad_weight)
-    return tuple(wrap(g) for g in (Tensor.empty(grad_weight.shape[1]), grad_weight, Tensor.empty(grad_weight.shape[0])))
-  # elif grad_weight is None: 
-    # print(grad_input, '-A-', grad_weight)
-    # return tuple(wrap(g) for g in (grad_input, Tensor.empty(grad_weight.shape[1]), Tensor.empty(grad_weight.shape[0])))
-  # else:
-    # print('D:', grad_input.shape, grad_weight.shape)
-  return tuple(wrap(g) for g in (grad_input, grad_weight, Tensor.empty(grad_weight.shape[0])))
-
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
@@ -220,6 +204,25 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
   #raise NotImplementedError("need convolution")
 
+@torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
+def convolution_backward_overrideable(grad_output, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
+  grad_output_tg = unwrap(grad_output)
+  input_tg = unwrap(input).requires_grad_(True)
+  weight_tg = unwrap(weight).requires_grad_(True)
+  output_tg = input_tg.conv2d(weight_tg,stride=stride,padding=padding,dilation=dilation,groups=groups)
+  output_tg.backward(grad_output_tg)
+  grad_input = input_tg.grad if output_mask[0] else None
+  grad_weight = weight_tg.grad if output_mask[1] else None
+  if grad_input is None and grad_weight is None: 
+    return (Tensor.empty(), Tensor.empty(), Tensor.empty())
+  elif grad_input is None:
+    # print(grad_input, grad_weight)
+    return tuple(wrap(g) for g in (Tensor.empty(grad_weight.shape[1]), grad_weight, Tensor.empty(grad_weight.shape[0])))
+  elif grad_weight is None: 
+    print(grad_input, '-A-', grad_weight)
+    return tuple(wrap(g) for g in (grad_input, Tensor.empty(grad_weight.shape[1]), Tensor.empty(grad_weight.shape[0])))
+  return tuple(wrap(g) for g in (grad_input, grad_weight, Tensor.empty(grad_weight.shape[0])))
+
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
@@ -242,27 +245,24 @@ def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
 @torch.library.impl("aten::addcmul.out", "privateuseone")
 def addcmul_out(self, tensor1, tensor2, *, out, value=1):
-  print('addcmul_out: ',type(self), type(tensor1), type(tensor2), type(out), type(value))
-  # print('addcmul_out: ', self.shape, tensor1.shape, tensor2.shape, out.shape, value)
   result = unwrap(self) + (unwrap(tensor1) * unwrap(tensor2)) * value
-  return wrap(unwrap(out).assign(result.detach()).detach()).detach()
+  return wrap(unwrap(out).assign(result.detach())).detach()
 
 @torch.library.impl("aten::addcdiv.out", "privateuseone")
 def addcdiv_out(self, tensor1, tensor2, *, out, value=1):
-  print('addcdiv_out: ', type(self), type(tensor1), type(tensor2), type(out), type(value))
   result = unwrap(self) + (unwrap(tensor1) / unwrap(tensor2)) * value
-  return wrap(unwrap(out).assign(result.detach()).detach()).detach()
+  return wrap(unwrap(out).assign(result.detach())).detach()
 
 # register some decompositions
-from torch._decomp import get_decompositions
-aten = torch.ops.aten
-decomps = [
-  aten.addmm,
-]
-for k,v in get_decompositions(decomps).items():
-  key = str(k._schema).split("(")[0]
-  if TORCH_DEBUG >= 2: print("register decomp for", k)
-  torch.library.impl(key, "privateuseone")(v)
+# from torch._decomp import get_decompositions
+# aten = torch.ops.aten
+# decomps = [
+#   aten.addmm,
+# ]
+# for k,v in get_decompositions(decomps).items():
+#   key = str(k._schema).split("(")[0]
+#   if TORCH_DEBUG >= 2: print("register decomp for", k)
+#   torch.library.impl(key, "privateuseone")(v)
 
 def call_func(obj, func_str):
   func = getattr(obj, func_str, None)
