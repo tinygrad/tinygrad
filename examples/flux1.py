@@ -327,9 +327,9 @@ class Flux:
     return self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
 def get_local_path(url: str, base_path: str, url_parts:int) -> str:
-    base_path = os.path.join(base_path, "")  # This adds trailing slash/backslash depending on OS
-    parts = url.split("/")[url_parts:]
-    return os.path.join(base_path, *parts)
+  base_path = os.path.join(base_path, "")  # This adds trailing slash/backslash depending on OS
+  parts = url.split("/")[url_parts:]
+  return os.path.join(base_path, *parts)
 
 # https://github.com/black-forest-labs/flux/blob/main/src/flux/util.py
 def load_flow_model(name:str, model_path:str):
