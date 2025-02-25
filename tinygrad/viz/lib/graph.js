@@ -48,11 +48,12 @@ window.renderGraph = function(graph, additions) {
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
     // +labels
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
+      console.log(d.label, d.width, d.height, d.labelWidth, d.labelHeight)
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2;
       return `translate(-${x}, -${y})`;
      }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "1")
-       .attr("dy", 16).attr("xml:space", "preserve");
+       .attr("dy", 14).attr("xml:space", "preserve");
 
     // ** draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);

@@ -1,7 +1,7 @@
 importScripts("../assets/dagrejs.github.io/project/dagre/latest/dagre.min.js");
 
 const NODE_PADDING = 10;
-const LINE_HEIGHT = 16;
+const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext('2d');
 ctx.font = `${LINE_HEIGHT}px sans-serif`;
@@ -24,7 +24,7 @@ onmessage = (e) => {
   for (const [k, [label, src, color]] of Object.entries(graph)) {
     // adjust node dims by label size + add padding
     const [labelWidth, labelHeight] = getTextDims(label);
-    g.setNode(k, {label, color, width:labelWidth+NODE_PADDING*2, height:labelHeight+NODE_PADDING*2, padding:NODE_PADDING});
+    g.setNode(k, {label, color, width:labelWidth+NODE_PADDING*2, height:labelHeight+NODE_PADDING*2, padding:NODE_PADDING, labelWidth, labelHeight});
     for (const s of src) g.setEdge(s, k);
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
