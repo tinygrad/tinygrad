@@ -232,12 +232,11 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
   if DEVECTORIZE:
-    # devectorize + load_store_indexing + mulacc_unrolled, mulacc_unrolled must be last because it can break loop_collapse
-    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing+
-      mulacc_unrolled)
+    # devectorize + load_store_indexing
+    sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
   else:
     # new devectorize only for load/store
-    sink = graph_rewrite(sink, sym+devectorize_load_store+mulacc_unrolled)
+    sink = graph_rewrite(sink, sym+devectorize_load_store)
 
   # optional pre matcher
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
