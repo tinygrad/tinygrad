@@ -72,9 +72,15 @@ sym = symbolic_simple+PatternMatcher([
   # no COPY to same device, except clone (arg is True)
   (UPat(Ops.COPY, src=(UPat(), UPat.var("copyin")), name="copy"),
    lambda copyin,copy: copyin if copyin.device == copy.device and copy.arg is not True else None),
+  # copyin must be base
+  (UPat(Ops.COPY, src=(UPat(), UPat(Ops.VIEW, name="v")), name="copy"), lambda copy,v: v.contiguous().copy_to_device(copy.device) \
+    if prod(v.shape) < prod(v.base.shape) else v.base.copy_to_device(copy.device, clone=copy.arg).view(v.st)),
   # remove cast to image when it's already a contiguous image
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"))),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
+  # put CAST to smaller dtype before EXPAND
+  (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st) \
+    if cast.dtype.itemsize <= vm.dtype.itemsize and resolve(prod(vm.shape) > vm.st.real_size()) else None),
   # make things that can't be images not images
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW, Ops.CONST, Ops.DEVICE}, name="u"), lambda u: u.replace(dtype=dt.base) if isinstance(dt:=u.dtype,ImageDType)
    and (prod(u.shape) != prod(dt.shape) or not any(u.shape[x]%4 == 0 for x in u.st.unit_stride_axes())) else None),
@@ -89,6 +95,9 @@ sym = symbolic_simple+PatternMatcher([
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="root"),
    lambda root: root.replace(op=Ops.BUFFER_VIEW) if isinstance(root.device, str) and root.device.startswith("DISK") else None),
+  # put UnaryOps before EXPANDs
+  (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
+   lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
@@ -405,14 +414,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # map tensors to buffer/const
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # NOTE: tensors can also map to a VIEW, if it's contiguous and we can reshape it it's fine
-    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN and a.size == k.size and unwrap(v.st).contiguous:
-      becomes_map[k] = k.src[0] if k.op is Ops.ASSIGN else a.buf_uop.reshape(k.shape)
+    # NOTE: tensors can also map to a VIEW, we just apply this VIEW on top of the BUFFER
+    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
+      becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
     if v is k: continue
-    if v.base.op is Ops.BUFFER:
-      # VIEW isn't a valid tensor uop, we need to backtrack to the movement op that created it
-      if v.op is Ops.VIEW: v = next(iter(x for x in k.toposort if (xs:=tensor_map[x]).base is v.base and xs.st == v.st))
-      if k is not v: becomes_map[k] = v
+    if v.base.op is Ops.BUFFER: becomes_map[k] = v
     elif v.base.op is Ops.CONST:
       if all_int(v.shape): becomes_map[k] = v
 
