@@ -518,14 +518,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
-    assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
+    assert self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}, f"must be BUFFER or BUFFER_VIEW {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
+    if self.op is Ops.BUFFER_VIEW:
+      buffers[self] = ret = (base:=self.src[0].buffer).view(self.size, self.dtype, self.arg[1]*base.dtype.itemsize)
+      return ret
     from tinygrad.device import Buffer
     assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
     return ret
   @property
-  def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER else None
+  def realized(self) -> Optional[Buffer]: return self.buffer if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW} else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
