@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, cast, ClassVar
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import HWInterface
