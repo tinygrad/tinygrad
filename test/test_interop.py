@@ -3,7 +3,7 @@ import unittest
 import torch
 import numpy as np
 
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
@@ -25,6 +25,11 @@ class TestInterop(unittest.TestCase):
     tg_data = Tensor.from_blob(inp.data_ptr(), inp.shape, dtype=_from_torch_dtype(inp.dtype))
 
     tg_out = tg_data[:, :, 0] * 0.2989 + tg_data[:, :, 1] * 0.5870 + tg_data[:, :, 2] * 0.1140
+
+    if self.torch_device == "mps" and CI:
+      # MPS backend out of memory: https://discuss.pytorch.org/t/mps-back-end-out-of-memory-on-github-action/189773
+      # Calculate expected value on cpu.
+      inp = inp.cpu()
     torch_out = inp[:, :, 0] * 0.2989 + inp[:, :, 1] * 0.5870 + inp[:, :, 2] * 0.1140
 
     np.testing.assert_allclose(tg_out.numpy(), torch_out.cpu().numpy())
