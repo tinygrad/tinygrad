@@ -61,15 +61,17 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name="model", symbolic_vars={}, wasm=False) -> str:
   headers = ["#include <tgmath.h>"]
   cprog = list(functions.values())
+  dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
+  inputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in input_names + list(symbolic_vars.values())]
+  outputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in output_names]
+  forward_args = ",".join(f"{dtype}{'*' if name not in symbolic_vars.values() else ''} {name}" for name,dtype,_ in (outputs+inputs if wasm else inputs+outputs))
 
   if not wasm:
     for name,cl in bufs_to_save.items():
       weight = ''.join(["\\x%02X"%x for x in bytes(cl._buf)])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
-    inputs = ", ".join([f'float* {input}' for input in input_names])
-    outputs = ", ".join([f'float* {output}' for output in output_names])
-    cprog += [f"float {name}[{len}];" if name not in bufs_to_save else f"float *{name} = (float *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in ['input', 'outputs']]
-    cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    cprog += [f"{dtype_map[dtype]} {name}[{len}];" if name not in bufs_to_save else f"{dtype_map[dtype]} *{name} = ({dtype_map[dtype]} *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in input_names+output_names]
+    cprog += [f"void net({forward_args}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     return '\n'.join(headers + cprog)
   else:
     if bufs_to_save:
@@ -79,15 +81,11 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
       cprog.append(f"void* bufs[{len(buf_to_name)}];")
       cprog.append(f"""void set_buf(size_t index, void* ptr) {{\n  bufs[index] = ptr;\n}}""")
 
-    dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", dtypes.uint: "unsigned int"}
     for name in set(bufs.keys()) - set(bufs_to_save.keys()) - set(input_names + output_names):
       n_bytes, dtype, _ = bufs[name]
       cprog += [f"{dtype_map[dtype]} {name}[{n_bytes // dtype.itemsize}];"]
 
-    inputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in input_names + list(symbolic_vars.values())]
-    outputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in output_names]
-    forward_args = [f"{dtype}{'*' if name not in symbolic_vars.values() else ''} {name}" for name,dtype,_ in outputs+inputs]
-    cprog += [f"void net({', '.join(forward_args)})"] + ["{"]
+    cprog += [f"void net({forward_args})"] + ["{"]
     get_weight_ptr = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{buf_to_name[x]['idx']}]" if x in bufs_to_save else x
     cprog += [f"  {name}({', '.join(map(get_weight_ptr, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
     weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for weight_name in [v["name"] for v in buf_to_name.values()]])}];
