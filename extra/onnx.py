@@ -66,7 +66,7 @@ def type_parse(onnx_type: TypeProto):
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
-  shape: tuple[str|int]
+  shape: tuple[str|int, ...]
   dtype: DType
   is_optional: bool
   is_sequence: bool
@@ -75,8 +75,8 @@ class OnnxValue:
 class OnnxNode:
   num: int
   op: str
-  inputs: tuple[str]
-  outputs: tuple[str]
+  inputs: tuple[str, ...]
+  outputs: tuple[str, ...]
   opts: dict[str, Any]
 
 # ***** python const *****
@@ -117,7 +117,7 @@ class OnnxRunner:
     Tensor.no_grad = False if self.is_training else True
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
-    self.graph_outputs = {x.name:type_parse(x.type) for x in model.graph.output}
+    self.graph_outputs = tuple(x.name for x in model.graph.output)
     self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
@@ -202,13 +202,14 @@ def get_onnx_ops():
 
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
 
-  def _prepare_quantize(x, scale, zero_point, axis=1, block_size=0):
+  def _prepare_quantize(x:Tensor, scale:Tensor, zero_point:Tensor|int, axis=1, block_size=0):
     if axis < 0: axis += x.ndim
-    if not isinstance(zero_point, Tensor): zero_point = Tensor(zero_point, dtype=dtypes.uint8)._broadcast_to(scale.shape)
-    if block_size == 0:
-      shape = (*[1]*axis, *scale.shape, *[1]*(x.ndim - axis - scale.ndim))
-      return scale.reshape(shape), zero_point.reshape(shape)
-    return scale.repeat_interleave(block_size, dim=axis), zero_point.repeat_interleave(block_size, dim=axis)
+    # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_quantize_linear.py#L31
+    def reshape(val:Tensor):
+      if val.numel() == 1: return val
+      if block_size == 0: return val.reshape([val.shape[0] if dim == axis else 1 for dim in range(x.ndim)])
+      return val.repeat_interleave(block_size, axis)
+    return (reshape(scale), reshape(zero_point) if isinstance(zero_point, Tensor) else zero_point)
 
   def _op_integer(op, inputs:list[Tensor], zero_points:list[Tensor], **opts):
     adjusted_inputs = [inp.int() - zp for inp, zp in zip(inputs, zero_points)]
@@ -286,6 +287,7 @@ def get_onnx_ops():
   Softmax = {1:Softmax_1, 13:Softmax_13}
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
+  def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
   def FastGelu(x:Tensor, bias:Tensor|None=None):
     # this is tanh approximated
     return (x + bias).gelu() if bias is not None else x.gelu()
@@ -313,6 +315,9 @@ def get_onnx_ops():
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
   def BitwiseNot(x:Tensor): return ~x
+  def Mod(x:Tensor,y:Tensor,fmod=0):
+    if fmod != 0: raise NotImplementedError("float mod is not supported")
+    return x % y
 
   # ***** Casting Ops *****
   # TODO: saturate
@@ -509,15 +514,13 @@ def get_onnx_ops():
       for i in range(-len(sizes), 0):
         reshape, index = [1] * X.ndim, indexes[i]
         reshape[i] = expand[i] = sizes[i]
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
     if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
     return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   # ***** Neural Network Ops *****
-  # TODO: try to factor out common implementations for these ops
-  # https://medium.com/@zljdanceholic/groupnorm-then-batchnorm-instancenorm-layernorm-e2b2a1d350a0
   def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
                         training_mode:int=0, spatial=1, is_test=0):
     if training_mode:
@@ -534,10 +537,8 @@ def get_onnx_ops():
     invstd = (input_var + epsilon).rsqrt()
     return X.batchnorm(scale, B, input_mean, invstd)
   def InstanceNormalization(x:Tensor, scale:Tensor, bias:Tensor, epsilon:float=1e-05):
-    axis = tuple(range(2, x.ndim))
-    mean = x.mean(axis=axis, keepdim=True)
-    invstd = x.sub(mean).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
-    return x.sub(mean).mul(scale.reshape(shape=[-1, 1, 1])).mul(invstd).add(bias.reshape(shape=[-1, 1, 1]))
+    x = x.reshape(x.shape[0], x.shape[1], -1).layernorm(eps=epsilon).reshape(x.shape)
+    return x * scale.reshape(1, -1, *[1] * (x.ndim-2)) + bias.reshape(1, -1, *[1] * (x.ndim-2))
   def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
@@ -548,8 +549,11 @@ def get_onnx_ops():
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
   def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
-    x = x + skip + bias
-    return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+    x = x + skip
+    if bias is not None: x = x + bias
+    ret = x.layernorm(eps=epsilon) * gamma
+    if beta is not None: ret = ret + beta
+    return ret, None, None, x
   def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embedding:Tensor, position_embedding:Tensor,
                               segment_embedding:Tensor, gamma=None, beta=None, mask:Tensor|None=None,
                               position_ids:Tensor|None=None, epsilon=1e-12, mask_index_type=0):
@@ -579,8 +583,9 @@ def get_onnx_ops():
   def OneHot(indices:Tensor, depth:float|int|list, values:Tensor, axis:int=-1):
     # Scalar or Rank 1 tensor containing exactly one element
     depth = int(depth[0] if isinstance(depth, list) else depth)
+    indices = indices.int()
     indices = (indices < 0).where(indices+depth, indices)
-    return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
+    return indices.unsqueeze(axis)._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
   def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
     return X.rearrange("b (c h1 w1) h w -> b c (h h1) (w w1)" if mode=="CRD" else "b (h1 w1 c) h w -> b c (h h1) (w w1)", h1=blocksize, w1=blocksize)
@@ -615,44 +620,49 @@ def get_onnx_ops():
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None,
-                relative_position_bias:Tensor|None=None, past_sequence_length:Tensor|None=None, do_rotary:int|None=None,
-                mask_filter_value:float|None=None, num_heads:int|None=None, past_present_share_buffer:int|None=None,
-                qkv_hidden_sizes:list[int]|None=None, scale:float|None=None, unidirectional:int|None=None):
-    # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
-    assert num_heads is not None  # required
-    assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-    assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
-      "functionality not supported yet"  # TODO strange params
-    hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
+  def Attention(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
+                past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
+                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None,
+                scale:float|None=None, unidirectional:int=0):
+    assert not do_rotary and not attention_bias, "TODO"
+    if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
+    qkv = x.linear(weights, bias)
+    q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
-    if unidirectional:  # gpt-style
-      assert hidden_size == v_hidden_size
-      xqkv = x.linear(weights, bias)
-      xq, xk, xv = [xqkv.shrink([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
-    else:  # bert-style
-      wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
-      bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
-      xq, xk, xv = [x.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
-    xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
+    batch_size, seq_len, _ = x.shape
+    q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
+    q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
 
+    present = None
     if past is not None:
-      xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
-      present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
+      k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
+      present = k.stack(v)
 
-    def attn(query, key, value, attn_mask):
-      query_length, key_length = query.shape[-2], key.shape[-2]
-      cdim = max(query_length, key_length) + 1
-      attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
-      # This is where Tensor.scaled_dot_product_attention differs:
-      causal_mask = Tensor.ones((cdim, cdim), requires_grad=False, dtype=dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length]
-      masked = Tensor.where(causal_mask, attn_weights, -math.inf)
-      if attn_mask is not None: masked = masked + attn_mask
-      return masked.softmax(-1) @ value
+    if scale is None: scale = 1.0 / math.sqrt(q_head_size)
+    attn_scores = q @ k.transpose(-1, -2) * scale
 
-    bsz, _, seq_len, _ = xq.shape
-    out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
-    return out, present if past is not None else out
+    if mask_index is not None:
+      assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+      if mask_index.ndim != 1: mask = mask_index.bool()
+      else:
+        if mask_index.shape[0] == batch_size:
+          mask = Tensor.arange(attn_scores.shape[-1], requires_grad=False, device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
+        elif mask_index.shape[0] == 2*batch_size:
+          end_positions = mask_index[:batch_size]
+          start_positions = mask_index[batch_size:]
+          arange = Tensor.arange(seq_len).unsqueeze(0)
+          mask = (arange < end_positions.unsqueeze(1)) & (arange >= start_positions.unsqueeze(1))
+        else: raise NotImplementedError("mask_index with shape (3 * batch_size + 2) is not implemented")
+      while mask.ndim < 4: mask = mask.unsqueeze(1)
+      attn_scores = mask.where(attn_scores, mask_filter_value)
+
+    if unidirectional:
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
+      attn_scores = causal_mask.where(attn_scores, mask_filter_value)
+
+    output = attn_scores.softmax(-1) @ v
+    output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
+    return output, present
 
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
@@ -789,7 +799,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf", "Mod")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops

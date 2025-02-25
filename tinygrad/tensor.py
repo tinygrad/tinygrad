@@ -4,6 +4,7 @@ import time, math, itertools, functools, struct, sys, inspect, pathlib, string, 
 from contextlib import ContextDecorator
 from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.engine.multi import get_multi_map
@@ -49,12 +50,6 @@ def _metaop(op, shape:tuple[sint,...], dtype:DType, device:Union[str, tuple[str,
   if isinstance(device, str): return UOp.metaop(op, shape, dtype, device, arg)
   return UOp.multi(*[UOp.metaop(op, shape, dtype, d, arg) for d in device], axis=None)
 
-def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
-  import numpy as np
-  return dtypes.fields()[np.dtype(npdtype).name]
-def _to_np_dtype(dtype:DType) -> Optional[type]:
-  import numpy as np
-  return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
@@ -262,19 +257,19 @@ class Tensor(SimpleMathTrait):
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
-  def replace(self, x:Tensor) -> Tensor:
+  def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:
     """
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
+    assert self.shape == x.shape or allow_shape_mismatch, f"replace shape mismatch {self.shape} != {x.shape}"
     self.lazydata = x.lazydata
     return self
 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CLANG", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
       self.contiguous().realize().lazydata.base.realized.ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -297,11 +292,11 @@ class Tensor(SimpleMathTrait):
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
+    cpu = self.cast(self.dtype.base).contiguous().to("CPU").realize()
     buf = cast(UOp, cpu.lazydata).base.realized
     assert buf is not None, f"{cast(UOp, cpu.lazydata).base} was not realized"
-    if self.device != "CLANG": buf.options = BufferSpec(nolru=True)
-    return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
+    if self.device != "CPU": buf.options = BufferSpec(nolru=True)
+    return buf.as_buffer(allow_zero_copy=True if self.device != "CPU" else False)
 
   def data(self) -> memoryview:
     """
@@ -520,8 +515,8 @@ class Tensor(SimpleMathTrait):
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
     num = ceildiv(numel * dtype.itemsize, 4)
 
-    # when using MOCKGPU and NV generate rand on CLANG
-    if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
+    # when using MOCKGPU and NV generate rand on CPU
+    if getenv("MOCKGPU") and device.startswith("NV"): device = "CPU"
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
@@ -1117,7 +1112,7 @@ class Tensor(SimpleMathTrait):
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(size, 0) + index # treat negative index values
+          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -2453,7 +2448,7 @@ class Tensor(SimpleMathTrait):
       reshape[i] = expand[i] = size[i]
       if mode == "linear":
         index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else:
         index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
@@ -3558,6 +3553,7 @@ class Tensor(SimpleMathTrait):
 
   # helper function commonly used for indexing
   def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=-1):
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
     offset = self.ndim - self._resolve_dim(dim) - 1
     return self == Tensor.arange(num_classes, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
 
@@ -3572,6 +3568,7 @@ class Tensor(SimpleMathTrait):
     print(t.one_hot(5).numpy())
     ```
     """
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
@@ -3600,7 +3597,7 @@ class Tensor(SimpleMathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    return qk.softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
+    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
