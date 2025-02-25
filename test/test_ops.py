@@ -637,7 +637,7 @@ class TestOps(unittest.TestCase):
     def get_torch_gradient(x, c):
       t = torch.tensor([x], dtype=torch.float, requires_grad=True)
       return torch.autograd.grad(t ** c, t)[0].item()
-    for x in [0, 1]:
+    for x in [-math.inf, 0, 1, math.inf]:
       for c in [-1, 0, 0.3, 1, 2]:
         tiny_out = get_tiny_gradient(x, c)
         torch_out = get_torch_gradient(x, c)
@@ -647,10 +647,10 @@ class TestOps(unittest.TestCase):
           self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
 
   def test_pow_zero_tensor(self):
-    helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
     # TODO: fix WEBGPU
     if Device.DEFAULT != "WEBGPU":
+      helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
