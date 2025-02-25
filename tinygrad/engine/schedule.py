@@ -428,8 +428,13 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     # NOTE: tensors can also map to a VIEW, we just apply this VIEW on top of the BUFFER
-    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
-      becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+    if (a:=kernel_map.get(v.base)) is not None:
+      if a.op is Ops.ASSIGN: becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+      # if the subbuffer base was a new buffer created in this schedule we replace the KERNEL with the BUFFER
+      # TODO: there's probably a better way to write this
+      elif a.op is Ops.BUFFER_VIEW and a.src[0].op is Ops.ASSIGN:
+        becomes_map[k] = a.replace(src=(a.src[0].buf_uop,))
+        continue
     if v is k: continue
     if v.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: becomes_map[k] = v
     elif v.base.op is Ops.CONST:

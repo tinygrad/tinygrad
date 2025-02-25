@@ -129,6 +129,8 @@ kernel_spec = buffer_spec+PatternMatcher([
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN))), lambda: True),
   # assign has a buffer view and kernel source, it can optionally depend on other assigns
   (UPat(Ops.ASSIGN, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.VIEW, Ops.KERNEL, Ops.ASSIGN))), lambda: True),
+  # we also allow for a BUFFER_VIEW to depend on ASSIGN in the kernel graph
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.ASSIGN),)), lambda: True),
   (UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}), lambda: False),
 ])
 
