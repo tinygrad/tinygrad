@@ -4,8 +4,8 @@
   <title>tinygrad viz</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-  <script src="assets/d3js.org/d3.v5.min.js" charset="utf-8"></script>
-  <script src="assets/dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
+  <script src="assets/dagrejs.github.io/project/dagre/latest/dagre.min.js"></script>
   <script src="lib/graph.js"></script>
   <link rel="stylesheet" href="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
@@ -59,7 +59,7 @@
     cursor: default;
     user-select: none;
   }
-  .node rect {
+  rect {
     stroke: #4a4b57;
     stroke-width: 1.4px;
     rx: 8px;
@@ -69,9 +69,9 @@
     color: #08090e;
     font-weight: 350;
   }
-  .edgePath path {
+  .edgePath {
     stroke: #4a4b57;
-    fill: #4a4b57;
+    fill: none;
     stroke-width: 1.4px;
   }
   .main-container {
@@ -211,7 +211,10 @@
     <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
     <div class="graph">
       <svg id="graph-svg">
-        <g id="render"></g>
+        <g id="render">
+          <g id="edges"></g>
+          <g id="nodes"></g>
+        </g>
       </svg>
     </div>
     <div class="container metadata"></div>
