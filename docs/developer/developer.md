@@ -7,6 +7,8 @@ The tinygrad framework has four pieces
 
 There is a good [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) by Di Zhu that go over tinygrad internals.
 
+There's also a [doc describing speed](../developer/speed.md)
+
 ## Frontend
 
 Everything in [Tensor](../tensor/index.md) is syntactic sugar around constructing a graph of [UOps](../developer/uop.md).

@@ -54,7 +54,7 @@ class PtrDType(DType):
   def vec(self, sz:int) -> DType:
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
-    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
+    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size)
   def ptr(self, size=-1, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
@@ -79,6 +79,8 @@ class dtypes:
   @staticmethod
   @functools.lru_cache(None)
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
+  @staticmethod
+  def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
@@ -145,6 +147,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  all = floats + ints + (bool,)
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
@@ -181,10 +184,36 @@ def truncate_fp16(x):
   try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
+def truncate_bf16(x):
+  max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
+  if x > max_bf16 or x < -max_bf16: return math.copysign(math.inf, x)
+  f32_int = struct.unpack('I', struct.pack('f', x))[0]
+  bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
+  return bf
+
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
+  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
   dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
   dtypes.int64: lambda x: ctypes.c_int64(x).value}
+
+# numpy and torch dtype interop
+
+def _to_np_dtype(dtype:DType) -> Optional[type]:
+  import numpy as np
+  return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
+def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+  import numpy as np
+  return dtypes.fields()[np.dtype(npdtype).name]
+
+@functools.lru_cache(None)
+def _to_torch_dtype(dtype:DType) -> Optional['torch.dtype']:  # type: ignore [name-defined] # noqa: F821
+  import numpy as np, torch
+  # NOTE: torch doesn't expose this mapping with a stable API
+  try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
+  except TypeError: return None
+@functools.lru_cache(None)
+def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+  return {v:k for k in dtypes.all if (v:=_to_torch_dtype(k)) is not None}[torchdtype]

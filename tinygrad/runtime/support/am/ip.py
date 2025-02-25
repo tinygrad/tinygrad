@@ -18,7 +18,7 @@ class AM_GMC(AM_IP):
     super().__init__(adev)
 
     # Memory controller aperture
-    self.mc_base = self.adev.regMMMC_VM_FB_LOCATION_BASE.read() << 24
+    self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
@@ -107,27 +107,34 @@ class AM_SMU(AM_IP):
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=not self.adev.partial_boot, boot=True)
 
   def init(self):
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
-
-    for clck in [0x00000C94, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]:
-      self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
-      self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
 
   def is_smu_alive(self):
-    with contextlib.suppress(RuntimeError): self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    with contextlib.suppress(RuntimeError): self._send_msg(smu_v13_0_0.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
     time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, cmd):
-    self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_TransferTableSmu2Dram, cmd, poll=True)
+    self._send_msg(smu_v13_0_0.PPSMC_MSG_TransferTableSmu2Dram, cmd, poll=True)
     return table_t.from_buffer(to_mv(self.adev.paddr2cpu(self.driver_table_paddr), ctypes.sizeof(table_t)))
   def read_metrics(self): return self.read_table(smu_v13_0_0.SmuMetricsExternal_t, smu_v13_0_0.TABLE_SMU_METRICS)
+
+  def set_clocks(self, level):
+    if not hasattr(self, 'clcks'):
+      self.clcks = {}
+      for clck in [smu_v13_0_0.PPCLK_GFXCLK, smu_v13_0_0.PPCLK_UCLK, smu_v13_0_0.PPCLK_FCLK, smu_v13_0_0.PPCLK_SOCCLK]:
+        cnt = self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff
+        self.clcks[clck] = [self._send_msg(smu_v13_0_0.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
+
+    for clck, vals in self.clcks.items():
+      self._send_msg(smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), poll=True)
+      self._send_msg(smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]), poll=True)
 
   def _smu_cmn_poll_stat(self, timeout=10000): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1, timeout=timeout)
   def _smu_cmn_send_msg(self, msg, param=0):
@@ -135,12 +142,12 @@ class AM_SMU(AM_IP):
     self.adev.mmMP1_SMN_C2PMSG_82.write(param)
     self.adev.mmMP1_SMN_C2PMSG_66.write(msg)
 
-  def _smu_cmn_send_smc_msg_with_param(self, msg, param, poll=True, read_back_arg=False, timeout=10000): # 10s
+  def _send_msg(self, msg, param, poll=True, read_back_arg=False, timeout=10000): # 10s
     if poll: self._smu_cmn_poll_stat(timeout=timeout)
 
     self._smu_cmn_send_msg(msg, param)
     self._smu_cmn_poll_stat(timeout=timeout)
-    return self.adev.rreg(self.adev.mmMP1_SMN_C2PMSG_82) if read_back_arg else None
+    return self.adev.mmMP1_SMN_C2PMSG_82.read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
   def init(self):
@@ -182,8 +189,6 @@ class AM_GFX(AM_IP):
     self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
     self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1)
     self._grbm_select()
-    self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=1, mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1,
-                                         mec_pipe0_active=0, mec_pipe1_active=0, mec_pipe2_active=0, mec_pipe3_active=0, mec_halt=1)
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
@@ -218,6 +223,8 @@ class AM_GFX(AM_IP):
     self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
   def set_clockgating_state(self):
+    if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
+
     self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1)
     self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
 
@@ -226,9 +233,10 @@ class AM_GFX(AM_IP):
     self.adev.regCP_RB_WPTR_POLL_CNTL.update(poll_frequency=0x100, idle_poll_count=0x90)
     self.adev.regCP_INT_CNTL.update(cntx_busy_int_enable=1, cntx_empty_int_enable=1, cmp_busy_int_enable=1, gfx_idle_int_enable=1)
     self.adev.regSDMA0_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
+    self.adev.regSDMA1_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
 
     self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=0, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
-      grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0)
+      grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0, gfxip_cgcg_override=0)
 
     self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1)
 
@@ -304,17 +312,16 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
-    self.adev.regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0)
-    self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
-    self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
-    self.adev.regSDMA0_UTCL1_PAGE.update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
-    self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
-    self.adev.regSDMA0_CNTL.update(ctxempty_int_enable=1, trap_enable=1)
+    for pipe in range(2):
+      self.adev.reg(f"regSDMA{pipe}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
+      self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
+      self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
+      self.adev.reg(f"regSDMA{pipe}_F32_CNTL").update(halt=0, th1_reset=0)
+      self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
 
   def fini(self):
     self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
     self.adev.regSDMA0_QUEUE0_IB_CNTL.update(ib_enable=0)
-    self.adev.regSDMA0_F32_CNTL.update(halt=1, th1_reset=1)
     self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
     time.sleep(0.01)
     self.adev.regGRBM_SOFT_RESET.write(0x0)
@@ -349,10 +356,10 @@ class AM_PSP(AM_IP):
     self._tmr_init()
 
     # SMU fw should be loaded before TMR.
-    self._load_ip_fw_cmd(self.adev.fw.smu_psp_desc)
+    self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
     self._tmr_load_cmd()
 
-    for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(psp_desc)
+    for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
 
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
@@ -426,16 +433,15 @@ class AM_PSP(AM_IP):
     cmd.cmd_id = hdr
     return cmd
 
-  def _load_ip_fw_cmd(self, psp_desc):
-    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[psp_desc[0]]}")
-    fw_type, fw_bytes = psp_desc
-
+  def _load_ip_fw_cmd(self, fw_types, fw_bytes):
     self._prep_msg1(fw_bytes)
-    cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
-    cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
-    cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
-    return self._ring_submit()
+    for fw_type in fw_types:
+      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
+      cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
+      cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.adev.paddr2mc(self.msg1_paddr))
+      cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
+      cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
+      self._ring_submit()
 
   def _tmr_load_cmd(self):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)

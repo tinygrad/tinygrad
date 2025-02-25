@@ -32,8 +32,8 @@ import os
 from tinygrad.tensor import Tensor
 
 # define the compute
-A = Tensor.rand(M, K, device="clang")
-B = Tensor.rand(K, N, device="clang")
+A = Tensor.rand(M, K, device="CPU")
+B = Tensor.rand(K, N, device="CPU")
 C = (A.reshape(M, 1, K) * B.permute(1,0).reshape(1, N, K)).sum(axis=2)
 
 sched = C.schedule()
@@ -42,6 +42,6 @@ from tinygrad.device import CompilerOptions
 lin = Kernel(sched[-1].ast, CompilerOptions(has_local=False, supports_float4=False))
 #lin.hand_coded_optimizations()
 lin.linearize()
-from tinygrad.runtime.ops_clang import renderer
+from tinygrad.runtime.ops_cpu import renderer
 src = renderer("mmult", lin.uops)
 print(src)

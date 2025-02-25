@@ -36,8 +36,7 @@ class TestSubBuffer(unittest.TestCase):
 
   def test_subbuffer_used(self):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
-    # TODO: why does it needs contiguous
-    vt = t[2:4].contiguous().realize()
+    vt = t[2:4].realize()
     out = (vt + 100).tolist()
     assert out == [102, 103]
 

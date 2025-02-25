@@ -1,4 +1,3 @@
-from typing import List, Tuple
 from extra.models.resnet import ResNet50
 from extra.mcts_search import mcts_search
 from examples.mlperf.helpers import get_mlperf_bert_model
@@ -6,8 +5,9 @@ from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.ops import Ops, sym_infer
 from tinygrad.device import Compiled
-from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
+from tinygrad.engine.search import beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv, colored, TRACEMETA
+from extra.optimization.helpers import time_linearizer
 
 def get_sched_resnet():
   mdl = ResNet50()
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     rawbufs = bufs_from_lin(Kernel(si.ast))
 
     # "linearize" the op into uops in different ways
-    lins: List[Tuple[Kernel, str]] = []
+    lins: list[tuple[Kernel, str]] = []
 
     # always try hand coded opt
     lin = Kernel(si.ast, opts=device.renderer)

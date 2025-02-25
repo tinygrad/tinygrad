@@ -5,7 +5,7 @@ from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
-from tinygrad.multi import all_reduce
+from tinygrad.engine.multi import all_reduce
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.device import is_dtype_supported
@@ -84,7 +84,7 @@ class TestMultiTensor(unittest.TestCase):
     for si, ei in zip(sched[:], lower_schedule(sched)):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
-    assert names[-2] == names[-1], "function was relinearized"
+    self.assertEqual(len(set(names)), 3), "function was relinearized"
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
   def test_sharded_memory(self):
@@ -288,6 +288,9 @@ class TestMultiTensor(unittest.TestCase):
       optim.step()
       out.numpy()
 
+  def test_backprop_conv_wino(self):
+    with Context(WINO=1): self.test_backprop_conv()
+
   def test_backward_sum(self):
     x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
     w = Tensor([1.,2,3,4], requires_grad=True).shard(devices_2)
@@ -343,6 +346,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -360,6 +364,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow, and flaky on LLVM")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     from tinygrad.nn.optim import LARS
@@ -531,8 +536,8 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in out.schedule() if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
-    assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
+    scheds = [sched for sched in out.schedule() if sched.bufs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
+    assert set(sched.bufs[0].device for sched in scheds) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
     # test case to show that ast can be different on devices
@@ -551,24 +556,24 @@ class TestMultiTensor(unittest.TestCase):
     t4 = t2.reshape((26, 105,))
 
     for t in [t0, t1, t2, t3, t4]:
-      np.testing.assert_allclose(t.numpy().flatten(), t0.numpy().flatten())
       assert t.lazydata.axis == 1
+      np.testing.assert_allclose(t.numpy().flatten(), t0.numpy().flatten())
 
     # test shape-one axis
     t5 = t4.reshape((26, 1, 105))
-    np.testing.assert_allclose(t.numpy().flatten(), t5.numpy().flatten())
     assert t5.lazydata.axis == 2
+    np.testing.assert_allclose(t.numpy().flatten(), t5.numpy().flatten())
 
     # test split and rejoin to the right and reshape to the left
     t5 = t0.reshape((2, 13, 3, 5, 7))
     t6 = t0.reshape((13, 2, 3, 7, 5))
     t7 = t0.reshape((1, 13, 2, 3, 1, 7, 5))
-    np.testing.assert_allclose(t5.numpy().flatten(), t0.numpy().flatten())
     assert t5.lazydata.axis == 2
-    np.testing.assert_allclose(t6.numpy().flatten(), t0.numpy().flatten())
     assert t6.lazydata.axis == 2
-    np.testing.assert_allclose(t7.numpy().flatten(), t0.numpy().flatten())
     assert t7.lazydata.axis == 3
+    np.testing.assert_allclose(t5.numpy().flatten(), t0.numpy().flatten())
+    np.testing.assert_allclose(t6.numpy().flatten(), t0.numpy().flatten())
+    np.testing.assert_allclose(t7.numpy().flatten(), t0.numpy().flatten())
 
     # test no left join
     with self.assertRaises((AssertionError, ValueError)):
@@ -577,8 +582,8 @@ class TestMultiTensor(unittest.TestCase):
   @unittest.skip("no longer supports uneven shard")
   def test_reshape_on_axis_uneven(self):
     def reshape_helper(t0, t, t_axis):
-      np.testing.assert_allclose(t0.reshape(t.shape).numpy(), t.numpy())
       assert t.lazydata.axis == t_axis
+      np.testing.assert_allclose(t0.reshape(t.shape).numpy(), t.numpy())
 
     t0 = Tensor.rand((4, 42, 15)).shard(devices_3, axis=1, splits=[14, 7, 21])
 
@@ -648,14 +653,21 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
 
   def test_rand_like_from_alu(self):
-    # TODO: fix this, which will also fix multi device dropout
-    a = Tensor.ones(4, 4).shard(devices_2, axis=0)
-    with self.assertRaises(AssertionError):
-      (a + a).rand_like()
+    a = Tensor.ones(4, 4).shard(devices_4, axis=0)
+    aa = a + a
+    self.assertEqual(aa.device, devices_4)
+    self.assertEqual(aa.lazydata.axis, 0)
+    raa = aa.rand_like()
+    self.assertEqual(raa.device, devices_4)
+    self.assertEqual(raa.lazydata.axis, 0)
 
-    b = Tensor.empty(4, 4).shard(devices_2, axis=None)
-    with self.assertRaises(AssertionError):
-      (a + b).rand_like()
+    b = Tensor.empty(4, 4).shard(devices_4, axis=None)
+    ab = a + b
+    self.assertEqual(ab.device, devices_4)
+    self.assertEqual(ab.lazydata.axis, 0)
+    rab = ab.rand_like()
+    self.assertEqual(rab.device, devices_4)
+    self.assertEqual(rab.lazydata.axis, 0)
 
   @unittest.skip("no longer supports uneven shard")
   def test_rand_like_uneven_shard(self):
@@ -764,10 +776,9 @@ class TestMultiTensor(unittest.TestCase):
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule()
-    self.assertEqual(len(sched), 8)
+    self.assertEqual(len(sched), 6)
     # notably, only two copies (for the arange) - vs 4 copies if we didn't fold the const copy
     self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
-    # all these kernels are just because multi calls contiguous on every single shard
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
@@ -936,6 +947,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_allclose(output.numpy(), expected)
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
 class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
@@ -963,6 +975,7 @@ class TestBatchNorm(unittest.TestCase):
       optim.step()
       out.numpy()
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
     GPUS = (d1, d2)
