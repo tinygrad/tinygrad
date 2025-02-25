@@ -59,6 +59,12 @@ def create_buffer_view(tr:UOp, x:UOp):
   if not tr.device.startswith("DISK"): return None
   return UOp(Ops.BUFFER_VIEW, tr.dtype, (x.base,), (tr.size, unwrap(x.st).views[0].offset)).reshape(tr.shape)
 
+def merge_buffer_view(vm1:UOp, vm2:UOp):
+  # this can simplify
+  if vm1.arg == vm2.arg and vm1.dtype == vm2.dtype: return vm1.replace(src=(vm2.src[0],))
+  # what is this?
+  return None
+
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -99,6 +105,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="tr"), create_buffer_view),
+  (UPat(Ops.BUFFER_VIEW, name="vm1", src=(UPat(Ops.BUFFER_VIEW, name="vm2"),)), merge_buffer_view),
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
@@ -424,7 +431,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
     if v is k: continue
-    if v.base.op is Ops.BUFFER: becomes_map[k] = v
+    if v.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: becomes_map[k] = v
     elif v.base.op is Ops.CONST:
       if all_int(v.shape): becomes_map[k] = v
 
