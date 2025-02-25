@@ -205,7 +205,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 class HCQSignal(Generic[DeviceType]):
   def __init__(self, base_addr:sint|None=None, value:int=0, dev_t:Type[DeviceType]|None=None, timeline_for_device:DeviceType|None=None,
                timestamp_divider=1, value_off=0, timestamp_off=8):
-    self.base_addr = dev_t._alloc_signal_addr() if base_addr is None else base_addr
+    self.base_addr = dev_t._alloc_signal_addr() if dev_t is not None and base_addr is None else base_addr
     self.value_addr, self.timestamp_addr, self.dev_t = self.base_addr+value_off, self.base_addr+timestamp_off, dev_t
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:DeviceType|None = timeline_for_device
@@ -215,7 +215,7 @@ class HCQSignal(Generic[DeviceType]):
       self.value_mv[0] = value
 
   def __del__(self):
-    if isinstance(self.base_addr, int): self.dev_t.signal_pool.append(self.base_addr)
+    if isinstance(self.base_addr, int) and self.dev_t is not None: self.dev_t.signal_pool.append(self.base_addr)
 
   @property
   def value(self) -> int: return self.value_mv[0]
@@ -349,7 +349,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     # Map signals if any
-    for sig_page in self.signal_pages: self.allocator.map(sig_page)
+    for sig_page in self.signal_pages: cast(HCQAllocator, self.allocator).map(sig_page)
     self.devices.append(self)
 
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
@@ -377,7 +377,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     if not cls.signal_pool:
       cls.signal_pages.append(alc:=cls.devices[0].allocator.alloc(0x1000, BufferSpec(host=True, uncached=True, cpu_access=True)))
       cls.signal_pool += [alc.va_addr + off for off in range(0, alc.size, 16)]
-      for dev in cls.devices: dev.allocator.map(alc)
+      for dev in cls.devices: cast(HCQAllocator, dev.allocator).map(alc)
     return cls.signal_pool.pop()
 
   def _at_profile_finalize(self):
