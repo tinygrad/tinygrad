@@ -275,17 +275,6 @@ class TestSubstitute(unittest.TestCase):
     ret = substitute(ret, {a.sin():a.sqrt(), n1.sin():n1.sqrt()})
     self.assertIs(ret, a.sqrt().sqrt())
 
-  def test_unrolled4_float_const(self):
-    acc_range = (UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 3))
-    acc = UOp(Ops.DEFINE_ACC, dtypes.float32, (UOp.const(dtypes.int, 0),)+acc_range, (0,))
-
-    a = [UOp.variable(f'a{i}', float("-inf"), float("inf"), dtype=dtypes.float32) for i in range(4)]
-    expr = acc.assign(acc + (a[0]*3.0 + a[1]*4.0 + a[2]*5.0 + a[3]*6.0))
-    expr_with_mulacc = graph_rewrite(expr, mulacc_unrolled)
-
-    # Verify it unrolls into individual multiply-accumulate operations
-    expected = acc.assign(acc + a[0]*3.0 + a[1]*4.0 + a[2]*5.0 + a[3]*6.0)
-    self.assertIs(expr_with_mulacc, expected)
 
 if __name__ == '__main__':
   unittest.main()
