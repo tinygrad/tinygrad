@@ -72,8 +72,8 @@ qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 class NVSignal(HCQSignal):
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs, timestamp_divider=1000, dev_t=NVDevice)
+  def __init__(self, base_addr:int|None=None, **kwargs):
+    super().__init__(base_addr, **kwargs, timestamp_divider=1000, dev_t=NVDevice)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __init__(self):
