@@ -534,7 +534,7 @@ jobs:
   testmetal2:
     name: MacOS (unit)
     runs-on: macos-14
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
