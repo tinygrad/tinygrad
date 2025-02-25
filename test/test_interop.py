@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, functools
+import unittest
 import torch
 import numpy as np
 
