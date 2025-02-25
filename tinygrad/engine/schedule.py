@@ -252,6 +252,9 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
 create_kernels = merge_views+PatternMatcher([
   (UPat(GroupOp.All-{Ops.KERNEL, Ops.BUFFER}, name="x"), create_kernel),
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
+  # remove CONST/BIND from the kernel graph
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
+    if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST,Ops.BIND}))) != x.src else None),
 ])
 
 # **** fix kernel AST
