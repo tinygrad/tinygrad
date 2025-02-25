@@ -282,12 +282,14 @@ class GPFifo:
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
+
   root = None
   fd_ctl: HWInterface
   fd_uvm: HWInterface
   gpus_info: Union[list, ctypes.Array] = []
-  signal_pages: list[Any] = []
-  signal_pool: list[int] = []
 
   # TODO: Need a proper allocator for va addresses
   # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings

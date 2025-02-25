@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Type, TypeVar, Generic, Any
+from typing import cast, Type, TypeVar, Generic, Any, ClassVar
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
@@ -203,7 +203,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def _submit(self, dev:DeviceType): raise NotImplementedError("need _submit")
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:sint|None=None, value:int=0, dev_t:Type[HCQDevice]|None=None, timeline_for_device:DeviceType|None=None,
+  def __init__(self, base_addr:sint|None=None, value:int=0, dev_t:Type[DeviceType]|None=None, timeline_for_device:DeviceType|None=None,
                timestamp_divider=1, value_off=0, timestamp_off=8):
     self.base_addr = dev_t._alloc_signal_addr() if base_addr is None else base_addr
     self.value_addr, self.timestamp_addr, self.dev_t = self.base_addr+value_off, self.base_addr+timestamp_off, dev_t
@@ -337,9 +337,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
-  devices: list[HCQCompiled] = []
-  signal_pages: list[Any] = []
-  signal_pool: list[int] = []
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Type[HWQueue]|None):

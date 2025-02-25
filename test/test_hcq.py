@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner, CompiledRunner
@@ -498,6 +498,16 @@ class TestHCQ(unittest.TestCase):
 
     assert "0xDEADBEE1" in str(ctx.exception)
     os.environ.pop("MOCKGPU_EMU_FAULTADDR")
+
+  @unittest.skipIf(not MOCKGPU or CI, "Emulate this on MOCKGPU to check the path in CI")
+  def test_multidevice(self):
+    amd_dev = Device["AMD"]
+    nv_dev = Device["NV"]
+
+    x = amd_dev.signal_t()
+    y = nv_dev.signal_t()
+    assert type(x) is amd_dev.signal_t
+    assert type(y) is nv_dev.signal_t
 
 if __name__ == "__main__":
   unittest.main()

@@ -317,8 +317,10 @@ class QCOMAllocator(HCQAllocatorBase):
     self.dev._gpu_free(opaque)
 
 class QCOMDevice(HCQCompiled):
-  signal_pages: list[Any] = []
-  signal_pool: list[int] = []
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
+
   gpu_id: int = 0
   dummy_addr: int = 0
 

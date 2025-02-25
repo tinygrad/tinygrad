@@ -559,9 +559,11 @@ class PCIIface:
   def device_fini(self): self.adev.fini()
 
 class AMDDevice(HCQCompiled):
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
+
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
-  signal_pages:list[Any] = []
-  signal_pool:list[int] = []
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
