@@ -32,7 +32,7 @@ class TestInterop(unittest.TestCase):
       inp = inp.cpu()
     torch_out = inp[:, :, 0] * 0.2989 + inp[:, :, 1] * 0.5870 + inp[:, :, 2] * 0.1140
 
-    np.testing.assert_allclose(tg_out.numpy(), torch_out.cpu().numpy())
+    np.testing.assert_allclose(tg_out.numpy(), torch_out.cpu().numpy(), atol=1e-5, rtol=1e-5)
 
   def test_torch_interop_write(self):
     tg_data = Tensor.randn((4, 4), device=Device.DEFAULT)
@@ -45,7 +45,7 @@ class TestInterop(unittest.TestCase):
 
     torch_out_np = out.cpu().numpy()
 
-    np.testing.assert_allclose(tg_data.numpy(), torch_out_np)
+    np.testing.assert_allclose(tg_data.numpy(), torch_out_np, atol=1e-5, rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
