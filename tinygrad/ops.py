@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
+  def __reduce_ex__(self, proto): return getattr, (self.__class__, self._name_)
   def __str__(self): return Enum.__str__(self)
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
