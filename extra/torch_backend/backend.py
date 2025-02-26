@@ -124,6 +124,8 @@ decomps = [
   aten.elu,  # elu has a scale + input_scale param
   aten.softplus,
   aten.threshold,
+  aten.nll_loss_forward,
+  aten.nll_loss_backward,
   # AttributeError: 'int' object has no attribute '_broadcasted'
   aten.sigmoid_backward,
   aten.tanh_backward,

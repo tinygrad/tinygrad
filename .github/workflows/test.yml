@@ -165,15 +165,15 @@ jobs:
     - name: Test ResNet-18
       run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/example.py
     - name: My (custom) tests
-      run: python3 extra/torch_backend/test.py
+      run: PYTHONPATH=. python3 extra/torch_backend/test.py
     - name: Test one op in torch tests
       run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_compare_log_tiny_float32
     - name: Test Ops with TINY_BACKEND (expect failure)
       run: PYTHONPATH=. TINY_BACKEND=1 python3 -m pytest test/test_ops.py || true
     - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
-      run: PYTHONPATH=. TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
+      run: PYTHONPATH=. TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
     - name: Test some torch tests (expect failure)
-      run: PYTHONPATH=. pytest extra/torch_backend/torch_tests.py -v || true
+      run: PYTHONPATH=. pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
   tc:
     name: Tensor Core tests
