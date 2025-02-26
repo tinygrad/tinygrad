@@ -311,6 +311,7 @@ def get_onnx_ops():
   def Equal(x:Tensor,y:Tensor): return x == y
   def And(x:Tensor,y:Tensor): return (x==y).where(x, False)
   def Or(x:Tensor,y:Tensor): return (x==y).where(x, True)
+  def Xor(x:Tensor,y:Tensor): return x.bool().bitwise_xor(y.bool())
   def BitwiseAnd(x:Tensor,y:Tensor): return x & y
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
@@ -799,7 +800,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops

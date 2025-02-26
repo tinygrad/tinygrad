@@ -223,7 +223,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.pow.Scalar_out": lambda x,y: x**y,
   "aten.bitwise_and.Tensor_out": Tensor.bitwise_and,
   "aten.bitwise_or.Tensor_out": Tensor.bitwise_or,
-  "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,  # TODO: tinygrad lacks bitwise_xor, add it
+  "aten.bitwise_xor.Tensor_out": Tensor.bitwise_xor,
   "aten.eq.Tensor_out": Tensor.eq, "aten.eq.Scalar_out": Tensor.eq,
   "aten.ne.Tensor_out": Tensor.ne, "aten.ne.Scalar_out": Tensor.ne,
   "aten.ge.Tensor_out": Tensor.__ge__, "aten.ge.Scalar_out": Tensor.__ge__,
