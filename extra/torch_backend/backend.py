@@ -13,9 +13,11 @@ def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype))
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
-class TinyBackend: pass
+class TinyBackend:
+  def is_available(self): return True
+  def current_device(self): return 0
 torch.utils.rename_privateuse1_backend("tiny")
-torch._register_device_module("tiny", TinyBackend)
+torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 
 @torch.library.impl("aten::zero_", "privateuseone")
@@ -45,12 +47,17 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
     # this is squeeze/unsqueeze
     return tensor.reshape(size)
 
+  if tensor.numel() == 1:
+    # this is expand
+    assert all(x == 0 for x in stride)
+    return wrap(unwrap(tensor).reshape([1]*len(size)).expand(size))
+
   # TODO: how do i know this is permute?
   if tensor.shape == (1000, 512) and size == [512, 1000] and stride == [0, 1]:
     return wrap(unwrap(tensor).permute(1,0))
 
   #print(tensor.cpu().numpy())
-  raise NotImplementedError("fix as_strided")
+  raise NotImplementedError(f"fix as_strided {tensor.shape} -> {size} {stride} {storage_offset}")
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -104,6 +111,12 @@ aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm,
   aten.addmm,
+  aten._log_softmax_backward_data,
+  aten.threshold_backward,
+  aten.softplus_backward,
+  # AttributeError: 'int' object has no attribute '_broadcasted'
+  #aten.sigmoid_backward,
+  #aten.tanh_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -115,56 +128,86 @@ for k,v in get_decompositions(decomps).items():
   if TORCH_DEBUG >= 2: print("register decomp for", k)
   torch.library.impl(key, "privateuseone")(v)
 
-tiny_backend = {
+# NOTE: we should only implement the "out" form, it should be 0 overhead
+# TODO: due to issue with empty / is_realized, it is slow to use assign so we use replace
+# the goal is to make as much as we can this
+simple_tensor_methods = [
+  # unary (ish)
+  "log", "log2", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "abs", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
+  "gelu", "elu", "sigmoid", "clamp", "mish", "erf", "logical_not", "softplus",
+  # trig
+  "acos", "acosh", "cos", "cosh", "asin", "asinh", "sin", "sinh", "atan", "atanh", "tan", "tanh",
+  # rounding
+  "ceil", "round", "floor", "trunc",
+  # binary
+  "add", "sub", "mul", "div", "maximum", "minimum",
+  # modify
+  "tril", "triu",
+  # reduce
+  "all", "any", "argmax", "argmin", "cumsum",
+  # complex
+  "avg_pool2d", "linspace"]
+
+tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
+  "aten.leaky_relu.out": Tensor.leakyrelu, # TODO: this should be renamed in tinygrad
+  # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
+  "aten.remainder.Tensor_out": Tensor.mod,
+  "aten.pow.Tensor_Tensor_out": Tensor.pow,
+  "aten.pow.Tensor_Scalar_out": Tensor.pow,
+  "aten.bitwise_and.Tensor_out": Tensor.bitwise_and,
+  "aten.bitwise_or.Tensor_out": Tensor.bitwise_or,
+  "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,  # TODO: tinygrad lacks bitwise_xor, add it
+  "aten.eq.Tensor_out": Tensor.eq, "aten.eq.Scalar_out": Tensor.eq,
+  "aten.ne.Tensor_out": Tensor.ne, "aten.ne.Scalar_out": Tensor.ne,
+  "aten.ge.Tensor_out": Tensor.__ge__, "aten.ge.Scalar_out": Tensor.__ge__,
+  "aten.gt.Tensor_out": Tensor.__gt__, "aten.gt.Scalar_out": Tensor.__gt__,
+  "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
+  "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
+}}
+
+# we add the "out" here
+def wrap_out(f):
+  def _wrap_out(*args, **kwargs):
+    out = kwargs.pop('out')
+    assigned = f(*args, **kwargs)
+    assert out.shape == assigned.shape and out.dtype == assigned.dtype
+    return out.replace(assigned)
+  return _wrap_out
+
+tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.view": Tensor.reshape,
-  "aten.add.Tensor": Tensor.add,
-  "aten.sub.Tensor": Tensor.sub,
-  "aten.mul.Tensor": Tensor.mul,
-  "aten.div.Tensor": Tensor.div,
-  "aten.add_.Tensor": lambda x,y,alpha=1: x.assign(x.add(y)*alpha),
-  "aten.pow.Tensor_Scalar": Tensor.pow,
-  "aten.bitwise_and.Tensor": Tensor.bitwise_and,
-  "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
-  "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
-  "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
-  "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
-  "aten.le.Tensor": Tensor.__le__, "aten.le.Scalar": Tensor.__le__,
-  "aten.abs": Tensor.abs,
-  "aten.exp": Tensor.exp,
-  "aten.exp2": Tensor.exp2,
-  "aten.min": Tensor.min,
-  "aten.max": Tensor.max,
+  "aten.floor_divide": lambda x,y: x//y,
+  # TODO: use tinygrad methods, but they require x to be unsigned
+  "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
+  "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
+  # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
   "aten.relu_": lambda x: x.assign(x.relu()),
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
-  "aten.neg": Tensor.neg,
-  "aten.reciprocal": Tensor.reciprocal,
-  "aten.sqrt": Tensor.sqrt,
-  "aten.rsqrt": Tensor.rsqrt,
+  "aten.min": Tensor.min,
+  "aten.max": Tensor.max,
   "aten.mm": Tensor.matmul,
+  "aten.dot": Tensor.dot,
+  "aten.prod": Tensor.prod,
+  "aten.std.correction": Tensor.std,
+  "aten.std_mean.correction": Tensor.std_mean,
   "aten.var.correction": Tensor.var,
   # TODO: support var_mean in tinygrad
   "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
     out.replace(Tensor.sum(self, axis if len(axis) else None, keepdim), allow_shape_mismatch=True),
-  "aten.argmax": Tensor.argmax,
   "aten.scatter.value": Tensor.scatter,
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where,
-  "aten._log_softmax": lambda self,dim,half_to_float: self.softmax(dim),
+  "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
+  "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": lambda self:
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
   "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
   "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
-}
-
-# NOTE: there's earlier things to hook these, so the .out form isn't needed
-#"aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
-#"aten.abs.out": lambda x,out: out.replace(x.abs(), allow_shape_mismatch=True),
-#"aten.ceil.out": lambda x,out: out.replace(x.ceil(), allow_shape_mismatch=True),
-#"aten.exp2.out": lambda x,out: out.replace(x.exp2(), allow_shape_mismatch=True),
+}}
 
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):

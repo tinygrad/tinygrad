@@ -72,6 +72,26 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10, device="CPU")
+    c = a+b
+    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+
+  def test_empty_is_not_realized(self):
+    a = Tensor.empty(10)
+    child = a+2
+    assert not a.lazydata.is_realized
+    child.realize()
+    assert a.lazydata.is_realized
+
+  # NOTE: because empty does not have an ExecItem if realize is called on a childless empty, it never gets allocated.
+  def test_childless_empty_never_allocates(self):
+    a = Tensor.empty(10)
+    a.realize()
+    assert not a.lazydata.is_realized
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -2123,10 +2143,10 @@ class TestView(unittest.TestCase):
     late_mul = a*bv
     other_child = b+2
     s = check_schedule([late_mul, other_child], 2)
-    # the arange realizes
-    self.assertIsNotNone(b.lazydata.base.realized)
+    # the arange becomes a BUFFER
+    self.assertIs(b.lazydata.base.op, Ops.BUFFER)
     # mul still collapses
-    self.assertIsNone(late_mul.lazydata.base.realized)
+    self.assertIs(late_mul.lazydata.base.op, Ops.CONST)
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
@@ -2546,7 +2566,7 @@ class TestUOpBecome(unittest.TestCase):
     noop.realize()
     # it becomes a realized view after realize
     assert noop.lazydata is not noop.lazydata.base
-    assert noop.lazydata.is_realized
+    assert noop.lazydata.base.op is Ops.BUFFER
     late_add = noop+2
     late_add.realize()
 
@@ -2578,7 +2598,7 @@ class TestUOpBecome(unittest.TestCase):
     a = Tensor.empty(4, 4)
     b = a+0
     check_schedule(b, 0)
-    assert b.lazydata.is_realized
+    assert b.lazydata.base.op is Ops.BUFFER
     self.assertIs(a.lazydata, b.lazydata)
 
   # they can also chain other movement ops on top of the tensor source
@@ -2600,7 +2620,7 @@ class TestUOpBecome(unittest.TestCase):
     b = (a.permute((1, 0))+0).reshape((8, 2))+0
     check_schedule(b, 0)
     self.assertEqual(b.lazydata.st, a.lazydata.permute((1, 0)).reshape((8, 2)).st)
-    assert b.lazydata.is_realized
+    assert b.lazydata.base.op is Ops.BUFFER
 
   def test_become_multiple_choices(self):
     a = Tensor.empty(16)
