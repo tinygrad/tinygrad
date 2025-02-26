@@ -26,6 +26,30 @@ class TestTorchBackend(unittest.TestCase):
     c = a+b
     np.testing.assert_equal(c.cpu().numpy(), [2,2,2,2])
 
+  def test_expand(self):
+    a = torch.Tensor([1,2,3,4]).to(device)
+    out = a.reshape(4,1).expand(4,4)
+    np.testing.assert_equal(out.cpu().numpy(), [[1,1,1,1],[2,2,2,2],[3,3,3,3],[4,4,4,4]])
+
+  def test_reshape(self):
+    a = torch.Tensor([[1,2],[3,4]]).to(device)
+    np.testing.assert_equal(a.reshape(4).cpu().numpy(), [1,2,3,4])
+    np.testing.assert_equal(a.reshape(2,1,2).cpu().numpy(), [[[1,2]],[[3,4]]])
+    np.testing.assert_equal(a.unsqueeze(1).cpu().numpy(), [[[1,2]],[[3,4]]])
+    np.testing.assert_equal(a.unsqueeze(1).unsqueeze(1).cpu().numpy(), [[[[1,2]]],[[[3,4]]]])
+    np.testing.assert_equal(a.unsqueeze(1).unsqueeze(1).squeeze().cpu().numpy(), [[1,2],[3,4]])
+
+  def test_permute(self):
+    a = torch.Tensor([[1,2],[3,4]]).to(device)
+    print(a.stride())
+    null = a.permute(0,1)
+    perm = a.permute(1,0)
+    back = perm.permute(1,0)
+    np.testing.assert_equal(a.cpu().numpy(), [[1,2],[3,4]])
+    np.testing.assert_equal(null.cpu().numpy(), [[1,2],[3,4]])
+    np.testing.assert_equal(perm.cpu().numpy(), [[1,3],[2,4]])
+    np.testing.assert_equal(back.cpu().numpy(), [[1,2],[3,4]])
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
