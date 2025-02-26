@@ -13,9 +13,11 @@ def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype))
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
-class TinyBackend: pass
+class TinyBackend:
+  def is_available(self): return True
+  def current_device(self): return 0
 torch.utils.rename_privateuse1_backend("tiny")
-torch._register_device_module("tiny", TinyBackend)
+torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 
 @torch.library.impl("aten::zero_", "privateuseone")
@@ -115,17 +117,42 @@ for k,v in get_decompositions(decomps).items():
   if TORCH_DEBUG >= 2: print("register decomp for", k)
   torch.library.impl(key, "privateuseone")(v)
 
-tiny_backend = {
+# TODO: autogen this. do we want them all to be the "out" format?
+tiny_backend_out = {
+  "aten.remainder.Tensor_out": lambda x,y,out: out.assign(x%y),
+  "aten.pow.Tensor_Tensor_out": lambda x,y,out: out.assign(x**y),
+  "aten.sub.out": lambda x,y,out: out.assign(x-y),
+  "aten.mul.out": lambda x,y,out: out.assign(x*y),
+  "aten.div.out": lambda x,y,out: out.assign(x/y),
+  "aten.log.out": lambda self,out: out.assign(self.log()),
+  "aten.bitwise_not.out": lambda self,out: out.assign(self.bitwise_not()),
+  "aten.bitwise_and.Tensor_out": lambda x,y,out: out.assign(x.bitwise_and(y)),
+  "aten.bitwise_or.Tensor_out": lambda x,y,out: out.assign(x.bitwise_or(y)),
+  # TODO: tinygrad lacks bitwise_xor
+  "aten.bitwise_xor.Tensor_out": lambda x,y,out: out.assign(x ^ y),
+}
+
+tiny_backend = {**tiny_backend_out, **{
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
   "aten.mul.Tensor": Tensor.mul,
   "aten.div.Tensor": Tensor.div,
+  "aten.remainder.Tensor": Tensor.mod,
+  "aten.floor_divide": Tensor.__floordiv__,
+  "aten.floor_divide_.Tensor": lambda self,x: self.assign(self.__floordiv__(x)),
   "aten.add_.Tensor": lambda x,y,alpha=1: x.assign(x.add(y)*alpha),
+  # TODO: tinygrad methods
+  "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
+  "aten.__ilshift__.Scalar": lambda x,y: x*(2**y),
+  "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
+  "aten.__irshift__.Scalar": lambda x,y: x//(2**y),
   "aten.pow.Tensor_Scalar": Tensor.pow,
+  "aten.pow.Tensor_Tensor": Tensor.pow,
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
   "aten.eq.Tensor": Tensor.eq, "aten.eq.Scalar": Tensor.eq,
   "aten.ne.Tensor": Tensor.ne, "aten.ne.Scalar": Tensor.ne,
+  "aten.ge.Tensor": Tensor.__ge__, "aten.ge.Scalar": Tensor.__ge__,
   "aten.gt.Tensor": Tensor.__gt__, "aten.gt.Scalar": Tensor.__gt__,
   "aten.lt.Tensor": Tensor.__lt__, "aten.lt.Scalar": Tensor.__lt__,
   "aten.le.Tensor": Tensor.__le__, "aten.le.Scalar": Tensor.__le__,
@@ -143,6 +170,7 @@ tiny_backend = {
   "aten.sqrt": Tensor.sqrt,
   "aten.rsqrt": Tensor.rsqrt,
   "aten.mm": Tensor.matmul,
+  "aten.dot": Tensor.dot,
   "aten.var.correction": Tensor.var,
   # TODO: support var_mean in tinygrad
   "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
@@ -158,7 +186,7 @@ tiny_backend = {
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
   "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
   "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
-}
+}}
 
 # NOTE: there's earlier things to hook these, so the .out form isn't needed
 #"aten.add.out": lambda x,y,out: out.replace(x+y, allow_shape_mismatch=True),
