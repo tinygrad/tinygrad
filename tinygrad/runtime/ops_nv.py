@@ -202,16 +202,16 @@ class NVProgram(HCQProgram):
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferSpec(cpu_access=True))
 
     self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0
-    self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
+    self.constbufs: dict[int, tuple[int, int]] = {} # dict[constbuf index, tuple[va_addr, size]]
     for sh in sections:
       if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
       if sh.name == f".text.{self.name}":
         self.prog_addr, self.prog_sz, self.regs_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, max(sh.header.sh_info>>24, 16)
       elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
-      elif sh.name == ".nv.info":
-        for off in range(0, sh.header.sh_size, 12):
-          typ, _, val = struct.unpack_from("III", sh.content, off)
-          if typ & 0xffff == 0x1204: self.lcmem_usage = val + 0x240
+      elif sh.name.startswith(".nv.info"):
+        for typ, param, data in self._parse_elf_info(sh):
+          if sh.name == f".nv.info.{name}" and param == 0xa: self.cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
+          elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("I", data)[0] # EIATTR_MIN_STACK_SIZE
 
     # Ensure device has enough local memory to run the program
     self.dev._ensure_has_local_memory(self.lcmem_usage)
@@ -226,7 +226,7 @@ class NVProgram(HCQProgram):
 
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
-    self.constbuffer_0 = [0] * 88
+    self.constbuffer_0 = [0] * (self.cbuf0_size // 4)
     self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
@@ -250,6 +250,12 @@ class NVProgram(HCQProgram):
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
     super().__init__(NVArgsState, self.dev, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
+
+  def _parse_elf_info(self, sh, start_off=0):
+    while start_off < sh.header.sh_size:
+      typ, param, sz = struct.unpack_from("BBH", sh.content, start_off)
+      yield typ, param, sh.content[start_off+4:start_off+sz+4] if typ == 0x4 else sz
+      start_off += (sz if typ == 0x4 else 0) + 4
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True))
