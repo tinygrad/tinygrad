@@ -3091,7 +3091,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu(neg_slope=0.42).numpy())
     ```
     """
-    return self.relu() - (-neg_slope*self).relu()
+    return (self<0).where(neg_slope*self, self)
 
   def mish(self):
     """
