@@ -1,4 +1,4 @@
-window.TINYCHAT_ROOT = "/";
+window.TINYCHAT_ROOT = "/tinychat-browser/";
 const queryParams = new URLSearchParams(window.location.search);
 const normalizedParams = Object.fromEntries([...queryParams].map(([key, value]) => [key.toUpperCase(), value.toUpperCase()]));
 window.BACKEND = (normalizedParams["BACKEND"] === "WASM") ? "WASM" : "WebGPU";
