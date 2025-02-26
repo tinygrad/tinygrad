@@ -1,5 +1,6 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEBUG, getenv, prod
+import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator
 torch.autograd.grad_mode.set_multithreading_enabled(False)
@@ -85,6 +86,18 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
   # TODO: this is wrong
   return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
+@torch.library.impl("aten::arange", "privateuseone")
+def arange(end, dtype=None, device=None, pin_memory=None):
+  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+
+@torch.library.impl("aten::arange.start", "privateuseone")
+def arange_start(start, end, dtype=None, device=None, pin_memory=None):
+  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+
+@torch.library.impl("aten::arange.start_step", "privateuseone")
+def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
+  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
@@ -142,6 +155,8 @@ decomps = {
     aten.nan_to_num,
     aten.logit,
     aten.rsub,
+    aten.index_select,
+    aten.native_dropout,
     # activations
     aten.hardswish, aten.hardswish_backward,
     aten.hardtanh, aten.hardtanh_backward,
@@ -199,6 +214,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.remainder.Tensor_out": Tensor.mod,
   "aten.pow.Tensor_Tensor_out": Tensor.pow,
   "aten.pow.Tensor_Scalar_out": Tensor.pow,
+  "aten.pow.Scalar_out": lambda x,y: x**y,
   "aten.bitwise_and.Tensor_out": Tensor.bitwise_and,
   "aten.bitwise_or.Tensor_out": Tensor.bitwise_or,
   "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,  # TODO: tinygrad lacks bitwise_xor, add it
@@ -229,10 +245,14 @@ def wrap_out(f):
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.view": Tensor.reshape,
+  "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
+  "aten.floor_divide_.Tensor": lambda x,y: x.assign(x//y),
   # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
+  "aten.__ilshift__.Scalar": lambda x,y: x.assign(x*(2**y)),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
+  "aten.__irshift__.Scalar": lambda x,y: x.assign(x//(2**y)),
   # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
   "aten.relu_": lambda x: x.assign(x.relu()),
@@ -300,8 +320,9 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
       tinygrad_tensors.append(param.data)
   for state_dict in optimizer.state.values():
     for key, value in state_dict.items():
-      if torch.is_tensor(value) and str(value.device) == "tiny": tinygrad_tensors.append(value)
-  Tensor.realize(*[unwrap(x) for x in tinygrad_tensors])
+      if torch.is_tensor(value): tinygrad_tensors.append(value)
+  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if x.device == "tiny"]
+  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
 _optimizer_init = torch.optim.Optimizer.__init__
 def _optimizer_patched_init(self, *args, **kwargs):
