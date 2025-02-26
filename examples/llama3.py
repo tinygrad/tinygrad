@@ -76,7 +76,7 @@ class Int8Linear:
     return x.dot(self.weight.cast(self.scale.dtype).T*self.scale)
 
   @staticmethod
-  def quantize(tensors, device, scale_dtype):
+  def quantize(tensors, device, scale_dtype=dtypes.float16):
     new_tensors = {}
     for name,v in tensors.items():
       if "feed_forward" in name or "attention.w" in name or "tok_embeddings.weight" in name:
