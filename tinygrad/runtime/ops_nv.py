@@ -195,7 +195,7 @@ class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
 
-    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
+    if MOCKGPU: image, sections, relocs, cbuf0_size = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [], 0x160 # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
@@ -210,7 +210,7 @@ class NVProgram(HCQProgram):
       elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
       elif sh.name.startswith(".nv.info"):
         for typ, param, data in self._parse_elf_info(sh):
-          if sh.name == f".nv.info.{name}" and param == 0xa: self.cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
+          if sh.name == f".nv.info.{name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
           elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("I", data)[0] # EIATTR_MIN_STACK_SIZE
 
     # Ensure device has enough local memory to run the program
@@ -226,7 +226,7 @@ class NVProgram(HCQProgram):
 
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
-    self.constbuffer_0 = [0] * (self.cbuf0_size // 4)
+    self.constbuffer_0 = [0] * (cbuf0_size // 4)
     self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
