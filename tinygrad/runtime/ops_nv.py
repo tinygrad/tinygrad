@@ -211,7 +211,7 @@ class NVProgram(HCQProgram):
       elif sh.name.startswith(".nv.info"):
         for typ, param, data in self._parse_elf_info(sh):
           if sh.name == f".nv.info.{name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
-          elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("I", data)[0] # EIATTR_MIN_STACK_SIZE
+          elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
 
     # Ensure device has enough local memory to run the program
     self.dev._ensure_has_local_memory(self.lcmem_usage)
