@@ -71,15 +71,13 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(torch.isfinite(a).cpu().numpy(), [True, True, True, True])
 
-  @unittest.skip("broken")
   def test_eq(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
     c = a == b
     print(c.cpu().numpy())
 
-  # TODO: why
-  @unittest.skip("broken")
+  @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
     print(str(a))

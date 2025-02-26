@@ -45,9 +45,10 @@ from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   # TODO: this is heavyweight
   st = ShapeTracker([View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)])
-  mops = to_movement_ops(st)
   ret = unwrap(tensor)
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, mops)
+  if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
+  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
+  mops = to_movement_ops(st)
   if mops[0] == (MovementOps.RESHAPE, tuple(tensor.shape)): mops = mops[1:]
   for mo in mops: ret = apply_mop(ret, mo)
   return wrap(ret)
@@ -83,6 +84,21 @@ def arange_start(start, end, dtype=None, device=None, pin_memory=None):
 def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
   return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
+@torch.library.impl("aten::topk", "privateuseone")
+def topk(self, k, dim=-1, largest=True, sorted=True):
+  # TODO: move to tinygrad
+  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
+  return torch.return_types.topk((t1.tiny(), t2.tiny()))
+
+@torch.library.impl("aten::_index_put_impl_", "privateuseone")
+def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
+  # TODO: move to tinygrad
+  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+
+@torch.library.impl("aten::index.Tensor", "privateuseone")
+def index_tensor(x, y):
+  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
+
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
@@ -110,9 +126,6 @@ def _copy_from(src, dest):
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
   unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
-
-@torch.library.impl("aten::index.Tensor", "privateuseone")
-def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
 
 # register some decompositions
 from torch._decomp import get_decompositions
@@ -148,6 +161,7 @@ decomps = {
     aten.index_select,
     aten.native_dropout, aten.native_dropout_backward,
     aten._softmax_backward_data, aten.embedding_dense_backward,
+    aten.linalg_vector_norm,
     # activations
     aten.hardswish, aten.hardswish_backward,
     aten.hardtanh, aten.hardtanh_backward,
@@ -264,7 +278,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
-    out.replace(Tensor.sum(self, axis if len(axis) else None, keepdim), allow_shape_mismatch=True),
+    out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where,
@@ -280,6 +294,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
+  "aten.multinomial": Tensor.multinomial,
 }}
 
 def wrap_fxn(k,f):
@@ -287,9 +302,6 @@ def wrap_fxn(k,f):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
-      #for x in list(args)+list(kwargs.values()):
-      #  if isinstance(x, torch.Tensor) and str(x.device) == "tiny":
-      #    assert 0 not in x.stride(), f"bad stride {x.stride()}"
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     out = f(*args, **kwargs)
