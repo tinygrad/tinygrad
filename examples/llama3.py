@@ -66,7 +66,6 @@ def load(fn:str):
     return torch_load(fn)
 
 # **** quantized linears ****
-# TODO: handle quantization from both float16 and float32
 class Int8Linear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
