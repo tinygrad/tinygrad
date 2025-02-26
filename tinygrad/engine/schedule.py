@@ -447,16 +447,29 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
 
   # final toposort (bfs)
-  # TODO: bfs is wrong if buffer_view depends on ASSIGN
+  children: dict[UOp, list[UOp]] = {}
+  in_degree: dict[UOp, int] = {}
+  for u in sched_sink.toposort:
+    in_degree[u] = 0
+    for s in u.src:
+      children.setdefault(s, []).append(u)
+      in_degree[u] += 1
+
+  queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
   var_vals: dict[Variable, int] = {}
-  for u in sched_sink.toposort:
-    if u.op is not Ops.ASSIGN: continue
-    schedule.append(schedule_uop(u, var_vals))
-    u.buf_uop.buffer.ref(1)
+  while queue:
+    u = queue.popleft()
+    if u.op is Ops.ASSIGN:
+      schedule.append(schedule_uop(u, var_vals))
+      # increment the refcount of the target buf (this is required by the JIT and memory planner)
+      u.buf_uop.buffer.ref(1)
+    for x in children.get(u, []):
+      in_degree[x] -= 1
+      if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  #if len(schedule) != (kc:=len({})): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
+  if len(schedule) != (kc:=len(kernel_assign)): raise RuntimeError(f"did not toposort all the created kernels {kc} != {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
