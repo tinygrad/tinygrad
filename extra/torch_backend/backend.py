@@ -215,7 +215,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.sub.out": lambda input,other,alpha=1: input-alpha*other, # NOTE: this is also needed to handle reverse
   "aten.mul.out": operator.mul,
   "aten.bmm.out": operator.matmul,
-  "aten.leaky_relu.out": Tensor.leakyrelu, # TODO: this should be renamed in tinygrad
+  "aten.leaky_relu.out": Tensor.leaky_relu,
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
   "aten.remainder.Tensor_out": Tensor.mod,
   "aten.pow.Tensor_Tensor_out": Tensor.pow,
