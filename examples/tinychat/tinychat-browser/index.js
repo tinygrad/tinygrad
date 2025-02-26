@@ -293,7 +293,6 @@ async function load_state_dict (data, device, progress) {
     model = new Worker(`./worker.js?version=${Date.now()}`);
     await sendMessageToWorker(model, {header: "init"});
     progress(0.02 * progress.total);
-    //data.metadata.files = await sendMessageToWorker(model, {header: "init_state_dict", files: data.metadata.files, totalSize: data.totalSize});
     progress(0.11 * progress.total);
   }
 
@@ -398,7 +397,6 @@ document.addEventListener("alpine:init", () => {
     // model
     nets: {},
     tokenizer: null,
-    // TODO: implement context sliding; model currently outputs gibberish past max_context
     max_context: 1024,
     lastSeenToks: [],
 
@@ -412,7 +410,6 @@ document.addEventListener("alpine:init", () => {
           device = await getDevice.call(this);
           console.log("WebGPU device initialized");
         } catch (error) {
-          //this.progress(0, "Failed to launch WebGPU. Loading WASM model instead...");
           window.BACKEND = "WASM";
           console.log(`error: ${error}\nFailed to launch WebGPU. Loading WASM model instead...`); // return;
           webgpuErrorMessage = this.loadingMessage;
@@ -423,10 +420,9 @@ document.addEventListener("alpine:init", () => {
       this.max_context = (window.BACKEND === "WebGPU" && !window.isMobile) ? window.PC_MAX_CONTEXT : window.MOBILE_MAX_CONTEXT;
 
       const kernelsReady = (async () => {
-        if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);} // TODO: is cache-busting necessary
+        if (window.BACKEND === "WASM") {var exports = await import(`./net_clang.js?version=${Date.now()}`);}
         else if (window.BACKEND === "WebGPU" && !window.isMobile) {var exports = await import(`${PC_WEBGPU_EXPORT}?version=${Date.now()}`);}
         else if (window.BACKEND === "WebGPU" && window.isMobile) {var exports = await import(`${MOBILE_WEBGPU_EXPORT}?version=${Date.now()}`);}
-        //Object.assign(self, exports);
         self.transformer = exports.default;
       })();
 
@@ -580,7 +576,6 @@ document.addEventListener("alpine:init", () => {
       let tokens = 0;
       this.tokens_per_second = 0;
 
-      // start receiving server sent events
       let gottenFirstChunk = false;
       try {
         for await (
@@ -592,7 +587,7 @@ document.addEventListener("alpine:init", () => {
           }
 
           // add chunk to the last message
-          // TODO: handle errors with localStorage overflow
+          // TODO: handle localStorage overflow
           //   possible example: this.cstate.messages[...] was undefined when trying to prompt within an old cstate (chat session)
           this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
 
@@ -612,7 +607,6 @@ document.addEventListener("alpine:init", () => {
           if (this.cancelGeneration) break;
         }
       } finally {
-        //this.generating = false;
         // update the state in histories or add it if it doesn't exist
         const index = this.histories.findIndex((cstate) => {
           return cstate.time === this.cstate.time;
@@ -704,7 +698,6 @@ document.addEventListener("alpine:init", () => {
 
       let lastTok = tokens[tokens.length - 1];
       while (true) {
-        //if (this.cancelGeneration) return;
         if (window.BACKEND === "WebGPU") {var tok = await this.nets["transformer"](new Int32Array([lastTok]), new Int32Array([startPos])); tok = tok[0][0];}
         else {var tok = await this.nets["transformer"](lastTok, startPos);}
         this.lastSeenToks.push(lastTok); // lets us skip prefilling with these tokens at the next prompt in this chain
