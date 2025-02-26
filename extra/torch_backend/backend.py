@@ -49,7 +49,7 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   # make big ret with stride 1
   ret = ret.reshape(numel, *wow)
   # stupid 0 stride
-  ret = ret.shrink(tuple((0,1) if st == 0 else None for st in stride)).expand([1337 if st == 0 else None for st in stride])
+  ret = ret.shrink(tuple((0,1) if st == 0 else None for st in stride)).expand([size[i] if st == 0 else None for i,st in enumerate(stride)])
   slices = tuple(slice(0,None,(st if st != 0 else 1)) for st in stride)
   shrinks = tuple(slice(0,sz) for sz in size)
   # do strides and shrink to size
