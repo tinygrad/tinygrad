@@ -22,11 +22,19 @@ function intersectRect(r1, r2) {
 
 const allWorkers = [];
 window.renderGraph = function(graph, additions) {
-  for (const w of allWorkers) w.terminate();
+  while (allWorkers.length) {
+    const { worker, timeout } = allWorkers.pop();
+    worker.terminate();
+    clearTimeout(timeout);
+  }
 
   // ** start calculating the new layout (non-blocking)
   worker = new Worker("/lib/worker.js");
-  allWorkers.push(worker);
+  const progressMessage = document.querySelector(".progress-message");
+  const timeout = setTimeout(() => {
+    progressMessage.style.display = "block";
+  }, 2000);
+  allWorkers.push({worker, timeout});
   worker.postMessage({graph, additions});
 
   // ** select svg render
@@ -38,15 +46,9 @@ window.renderGraph = function(graph, additions) {
   recenterRects(svg, zoom);
   svg.call(zoom);
 
-  const progressMessage = document.querySelector(".progress-message");
-
-  const tm = setTimeout(() => {
-    progressMessage.style.display = "block";
-  }, 1000);
-
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
-    clearTimeout(tm);
+    clearTimeout(timeout);
     const g = dagre.graphlib.json.read(e.data);
     // ** draw nodes
     const nodeRender = inner.select("#nodes");
