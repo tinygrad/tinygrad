@@ -49,14 +49,14 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides:
     return tensor.reshape(size)
 
-  # this is expand
-  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)):
-    return wrap(unwrap(tensor).expand(size))
-
   # this is also expand, hit?
   if tensor.numel() == 1:
     assert all(x == 0 for x in stride)
     return wrap(unwrap(tensor).reshape([1]*len(size)).expand(size))
+
+  # this is expand
+  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)) and decending_strides:
+    return wrap(unwrap(tensor).expand(size))
 
   # this is permute because we are flipping strides
   if len(tensor.shape) == 2 and tuple(tensor.shape)[::-1] == tuple(size) and stride == [0, 1]:
