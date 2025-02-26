@@ -13,10 +13,10 @@ MMAP_SYSCALL = {"aarch64": 0xde, "x86_64":0x09}[processor]
 def get_struct(argp, stype):
   return ctypes.cast(ctypes.c_void_p(argp), ctypes.POINTER(stype)).contents
 
-def dump_struct(st):
+def dump_struct(st, end=" "):
   if getenv("IOCTL", 0) == 0: return
   print("\t", st.__class__.__name__, end=" { ")
-  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
+  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=end)
   print("}")
 
 def format_struct(s):
@@ -115,7 +115,7 @@ def ioctl(fd, request, argp):
         if s.hClass == nv_gpu.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.GT200_DEBUGGER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV83DE_ALLOC_PARAMETERS))
-        if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
+        if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A or s.hClass == nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A:
           sx = get_struct(s.pAllocParms, nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
           dump_struct(sx)
           gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries))
@@ -224,6 +224,26 @@ def _dump_qmd(address, packets):
       for j in range(size): print(f"\t\t\t{j}: {gpfifo[i+j+1]} | 0x{gpfifo[i+j+1]:x}")
     if mthd == 792:
       qmds.append(qmd_struct_t.from_address(address + 12 + i * 4))
+      if getenv("IOCTL", 0) >= 2:
+        print("qmd:")
+        dump_struct(qmds[-1], end="\n")
+        print(qmds[-1].qmd_major_version)
+        print(qmds[-1].constant_buffer_addr_lower_1)
+        print(qmds[-1].constant_buffer_addr_upper_1)
+        xx = to_mv(address + 12 + i * 4, 0x180)
+        hexdump(xx)
+        
+        # 48bits
+        prg_cb1 = xx.cast('Q')[0x10] & ((1 << 48)-1)
+        print(hex(prg_cb1))
+
+        prg_cb1 = xx.cast('Q')[0x30//8] & ((1 << 48)-1)
+        print(hex(prg_cb1 << 8))
+        # hexdump(to_mv(prg_cb1 << 8, 0x40))
+        print(hex(address))
+        # if prg_cb1 > 0:
+        #   hexdump(to_mv(prg_cb1, 0x40))
+
     elif mthd == nv_gpu.NVC6C0_SEND_PCAS_A:
       qmds.append(qmd_struct_t.from_address(gpfifo[i+1] << 8))
 
