@@ -153,9 +153,9 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: torch-backend-pillow-torchvision-et
+        key: torch-backend-pillow-torchvision-et-pt
         deps: testing_minimal
-        pydeps: "pillow torchvision expecttest"
+        pydeps: "pillow torchvision expecttest pytest"
     - name: Install ninja
       run: |
         sudo apt update || true
