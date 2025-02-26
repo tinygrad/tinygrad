@@ -34,7 +34,8 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:Optional[tuple[UOp, ...
   idx, valid = views[-1].to_indexed_uops(_idxs)
   for view in reversed(views[0:-1]):
     view = view.minify()
-    idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
+    if view.mask and (_idxs is not None and any(i.op is Ops.SPECIAL for i in _idxs)): idx, valid = view.to_indexed_uops(None, valid)
+    else: idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
   return idx, valid
 
 @functools.lru_cache(None)
