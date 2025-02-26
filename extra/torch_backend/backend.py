@@ -39,38 +39,18 @@ def masked_select(self, mask):
   # err, bad
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
+from tinygrad.shape.shapetracker import ShapeTracker, View
+from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  #return tensor.cpu().as_strided(size, stride).tiny()
-  if TORCH_DEBUG >= 1: print("** NOTE: this as_strided might be wrong", tensor.shape, size, stride, storage_offset)
-
-  nz_strides = [st for s,st in zip(size, stride) if s != 1]
-  decending_strides = all(x>=y for x,y in zip(nz_strides[:-1], nz_strides[1:]))
-  if storage_offset is None: storage_offset = 0
-
-  # this is reshape (squeeze/unsqueeze), strides must be in decending order
-  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides and storage_offset == 0:
-    return tensor.reshape(size)
-
-  # this is also expand, hit?
-  if tensor.numel() == 1 and storage_offset == 0:
-    assert all(x == 0 for x in stride)
-    return wrap(unwrap(tensor).reshape([1]*len(size)).expand(size))
-
-  # this is expand
-  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)) and decending_strides and storage_offset == 0:
-    return wrap(unwrap(tensor).expand(size))
-
-  # this is permute because we are flipping strides
-  if len(tensor.shape) == 2 and tuple(tensor.shape)[::-1] == tuple(size) and stride == [0, 1] and storage_offset == 0:
-    return wrap(unwrap(tensor).permute(1,0))
-
-  # this is shrink
-  if prod(tensor.shape) > prod(size) and decending_strides:
-    return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+prod(size)].reshape(size))
-
-  #print(tensor.cpu().numpy())
-  raise NotImplementedError(f"fix as_strided {tensor.shape} -> {size} {stride} {storage_offset}")
+  # TODO: this is heavyweight
+  st = ShapeTracker([View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)])
+  mops = to_movement_ops(st)
+  ret = unwrap(tensor)
+  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, mops)
+  if mops[0] == (MovementOps.RESHAPE, tuple(tensor.shape)): mops = mops[1:]
+  for mo in mops: ret = apply_mop(ret, mo)
+  return wrap(ret)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -121,6 +101,9 @@ def _copy_from(src, dest):
     dest.copy_(torch.from_numpy(unwrap(src).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
     unwrap(dest).assign(Tensor(src.numpy()))
+    #if 0 in dest.stride():
+    #  print(dest.shape, dest.stride())
+    #  exit(0)
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
@@ -295,8 +278,12 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
 
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
-    if TORCH_DEBUG: print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
+    if TORCH_DEBUG:
+      print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
+      for x in list(args)+list(kwargs.values()):
+        if isinstance(x, torch.Tensor) and str(x.device) == "tiny":
+          assert 0 not in x.stride(), f"bad stride {x.stride()}"
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     out = f(*args, **kwargs)

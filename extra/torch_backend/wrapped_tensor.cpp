@@ -9,6 +9,20 @@ namespace at {
 namespace detail {
 C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
 }
+
+// the MetalTensorImpl and VulkanOpaqueTensorImpl already does the strides we want
+template <typename OpaqueHandle>
+struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
+  TinyOpaqueTensorImpl(
+      at::DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      c10::Device device,
+      OpaqueHandle opaque_handle,
+      c10::IntArrayRef sizes,
+      c10::IntArrayRef strides)
+      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes)
+        { this->sizes_and_strides_.set_strides(strides); }
+};
 }
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
@@ -26,17 +40,28 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
-  return at::detail::make_tensor<at::OpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
+  // Last dimension stride is 1 for contiguous row-major layout
+  std::vector<int64_t> strides(sizes.size());
+  if (sizes.size() >= 1) {
+    strides[sizes.size() - 1] = 1;
+
+    // Compute strides from right to left
+    for (int64_t i = sizes.size() - 2; i >= 0; --i) {
+      strides[i] = strides[i + 1] * sizes[i + 1];
+    }
+  }
+
+  return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
     c10::scalarTypeToTypeMeta(dtype),
     at::Device(at::kPrivateUse1),
     std::make_shared<c10::SafePyObject>(py_obj.release().ptr(), getPyInterpreter()),
-    sizes);
+    sizes, strides);
 }
 
 py::object unwrap_tensor(const at::Tensor &tensor) {
   auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = static_cast<at::OpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+  auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
   std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
