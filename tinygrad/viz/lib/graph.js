@@ -1,15 +1,3 @@
-function recenterRects(svg, zoom) {
-  const svgBounds = svg.node().getBoundingClientRect();
-  for (const rect of svg.node().querySelectorAll("rect")) {
-    const rectBounds = rect.getBoundingClientRect();
-    const outOfBounds = rectBounds.top < svgBounds.top || rectBounds.left < svgBounds.left ||
-      rectBounds.bottom > svgBounds.bottom || rectBounds.right > svgBounds.right;
-    // if there's at least one rect in view we don't do anything
-    if (!outOfBounds) return;
-  }
-  svg.call(zoom.transform, d3.zoomIdentity)
-}
-
 function intersectRect(r1, r2) {
   const dx = r2.x-r1.x;
   const dy = r2.y-r1.y;
@@ -37,21 +25,12 @@ window.renderGraph = function(graph, additions) {
   allWorkers.push({worker, timeout});
   worker.postMessage({graph, additions});
 
-  // ** select svg render
-  const svg = d3.select("#graph-svg");
-  const inner = svg.select("g");
-  const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", ({ transform }) => {
-    inner.attr("transform", transform);
-  });
-  recenterRects(svg, zoom);
-  svg.call(zoom);
-
   worker.onmessage = (e) => {
     progressMessage.style.display = "none";
     clearTimeout(timeout);
     const g = dagre.graphlib.json.read(e.data);
     // ** draw nodes
-    const nodeRender = inner.select("#nodes");
+    const nodeRender = d3.select("#nodes");
     const nodes = nodeRender.selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`);
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
@@ -66,7 +45,7 @@ window.renderGraph = function(graph, additions) {
 
     // ** draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
-    const edgeRender = inner.select("#edges");
+    const edgeRender = d3.select("#edges");
     edgeRender.selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
       const edge = g.edge(e);
       const points = edge.points.slice(1, edge.points.length-1);
