@@ -50,6 +50,11 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(perm.cpu().numpy(), [[1,3],[2,4]])
     np.testing.assert_equal(back.cpu().numpy(), [[1,2],[3,4]])
 
+  def test_shrink(self):
+    a = torch.Tensor([1,2,3,4]).to(device)
+    np.testing.assert_equal(a[:3].cpu().numpy(), [1,2,3])
+    np.testing.assert_equal(a[1:].cpu().numpy(), [2,3,4])
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
@@ -66,15 +71,13 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(torch.isfinite(a).cpu().numpy(), [True, True, True, True])
 
-  @unittest.skip("broken")
   def test_eq(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
     c = a == b
     print(c.cpu().numpy())
 
-  # TODO: why
-  @unittest.skip("broken")
+  @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
     print(str(a))

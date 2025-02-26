@@ -1,5 +1,6 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEBUG, getenv, prod
+import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator
 torch.autograd.grad_mode.set_multithreading_enabled(False)
@@ -38,33 +39,19 @@ def masked_select(self, mask):
   # err, bad
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
+from tinygrad.shape.shapetracker import ShapeTracker, View
+from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  #return tensor.cpu().as_strided(size, stride).tiny()
-  if TORCH_DEBUG >= 1: print("** NOTE: this as_strided might be wrong", tensor.shape, size, stride, storage_offset)
-
-  nz_strides = [st for s,st in zip(size, stride) if s != 1]
-  decending_strides = all(x>=y for x,y in zip(nz_strides[:-1], nz_strides[1:]))
-
-  # this is reshape (squeeze/unsqueeze), strides must be in decending order
-  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides:
-    return tensor.reshape(size)
-
-  # this is also expand, hit?
-  if tensor.numel() == 1:
-    assert all(x == 0 for x in stride)
-    return wrap(unwrap(tensor).reshape([1]*len(size)).expand(size))
-
-  # this is expand
-  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)) and decending_strides:
-    return wrap(unwrap(tensor).expand(size))
-
-  # this is permute because we are flipping strides
-  if len(tensor.shape) == 2 and tuple(tensor.shape)[::-1] == tuple(size) and stride == [0, 1]:
-    return wrap(unwrap(tensor).permute(1,0))
-
-  #print(tensor.cpu().numpy())
-  raise NotImplementedError(f"fix as_strided {tensor.shape} -> {size} {stride} {storage_offset}")
+  # TODO: this is heavyweight
+  st = ShapeTracker([View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)])
+  ret = unwrap(tensor)
+  if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
+  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
+  mops = to_movement_ops(st)
+  if mops[0] == (MovementOps.RESHAPE, tuple(tensor.shape)): mops = mops[1:]
+  for mo in mops: ret = apply_mop(ret, mo)
+  return wrap(ret)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -85,6 +72,33 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
   # TODO: this is wrong
   return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
+@torch.library.impl("aten::arange", "privateuseone")
+def arange(end, dtype=None, device=None, pin_memory=None):
+  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+
+@torch.library.impl("aten::arange.start", "privateuseone")
+def arange_start(start, end, dtype=None, device=None, pin_memory=None):
+  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+
+@torch.library.impl("aten::arange.start_step", "privateuseone")
+def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
+  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+
+@torch.library.impl("aten::topk", "privateuseone")
+def topk(self, k, dim=-1, largest=True, sorted=True):
+  # TODO: move to tinygrad
+  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
+  return torch.return_types.topk((t1.tiny(), t2.tiny()))
+
+@torch.library.impl("aten::_index_put_impl_", "privateuseone")
+def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
+  # TODO: move to tinygrad
+  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+
+@torch.library.impl("aten::index.Tensor", "privateuseone")
+def index_tensor(x, y):
+  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
+
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
@@ -103,14 +117,15 @@ def _copy_from(src, dest):
     dest.copy_(torch.from_numpy(unwrap(src).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
     unwrap(dest).assign(Tensor(src.numpy()))
+    #if 0 in dest.stride():
+    #  print(dest.shape, dest.stride())
+    #  exit(0)
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
 @torch.library.impl("aten::cat.out", "privateuseone")
-def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
-
-@torch.library.impl("aten::index.Tensor", "privateuseone")
-def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
+def cat_out(tensors, dim=0, out=None):
+  unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
 # register some decompositions
 from torch._decomp import get_decompositions
@@ -118,6 +133,7 @@ aten = torch.ops.aten
 decomps = {
   "post_autograd": [
     aten.native_batch_norm, aten.native_batch_norm_backward,
+    aten.native_layer_norm_backward,
     aten.addmm,
     aten.addcmul,
     aten.addcdiv,
@@ -142,6 +158,10 @@ decomps = {
     aten.nan_to_num,
     aten.logit,
     aten.rsub,
+    aten.index_select,
+    aten.native_dropout, aten.native_dropout_backward,
+    aten._softmax_backward_data, aten.embedding_dense_backward,
+    aten.linalg_vector_norm,
     # activations
     aten.hardswish, aten.hardswish_backward,
     aten.hardtanh, aten.hardtanh_backward,
@@ -194,11 +214,13 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
   "aten.sub.out": lambda input,other,alpha=1: input-alpha*other, # NOTE: this is also needed to handle reverse
   "aten.mul.out": operator.mul,
+  "aten.bmm.out": operator.matmul,
   "aten.leaky_relu.out": Tensor.leakyrelu, # TODO: this should be renamed in tinygrad
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
   "aten.remainder.Tensor_out": Tensor.mod,
   "aten.pow.Tensor_Tensor_out": Tensor.pow,
   "aten.pow.Tensor_Scalar_out": Tensor.pow,
+  "aten.pow.Scalar_out": lambda x,y: x**y,
   "aten.bitwise_and.Tensor_out": Tensor.bitwise_and,
   "aten.bitwise_or.Tensor_out": Tensor.bitwise_or,
   "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,  # TODO: tinygrad lacks bitwise_xor, add it
@@ -229,10 +251,15 @@ def wrap_out(f):
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.view": Tensor.reshape,
+  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
+  "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
+  "aten.floor_divide_.Tensor": lambda x,y: x.assign(x//y),
   # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
+  "aten.__ilshift__.Scalar": lambda x,y: x.assign(x*(2**y)),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
+  "aten.__irshift__.Scalar": lambda x,y: x.assign(x//(2**y)),
   # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
   "aten.relu_": lambda x: x.assign(x.relu()),
@@ -251,7 +278,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
-    out.replace(Tensor.sum(self, axis if len(axis) else None, keepdim), allow_shape_mismatch=True),
+    out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where,
@@ -266,11 +293,14 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
+  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
+  "aten.multinomial": Tensor.multinomial,
 }}
 
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
-    if TORCH_DEBUG: print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
+    if TORCH_DEBUG:
+      print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
@@ -300,8 +330,9 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
       tinygrad_tensors.append(param.data)
   for state_dict in optimizer.state.values():
     for key, value in state_dict.items():
-      if torch.is_tensor(value) and str(value.device) == "tiny": tinygrad_tensors.append(value)
-  Tensor.realize(*[unwrap(x) for x in tinygrad_tensors])
+      if torch.is_tensor(value): tinygrad_tensors.append(value)
+  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
+  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
 _optimizer_init = torch.optim.Optimizer.__init__
 def _optimizer_patched_init(self, *args, **kwargs):
