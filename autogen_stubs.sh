@@ -104,10 +104,10 @@ generate_nvrtc() {
 }
 
 generate_nv() {
-  NVKERN_COMMIT_HASH=d6b75a34094b0f56c2ccadf14e5d0bd515ed1ab6
+  NVKERN_COMMIT_HASH=81fe4fb417c8ac3b9bdcc1d56827d116743892a5
   NVKERN_SRC=/tmp/open-gpu-kernel-modules-$NVKERN_COMMIT_HASH
   if [ ! -d "$NVKERN_SRC" ]; then
-    git clone https://github.com/tinygrad/open-gpu-kernel-modules $NVKERN_SRC
+    git clone https://github.com/NVIDIA/open-gpu-kernel-modules $NVKERN_SRC
     pushd .
     cd $NVKERN_SRC
     git reset --hard $NVKERN_COMMIT_HASH
@@ -119,12 +119,15 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl0080.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl2080_notification.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
-    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc86f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc96f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc761.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl83de.h \
     $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clcdc0.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/clc9b5.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/hwref/ampere/ga100/dev_fault.h \
