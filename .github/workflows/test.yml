@@ -173,7 +173,7 @@ jobs:
     - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
       run: PYTHONPATH=. TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
     - name: Test some torch tests (expect failure)
-      run: PYTHONPATH=. pytest extra/torch_backend/torch_tests.py -v --tb=no || true
+      run: PYTHONPATH=. python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
   tc:
     name: Tensor Core tests

@@ -50,6 +50,11 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(perm.cpu().numpy(), [[1,3],[2,4]])
     np.testing.assert_equal(back.cpu().numpy(), [[1,2],[3,4]])
 
+  def test_shrink(self):
+    a = torch.Tensor([1,2,3,4]).to(device)
+    np.testing.assert_equal(a[:3].cpu().numpy(), [1,2,3])
+    np.testing.assert_equal(a[1:].cpu().numpy(), [2,3,4])
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)

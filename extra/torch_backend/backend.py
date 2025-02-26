@@ -46,23 +46,28 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
 
   nz_strides = [st for s,st in zip(size, stride) if s != 1]
   decending_strides = all(x>=y for x,y in zip(nz_strides[:-1], nz_strides[1:]))
+  if storage_offset is None: storage_offset = 0
 
   # this is reshape (squeeze/unsqueeze), strides must be in decending order
-  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides:
+  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides and storage_offset == 0:
     return tensor.reshape(size)
 
   # this is also expand, hit?
-  if tensor.numel() == 1:
+  if tensor.numel() == 1 and storage_offset == 0:
     assert all(x == 0 for x in stride)
     return wrap(unwrap(tensor).reshape([1]*len(size)).expand(size))
 
   # this is expand
-  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)) and decending_strides:
+  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)) and decending_strides and storage_offset == 0:
     return wrap(unwrap(tensor).expand(size))
 
   # this is permute because we are flipping strides
-  if len(tensor.shape) == 2 and tuple(tensor.shape)[::-1] == tuple(size) and stride == [0, 1]:
+  if len(tensor.shape) == 2 and tuple(tensor.shape)[::-1] == tuple(size) and stride == [0, 1] and storage_offset == 0:
     return wrap(unwrap(tensor).permute(1,0))
+
+  # this is shrink
+  if prod(tensor.shape) > prod(size) and decending_strides:
+    return wrap(unwrap(tensor).flatten()[storage_offset:storage_offset+prod(size)].reshape(size))
 
   #print(tensor.cpu().numpy())
   raise NotImplementedError(f"fix as_strided {tensor.shape} -> {size} {stride} {storage_offset}")
