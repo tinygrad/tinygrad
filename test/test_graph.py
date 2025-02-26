@@ -18,7 +18,7 @@ def helper_exec_op(device, outbuf, inbufs):
     with Context(DEBUG=0):
       fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for i in range(len(inbufs))]
       s = fst[0]
-      for i in range(1, len(inbufs)): s = s.xor(fst[i])
+      for i in range(1, len(inbufs)): s = s.bitwise_xor(fst[i])
 
       si = s.schedule()[-1]
       prg = get_runner(device, si.ast)
