@@ -119,9 +119,6 @@ class Ops(FastEnum):
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
 
-  # UnaryOps
-  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
-
   # load/store before math
   LOAD = auto(); STORE = auto() # noqa: E702
 
@@ -132,8 +129,11 @@ class Ops(FastEnum):
   WMMA = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  ADD = auto(); MUL = auto(); IDIV = auto(); MOD = auto(); MAX = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
+
+  # UnaryOps
+  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -171,6 +171,7 @@ class GroupOp:
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
   Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
+  CommAssoc = set.intersection(Commutative, Associative)
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
@@ -281,6 +282,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
+  @functools.cached_property
+  def order(self:UOp) -> tuple:
+    if self.op in GroupOp.ALU:
+      const_srcs, srcs = partition(self.src, lambda x: x.op in (Ops.CONST, Ops.VCONST))
+      if len(srcs) == 1: return srcs[0].order + ((self.op.value, *[src.arg if isinstance(src.arg, tuple) else (src.arg,) for src in const_srcs]),)
+    return (self.tuplize,)
+
   # *** uop shape stuff ***
 
   @functools.cached_property
@@ -322,9 +330,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def simplify(self):
     # late import!
-    from tinygrad.codegen.symbolic import symbolic
+    from tinygrad.codegen.symbolic import symbolic_flat
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, symbolic)
+      return graph_rewrite(self, symbolic_flat)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"

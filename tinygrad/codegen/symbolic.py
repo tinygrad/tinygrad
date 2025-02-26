@@ -1,6 +1,6 @@
 # all of symbolic lives here now
 from typing import Any, Literal, cast
-import math, operator, struct, functools
+import math, operator, struct, functools, heapq
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
@@ -170,9 +170,14 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.order > chain.src[1].order: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
-  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.op is not x.src[0].op and \
+        (x.src[1].op is x.op or (x.src[0].order > x.src[1].order)) else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -215,6 +220,12 @@ symbolic = symbolic_simple+PatternMatcher([
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(Ops.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   (UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+  # swap terms if they are out of order (a+c)+b -> (a+b)+c
+  *((UPat(op, dtype=dtypes.int, src=(UPat(op, name="chain"), UPat(name="b"))),
+    lambda chain,b: chain_insert(chain,b,chain.op) if b.order < chain.src[1].order else None) for op in GroupOp.CommAssoc),
+  # merge two commutative+associative chains, generalization of (a+c)+(b+d) -> a+b+c+d
+  *((UPat(op, dtype=dtypes.int, src=(UPat(op, name='a'), UPat(op, name='b'))), lambda a,b,op=op: functools.reduce(
+    lambda t,s: t.alu(op,s), heapq.merge(split_uop(a, op), split_uop(b, op), key=lambda u: u.order))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
   (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
