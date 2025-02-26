@@ -10,7 +10,6 @@ namespace detail {
 C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
 }
 
-// the MetalTensorImpl and VulkanOpaqueTensorImpl already does the strides we want
 template <typename OpaqueHandle>
 struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   TinyOpaqueTensorImpl(

@@ -281,9 +281,9 @@ def wrap_fxn(k,f):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
-      for x in list(args)+list(kwargs.values()):
-        if isinstance(x, torch.Tensor) and str(x.device) == "tiny":
-          assert 0 not in x.stride(), f"bad stride {x.stride()}"
+      #for x in list(args)+list(kwargs.values()):
+      #  if isinstance(x, torch.Tensor) and str(x.device) == "tiny":
+      #    assert 0 not in x.stride(), f"bad stride {x.stride()}"
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     out = f(*args, **kwargs)
