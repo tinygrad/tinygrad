@@ -108,7 +108,8 @@ def _copy_from(src, dest):
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
 @torch.library.impl("aten::cat.out", "privateuseone")
-def cat_out(tensors, out, dim=0): unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
+def cat_out(tensors, dim=0, out=None):
+  unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y): return wrap(unwrap(x)[y[0].tolist()])
@@ -119,6 +120,7 @@ aten = torch.ops.aten
 decomps = {
   "post_autograd": [
     aten.native_batch_norm, aten.native_batch_norm_backward,
+    aten.native_layer_norm_backward,
     aten.addmm,
     aten.addcmul,
     aten.addcdiv,
@@ -144,7 +146,8 @@ decomps = {
     aten.logit,
     aten.rsub,
     aten.index_select,
-    aten.native_dropout,
+    aten.native_dropout, aten.native_dropout_backward,
+    aten._softmax_backward_data, aten.embedding_dense_backward,
     # activations
     aten.hardswish, aten.hardswish_backward,
     aten.hardtanh, aten.hardtanh_backward,
@@ -197,6 +200,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
   "aten.sub.out": lambda input,other,alpha=1: input-alpha*other, # NOTE: this is also needed to handle reverse
   "aten.mul.out": operator.mul,
+  "aten.bmm.out": operator.matmul,
   "aten.leaky_relu.out": Tensor.leakyrelu, # TODO: this should be renamed in tinygrad
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
   "aten.remainder.Tensor_out": Tensor.mod,
@@ -233,6 +237,7 @@ def wrap_out(f):
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.view": Tensor.reshape,
+  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
   "aten.floor_divide_.Tensor": lambda x,y: x.assign(x//y),
@@ -274,6 +279,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
+  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
 }}
 
 def wrap_fxn(k,f):
