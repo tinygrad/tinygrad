@@ -39,19 +39,34 @@ def masked_select(self, mask):
   # err, bad
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  # TODO: this is heavyweight
-  st = ShapeTracker([View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)])
-  ret = unwrap(tensor)
-  if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, tuple(tensor.shape)): mops = mops[1:]
-  for mo in mops: ret = apply_mop(ret, mo)
+  ret = unwrap(tensor).flatten()
+  if storage_offset: ret = ret[storage_offset:]
+  numel = ret.numel()
+  wow = (numel+1,)*(len(size)-1)
+  ret = ret.expand(*wow, numel).flatten()
+  # make big ret with stride 1
+  ret = ret.reshape(numel, *wow)
+  slices = tuple(slice(0,None,st) for st in stride)
+  shrinks = tuple(slice(0,sz) for sz in size)
+  # do strides and shrink to size
+  ret = ret[slices][shrinks]
   return wrap(ret)
+
+# from tinygrad.shape.shapetracker import ShapeTracker, View
+# from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+# @torch.library.impl("aten::as_strided", "privateuseone")
+# def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+#   # TODO: this is heavyweight
+#   st = ShapeTracker([View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)])
+#   ret = unwrap(tensor)
+#   if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
+#   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
+#   mops = to_movement_ops(st)
+#   if mops[0] == (MovementOps.RESHAPE, tuple(tensor.shape)): mops = mops[1:]
+#   for mo in mops: ret = apply_mop(ret, mo)
+#   return wrap(ret)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
