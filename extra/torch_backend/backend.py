@@ -107,6 +107,15 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
   #raise NotImplementedError("need convolution")
 
+@torch.library.impl("aten::convolution_backward", "privateuseone")
+# TODO: fix this....
+def convolution_backward(grad_output, input, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=0, groups=1, output_mask=None):
+  if TORCH_DEBUG >= 1:
+    print(f"convolution backward {input.shape=} {weight.shape=} {bias=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=} {output_mask=}")
+  ret = wrap(unwrap(input).conv2d(unwrap(weight), bias=None, groups=groups, stride=stride, dilation=dilation, padding=padding).backward(unwrap(grad_output)))
+  # ret.tolist()
+  return Tensor(ret.tolist()).numpy()
+
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
@@ -141,6 +150,7 @@ decomps = {
     aten.threshold_backward,
     aten.softplus_backward,
     aten.elu,  # elu has a scale + input_scale param
+    aten.elu_backward,
     aten.softplus,
     aten.threshold,
     aten.nll_loss_forward,
@@ -177,10 +187,17 @@ decomps = {
     #aten.lgamma,
     # this needs copy_strided
     #aten.lerp,
+    aten.logical_and,
+    aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
+    aten.eye,
+    aten.scatter_,
+    aten.nll_loss2d_forward,
+    aten.nll_loss_forward,
   ],
   "meta": [
+    aten.upsample_nearest1d_backward,
     aten.max_pool2d_with_indices_backward,
-    aten.convolution_backward,
+    aten.avg_pool2d_backward,
   ],
 }
 
@@ -208,7 +225,7 @@ simple_tensor_methods = [
   # reduce
   "all", "any", "argmax", "argmin", "cumsum",
   # complex
-  "avg_pool2d", "linspace"]
+  "linspace"]
 
 tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
@@ -283,7 +300,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where,
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
-  "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
+  "aten._log_softmax": lambda self,dim,half_to_float: Tensor.log_softmax(self,dim),
   "aten.random_": lambda self:
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
   "aten.random_.from": lambda self, from_, to:
@@ -295,6 +312,26 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
+  # my changes start here:
+  "aten.all": Tensor.all,
+  "aten.sgn": Tensor.sign,
+  "aten.acos": Tensor.acos,
+  "aten.any": Tensor.any,
+  "aten.bitwise_not": Tensor.bitwise_not,
+  "aten.argmax": Tensor.argmax,
+  "aten.argmin": Tensor.argmin,
+  "aten.asinh": Tensor.asinh,
+  "aten.mul": Tensor.mul,
+  "aten.atanh": Tensor.atanh,
+  "aten.fill_.Tensor": Tensor.full,
+  "aten.flip": Tensor.flip,
+  "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
+  "aten.avg_pool2d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode),
+  "aten.avg_pool3d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
+  "aten.convolution": lambda self, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=1, groups=1: Tensor.conv2d(self, weight, bias, groups, stride, dilation, padding) if not transposed else Tensor.conv_transpose2d(self, weight, bias, groups, stride, dilation, padding),
+  "aten.cummax": Tensor.cummax,
+  "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
+  "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient))
 }}
 
 def wrap_fxn(k,f):
