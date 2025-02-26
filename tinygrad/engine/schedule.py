@@ -99,9 +99,6 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="tr"), create_buffer_view),
-  # merge BUFFER_VIEW
-  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER, name="b"),), name="v2"),), name="v1"),
-   lambda v1,v2,b: v1.replace(src=(b,), arg=(v1.size, (v1.arg[1]*v2.dtype.itemsize+v2.arg[1]*b.dtype.itemsize)//b.dtype.itemsize))),
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
