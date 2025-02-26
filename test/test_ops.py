@@ -2476,6 +2476,40 @@ class TestOps(unittest.TestCase):
     n = (x < 0).where(x, 1).numpy()
     assert np.all(n == 1.)
 
+  # DEEPSEEK R1 HELP ME WRITE TESTS
+  def test_as_strided(self):
+    # Basic test with simple striding
+    helper_test_op([(4,)], lambda x: torch.as_strided(x, size=(2,2), stride=(2,1)), lambda x: x.as_strided((2,2), (2,1)))
+
+    # Test with overlapping elements
+    helper_test_op([(9,)], lambda x: torch.as_strided(x, size=(3,3), stride=(3,1)), lambda x: x.as_strided((3,3), (3,1)))
+
+    # Edge case: zero-size dimension
+    helper_test_op([(4,)], lambda x: torch.as_strided(x, size=(0,2), stride=(1,1)), lambda x: x.as_strided((0,2), (1,1)), forward_only=True)
+
+    # Test with non-contiguous storage
+    helper_test_op([(2,3)], lambda x: torch.as_strided(x, size=(2,2), stride=(3,1)), lambda x: x.as_strided((2,2), (3,1)))
+
+    # Test with storage offset
+    helper_test_op([(5,)], lambda x: torch.as_strided(x, size=(3,), stride=(1,), storage_offset=1),
+                  lambda x: x.as_strided((3,), (1,), storage_offset=1))
+
+    # Test with non-descending strides
+    helper_test_op([(2,3,4,5)], lambda x: torch.as_strided(x, size=(2,3,2,5), stride=(8,1,32,2)),
+                  lambda x: x.as_strided((2,3,2,5), (8,1,32,2)))
+
+    # Edge case: negative stride
+    # TORCH NO SUPPORT
+    # helper_test_op([(4,)], lambda x: torch.as_strided(x, size=(4,), stride=(-1,)), lambda x: x.as_strided((4,), (-1,)))
+
+    # Test with larger dimensions
+    helper_test_op([(24,)], lambda x: torch.as_strided(x, size=(2,3,4), stride=(12,4,1)),
+                  lambda x: x.as_strided((2,3,4), (12,4,1)))
+
+    # Edge case: single element with multiple dimensions
+    helper_test_op([(1,)], lambda x: torch.as_strided(x, size=(1,1,1), stride=(1,1,1)),
+                  lambda x: x.as_strided((1,1,1), (1,1,1)))
+
   def _get_index_randoms(self):
     # indices cannot have gradient
     a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)

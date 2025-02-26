@@ -1092,6 +1092,19 @@ class Tensor(SimpleMathTrait):
 
   # ***** movement high level ops *****
 
+  def as_strided(self, size, stride, storage_offset=None):
+    ret = self.flatten()
+    if storage_offset: ret = ret[storage_offset:]
+    numel = ret.numel()
+    wow = (numel+1,)*(len(size)-1)
+    ret = ret.expand(*wow, numel).flatten()
+    # make big ret with stride 1
+    ret = ret.reshape(numel, *wow)
+    slices = tuple(slice(0,None,st) for st in stride)
+    shrinks = tuple(slice(0,sz) for sz in size)
+    # do strides and shrink to size
+    return ret[slices][shrinks]
+
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
