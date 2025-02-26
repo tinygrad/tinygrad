@@ -226,7 +226,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
 @dataclass(frozen=True)
 class Kernel:
   ast: UOp
-  metadata: tuple[Metadata, ...]
+  metadata: tuple[Metadata, ...] = ()
   def __repr__(self): return f"<Kernel {len(list(self.ast.toposort))} {self.ast.op} {self.metadata}>"
 
 @dataclass(frozen=True)
@@ -234,29 +234,28 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
-def create_kernel(ctx:KernelContext, x:UOp):
-  if x not in ctx.realizes: return None
-  assert isinstance(x.device, str), f"buf device in kernel must be string {x.device}"
-  b = x.buf_uop if x.op is Ops.ASSIGN else UOp.new_buffer(x.device, x.size, x.dtype)
-  output_st = ShapeTracker.from_shape(x.shape)
-  # KERNEL nodes become: ASSIGN(VIEW(BUFFER), KERNEL)
-  # TODO: this should be ASSIGN(BUFFER, KERNEL) followed by the output ShapeTracker
-  return b.view(output_st).assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x, (m,) if (m:=ctx.ops_metadata.get(x)) else ())))
-
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
-  new_metadata: dict[Metadata, None] = dict.fromkeys(x.arg.metadata)
+  metadata = dict.fromkeys(x.arg.metadata)
+  if (m:=ctx.ops_metadata.get(x.arg.ast)) is not None: metadata[m] = None
   for s in x.src:
-    if s.op is Ops.BUFFER or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL) or s in ctx.realizes: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
-      if (m:=ctx.ops_metadata.get(s)) is not None: new_metadata[m] = None
-  return x.replace(src=n, arg=Kernel(x.arg.ast, tuple(new_metadata))) if (n:=tuple(dedup(new_srcs))) != x.src else None
+      if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
+  if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
+  return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
 
 create_kernels = merge_views+PatternMatcher([
-  (UPat(GroupOp.All-{Ops.KERNEL, Ops.BUFFER}, name="x"), create_kernel),
+  # always give assign a kernel
+  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
+  # otherwise check if need to assign this UOp to a new buffer
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
+    UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))) if x in ctx.realizes else None),
+  # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
-  # remove CONST/BIND from the kernel graph
+  # remove CONST/BIND from SINK
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=new_src)
     if (new_src:=tuple(dedup(s.base for s in x.src if s.op not in {Ops.CONST,Ops.BIND}))) != x.src else None),
 ])
@@ -361,9 +360,8 @@ def check_load_st(glbl:UOp, view:UOp):
 fix_kernel_ops = PatternMatcher([
   # BIND in shapetracker becomes DEFINE_VAR
   (UPat(Ops.VIEW, name="x"), unbind_shapetracker),
-  # remove CONTIGUOUS/ASSIGN/DEVICE
+  # remove CONTIGUOUS/DEVICE
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
   # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),

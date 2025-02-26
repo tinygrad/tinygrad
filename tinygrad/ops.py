@@ -741,7 +741,7 @@ class UPat(MathTrait):
   def gep(self, i:int): return UPat(Ops.GEP, None, (self,), (i,))
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
-  def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
+  def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):
