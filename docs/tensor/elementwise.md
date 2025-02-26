@@ -65,7 +65,9 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.div
 ::: tinygrad.Tensor.idiv
 ::: tinygrad.Tensor.mod
-::: tinygrad.Tensor.xor
+::: tinygrad.Tensor.bitwise_xor
+::: tinygrad.Tensor.bitwise_and
+::: tinygrad.Tensor.bitwise_or
 ::: tinygrad.Tensor.lshift
 ::: tinygrad.Tensor.rshift
 ::: tinygrad.Tensor.pow

@@ -1,18 +1,16 @@
-from tinygrad import Tensor, dtypes
+# NOTE: this is probably the wrong backend to work on, you want backend.py
+# discussion about this in #pytorch-backend on our Discord
+# this is using high level debug features from torch and we should integrate deeper
+
+from tinygrad import Tensor
 import torch, contextlib
 from torch.utils._python_dispatch import TorchDispatchMode
-
-torch_to_tiny_dtype = {
-  torch.float32: dtypes.float32,
-  torch.float64: dtypes.float64,
-  torch.int32: dtypes.int32,
-  torch.int64: dtypes.int64,
-  torch.bool: dtypes.bool,
-}
+from tinygrad.dtype import _from_torch_dtype
 
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
-  return TTensor(Tensor.empty(*size, dtype=torch_to_tiny_dtype[dtype]))
+  return TTensor(Tensor.empty(*size, dtype=_from_torch_dtype(dtype)))
 
+# NOTE: if we have a way to change wrap/unwrap, these can be the same methods from backend.py
 tiny_backend = {
   "aten.empty.memory_format": empty_memory_format,
   "aten.view.default": lambda x,sz: TTensor(x.tiny.reshape(sz)),

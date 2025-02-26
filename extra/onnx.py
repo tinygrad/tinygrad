@@ -287,6 +287,7 @@ def get_onnx_ops():
   Softmax = {1:Softmax_1, 13:Softmax_13}
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
+  def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
   def FastGelu(x:Tensor, bias:Tensor|None=None):
     # this is tanh approximated
     return (x + bias).gelu() if bias is not None else x.gelu()
@@ -310,6 +311,7 @@ def get_onnx_ops():
   def Equal(x:Tensor,y:Tensor): return x == y
   def And(x:Tensor,y:Tensor): return (x==y).where(x, False)
   def Or(x:Tensor,y:Tensor): return (x==y).where(x, True)
+  def Xor(x:Tensor,y:Tensor): return x.bool().bitwise_xor(y.bool())
   def BitwiseAnd(x:Tensor,y:Tensor): return x & y
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
@@ -548,8 +550,11 @@ def get_onnx_ops():
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
   def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
-    x = x + skip + bias
-    return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+    x = x + skip
+    if bias is not None: x = x + bias
+    ret = x.layernorm(eps=epsilon) * gamma
+    if beta is not None: ret = ret + beta
+    return ret, None, None, x
   def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embedding:Tensor, position_embedding:Tensor,
                               segment_embedding:Tensor, gamma=None, beta=None, mask:Tensor|None=None,
                               position_ids:Tensor|None=None, epsilon=1e-12, mask_index_type=0):
@@ -616,44 +621,49 @@ def get_onnx_ops():
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  def Attention(x:Tensor, weights, bias:Tensor, mask_index:Tensor|None=None, past:Tensor|None=None,
-                relative_position_bias:Tensor|None=None, past_sequence_length:Tensor|None=None, do_rotary:int|None=None,
-                mask_filter_value:float|None=None, num_heads:int|None=None, past_present_share_buffer:int|None=None,
-                qkv_hidden_sizes:list[int]|None=None, scale:float|None=None, unidirectional:int|None=None):
-    # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
-    assert num_heads is not None  # required
-    assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-    assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
-      "functionality not supported yet"  # TODO strange params
-    hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
+  def Attention(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
+                past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
+                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None,
+                scale:float|None=None, unidirectional:int=0):
+    assert not do_rotary and not attention_bias, "TODO"
+    if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
+    qkv = x.linear(weights, bias)
+    q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
-    if unidirectional:  # gpt-style
-      assert hidden_size == v_hidden_size
-      xqkv = x.linear(weights, bias)
-      xq, xk, xv = [xqkv.shrink([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
-    else:  # bert-style
-      wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
-      bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None
-      xq, xk, xv = [x.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
-    xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
+    batch_size, seq_len, _ = x.shape
+    q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
+    q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
 
+    present = None
     if past is not None:
-      xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
-      present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
+      k, v = past[0].cat(k, dim=2), past[1].cat(v, dim=2)
+      present = k.stack(v)
 
-    def attn(query, key, value, attn_mask):
-      query_length, key_length = query.shape[-2], key.shape[-2]
-      cdim = max(query_length, key_length) + 1
-      attn_weights = query @ key.transpose(-1, -2) / math.sqrt(value.shape[-1])
-      # This is where Tensor.scaled_dot_product_attention differs:
-      causal_mask = Tensor.ones((cdim, cdim), requires_grad=False, dtype=dtypes.bool).tril(0)[key_length - query_length : key_length, :key_length]
-      masked = Tensor.where(causal_mask, attn_weights, -math.inf)
-      if attn_mask is not None: masked = masked + attn_mask
-      return masked.softmax(-1) @ value
+    if scale is None: scale = 1.0 / math.sqrt(q_head_size)
+    attn_scores = q @ k.transpose(-1, -2) * scale
 
-    bsz, _, seq_len, _ = xq.shape
-    out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
-    return out, present if past is not None else out
+    if mask_index is not None:
+      assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+      if mask_index.ndim != 1: mask = mask_index.bool()
+      else:
+        if mask_index.shape[0] == batch_size:
+          mask = Tensor.arange(attn_scores.shape[-1], requires_grad=False, device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
+        elif mask_index.shape[0] == 2*batch_size:
+          end_positions = mask_index[:batch_size]
+          start_positions = mask_index[batch_size:]
+          arange = Tensor.arange(seq_len).unsqueeze(0)
+          mask = (arange < end_positions.unsqueeze(1)) & (arange >= start_positions.unsqueeze(1))
+        else: raise NotImplementedError("mask_index with shape (3 * batch_size + 2) is not implemented")
+      while mask.ndim < 4: mask = mask.unsqueeze(1)
+      attn_scores = mask.where(attn_scores, mask_filter_value)
+
+    if unidirectional:
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
+      attn_scores = causal_mask.where(attn_scores, mask_filter_value)
+
+    output = attn_scores.softmax(-1) @ v
+    output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
+    return output, present
 
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
@@ -790,7 +800,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops

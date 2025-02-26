@@ -318,9 +318,10 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
-def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extra=None,vec=None,ne=None,
+def loop_collapse(compval, multconst, rng:UOp, acc:UOp, extra:UOp, idx2=None,idx3=None,vec=None,ne=None,
                   add=UOp.const(dtypes.int, 0), mul:UOp=UOp.const(dtypes.int, 1)):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in acc.src: return None  # must be the right REDUCE
+  if acc not in split_uop(extra, Ops.ADD): return None
   loop_start, loop_end = rng.src
   if loop_start.arg != 0:
     # TODO: support and test this with other mul and loop_starts
@@ -344,7 +345,7 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extr
   # TODO: what does it mean to have the same numbered DEFINE_ACC with different ranges?
   new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
   ret = new_acc.assign(new_acc+new_reduce_op)
-  if extra is not None: ret = ret + acc.assign(acc+extra)
+  if extra is not acc: ret = ret + acc.assign(extra)
   return ret
 
 def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
@@ -382,9 +383,6 @@ index_load = UPat.var("buf").index(rng_aug).load(name="ld")
 
 arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(Ops.VECTORIZE, name="vec", src=rng_aug))
 arange_m = ((arange_augrng<UPat.cvar("compval"))!=UPat(Ops.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
-
-# this moves the accumulation variable down an unrolled add chain which allows for more efficient accumulation using mulacc
-mulacc_unrolled = PatternMatcher([(UPat.var("x")+UPat.var("y")+acc_pat, lambda x,y,acc: (acc+x)+y if y.op is not Ops.DEFINE_ACC else None)])
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
@@ -435,7 +433,7 @@ sym = symbolic_flat+PatternMatcher([
   ((UPat.var('x', dtypes.uint64)&(UPat.var('y').where(UPat.const(dtypes.uint64, 0xFFFFFFFF), UPat.const(dtypes.uint64, 0)))).cast(dtypes.uint32),
    lambda x,y: y.where(x.cast(dtypes.uint32), UOp.const(dtypes.uint32, 0))),
   # arange loop folding
-  (acc_pat.assign(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat), loop_collapse),
+  (acc_pat.assign(arange_m+UPat.var("extra")), loop_collapse),
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
