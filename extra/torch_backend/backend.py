@@ -43,7 +43,8 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   #return tensor.cpu().as_strided(size, stride).tiny()
   if TORCH_DEBUG >= 1: print("** NOTE: this as_strided might be wrong", tensor.shape, size, stride, storage_offset)
 
-  decending_strides = all(x>=y for x,y in zip(stride[:-1], stride[1:]))
+  nz_strides = [st for s,st in zip(size, stride) if s != 1]
+  decending_strides = all(x>=y for x,y in zip(nz_strides[:-1], nz_strides[1:]))
 
   # this is reshape (squeeze/unsqueeze), strides must be in decending order
   if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides:
@@ -139,7 +140,7 @@ for k,v in get_decompositions(decomps).items():
 # the goal is to make as much as we can this
 simple_tensor_methods = [
   # unary (ish)
-  "log", "log2", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "abs", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
+  "log", "log2", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
   "gelu", "elu", "sigmoid", "clamp", "mish", "erf", "logical_not", "softplus",
   # trig
   "acos", "acosh", "cos", "cosh", "asin", "asinh", "sin", "sinh", "atan", "atanh", "tan", "tanh",
@@ -197,6 +198,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
+  "aten.abs": Tensor.abs, # abs out doesn't work, it has size 0
   "aten.max": Tensor.max,
   "aten.mm": Tensor.matmul,
   "aten.dot": Tensor.dot,
