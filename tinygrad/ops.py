@@ -119,8 +119,8 @@ class Ops(FastEnum):
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
 
-  # load/store before math
-  LOAD = auto(); STORE = auto() # noqa: E702
+  # load/store/cast before math
+  LOAD = auto(); STORE = auto(); CAST = auto(); BITCAST = auto() # noqa: E702
 
   # early INDEX
   INDEX = auto()
@@ -133,7 +133,7 @@ class Ops(FastEnum):
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # UnaryOps
-  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
