@@ -167,7 +167,7 @@ jobs:
     - name: My (custom) tests
       run: PYTHONPATH=. python3 extra/torch_backend/test.py
     - name: Test one op in torch tests
-      run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_compare_log_tiny_float32
+      run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND (expect failure)
       run: PYTHONPATH=. TINY_BACKEND=1 python3 -m pytest test/test_ops.py || true
     - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
