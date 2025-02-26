@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+cd "$(dirname "$0")"
 
 # prereq: install emscripten: https://emscripten.org/docs/getting_started/downloads.html
 EMSCRIPTEN_PATH=~/emsdk/emsdk_env.sh
