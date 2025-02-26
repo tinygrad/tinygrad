@@ -1,7 +1,7 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEBUG, getenv, prod
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math
+import torch, pathlib, math, operator
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -121,15 +121,25 @@ decomps = [
   aten._log_softmax_backward_data,
   aten.threshold_backward,
   aten.softplus_backward,
+  aten.elu,  # elu has a scale + input_scale param
+  aten.softplus,
+  aten.threshold,
   # AttributeError: 'int' object has no attribute '_broadcasted'
-  #aten.sigmoid_backward,
-  #aten.tanh_backward,
+  aten.sigmoid_backward,
+  aten.tanh_backward,
+  aten.sinc,
+  aten._prelu_kernel,
+  aten.hardtanh,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
   #aten.rsqrt,
   #aten.max_pool2d_with_indices,
+  # NOTE: these are prims
+  #aten.digamma,
+  #aten.erfinv,
 ]
+
 for k,v in get_decompositions(decomps).items():
   key = str(k._schema).split("(")[0]
   if TORCH_DEBUG >= 2: print("register decomp for", k)
@@ -141,13 +151,13 @@ for k,v in get_decompositions(decomps).items():
 simple_tensor_methods = [
   # unary (ish)
   "log", "log2", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
-  "gelu", "elu", "sigmoid", "clamp", "mish", "erf", "logical_not", "softplus",
+  "gelu", "sigmoid", "clamp", "mish", "erf",
   # trig
   "acos", "acosh", "cos", "cosh", "asin", "asinh", "sin", "sinh", "atan", "atanh", "tan", "tanh",
   # rounding
   "ceil", "round", "floor", "trunc",
   # binary
-  "add", "sub", "mul", "div", "maximum", "minimum",
+  "add", "mul", "div", "maximum", "minimum",
   # modify
   "tril", "triu",
   # reduce
@@ -156,6 +166,7 @@ simple_tensor_methods = [
   "avg_pool2d", "linspace"]
 
 tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
+  "aten.sub.out": operator.sub,  # NOTE: this is needed to handle reverse
   "aten.leaky_relu.out": Tensor.leakyrelu, # TODO: this should be renamed in tinygrad
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
   "aten.remainder.Tensor_out": Tensor.mod,
@@ -174,6 +185,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
+  # TODO: this gets the shape wrong
+  #"aten.arange.start_out": Tensor.arange,
 }}
 
 # we add the "out" here
@@ -198,7 +211,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
-  "aten.abs": Tensor.abs, # abs out doesn't work, it has size 0
   "aten.max": Tensor.max,
   "aten.mm": Tensor.matmul,
   "aten.dot": Tensor.dot,
@@ -220,6 +232,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
   "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
   "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
+  # these don't work in out form, they have size 0
+  "aten.abs": Tensor.abs,
+  "aten.logical_not": Tensor.logical_not,
 }}
 
 def wrap_fxn(k,f):
