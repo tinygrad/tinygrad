@@ -1,7 +1,7 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEBUG, getenv, prod
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib
+import torch, pathlib, math
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -163,6 +163,10 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.gt.Tensor_out": Tensor.__gt__, "aten.gt.Scalar_out": Tensor.__gt__,
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
+  # not in tinygrad. are there decomps for these?
+  "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
+  "aten.log1p.out": lambda self: (self+1).log(),
+  "aten.expm1.out": lambda self: self.exp() - 1,
 }}
 
 # we add the "out" here
@@ -170,7 +174,8 @@ def wrap_out(f):
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
-    assert out.shape == assigned.shape and out.dtype == assigned.dtype
+    assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
+    assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
     return out.replace(assigned)
   return _wrap_out
 
