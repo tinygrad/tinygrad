@@ -24,7 +24,7 @@ onmessage = (e) => {
   for (const [k, [label, src, color]] of Object.entries(graph)) {
     // adjust node dims by label size + add padding
     const [labelWidth, labelHeight] = getTextDims(label);
-    g.setNode(k, {label, color, width:labelWidth+NODE_PADDING*2, height:labelHeight+NODE_PADDING*2, padding:NODE_PADDING, labelWidth, labelHeight});
+    g.setNode(k, {label, color, width:labelWidth+NODE_PADDING*2, height:labelHeight+NODE_PADDING*2, padding:NODE_PADDING});
     for (const s of src) g.setEdge(s, k);
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
