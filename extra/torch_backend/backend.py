@@ -111,6 +111,12 @@ aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm,
   aten.addmm,
+  aten._log_softmax_backward_data,
+  aten.threshold_backward,
+  aten.softplus_backward,
+  # AttributeError: 'int' object has no attribute '_broadcasted'
+  #aten.sigmoid_backward,
+  #aten.tanh_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -143,14 +149,14 @@ simple_tensor_methods = [
   "avg_pool2d", "linspace"]
 
 tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
+  "aten.leaky_relu.out": Tensor.leakyrelu, # TODO: this should be renamed in tinygrad
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
-  "aten.leaky_relu.out": Tensor.leakyrelu,
   "aten.remainder.Tensor_out": Tensor.mod,
   "aten.pow.Tensor_Tensor_out": Tensor.pow,
   "aten.pow.Tensor_Scalar_out": Tensor.pow,
   "aten.bitwise_and.Tensor_out": Tensor.bitwise_and,
   "aten.bitwise_or.Tensor_out": Tensor.bitwise_or,
-  "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,  # TODO: tinygrad lacks bitwise_xor
+  "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,  # TODO: tinygrad lacks bitwise_xor, add it
   "aten.eq.Tensor_out": Tensor.eq, "aten.eq.Scalar_out": Tensor.eq,
   "aten.ne.Tensor_out": Tensor.ne, "aten.ne.Scalar_out": Tensor.ne,
   "aten.ge.Tensor_out": Tensor.__ge__, "aten.ge.Scalar_out": Tensor.__ge__,
