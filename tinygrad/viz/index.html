@@ -34,6 +34,7 @@
     font-variation-settings: "wdth" 100;
     font-size: 14px;
     overflow: hidden;
+    background-color: #08090e;
   }
   a {
     color: #4a90e2;
@@ -87,7 +88,6 @@
     margin-top: 12px;
   }
   .graph {
-    background-color: #08090e;
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -174,7 +174,6 @@
     background-color: #2a2b36;
     border-color: #5a5b66;
     color: #ffffff;
-    transform: translateY(-1px);
   }
   .collapsed .kernel-list, .collapsed .metadata {
     width: 0;
@@ -206,6 +205,12 @@
     color: #ffd230;
     display: none;
   }
+  #zoom-to-fit-btn {
+    position: absolute;
+    left: 50%;
+    bottom: 5%;
+    display: none;
+  }
   </style>
 </head>
 <body>
@@ -225,6 +230,7 @@
           <g id="nodes"></g>
         </g>
       </svg>
+      <button class="btn" id="zoom-to-fit-btn">Zoom to fit</button>
     </div>
     <div class="container metadata"></div>
   </div>
@@ -264,6 +270,23 @@
       return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
     })
   }
+
+  // **** base graph svg
+  const svg = d3.select("#graph-svg");
+  const inner = svg.select("g");
+  const zoom = d3.zoom().scaleExtent([0.05, 2]).on("zoom", ({ transform }) => {
+    inner.attr("transform", transform);
+  });
+  svg.call(zoom);
+  // zoom to fit into view
+  const observer = new IntersectionObserver((e) => {
+    const { width, height } = render.getBBox();
+    if (width*height === 0) return;
+    const btn = document.getElementById("zoom-to-fit-btn");
+    btn.style.display = e[0].isIntersecting ? "none" : "block";
+  });
+  observer.observe(document.getElementById("render"));
+  document.getElementById("zoom-to-fit-btn").addEventListener("click", () => svg.call(zoom.transform, d3.zoomIdentity));
 
   // **** main loop
   var ret = [];
