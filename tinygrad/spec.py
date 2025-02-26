@@ -38,9 +38,9 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
   # NOTE: the arg here specifies clone=True, which prevents folding same device copy
   (UPat(Ops.COPY, name="copy", src=(UPat(Ops.DEVICE), UPat.var("x"))), lambda copy,x: isinstance(copy.arg, bool) and copy.dtype == x.dtype),
 
-  # ASSIGN changes the value of a realized buffer
+  # ASSIGN changes the value of a buffer
   (UPat(Ops.ASSIGN, name="assign", src=(UPat.var("target"), UPat.var("new_val"))),
-   lambda assign,target,new_val: target.is_realized and (assign.dtype == target.dtype == new_val.dtype)),
+   lambda assign,target,new_val: target.base.op is Ops.BUFFER and (assign.dtype == target.dtype == new_val.dtype)),
 ])
 
 # ***** uop type spec *****
