@@ -421,6 +421,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+    elif a is not None and a.op is Ops.BUFFER_VIEW and a.src[0].op is Ops.ASSIGN: becomes_map[k] = a.replace(src=(a.src[0].buf_uop,))
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
