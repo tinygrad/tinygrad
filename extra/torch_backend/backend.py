@@ -117,10 +117,11 @@ for k,v in get_decompositions(decomps).items():
   if TORCH_DEBUG >= 2: print("register decomp for", k)
   torch.library.impl(key, "privateuseone")(v)
 
-# TODO: autogen this. do we want them all to be the "out" format?
+# NOTE: due to issue with empty / is_realized, this is currently slow
 tiny_backend_out = {
   "aten.remainder.Tensor_out": lambda x,y,out: out.assign(x%y),
   "aten.pow.Tensor_Tensor_out": lambda x,y,out: out.assign(x**y),
+  "aten.add.out": lambda x,y,out: out.assign(x+y),
   "aten.sub.out": lambda x,y,out: out.assign(x-y),
   "aten.mul.out": lambda x,y,out: out.assign(x*y),
   "aten.div.out": lambda x,y,out: out.assign(x/y),
