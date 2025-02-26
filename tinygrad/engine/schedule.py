@@ -424,7 +424,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     elif a is not None and a.op is Ops.BUFFER_VIEW and a.src[0].op is Ops.ASSIGN: becomes_map[k] = a.replace(src=(a.src[0].buf_uop,))
     # tensors can also simplify to an existing buffer/const
     else:
-      if k.base is v.base: continue
+      if k is v: continue
       if v.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: becomes_map[k] = v
       if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
