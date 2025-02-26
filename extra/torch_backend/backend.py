@@ -41,19 +41,25 @@ def masked_select(self, mask):
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   #return tensor.cpu().as_strided(size, stride).tiny()
-  if TORCH_DEBUG >= 1: print("** NOTE: this as_strided is wrong", tensor.shape, size, stride, storage_offset)
+  if TORCH_DEBUG >= 1: print("** NOTE: this as_strided might be wrong", tensor.shape, size, stride, storage_offset)
 
-  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1):
-    # this is squeeze/unsqueeze
+  decending_strides = all(x>=y for x,y in zip(stride[:-1], stride[1:]))
+
+  # this is reshape (squeeze/unsqueeze), strides must be in decending order
+  if tuple(x for x in tensor.shape if x != 1) == tuple(x for x in size if x != 1) and decending_strides:
     return tensor.reshape(size)
 
+  # this is expand
+  if len(tensor.shape) == len(size) and all(x == y or x == 1 for x,y in zip(tensor.shape, size)):
+    return wrap(unwrap(tensor).expand(size))
+
+  # this is also expand, hit?
   if tensor.numel() == 1:
-    # this is expand
     assert all(x == 0 for x in stride)
     return wrap(unwrap(tensor).reshape([1]*len(size)).expand(size))
 
-  # TODO: how do i know this is permute?
-  if tensor.shape == (1000, 512) and size == [512, 1000] and stride == [0, 1]:
+  # this is permute because we are flipping strides
+  if len(tensor.shape) == 2 and tuple(tensor.shape)[::-1] == tuple(size) and stride == [0, 1]:
     return wrap(unwrap(tensor).permute(1,0))
 
   #print(tensor.cpu().numpy())
