@@ -117,23 +117,25 @@ for k,v in get_decompositions(decomps).items():
   if TORCH_DEBUG >= 2: print("register decomp for", k)
   torch.library.impl(key, "privateuseone")(v)
 
-# NOTE: due to issue with empty / is_realized, this is currently slow
+# NOTE: perhaps we should only implement the "out" form, it *should* be 0 overhead
+# TODO: due to issue with empty / is_realized, this is currently slow
 tiny_backend_out = {
-  "aten.remainder.Tensor_out": lambda x,y,out: out.assign(x%y),
-  "aten.pow.Tensor_Tensor_out": lambda x,y,out: out.assign(x**y),
-  "aten.add.out": lambda x,y,out: out.assign(x+y),
-  "aten.sub.out": lambda x,y,out: out.assign(x-y),
-  "aten.mul.out": lambda x,y,out: out.assign(x*y),
-  "aten.div.out": lambda x,y,out: out.assign(x/y),
-  "aten.log.out": lambda self,out: out.assign(self.log()),
-  "aten.bitwise_not.out": lambda self,out: out.assign(self.bitwise_not()),
-  "aten.bitwise_and.Tensor_out": lambda x,y,out: out.assign(x.bitwise_and(y)),
-  "aten.bitwise_or.Tensor_out": lambda x,y,out: out.assign(x.bitwise_or(y)),
+  "aten.remainder.Tensor_out": lambda x,y: x%y,
+  "aten.pow.Tensor_Tensor_out": lambda x,y: x**y,
+  "aten.add.out": lambda x,y: x+y,
+  "aten.sub.out": lambda x,y: x-y,
+  "aten.mul.out": lambda x,y: x*y,
+  "aten.div.out": lambda x,y: x/y,
+  "aten.log.out": lambda self: self.log(),
+  "aten.bitwise_not.out": lambda self: self.bitwise_not(),
+  "aten.bitwise_and.Tensor_out": lambda x,y: x.bitwise_and(y),
+  "aten.bitwise_or.Tensor_out": lambda x,y: x.bitwise_or(y),
   # TODO: tinygrad lacks bitwise_xor
-  "aten.bitwise_xor.Tensor_out": lambda x,y,out: out.assign(x ^ y),
+  "aten.bitwise_xor.Tensor_out": lambda x,y: x^y,
 }
-
-tiny_backend = {**tiny_backend_out, **{
+# we add the "out" here
+def wrap_out(f): return lambda *args, **kwargs: kwargs.pop('out').assign(f(*args, **kwargs))
+tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.view": Tensor.reshape,
   "aten.add.Tensor": Tensor.add,
   "aten.sub.Tensor": Tensor.sub,
@@ -143,11 +145,9 @@ tiny_backend = {**tiny_backend_out, **{
   "aten.floor_divide": Tensor.__floordiv__,
   "aten.floor_divide_.Tensor": lambda self,x: self.assign(self.__floordiv__(x)),
   "aten.add_.Tensor": lambda x,y,alpha=1: x.assign(x.add(y)*alpha),
-  # TODO: tinygrad methods
+  # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__ilshift__.Scalar": lambda x,y: x*(2**y),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
-  "aten.__irshift__.Scalar": lambda x,y: x//(2**y),
   "aten.pow.Tensor_Scalar": Tensor.pow,
   "aten.pow.Tensor_Tensor": Tensor.pow,
   "aten.bitwise_and.Tensor": Tensor.bitwise_and,
