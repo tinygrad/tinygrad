@@ -72,6 +72,13 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10, device="CPU")
+    c = a+b
+    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
