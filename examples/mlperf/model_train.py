@@ -273,7 +273,7 @@ def train_resnet():
       else:
         it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False, pad_first_batch=True), total=steps_in_val_epoch))
         i, proc = 0, data_get(it)
-        
+
       prev_cookies = []
       while proc is not None:
         GlobalCounters.reset()
@@ -446,7 +446,7 @@ def train_unet3d():
     loss.backward()
     optim.step()
     return loss.realize()
-  
+
   @Tensor.train(mode=False)
   @Tensor.test()
   def eval_step(model, x, y):
@@ -455,7 +455,7 @@ def train_unet3d():
     loss = dice_ce_loss(y_hat, y)
     score = dice_score(y_hat, y)
     return loss.realize(), score.realize()
-  
+
   if WANDB: wandb.init(config=config, project=PROJ_NAME)
 
   step_times, start_epoch = [], 1
@@ -464,7 +464,7 @@ def train_unet3d():
   next_eval_at = start_eval_at
 
   print(f"Training on {GPUS}")
-  
+
   if BENCHMARK: print("Benchmarking UNet3D")
   else: print(f"Start evaluation at epoch {start_eval_at} and every {evaluate_every} epoch(s) afterwards")
 
@@ -574,9 +574,9 @@ def train_rnnt():
 @TinyJit
 def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
                     masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
-  if len(GPUS) > 1:
-    for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-      t.shard_(GPUS, axis=0)
+  for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
+    if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+    else: t.to_(GPUS[0])
   optimizer.zero_grad()
 
   lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
@@ -584,7 +584,7 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Te
   (loss * loss_scaler).backward()
 
   global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device).realize()
-  for p in optimizer.params: 
+  for p in optimizer.params:
     p.grad = p.grad / loss_scaler
     global_norm += p.grad.float().square().sum()
   global_norm = global_norm.sqrt()
@@ -597,9 +597,9 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Te
 @TinyJit
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor,
                    masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
-  if len(GPUS) > 1:
-    for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-      t.shard_(GPUS, axis=0)
+  for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
+    if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+    else: t.to_(GPUS[0])
   lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
   masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = \
     model.accuracy(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
