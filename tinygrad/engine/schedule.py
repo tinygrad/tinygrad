@@ -417,16 +417,17 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
-  # map tensors to buffer/const
+  # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # NOTE: tensors can also map to a VIEW, we just apply this VIEW on top of the BUFFER
+    # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
-    if v is k: continue
-    if v.base.op is Ops.BUFFER: becomes_map[k] = v
-    elif v.base.op is Ops.CONST:
-      if all_int(v.shape): becomes_map[k] = v
+    # tensors can also simplify to an existing buffer/const
+    else:
+      if k is v: continue
+      if v.base.op is Ops.BUFFER: becomes_map[k] = v
+      if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
