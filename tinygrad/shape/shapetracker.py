@@ -112,7 +112,8 @@ class ShapeTracker:
     if all(len(x) == 0 for x in var_vals): return self, {}
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
-  def real_strides(self, ignore_valid=False) -> tuple[Optional[sint], ...]: return views_to_real_strides(self.views, ignore_valid)
+  def real_strides(self, ignore_valid=False) -> tuple[Optional[sint], ...]:
+    with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
   def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def axis_is_masked(self, axis:int) -> bool:

@@ -1,83 +1,142 @@
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/impl/alloc_cpu.h>
 #include <torch/extension.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <ATen/OpaqueTensorImpl.h>
 
 // register guard
 namespace at {
 namespace detail {
-C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
-}
-}
-
-// code from chatgpt
-struct GILSafeDeleter {
-  void operator()(PyObject* ptr) const {
-    if (ptr) {
-      py::gil_scoped_acquire gil;
-      Py_DECREF(ptr);
-    }
+//C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
+// NOTE: pytorch's no-op class throws error on backwards with events/streams
+// TODO: why are there events in autograd?
+struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
+{
+  static const DeviceType D = DeviceType::PrivateUse1;
+  CustomNoOpDeviceGuardImpl() = default;
+  DeviceType type() const override {
+    return D;
+  }
+  Device exchangeDevice(Device) const override {
+    return Device(D, 0); // no-op
+  }
+  Device getDevice() const override {
+    return Device(D, 0);
+  }
+  void setDevice(Device) const override {
+    // no-op
+  }
+  void uncheckedSetDevice(Device) const noexcept override {
+    // no-op
+  }
+  Stream getStream(Device) const noexcept override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, 0));
+  }
+  Stream getDefaultStream(Device) const override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, 0));
+  }
+  Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
+      const override {
+    // no-op
+    (void)isHighPriority;
+    return Stream(Stream::DEFAULT, Device(D, 0));
+  }
+  Stream getNewStream(Device, int priority = 0) const override {
+    // no-op
+    (void)priority;
+    return Stream(Stream::DEFAULT, Device(D, 0));
+  }
+  // NB: These do NOT set the current device
+  Stream exchangeStream(Stream) const noexcept override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, 0));
+  }
+  DeviceIndex deviceCount() const noexcept override {
+    return 1;
+  }
+  // Event-related functions
+  void record(
+      void** /*event*/,
+      const Stream& /*stream*/,
+      const DeviceIndex /*device_index*/,
+      const EventFlag /*flag*/) const override {
+    //TORCH_CHECK(false, D, " backend doesn't support events.");
+  }
+  void block(void* /*event*/, const Stream& /*stream*/) const override {
+    //TORCH_CHECK(false, D, " backend doesn't support events.")
+  }
+  bool queryEvent(void* /*event*/) const override {
+    //TORCH_CHECK(false, D, " backend doesn't support events.")
+    return true;
+  }
+  void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
+      const noexcept override {}
+  // Stream-related functions
+  bool queryStream(const Stream& /*stream*/) const override {
+    return true;
+  }
+  void synchronizeStream(const Stream& /*stream*/) const override {
+    // Don't wait for anything.
   }
 };
-
-class TinyTensor {
-private:
-  // We wrap the PyObject* inside a shared_ptr so the GILSafeDeleter runs on destruction.
-  std::shared_ptr<PyObject> obj_;
-
-public:
-  TinyTensor() : obj_(nullptr, GILSafeDeleter()) {}
-
-  // From a py::object
-  TinyTensor(const py::object& o)
-  : obj_(o.inc_ref().ptr(), GILSafeDeleter()) {
-    // o.inc_ref() bumps the PyObject reference count; we store the pointer in shared_ptr
-  }
-
-  // Optional move or copy ctors if needed:
-  TinyTensor(const TinyTensor &other) = default;
-  TinyTensor(TinyTensor &&other) = default;
-  TinyTensor& operator=(const TinyTensor &other) = default;
-  TinyTensor& operator=(TinyTensor &&other) = default;
-
-  py::object get_py_obj() const {
-    if (!obj_) {
-      return py::none();
-    }
-    // Safely borrow as a py::object (we must hold the GIL).
-    py::gil_scoped_acquire gil;
-    return py::reinterpret_borrow<py::object>(obj_.get());
-  }
-};
-
-static caffe2::TypeMeta dtypeFromName(const std::string &dtype_name) {
-  if (dtype_name == "float") { return caffe2::TypeMeta::Make<float>();
-  } else if (dtype_name == "double") { return caffe2::TypeMeta::Make<double>();
-  } else if (dtype_name == "int") { return caffe2::TypeMeta::Make<int32_t>();
-  } else if (dtype_name == "long") { return caffe2::TypeMeta::Make<int64_t>();
-  } else if (dtype_name == "bool") { return caffe2::TypeMeta::Make<bool>();
-  }
-  throw std::runtime_error("Unsupported dtype: " + dtype_name);
+C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
 }
 
-at::Tensor wrap_tensor(py::object &py_obj) {
+template <typename OpaqueHandle>
+struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
+  TinyOpaqueTensorImpl(
+      at::DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      c10::Device device,
+      OpaqueHandle opaque_handle,
+      c10::IntArrayRef sizes,
+      c10::IntArrayRef strides)
+      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes)
+        { this->sizes_and_strides_.set_strides(strides); }
+};
+}
+
+struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
+  // NOTE: no idea what this is
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
+};
+
+int register_hook() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
+  return 0;
+}
+int temp_register_hook = register_hook();
+
+at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
-  std::string dtype_name = py_obj.attr("dtype").attr("name").cast<std::string>();
 
-  return at::detail::make_tensor<at::OpaqueTensorImpl<TinyTensor>>(
+  // Last dimension stride is 1 for contiguous row-major layout
+  std::vector<int64_t> strides(sizes.size());
+  if (sizes.size() >= 1) {
+    strides[sizes.size() - 1] = 1;
+
+    // Compute strides from right to left
+    for (int64_t i = sizes.size() - 2; i >= 0; --i) {
+      strides[i] = strides[i + 1] * sizes[i + 1];
+    }
+  }
+
+  return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
-    dtypeFromName(dtype_name),
+    c10::scalarTypeToTypeMeta(dtype),
     at::Device(at::kPrivateUse1),
-    TinyTensor(py_obj),
-    sizes);
+    std::make_shared<c10::SafePyObject>(py_obj.release().ptr(), getPyInterpreter()),
+    sizes, strides);
 }
 
 py::object unwrap_tensor(const at::Tensor &tensor) {
   auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = static_cast<at::OpaqueTensorImpl<TinyTensor>*>(impl);
-  const TinyTensor &tiny = opaque_impl->opaque_handle();
-  return tiny.get_py_obj();
+  auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+  std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
+  return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

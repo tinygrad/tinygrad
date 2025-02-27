@@ -66,7 +66,7 @@ def type_parse(onnx_type: TypeProto):
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
-  shape: tuple[str|int]
+  shape: tuple[str|int, ...]
   dtype: DType
   is_optional: bool
   is_sequence: bool
@@ -75,8 +75,8 @@ class OnnxValue:
 class OnnxNode:
   num: int
   op: str
-  inputs: tuple[str]
-  outputs: tuple[str]
+  inputs: tuple[str, ...]
+  outputs: tuple[str, ...]
   opts: dict[str, Any]
 
 # ***** python const *****
@@ -319,7 +319,7 @@ def get_onnx_ops():
   def PRelu(X:Tensor, slope:Tensor):
     slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
     return (X > 0).where(X, X * slope)
-  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
+  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
@@ -335,6 +335,7 @@ def get_onnx_ops():
   def Equal(x:Tensor,y:Tensor): return x == y
   def And(x:Tensor,y:Tensor): return (x==y).where(x, False)
   def Or(x:Tensor,y:Tensor): return (x==y).where(x, True)
+  def Xor(x:Tensor,y:Tensor): return x.bool().bitwise_xor(y.bool())
   def BitwiseAnd(x:Tensor,y:Tensor): return x & y
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
@@ -575,7 +576,9 @@ def get_onnx_ops():
   def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma:Tensor, beta:Tensor|None=None, bias:Tensor|None=None, epsilon:float=1e-12):
     x = x + skip
     if bias is not None: x = x + bias
-    return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
+    ret = x.layernorm(eps=epsilon) * gamma
+    if beta is not None: ret = ret + beta
+    return ret, None, None, x
   def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Tensor, word_embedding:Tensor, position_embedding:Tensor,
                               segment_embedding:Tensor, gamma=None, beta=None, mask:Tensor|None=None,
                               position_ids:Tensor|None=None, epsilon=1e-12, mask_index_type=0):
@@ -646,13 +649,11 @@ def get_onnx_ops():
                 past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
                 past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None,
                 scale:float|None=None, unidirectional:int=0):
-    assert not do_rotary, "TODO"
-    # project x to q, k, v
+    assert not do_rotary and not attention_bias, "TODO"
     if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
     qkv = x.linear(weights, bias)
     q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
-    # reshape to multi-head format
     batch_size, seq_len, _ = x.shape
     q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
     q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
@@ -665,16 +666,23 @@ def get_onnx_ops():
     if scale is None: scale = 1.0 / math.sqrt(q_head_size)
     attn_scores = q @ k.transpose(-1, -2) * scale
 
-    if attention_bias is not None: attn_scores += attention_bias
-
     if mask_index is not None:
       assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
-      mask = Tensor.arange(attn_scores.shape[-1]).unsqueeze(0) < mask_index.unsqueeze(1) if mask_index.ndim == 1 else mask_index.bool()
+      if mask_index.ndim != 1: mask = mask_index.bool()
+      else:
+        if mask_index.shape[0] == batch_size:
+          mask = Tensor.arange(attn_scores.shape[-1], requires_grad=False, device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
+        elif mask_index.shape[0] == 2*batch_size:
+          end_positions = mask_index[:batch_size]
+          start_positions = mask_index[batch_size:]
+          arange = Tensor.arange(seq_len).unsqueeze(0)
+          mask = (arange < end_positions.unsqueeze(1)) & (arange >= start_positions.unsqueeze(1))
+        else: raise NotImplementedError("mask_index with shape (3 * batch_size + 2) is not implemented")
       while mask.ndim < 4: mask = mask.unsqueeze(1)
       attn_scores = mask.where(attn_scores, mask_filter_value)
 
     if unidirectional:
-      causal_mask = attn_scores.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
       attn_scores = causal_mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
@@ -822,7 +830,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops

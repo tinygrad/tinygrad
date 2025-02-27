@@ -44,7 +44,6 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
 
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   run_onnx = OnnxRunner(onnx.load(onnx_file))
-  tinygrad_out = run_onnx(inputs)
 
   ort_options = ort.SessionOptions()
   ort_options.log_severity_level = 3
@@ -54,8 +53,10 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   out_values = ort_sess.run(out_names, np_inputs)
   ort_out = dict(zip(out_names, out_values))
 
+  tinygrad_out = run_onnx(inputs)
+
   assert tinygrad_out.keys() == ort_out.keys()
   for k in tinygrad_out.keys():
     tiny_v, onnx_v = tinygrad_out[k], ort_out[k]
-    if tiny_v is None: assert onnx_v is None
+    if tiny_v is None: assert onnx_v is None, f"{k}: {tiny_v=}, {onnx_v=}"
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
