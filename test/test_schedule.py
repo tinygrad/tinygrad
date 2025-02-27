@@ -33,14 +33,14 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
     sched, _, __ = create_schedule_with_vars(t.sink())
   # test lowering all the ScheduleItems to ExecItems
   lowered = list(lower_schedule(sched.copy()))
-  if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
-  if len(sched) != allowed:
-    print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+  cnt = len([s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)] if filter_sink else sched)
+  if cnt != allowed:
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {cnt}")
     if DEBUG >= 3:
       for i,s in enumerate(sched):
         print("kernel", i+1)
         print(s.ast)
-    raise KernelCountException(f"{len(sched)=} != {allowed}")
+    raise KernelCountException(f"{cnt=} != {allowed}")
   return sched
 
 def _realize_weights(m):
@@ -72,6 +72,12 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  def test_push_pads_idiv(self):
+    x = Tensor([1, 2, 3])
+    t = x.cat(x.idiv(2))
+    run_schedule(check_schedule(t, 1))
+    self.assertEqual(t.tolist(), [1, 2, 3, 0, 1, 1])
+
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)

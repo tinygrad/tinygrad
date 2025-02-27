@@ -102,6 +102,9 @@ sym = symbolic_simple+PatternMatcher([
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
+  # put masked VIEW before IDIV to non-zero CONST
+  (UPat(Ops.VIEW, name="vm", src=(UPat(Ops.IDIV, src=(UPat.var("a"), UPat.cvar("b"))),)),
+   lambda a,b,vm: a.view(vm.st).idiv(b.arg) if any(v.mask is not None for v in vm.st.views) and b.arg != 0 else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
