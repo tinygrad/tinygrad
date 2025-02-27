@@ -82,9 +82,6 @@ class SpeedyConvNet:
     return self.linear(x.max(axis=(2,3))) * hyp['opt']['scaling_factor']
 
 if __name__ == "__main__":
-  if getenv("TINY_BACKEND"):
-    import extra.torch_backend.backend
-    device = torch.device("tiny")
   # *** dataset ***
   X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
   # TODO: without this line indexing doesn't fuse!
