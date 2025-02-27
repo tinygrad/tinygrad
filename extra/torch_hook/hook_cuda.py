@@ -158,7 +158,7 @@ def cuLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockD
     ret = cuda.cuFuncGetParamInfo(f, len(params), ctypes.byref(paramOffset:=ctypes.c_size_t()), ctypes.byref(paramSize:=ctypes.c_size_t()))
     if ret != 0: break
     params.append((paramOffset.value, paramSize.value))
-  
+
   ev_params = []
   if extra: params_ptr = to_mv(extra, 5*8).cast("Q")
   else: params_ptr = to_mv(kernelParams, len(params)*8).cast("Q")

@@ -85,7 +85,7 @@ class DispatchLog(TorchDispatchMode):
         tiny_kwargs['device'] = torch.device("tiny")
 
       tiny_x = func(*tiny_args, **tiny_kwargs)
-      
+
       # TODO: this is a hack, any way to do this better?
       if REALIZE:
         tiny_x.cpu()
