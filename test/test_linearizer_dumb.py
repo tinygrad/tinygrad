@@ -3,7 +3,7 @@
 # like test_linearizer_failures, but they don't have to fail
 
 import unittest
-from test.helpers import ast_const
+from test.helpers import ast_const, is_dtype_supported
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.ops import UOp, Ops
