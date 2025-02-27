@@ -84,7 +84,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(Ops.CONTIGUOUS, name="base"))),)),
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
   # put CAST to smaller dtype before EXPAND
-  (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st) \
+  (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.All-{Ops.BUFFER}),)),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st) \
     if cast.dtype.itemsize <= vm.dtype.itemsize and resolve(prod(vm.shape) > vm.st.real_size()) else None),
   # make things that can't be images not images
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW, Ops.CONST, Ops.DEVICE}, name="u"), lambda u: u.replace(dtype=dt.base) if isinstance(dt:=u.dtype,ImageDType)
@@ -102,6 +102,8 @@ sym = symbolic_simple+PatternMatcher([
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
+  (UPat(Ops.VIEW, src=(UPat(Ops.CAST, src=(UPat.var("x"),)),), name="v"),
+   lambda x,v: x.view(x.st+v.st).cast(v.dtype) if x.base.op is Ops.BUFFER and resolve(prod(v.shape) > prod(x.shape)) else None),
 ])
 
 remove_movement_ops = merge_views+PatternMatcher([
