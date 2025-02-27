@@ -194,6 +194,7 @@ decomps = [
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
+  aten.logical_and,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -306,6 +307,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
+  # my changes
+  "aten.scatter.value_reduce": Tensor.scatter,
+  "aten.scatter.src": Tensor.scatter, # This might be wrong??
+  # ==== 
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where,
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
@@ -335,12 +340,14 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
   "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
+  "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, **kwargs: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, **kwargs),
   "aten.avg_pool2d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode),
   "aten.avg_pool3d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
   # "aten.convolution": lambda self, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=1, groups=1: Tensor.conv2d(self, weight, bias, groups, stride, dilation, padding) if not transposed else Tensor.conv_transpose2d(self, weight, bias, groups, stride, dilation, padding),
   "aten.cummax": Tensor.cummax,
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
   "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  "aten.roll": Tensor.roll,
   # TODO: this is wrong
   "aten.reflection_pad2d": Tensor.pad,
 }}
