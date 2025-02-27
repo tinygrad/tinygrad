@@ -1,19 +1,16 @@
 import ctypes, struct, platform, pathlib, os, binascii, itertools
 from hexdump import hexdump
-from tinygrad.helpers import to_mv, DEBUG, getenv, colored, time_to_str
-from tinygrad.runtime.autogen import libc, cuda
-from tinygrad.device import CPUProgram, Device
-from tinygrad.runtime.support.elf import elf_loader
-# from tinygrad.runtime.ops_cuda import cu_time_execution
+from tinygrad.device import Device
 from tinygrad import Tensor
 from tinygrad.helpers import to_mv, DEBUG, getenv, colored, time_to_str
 
-# import extra.nv_gpu_driver.hook_cuda as hook_cuda
+import extra.nv_gpu_driver.hook_cuda as hook_cuda
 
-# to run with nv profiler: sudo modprobe nvidia NVreg_RestrictProfilingToAdminUsers=0
+# settings to profile gemm in the __main__ example: TINY_MIRROR=1;CUDA=1;RUN_ONLY=9
 TINY_MIRROR = getenv("TINY_MIRROR", 1) # should mirror aten ops to tiny backend
 RUN_ONLY = getenv("RUN_ONLY", -1) # run only a specific aten call
-REALIZE = getenv("REALIZE", RUN_ONLY >= 0) # realize and wait each aten call
+REALIZE = getenv("REALIZE", 1) # realize and wait each aten call
+FULL_KERN_NAME = getenv("FULL_KERN_NAME", 0) # print full kernel name
 
 print("importing torch...")
 import torch
@@ -51,7 +48,7 @@ class DispatchLog(TorchDispatchMode):
     print(colored(f"#{aten_id} {func}", "magenta" if should_call_tiny else "cyan") + "("+", ".join(txt_args)+")", flush=True)
 
     # ignore dispatches if needed
-    # hook_cuda.push_ignore_dispatch(RUN_ONLY >= 0 and RUN_ONLY != aten_id)
+    hook_cuda.push_ignore_dispatch(RUN_ONLY >= 0 and RUN_ONLY != aten_id)
     orig_x = func(*args, **(kwargs or {}))
 
     def print_events(evs, name, out_addr):
@@ -62,7 +59,11 @@ class DispatchLog(TorchDispatchMode):
             if isinstance(param, hook_cuda.HookTensorParamEvent):
               is_out = param.cuda_address == out_addr
               txt_params += [f"{'out' if is_out else 'in'} tensor{param.enum}({param.cuda_address:#x}, off={param.offset:#x})"]
-          print(f"\t {name} kernel {ev.name[:24]} {ev.grid} {ev.block} {ev.ptm}\n\t\t({', '.join(txt_params)})")
+
+          just_kern_name = ev.name
+          if not FULL_KERN_NAME:
+            just_kern_name = ev.name.replace("(anonymous namespace)", "").replace("void ", "").split("<")[0].split("(")[0].split("::")[-1]
+          print(f"\t {name} kernel {just_kern_name} {ev.grid} {ev.block} {ev.ptm}\n\t\t({', '.join(txt_params)})")
         else: print("\t", name, ev)
 
     if REALIZE:
@@ -93,7 +94,7 @@ class DispatchLog(TorchDispatchMode):
 
       cuda_to_tiny_mappings[orig_x] = tiny_x
 
-    # hook_cuda.pop_ignore_dispatch()
+    hook_cuda.pop_ignore_dispatch()
     return orig_x
 DispatchLog().__enter__()
 
@@ -112,8 +113,8 @@ if __name__ == "__main__":
     print("\n\n\n****** second run ******\n")
     model(X)
   else:
-    a = torch.zeros(64, 64)
-    b = torch.zeros(64, 64)
+    a = torch.randn(64, 64)
+    b = torch.randn(64, 64)
     a += 1
     b += 2
     a = a.exp2()
@@ -121,6 +122,3 @@ if __name__ == "__main__":
     a += b
     c = a @ b
     print("tensor math done", c.cpu().numpy())
-
-    # maps = pathlib.Path("/proc/self/maps").read_text()
-    # print('\n'.join([x for x in maps.split("\n") if 'cuda' in x or 'nv' in x]))

@@ -202,6 +202,9 @@ def install_hooks():
   # module loading + not used module loading
   hooked['cuModuleLoadData'] = install_hook(cuda.cuModuleLoadData, cuModuleLoadData)
 
-NVPROFILER = os.environ.get("NV_COMPUTE_PROFILER_PERFWORKS_DIR", None) is not None # realize and wait each aten call
-if not NVPROFILER: install_hooks()
-else: print("Detected NSIGHT Profiled, hooking not avail.")
+NVPROFILER = os.environ.get("NV_COMPUTE_PROFILER_PERFWORKS_DIR", None) # realize and wait each aten call
+if NVPROFILER is None: install_hooks()
+else:
+  print("Detected NSIGHT Profiled, hooking not avail.")
+  print(NVPROFILER)
+  cuda._libraries['libcuda.so'] = ctypes.CDLL(NVPROFILER + "/libcuda-injection.so")
