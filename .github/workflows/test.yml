@@ -146,7 +146,7 @@ jobs:
   torchbackend:
     name: Torch Backend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
