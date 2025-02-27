@@ -96,6 +96,9 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
   return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
 
+@torch.library.impl("aten::randperm.generator_out", "privateuseone")
+def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator).tiny())
+
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
   return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
@@ -109,7 +112,7 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
   #raise NotImplementedError("need convolution")
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
-def _copy_from(src, dest):
+def _copy_from(src, dest, non_blocking=False):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
     unwrap(dest).replace(unwrap(src), allow_shape_mismatch=True)
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
@@ -163,10 +166,13 @@ decomps = {
     aten.native_dropout, aten.native_dropout_backward,
     aten._softmax_backward_data, aten.embedding_dense_backward,
     aten.linalg_vector_norm,
+    aten.unfold,
     # activations
     aten.hardswish, aten.hardswish_backward,
     aten.hardtanh, aten.hardtanh_backward,
     aten.gelu, aten.gelu_backward,
+    # NOTE: this uses index
+    #aten.reflection_pad2d,
     # NOTE: many of these don't work or cause infinite loops
     #aten.var_mean,
     #aten.var,
@@ -241,6 +247,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
+  "aten.scatter.value_out": Tensor.scatter,
 }}
 
 # we add the "out" here
@@ -300,6 +307,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
+  # TODO: this is wrong
+  "aten.reflection_pad2d": Tensor.pad,
 }}
 
 def wrap_fxn(k,f):
