@@ -15,6 +15,7 @@ def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
 class TinyBackend:
+  def is_initialized(self): return True
   def is_available(self): return True
   def current_device(self): return 0
 torch.utils.rename_privateuse1_backend("tiny")
@@ -230,6 +231,9 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.gt.Tensor_out": Tensor.__gt__, "aten.gt.Scalar_out": Tensor.__gt__,
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
+  # TODO: support this in tinygrad
+  "aten.bitwise_left_shift.Tensor_out": lambda self, other: Tensor(self << other.numpy()),
+  "aten.bitwise_right_shift.Tensor_out": lambda self, other: Tensor(self >> other.numpy()),
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
@@ -244,8 +248,9 @@ def wrap_out(f):
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
+    if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
-    assert getenv("ALLOW_DTYPE_MISMATCH") or out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
+    assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
     return out.replace(assigned)
   return _wrap_out
 
