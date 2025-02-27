@@ -3078,20 +3078,20 @@ class Tensor(SimpleMathTrait):
     """
     return self * (self * 1.702).sigmoid()
 
-  def leakyrelu(self, neg_slope=0.01):
+  def leaky_relu(self, neg_slope=0.01):
     """
     Applies the Leaky ReLU function element-wise.
 
     - Described: https://paperswithcode.com/method/leaky-relu
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leakyrelu().numpy())
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leakyrelu(neg_slope=0.42).numpy())
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu(neg_slope=0.42).numpy())
     ```
     """
-    return self.relu() - (-neg_slope*self).relu()
+    return (self<0).where(neg_slope*self, self)
 
   def mish(self):
     """

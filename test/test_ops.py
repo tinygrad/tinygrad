@@ -806,9 +806,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.relu(), vals=[[-1.,0,1]])
   def test_relu_maximum_exact(self):
     helper_test_op(None, lambda x: torch.maximum(x, torch.zeros_like(x, requires_grad=False)), lambda x: Tensor.maximum(x, 0), vals=[[-1.,0,1]])
-  def test_leakyrelu(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
-    helper_test_op([()], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
+  def test_leaky_relu(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leaky_relu)
+    helper_test_op([()], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leaky_relu)
   def test_celu(self):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
