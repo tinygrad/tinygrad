@@ -270,7 +270,7 @@ class Tensor(SimpleMathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.realized.ensure_allocated().copyin(x._data())
+      self.contiguous().realize().lazydata.base.buffer.ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.lazydata is x.lazydata: return self  # a self assign is a NOOP
@@ -1784,6 +1784,23 @@ class Tensor(SimpleMathTrait):
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     return squares.sum(axis=axis, keepdim=keepdim).div(smax([0, n-correction]))
 
+  def var_mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
+    """
+    Calculates the variance and mean over the dimensions specified by dim.
+    Syntactic sugar around `Tensor.var` and `Tensor.mean` to match `torch.var_mean`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    var, mean = t.var_mean()
+    print(var.numpy(), mean.numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
+
   def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
@@ -3078,20 +3095,20 @@ class Tensor(SimpleMathTrait):
     """
     return self * (self * 1.702).sigmoid()
 
-  def leakyrelu(self, neg_slope=0.01):
+  def leaky_relu(self, neg_slope=0.01):
     """
     Applies the Leaky ReLU function element-wise.
 
     - Described: https://paperswithcode.com/method/leaky-relu
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leakyrelu().numpy())
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leakyrelu(neg_slope=0.42).numpy())
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu(neg_slope=0.42).numpy())
     ```
     """
-    return self.relu() - (-neg_slope*self).relu()
+    return (self<0).where(neg_slope*self, self)
 
   def mish(self):
     """
@@ -3269,25 +3286,25 @@ class Tensor(SimpleMathTrait):
     a, b = self._broadcasted(x, reverse)
     return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
 
-  def xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def bitwise_xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
     Computes bitwise xor of `self` and `x`.
     Equivalent to `self ^ x`.
     Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, -2, 3]).xor(Tensor([1, 0, 3])).numpy())
+    print(Tensor([-1, -2, 3]).bitwise_xor(Tensor([1, 0, 3])).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
+    print(Tensor([True, True, False, False]).bitwise_xor(Tensor([True, False, True, False])).numpy())
     ```
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self._apply_broadcasted_uop(UOp.xor, x, reverse)
+    return self._apply_broadcasted_uop(UOp.bitwise_xor, x, reverse)
 
   def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
-    Compute the bit-wise AND of `self` and `x`.
+    Compute the bitwise AND of `self` and `x`.
     Equivalent to `self & x`.
     Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3302,7 +3319,7 @@ class Tensor(SimpleMathTrait):
 
   def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
-    Compute the bit-wise OR of `self` and `x`.
+    Compute the bitwise OR of `self` and `x`.
     Equivalent to `self | x`.
     Supports broadcasting to a common shape, type promotion, and integer, boolean inputs.
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3317,7 +3334,7 @@ class Tensor(SimpleMathTrait):
 
   def bitwise_not(self) -> Tensor:
     """
-    Compute the bit-wise NOT of `self`.
+    Compute the bitwise NOT of `self`.
     Equivalent to `~self`.
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
@@ -3451,7 +3468,7 @@ class Tensor(SimpleMathTrait):
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
-  def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
+  def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x))
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
 

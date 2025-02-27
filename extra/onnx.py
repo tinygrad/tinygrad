@@ -295,7 +295,7 @@ def get_onnx_ops():
   def PRelu(X:Tensor, slope:Tensor):
     slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
     return (X > 0).where(X, X * slope)
-  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
+  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
@@ -311,6 +311,7 @@ def get_onnx_ops():
   def Equal(x:Tensor,y:Tensor): return x == y
   def And(x:Tensor,y:Tensor): return (x==y).where(x, False)
   def Or(x:Tensor,y:Tensor): return (x==y).where(x, True)
+  def Xor(x:Tensor,y:Tensor): return x.bool().bitwise_xor(y.bool())
   def BitwiseAnd(x:Tensor,y:Tensor): return x & y
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
@@ -799,7 +800,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops

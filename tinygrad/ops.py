@@ -32,7 +32,7 @@ class SimpleMathTrait:
   def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
   def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
   def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
-  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
+  def bitwise_xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
@@ -48,7 +48,7 @@ class SimpleMathTrait:
   def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
-  def __xor__(self, x): return self.xor(x)
+  def __xor__(self, x): return self.bitwise_xor(x)
 
   def __radd__(self, x): return self.add(x, True)
   def __rsub__(self, x): return self.sub(x, True)
@@ -57,7 +57,7 @@ class SimpleMathTrait:
   def __rfloordiv__(self, x): return self.idiv(x, True)
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
-  def __rxor__(self, x): return self.xor(x, True)
+  def __rxor__(self, x): return self.bitwise_xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
 
   def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
@@ -525,7 +525,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
     return ret
   @property
-  def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER else None
+  def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.real_lbs) if self.base.op is Ops.MULTI else self.base.realized is not None
@@ -741,7 +741,7 @@ class UPat(MathTrait):
   def gep(self, i:int): return UPat(Ops.GEP, None, (self,), (i,))
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
-  def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
+  def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):

@@ -1,4 +1,5 @@
 from PIL import Image
+from tinygrad.helpers import getenv
 import torch, torchvision, pathlib
 import torchvision.transforms as transforms
 import extra.torch_backend.backend
@@ -13,7 +14,8 @@ if __name__ == "__main__":
   ])
   img = transform(img).unsqueeze(0).to(device)
 
-  model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT).eval()
+  model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
+  if getenv("EVAL", 1): model.eval()
   out = model(img).detach().cpu().numpy()
   print("output:", out.shape, out.argmax())
   assert out.argmax() == 7  # cock
