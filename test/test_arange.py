@@ -26,8 +26,8 @@ class TestArange(unittest.TestCase):
 
   def test_complexity(self, opts=None, limit=None):
     # add 1 to avoid divide by 0. arange is 0 flops now!
-    f1 = self._get_flops(256, opts) + 1
-    f2 = self._get_flops(2560, opts) + 1
+    f1 = self._get_flops(768, opts) + 1
+    f2 = self._get_flops(7680, opts) + 1
     print(f"{f1=}, {f2=}")
     assert (f1 < 5000 and f2 < 5000) or (f2 / f1 < 15), f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
     if limit is not None and not getenv("PTX"):
