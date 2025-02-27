@@ -18,18 +18,32 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
   # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
   # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
   free_segs: dict[tuple, list[tuple[int, int, Buffer]]] = defaultdict(list) # dict[buffer key, tuple[start, end, buffer to reuse on the seg]]
+  
+  # Improved find_replace_buffer function with better segment selection strategy
   def find_replace_buffer(buf, st, en):
     key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
 
-    default_buf = (0, len(buffers) - 1, buf) # will return the buffer itself if the replace one is not found.
-    seg_st, seg_en, seg_buf = next((free_segs[key].pop(i) for i,(sst,sen,_) in enumerate(free_segs[key]) if sst <= st and en <= sen), default_buf)
-
+    # First try to find a segment with minimal wastage (closest size match)
+    matching_segments = [(i, sst, sen, sbuf) for i, (sst, sen, sbuf) in enumerate(free_segs[key]) if sst <= st and en <= sen]
+    
+    if matching_segments:
+      # Select the segment with the least wasted space (most efficient fit)
+      best_idx, seg_st, seg_en, seg_buf = min(matching_segments, key=lambda x: (x[3].nbytes - buf.nbytes) if x[3].nbytes >= buf.nbytes else float('inf'))
+      free_segs[key].pop(best_idx)
+    else:
+      # Default case - allocate new buffer
+      seg_st, seg_en, seg_buf = 0, len(buffers) - 1, buf
+    
+    # Split remaining segments if needed
     free_segs[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
     free_segs[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
 
     return seg_buf if seg_buf.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=seg_buf)
 
-  buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
+  # Add timing information to buffer requests to improve planning
+  buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], 
+                          key=lambda x: (-x[2].nbytes, x[0]))  # Sort by size descending, then by first appearance
+
   assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
 
   for i,u in enumerate(buffers):
