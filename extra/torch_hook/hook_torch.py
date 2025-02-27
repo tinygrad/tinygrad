@@ -35,16 +35,22 @@ class DispatchLog(TorchDispatchMode):
   def __torch_dispatch__(self, func, types, args, kwargs=None):
     txt_args = []
     should_call_tiny = kwargs.get('device') is not None and kwargs['device'].type == "cuda"
-    for arg in args:
+
+    def can_print_arg(arg):
+      return args is None or isinstance(arg, str) or isinstance(arg, int) or isinstance(arg, float) or isinstance(arg, bool)
+
+    for i,arg in enumerate(args):
       if torch.is_tensor(arg):
         if arg.device.type == "cuda": should_call_tiny = True
         txt_args.append(f"tensor({arg.shape} {arg.device} {arg.dtype})")
-      else: txt_args.append(f"{arg}")
+      elif can_print_arg(arg): txt_args.append(f'{arg}')
+      else: txt_args.append(f"{type(arg)}")
     for k,v in (kwargs or {}).items():
       if torch.is_tensor(v):
         if arg.device.type == "cuda": should_call_tiny = True
         txt_args.append(f"{k}:tensor({v.shape} {v.device} {v.dtype})")
-      else: txt_args.append(f"{k}:{v}")
+      elif can_print_arg(arg): txt_args.append(f'{k}:{arg}"')
+      else: txt_args.append(f"{type(arg)}")
 
     # magenta-colored kerenls mirrored to tiny backend.
     aten_id = next(enumerator_aten_calls)
@@ -73,7 +79,7 @@ class DispatchLog(TorchDispatchMode):
     if REALIZE:
       torch.cuda.synchronize()
       cuda_events = hook_cuda.collect_events(clear=True)
-      print_events(cuda_events, colored("cuda", "cyan"), orig_x.data_ptr())
+      print_events(cuda_events, colored("cuda", "cyan"), orig_x.data_ptr() if torch.is_tensor(orig_x) else 0x0)
 
     if should_call_tiny:
       # replace with tiny tensor
