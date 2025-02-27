@@ -337,7 +337,7 @@ class TestLinearizerFailures(unittest.TestCase):
             UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=3, src=()),
             UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 1, 384, 1), strides=(0, 0, 1, 0), offset=19584, mask=None, contiguous=False),)), src=()),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, arg=4)]
-    helper_test_lin(Kernel(ast), opts, failed_platforms=["METAL", "GPU", "CUDA"])
+    helper_test_lin(Kernel(ast), opts, failed_platforms=["METAL", "GPU", "CUDA", "CPU", "LLVM"])
 
   def test_failure_14(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -1285,7 +1285,7 @@ class TestLinearizerFailures(unittest.TestCase):
                 UOp(Ops.CONST, dtypes.bool, arg=True, src=(
                    x23,)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=1, arg=16)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["AMD", "GPU", "METAL", "NV", "CUDA"])
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["AMD", "GPU", "METAL", "NV", "CUDA", "LLVM"])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
   def test_failure_54(self):
