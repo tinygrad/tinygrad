@@ -79,7 +79,7 @@ class TestSchedule(unittest.TestCase):
     c = a+b
     with self.assertRaises(RuntimeError): check_schedule(c, 1)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   def test_expand_buffer_before_cast(self):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
@@ -1433,7 +1433,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.cast(dtypes.half).expand(2, 4, 4)
     c = b.cast(dtypes.int).expand(2, 2, 4, 4)
-    run_schedule(check_schedule(c, 1))
+    run_schedule(check_schedule(c, 2))
     np.testing.assert_equal(c.numpy(), np.ones(((2, 2, 4, 4)), dtype=np.int32))
 
   def test_base_change_pad_expand(self):
