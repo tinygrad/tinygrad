@@ -343,8 +343,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.std.correction": Tensor.std,
   "aten.std_mean.correction": Tensor.std_mean,
   "aten.var.correction": Tensor.var,
-  # TODO: support var_mean in tinygrad
-  "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
+  "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
@@ -362,7 +361,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.random_.from": lambda self, from_, to:
     self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype)),
   "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
-  "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
+  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std)),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
@@ -424,8 +423,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # "aten.upsample_linear1d": Tensor.interpolate,
   # "aten.upsample_linear1d": lambda self,size,align: Tensor.interpolate(self, size, mode="linear", align_corners=align),
   # "aten.upsample_linear1d_backward.grad_input": lambda self, input_size, op_size, align, grad_input: Tensor.interpolate(self, op_size, mode="linear", align_corners=align).backward(grad_input),
-  # TODO: this is wrong
-  "aten.reflection_pad2d": Tensor.pad,
+  "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
 }}
 
 def wrap_fxn(k,f):

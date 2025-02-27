@@ -1784,6 +1784,23 @@ class Tensor(SimpleMathTrait):
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     return squares.sum(axis=axis, keepdim=keepdim).div(smax([0, n-correction]))
 
+  def var_mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
+    """
+    Calculates the variance and mean over the dimensions specified by dim.
+    Syntactic sugar around `Tensor.var` and `Tensor.mean` to match `torch.var_mean`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    var, mean = t.var_mean()
+    print(var.numpy(), mean.numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
+
   def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
