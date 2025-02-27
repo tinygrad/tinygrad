@@ -15,6 +15,7 @@ def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
 class TinyBackend:
+  def is_initialized(self): return True
   def is_available(self): return True
   def current_device(self): return 0
 torch.utils.rename_privateuse1_backend("tiny")
@@ -103,6 +104,9 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
   return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
 
+@torch.library.impl("aten::randperm.generator_out", "privateuseone")
+def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator).tiny())
+
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
   return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
@@ -128,7 +132,7 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   #raise NotImplementedError("need convolution")
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
-def _copy_from(src, dest):
+def _copy_from(src, dest, non_blocking=False):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
     unwrap(dest).replace(unwrap(src), allow_shape_mismatch=True)
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
@@ -242,6 +246,9 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.gt.Tensor_out": Tensor.__gt__, "aten.gt.Scalar_out": Tensor.__gt__,
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
+  # TODO: support this in tinygrad
+  "aten.bitwise_left_shift.Tensor_out": lambda self, other: Tensor(self << other.numpy()),
+  "aten.bitwise_right_shift.Tensor_out": lambda self, other: Tensor(self >> other.numpy()),
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
@@ -249,6 +256,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
+  "aten.scatter.value_out": Tensor.scatter,
 }}
 
 # we add the "out" here
@@ -256,8 +264,9 @@ def wrap_out(f):
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
+    if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
-    assert getenv("ALLOW_DTYPE_MISMATCH") or out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
+    assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
     return out.replace(assigned)
   return _wrap_out
 
@@ -307,6 +316,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
+  # TODO: this is wrong
+  "aten.reflection_pad2d": Tensor.pad,
 }}
 
 def wrap_fxn(k,f):
