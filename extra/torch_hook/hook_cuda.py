@@ -8,6 +8,11 @@ from tinygrad.runtime.ops_cuda import cu_time_execution
 
 print(f"hooking CUDA runtime, running with {Device.DEFAULT}")
 
+# TODO: regen and make cuda 12 default?
+cuda.cuFuncGetParamInfo = cuda._libraries['libcuda.so'].cuFuncGetParamInfo
+cuda.cuFuncGetParamInfo.restype = cuda.CUresult
+cuda.cuFuncGetParamInfo.argtypes = [cuda.CUfunction, cuda.size_t, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)]
+
 ignore_dispatch = [False] # default valus is False
 def push_ignore_dispatch(val):
   global ignore_dispatch
@@ -206,5 +211,4 @@ NVPROFILER = os.environ.get("NV_COMPUTE_PROFILER_PERFWORKS_DIR", None) # realize
 if NVPROFILER is None: install_hooks()
 else:
   print("Detected NSIGHT Profiled, hooking not avail.")
-  print(NVPROFILER)
   cuda._libraries['libcuda.so'] = ctypes.CDLL(NVPROFILER + "/libcuda-injection.so")

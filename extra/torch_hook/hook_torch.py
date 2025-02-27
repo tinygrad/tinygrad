@@ -4,7 +4,7 @@ from tinygrad.device import Device
 from tinygrad import Tensor
 from tinygrad.helpers import to_mv, DEBUG, getenv, colored, time_to_str
 
-import extra.nv_gpu_driver.hook_cuda as hook_cuda
+import extra.torch_hook.hook_cuda as hook_cuda
 
 # settings to profile gemm in the __main__ example: TINY_MIRROR=1;CUDA=1;RUN_ONLY=9
 TINY_MIRROR = getenv("TINY_MIRROR", 1) # should mirror aten ops to tiny backend
