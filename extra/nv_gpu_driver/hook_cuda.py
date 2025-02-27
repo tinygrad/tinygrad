@@ -8,15 +8,14 @@ from tinygrad.runtime.ops_cuda import cu_time_execution
 
 print(f"hooking CUDA runtime, running with {Device.DEFAULT}")
 
-text_prefix, text_prefix_order = "", [""]
-def push_prefix(prefix):
-  global text_prefix
-  text_prefix_order.append(text_prefix)
-  text_prefix = prefix
+ignore_dispatch = [False] # default valus is False
+def push_ignore_dispatch(val):
+  global ignore_dispatch
+  ignore_dispatch.append(val)
 
-def pop_prefix():
-  global text_prefix
-  text_prefix = text_prefix_order.pop()
+def pop_ignore_dispatch():
+  global ignore_dispatch
+  ignore_dispatch.pop()
 
 hooked = {}
 def _hook(fxn_address_value, tramp):
@@ -137,11 +136,16 @@ def cuMemAlloc_v2(dptr, bytesize):
 
 @ctypes.CFUNCTYPE(*([cuda.cuLaunchKernel.restype] + cuda.cuLaunchKernel.argtypes))
 def cuLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra):
-  global text_prefix
+  global ignore_dispatch
+
+  name = function_names[ctypes.addressof(f.contents)]
+  if ignore_dispatch[-1]:
+    if DEBUG >= 4: print(f"ignoring dispatch {name}")
+    return 0
+
   tm = cu_time_execution(lambda:
     hooked["cuLaunchKernel"](f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra), True)
 
-  name = function_names[ctypes.addressof(f.contents)]
   ptm = colored(time_to_str(tm, w=9), "yellow" if tm > 0.01 else "green")
 
   params = []
@@ -197,4 +201,7 @@ def install_hooks():
 
   # module loading + not used module loading
   hooked['cuModuleLoadData'] = install_hook(cuda.cuModuleLoadData, cuModuleLoadData)
-install_hooks()
+
+NVPROFILER = os.environ.get("NV_COMPUTE_PROFILER_PERFWORKS_DIR", None) is not None # realize and wait each aten call
+if not NVPROFILER: install_hooks()
+else: print("Detected NSIGHT Profiled, hooking not avail.")
