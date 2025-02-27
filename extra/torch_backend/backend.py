@@ -169,6 +169,7 @@ decomps = [
   aten.threshold_backward,
   aten.softplus_backward,
   aten.elu,  # elu has a scale + input_scale param
+  aten.elu_backward,
   aten.softplus,
   aten.threshold,
   aten.nll_loss_forward,
@@ -195,6 +196,8 @@ decomps = [
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
   aten.logical_and,
+  aten.cumprod,
+  aten.eye,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -340,7 +343,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
   "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
-  "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, **kwargs: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, **kwargs),
+  "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
   "aten.avg_pool2d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode),
   "aten.avg_pool3d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
   # "aten.convolution": lambda self, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=1, groups=1: Tensor.conv2d(self, weight, bias, groups, stride, dilation, padding) if not transposed else Tensor.conv_transpose2d(self, weight, bias, groups, stride, dilation, padding),
@@ -348,6 +351,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
   "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
   "aten.roll": Tensor.roll,
+  "aten.where.self_out": lambda self, x, y, out: out.replace(Tensor.where(self, x, y)),
+  "aten.logcumsumexp": Tensor.logcumsumexp,
+  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
   # TODO: this is wrong
   "aten.reflection_pad2d": Tensor.pad,
 }}
