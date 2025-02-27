@@ -76,10 +76,10 @@ class Int8Linear:
     return x.dot(self.weight.cast(self.scale.dtype).T*self.scale)
 
   @staticmethod
-  def quantize(tensors, device, scale_dtype=dtypes.float16):
+  def quantize(tensors, device, scale_dtype=dtypes.float16, quantize_embeds=False):
     new_tensors = {}
     for name,v in tensors.items():
-      if "feed_forward" in name or "attention.w" in name or "tok_embeddings.weight" in name:
+      if "feed_forward" in name or "attention.w" in name or (quantize_embeds and "tok_embeddings.weight" in name):
         assert "weight" in name, name
         v = v.cast(scale_dtype)
         scale = v.abs().max(axis=1) / 127.0
@@ -91,7 +91,7 @@ class Int8Linear:
           new_tensors[name.replace('weight', 'scale')].shard_(device, axis=None)
       else:
         new_tensors[name] = v
-    new_tensors.update({"output.weight": new_tensors["tok_embeddings.weight"], "output.scale": new_tensors["tok_embeddings.scale"]})
+    if quantize_embeds: new_tensors.update({"output.weight": new_tensors["tok_embeddings.weight"], "output.scale": new_tensors["tok_embeddings.scale"]})
     return new_tensors
 
 class Int8Embedding:
@@ -159,9 +159,9 @@ MODEL_PARAMS = {
 }
 def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dtype=dtypes.float16, device=None, max_context=8192, load_weights=True):
   # build model
-  if quantize == "int8": linear, embedding = Int8Linear, Int8Embedding
-  elif quantize == "nf4": linear, embedding = NF4Linear(64), nn.Embedding
-  else: linear, embedding = nn.Linear, nn.Embedding
+  if quantize == "int8": linear, embedding, quantize_embeds = Int8Linear, Int8Embedding, True
+  elif quantize == "nf4": linear, embedding, quantize_embeds = NF4Linear(64), nn.Embedding, False
+  else: linear, embedding, quantize_embeds = nn.Linear, nn.Embedding, False
   model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, embedding=embedding, max_context=max_context, jit=True)
 
   if not load_weights: return model
@@ -182,7 +182,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
     # quantize
     if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
     elif quantize is not None:
-      weights = linear.quantize(weights, device, scale_dtype)
+      weights = linear.quantize(weights, device, scale_dtype, quantize_embeds)
       for _,v in weights.items(): v.realize()
 
     # shard
