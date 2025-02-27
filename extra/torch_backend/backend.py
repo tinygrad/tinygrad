@@ -5,6 +5,7 @@ TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
+from tinygrad.ops import Ops
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
@@ -136,6 +137,27 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
+
+@torch.library.impl("aten::slice.Tensor", "privateuseone")
+def slice_tensor(self, dim=0, start=None, end=None, step=1):
+  # TODO: Do we need more dims?
+  # TODO: rewrite this...
+  print(f"{self.shape=}")
+  if self.ndim == 1:
+    return wrap(unwrap(self)[start:end:step])
+  elif self.ndim == 2:
+    if dim == 0:
+      return wrap(unwrap(self)[start:end:step, :])
+    else:
+      return wrap(unwrap(self)[:, start:end:step])
+  else:
+    if dim == 0:
+      return wrap(unwrap(self)[start:end:step, :, :])
+    elif dim == 1:
+      return wrap(unwrap(self)[:, start:end:step, :])
+    else:
+      return wrap(unwrap(self)[:, :, start:end:step])
+
 # @torch.library.impl("aten::convolution_backward", "privateuseone")
 # TODO: fix this....
 def convolution_backward(grad_output, input, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=0, groups=1, output_mask=None):
@@ -160,7 +182,7 @@ def _copy_from(src, dest, non_blocking=False):
 
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
-  unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
+  return wrap(unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True))
 
 # register some decompositions
 from torch._decomp import get_decompositions
@@ -208,6 +230,10 @@ decomps = [
   aten.binary_cross_entropy_backward,
   aten.hardsigmoid_backward,
   aten.logical_or_,
+  aten.leaky_relu_backward,
+  aten.nll_loss2d_forward,
+  aten.slice_backward,
+  # aten.upsample_linear1d,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -366,6 +392,20 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logcumsumexp": Tensor.logcumsumexp,
   "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
+  # "aten.slice.Tensor": lambda self, dim=0, start=None, end=None, step=1: self[:, start:end:step] if dim else self[start:end:step, :],
+  "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
+  "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
+  "aten.prod": lambda self: Tensor.prod(self),
+  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, dim)),
+  # "aten.std": Tensor.std,
+  # "aten.mean": Tensor.mean,
+  # "aten.squeeze.dim": lambda self,dim: Tensor.squeeze(self, dim),
+  # "aten.unsqueeze": Tensor.unsqueeze,
+  # "aten.slice_backward": lambda self: self,
+  # "aten.amax": Tensor.argmax,
+  # "aten.upsample_linear1d": Tensor.interpolate,
+  # "aten.upsample_linear1d": lambda self,size,align: Tensor.interpolate(self, size, mode="linear", align_corners=align),
+  # "aten.upsample_linear1d_backward.grad_input": lambda self, input_size, op_size, align, grad_input: Tensor.interpolate(self, op_size, mode="linear", align_corners=align).backward(grad_input),
   # TODO: this is wrong
   "aten.reflection_pad2d": Tensor.pad,
 }}
