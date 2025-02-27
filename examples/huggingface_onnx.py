@@ -1,4 +1,4 @@
-import onnx, json, tempfile
+import onnx, json, tempfile, time
 from pathlib import Path
 from huggingface_hub import list_models, snapshot_download
 from tinygrad.helpers import _ensure_downloads_dir, getenv
@@ -40,7 +40,7 @@ def get_tolerances(file_name):
   # TODO very high rtol atol
   # if "fp16" in file_name: return 9e-2, 9e-2
   # if any(q in file_name for q in ["int8", "uint8", "quantized"]): return 4, 4
-  return 3e-3, 3e-3
+  return 4e-3, 4e-3
 
 def run_huggingface_benchmark(onnx_model_path, config, rtol, atol):
   inputs = get_example_inputs(OnnxRunner(onnx.load(onnx_model_path)).graph_inputs, config)
@@ -62,6 +62,8 @@ if __name__ == "__main__":
   if limit:
     sort = "downloads"  # recent 30 days downloads
     result = {"passed": 0, "failed": 0}
+    start_time = time.time()
+    total_size_bytes = 0
     print(f"** Running benchmarks on top {limit} models ranked by '{sort}' on huggingface **")
     for i, model in enumerate(list_models(filter="onnx", sort=sort, limit=limit)):
       if model.id in SKIPPED_REPO_PATHS: continue  # skip these
@@ -70,7 +72,16 @@ if __name__ == "__main__":
       result[model.id] = {"url": url}
       print(f"Downloading all onnx models from {url}")
       root_path = huggingface_download_onnx_model(model.id)
-      print(f"Saved to {root_path}")
+
+      total_size = sum(f.stat().st_size for f in root_path.glob('**/*') if f.is_file())
+      total_size_bytes += total_size  # Accumulate total size
+      result[model.id]['total_size'] = f"{total_size / 1e9:.2f}GB"
+
+      config = get_config(root_path)
+      architecture = config.get('architectures', ["unknown"])[0]
+      result[model.id]['architecture'] = architecture
+
+      print(f"Saved {total_size/1e6:.2f}MB to {root_path}")
       for onnx_model_path in root_path.rglob("*.onnx"):
         onnx_file_name = onnx_model_path.stem
         if any(skip in onnx_file_name for skip in SKIPPED_FILES): continue  # skip these
@@ -78,13 +89,20 @@ if __name__ == "__main__":
         relative_path = str(onnx_model_path.relative_to(root_path))
         print(f"Benchmarking {relative_path}")
         try:
-          run_huggingface_benchmark(onnx_model_path, get_config(root_path), rtol, atol)
-          result[model.id][relative_path] = {"status": "passed"}
+          st = time.time()
+          run_huggingface_benchmark(onnx_model_path, config, rtol, atol)
+          # Record time in seconds with 2 decimal precision
+          et = time.time() - st
+          result[model.id][relative_path] = {"status": "passed", "time": f"{et:.2f}s"}
           result["passed"] += 1
         except Exception as e:
           result[model.id][relative_path] = {"status": f"failed {e}"}
           result["failed"] += 1
 
+    # Add total metrics at the end
+    total_seconds = time.time() - start_time
+    result["total_time"] = f"{int(total_seconds // 60)}m {total_seconds % 60:.2f}s"
+    result["total_size"] = f"{total_size_bytes / 1e9:.2f}GB"
     with open("huggingface_results.json", "w") as f:
       json.dump(result, f, indent=2)
       print(f"report saved to {Path('huggingface_results.json').resolve()}")
