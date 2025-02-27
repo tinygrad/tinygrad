@@ -118,7 +118,10 @@ def index_tensor(x, y):
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+  if not transposed:
+    return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+                                   groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
@@ -126,7 +129,10 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0])
-  out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  if not transposed:
+    out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  else:
+    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
@@ -198,6 +204,10 @@ decomps = [
   aten.logical_and,
   aten.cumprod,
   aten.eye,
+  aten.binary_cross_entropy,
+  aten.binary_cross_entropy_backward,
+  aten.hardsigmoid_backward,
+  aten.logical_or_,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -345,7 +355,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
   "aten.avg_pool2d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode),
-  "aten.avg_pool3d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
+  # "aten.avg_pool2d_backward": lambda grad_out, input, kernel_size, stride=None, padding=1, ceil_mode=False, count_include_pad=True, divisor_override=None: Tensor.avg_pool2d(input, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad).backward(grad_out),
+  "aten.avg_pool3d": lambda self, kernel_size, stride=None, padding=1, ceil_mode=False: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode),
   # "aten.convolution": lambda self, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=1, groups=1: Tensor.conv2d(self, weight, bias, groups, stride, dilation, padding) if not transposed else Tensor.conv_transpose2d(self, weight, bias, groups, stride, dilation, padding),
   "aten.cummax": Tensor.cummax,
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
@@ -354,6 +365,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.where.self_out": lambda self, x, y, out: out.replace(Tensor.where(self, x, y)),
   "aten.logcumsumexp": Tensor.logcumsumexp,
   "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
+  "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
   # TODO: this is wrong
   "aten.reflection_pad2d": Tensor.pad,
 }}
