@@ -7,6 +7,10 @@ from tinygrad.helpers import to_mv, DEBUG, getenv, colored, time_to_str
 import extra.torch_hook.hook_cuda as hook_cuda
 
 # settings to profile gemm in the __main__ example: TINY_MIRROR=1;CUDA=1;RUN_ONLY=9
+# nvprof sample command (this will sample all kernels):
+# ncu --export ~/nvprof_data --force-overwrite --rule AchievedOccupancy --rule Compute --rule LaunchConfiguration --rule Memory --rule PMSamplingData --rule SOLBottleneck --rule TheoreticalOccupancy --rule WorkloadImbalance python3 extra/torch_hook/hook_torch.py
+# or just run nsight compute from the host to the machine.
+
 TINY_MIRROR = getenv("TINY_MIRROR", 1) # should mirror aten ops to tiny backend
 RUN_ONLY = getenv("RUN_ONLY", -1) # run only a specific aten call
 REALIZE = getenv("REALIZE", 1) # realize and wait each aten call
