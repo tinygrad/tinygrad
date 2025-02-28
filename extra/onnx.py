@@ -724,6 +724,14 @@ def get_onnx_ops():
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
 
+  def DynamicQuantizeLinear(x: Tensor):
+    # only support uint8
+    qmin, qmax = dtypes.min(dtypes.uint8), dtypes.max(dtypes.uint8)
+    scale = (x.max().maximum(0) + ((-x).max()).maximum(0)) / (qmax - qmin)
+    zero_point = _clamp_cast((qmin - x.min() / scale).round(), dtypes.uint8)
+    y = _clamp_cast((x / scale).round() + zero_point, dtypes.uint8)
+    return y, scale, zero_point
+
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)

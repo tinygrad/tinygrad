@@ -27,6 +27,33 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["out"]
     self.helper_test_single_op("Reshape", inputs, attributes, outputs)
 
+  def test_quantize_linear(self):
+    test_cases = [
+      {"test_case": "round_half_to_even", "qdtype": np.int8, "qzero_point": 0, "x": [-1.5, -0.5, 0.5, 1.5], "scale": 1.0},
+      {"test_case": "round_to_even_before_add_zero_point", "qdtype": np.uint8, "qzero_point": 1, "x": [0.5, 1.5], "scale": 1.0},
+    ]
+    for case in test_cases:
+      with self.subTest(test_case=case["test_case"]):
+        inputs = {
+          "x": np.array([case["x"]], dtype=np.float32),
+          "y_scale": np.array(case["scale"], dtype=np.float32),
+          "y_zero_point": np.array(case["qzero_point"], dtype=case["qdtype"])
+        }
+        self.helper_test_single_op("QuantizeLinear", inputs, {}, ["y"])
+
+  def test_dynamic_quantize_linear(self):
+    test_cases = [
+      {"name": "round_half_to_even", "x": np.array([0, 0.5, 1.5, 255], dtype=np.float32)},
+      {"name": "round_zero_point_half_down_to_even", "x": np.array([-1, 509], dtype=np.float32)},
+      {"name": "round_zero_point_half_up_to_even", "x": np.array([-11, 499], dtype=np.float32)},
+      # other tests from https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-45
+      {"name": "max_adjusted", "x": np.array([-1.0, -2.1, -1.3, -2.5, -3.34, -4.0], dtype=np.float32)},
+      {"name": "min_adjusted", "x": np.array([1, 2.1, 1.3, 2.5, 3.34, 4.0, 1.5, 2.6, 3.9, 4.0, 3.0, 2.345], dtype=np.float32).reshape((3, 4))},
+    ]
+    for case in test_cases:
+      with self.subTest(test_case=case["name"]):
+        self.helper_test_single_op("DynamicQuantizeLinear", {"x": case["x"]}, {}, ["y", "y_scale", "y_zero_point"])
+
   def test_qlinear_conv(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for b in (np.ones([32], dtype=np.int32), np.zeros([32], dtype=np.int32)):
@@ -67,7 +94,6 @@ class TestMainOnnxOps(TestOnnxOps):
 
 class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = "com.microsoft"
-
   def test_attention(self):
     batch_size, seq_len, input_hidden_size = 2, 8, 256
     num_heads, head_size = 4, 64
