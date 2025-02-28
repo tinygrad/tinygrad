@@ -186,7 +186,7 @@ class TestContribOnnxOps(TestOnnxOps):
         outputs = ["C"]
         self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
 
-    with self.subTest(test_case="round_away_from_zero"):
+    with self.subTest(test_case="round_half_away_from_zero"):
       inputs = {
         "A": np.array([1, 1, 1, 1], dtype=np.int8),
         "A_scale": np.array(1, dtype=np.float32),
