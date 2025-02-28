@@ -167,7 +167,7 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
 
 @torch.library.impl("aten::avg_pool2d_backward", "privateuseone")
 def avg_pool2d_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
-  if stride is not None and len(stride) == 0: stride = None
+  if stride == []: stride = None
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
