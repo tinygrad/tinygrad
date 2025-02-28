@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import unittest
 from tinygrad import Tensor, Context, TRACEMETA
 from tinygrad.ops import all_metadata
