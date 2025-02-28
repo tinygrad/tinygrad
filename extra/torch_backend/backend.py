@@ -173,29 +173,6 @@ def avg_pool3d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_i
   if stride is not None and len(stride) == 0: stride = None
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
 
-@torch.library.impl("aten::view.dtype", "privateuseone")
-def view_dtype(self, dtype):
-  return wrap(unwrap(self).bitcast(_from_torch_dtype(dtype)))
-
-@torch.library.impl("aten::_cummax_helper", "privateuseone")
-def _cummax_helper(self, values, indices, dim):
-  self, values, indices = unwrap(self), unwrap(values), unwrap(indices)
-  if len(self.shape) == 0:
-    values.assign(self)
-    indices.assign(Tensor(0))
-  else:
-    values.assign(self.cummax(dim))
-    indices.assign(Tensor.arange(self.shape[dim], dtype=indices.dtype))
-  return None
-
-@torch.library.impl("aten::cummax", "privateuseone")
-def cummax(self, dim):
-  self_t = unwrap(self)
-  values = Tensor.zeros_like(self_t)
-  indices = Tensor.zeros(self_t.shape[dim], dtype=dtypes.long)
-  _cummax_helper(self_t, values, indices, dim)
-  return wrap(values), wrap(indices)
-
 # register some decompositions
 from torch._decomp import get_decompositions
 aten = torch.ops.aten
@@ -231,7 +208,6 @@ decomps = [
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
   aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
-  aten.upsample_nearest2d.out,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
@@ -301,12 +277,12 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
-  "aten.logical_and.out": lambda self, other: (self != 0) & (other != 0),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
+  "aten.logical_and.out": lambda self, other: (self != 0) & (other != 0)
 }}
 
 # we add the "out" here
@@ -369,11 +345,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.sgn": Tensor.sign,
   "aten.all": Tensor.all,
   "aten.any": Tensor.any,
-  "aten.logical_and": lambda input, other: (input != 0) & (other != 0),
-  "aten.repeat": Tensor.repeat,
-  "aten.fill_.Tensor": lambda self,fill_value: self.assign(self.full_like(fill_value.item())),
-  "aten.scatter_add": lambda self,dim,index,src: 
-    self+src if len(self.shape) == 0 and index.item() == 0 else self.scatter_reduce(dim, index, src, reduce="sum"),
+  "aten.logical_and": lambda input, other: (input != 0) & (other != 0)
 }}
 
 def wrap_fxn(k,f):
