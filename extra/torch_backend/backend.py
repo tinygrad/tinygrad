@@ -184,6 +184,7 @@ decomps = [
   aten.native_dropout, aten.native_dropout_backward,
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
+  aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
