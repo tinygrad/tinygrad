@@ -94,6 +94,7 @@ class MathTrait(SimpleMathTrait):
 class Ops(FastEnum):
   # uops that aren't rendered
   NAME = auto(); SINK = auto(); CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); KERNEL = auto(); UNIQUE = auto() # noqa: E702
+  IGNORE = auto()
 
   # TODO: empty continues to exist because of tensor
   EMPTY = auto()
