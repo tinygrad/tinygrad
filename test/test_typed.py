@@ -1,12 +1,9 @@
-#!/usr/bin/env python3
 import os
 import unittest
 from typing import List, Dict, Optional, Union
 
-# Set TYPED=1 to enable runtime type checking
 os.environ["TYPED"] = "1"
 
-# Import tinygrad after setting TYPED=1
 from tinygrad import Tensor, typechecked
 from tinygrad.dtype import dtypes
 
@@ -23,11 +20,11 @@ def func_with_float_param(x: Tensor, scale: float) -> Tensor:
 @typechecked
 def func_with_complex_types(x: Tensor, y: List[Tensor], opts: Dict[str, Union[int, float]]) -> Tensor:
   """Test function with complex type annotations."""
-  result = x  # Start with the original tensor
+  result = x 
   for t in y:
     result += t
   if "scale" in opts:
-    # Convert to float tensor to avoid dtype mismatch
+    # convert to float tensor to avoid dtype mismatch
     result = result.float() * opts["scale"]
   return result
 
