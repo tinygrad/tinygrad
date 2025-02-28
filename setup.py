@@ -68,7 +68,10 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone"
+            "capstone",
+            "pycocotools",
+            "boto3",
+            "pandas"
         ],
         'docs': [
             "mkdocs",
