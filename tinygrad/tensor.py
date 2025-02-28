@@ -3990,7 +3990,8 @@ class Tensor(SimpleMathTrait):
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
-    if _METADATA.get() is not None: return fn(*args, **kwargs)
+    # Check if TRACEMETA is 0, and if so, don't add metadata
+    if TRACEMETA == 0 or _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
