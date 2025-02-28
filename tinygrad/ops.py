@@ -229,7 +229,7 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
-    if (metadata:=_METADATA.get()) is not None and TRACEMETA > 0: all_metadata[created] = metadata
+    if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
