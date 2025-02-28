@@ -365,9 +365,9 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       img = resize(img)[0]
     else:
       if seed is not None:
-        np.random.seed(seed * 2 ** 10 + idx)
-        random.seed(seed * 2 ** 10 + idx)
-        torch.manual_seed(seed * 2 ** 10 + idx)
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.manual_seed(seed)
 
       img, tgt = random_horizontal_flip(img, tgt)
       img, tgt, _ = resize(img, tgt=tgt)
