@@ -191,10 +191,10 @@ class RetinaHead:
         "classification_loss": self.classification_head(x, labels=kwargs["labels"], matches=kwargs["matches"]),
         "regression_loss": self.regression_head(x, bboxes=kwargs["bboxes"], matches=kwargs["matches"], anchors=kwargs["anchors"])
       }
-    else:
-      pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
-      out = pred_bbox.cat(pred_class, dim=-1)
-      return out
+
+    pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
+    out = pred_bbox.cat(pred_class, dim=-1)
+    return out
 
 class ResNetFPN:
   def __init__(self, resnet:ResNet, out_channels:int=256, returned_layers:list[int]=[2, 3, 4]):
