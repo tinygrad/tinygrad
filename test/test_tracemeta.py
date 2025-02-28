@@ -14,7 +14,7 @@ class TestTraceMeta(unittest.TestCase):
     self.assertTrue(any(all_metadata.values()))
 
   def test_tracemeta_context_zero(self):
-    all_metadata.clear() 
+    all_metadata.clear()
 
     with Context(TRACEMETA=0):
       t = Tensor([1,2,3,4])
