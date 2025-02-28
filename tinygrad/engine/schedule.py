@@ -61,6 +61,7 @@ def create_buffer_view(tr:UOp, x:UOp):
 
 def swizzle_assign(buf:UOp, view:UOp, b:UOp):
   if (sti:=unwrap(view.st).invert(buf.shape)) is not None: return buf.assign(b.view(sti)).reshape(b.shape)
+  raise Exception("todo!")
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -260,7 +261,8 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
 
 create_kernels = merge_views+PatternMatcher([
   # always give assign a kernel
-  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
+  (UPat.assign(UPat(Ops.BUFFER, name="b"), UPat(GroupOp.All-{Ops.KERNEL}, name="x")),
+   lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
   # otherwise check if need to assign this UOp to a new buffer
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
     UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))) if x in ctx.realizes else None),
@@ -282,8 +284,7 @@ def load_buf(ctx:list[UOp], x:UOp):
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="x"), load_buf),
-  # remove assign
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"))), lambda x:x),
+  (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat())), load_buf),
   # STORE (except for COPY)
   (UPat(Ops.SINK, src=(UPat(Ops.COPY, name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
@@ -391,13 +392,13 @@ def schedule_uop(kernel:UOp, buffer_map:dict[UOp, UOp], var_vals:dict[Variable, 
   # substitute kernel sources for the target buffer
   ast = kernel.arg.ast.substitute({k:v for k,v in buffer_map.items() if k is not kernel.arg.ast}).sink()
   # add buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[kernel.src[0].buf_uop])
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[kernel.src[0].buf_uop], bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
   ast = graph_rewrite(ast, fix_kernel_ops, var_vals)
-  return ScheduleItem(ast, tuple(x.buf_uop.buffer for x in kernel.src), kernel.arg.metadata)
+  return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), kernel.arg.metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
