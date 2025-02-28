@@ -1,93 +1,104 @@
 #!/usr/bin/env python3
 import os
+import unittest
+from typing import List, Dict, Optional, Union
+
 # Set TYPED=1 to enable runtime type checking
 os.environ["TYPED"] = "1"
 
-# Ensure numpy is imported
-import numpy as np
-from typing import Optional
-
 # Import tinygrad after setting TYPED=1
 from tinygrad import Tensor, typechecked
-from tinygrad.helpers import fetch, getenv, Context
+from tinygrad.dtype import dtypes
 
 @typechecked
-def example_with_type_annotations(x: Tensor, scale: float = 1.0) -> Tensor:
-    return x * scale
+def func_with_tensor_param(x: Tensor) -> Tensor:
+  """Test function with tensor parameter annotation."""
+  return x
 
 @typechecked
-def function_with_multiple_types(x: Tensor, y: list, z: dict, flag: bool = True) -> Tensor:
-    if flag:
-        return x * len(y) if z else x
-    return x
+def func_with_float_param(x: Tensor, scale: float) -> Tensor:
+  """Test function with float parameter annotation."""
+  return x * scale
 
 @typechecked
-def function_with_optional(x: Tensor, y: Optional[float] = None) -> Tensor:
-    if y is not None:
-        return x * y
-    return x
+def func_with_complex_types(x: Tensor, y: List[Tensor], opts: Dict[str, Union[int, float]]) -> Tensor:
+  """Test function with complex type annotations."""
+  result = x  # Start with the original tensor
+  for t in y:
+    result += t
+  if "scale" in opts:
+    # Convert to float tensor to avoid dtype mismatch
+    result = result.float() * opts["scale"]
+  return result
 
-def test_valid_types():
-    # Basic valid type test
-    x = Tensor([1, 2, 3, 4])
-    y = example_with_type_annotations(x, 2.0)
-    print("Basic valid type test passed:", y.shape, y.dtype)
-    
-    # Multiple valid types test
-    y = function_with_multiple_types(x, [1, 2, 3], {"key": "value"}, True)
-    print("Multiple valid types test passed:", y.shape, y.dtype)
-    
-    # Optional parameter test
-    y = function_with_optional(x)
-    print("Optional parameter test passed:", y.shape, y.dtype)
-    y = function_with_optional(x, 2.5)
-    print("Optional parameter with value test passed:", y.shape, y.dtype)
+@typechecked
+def func_with_optional(x: Tensor, y: Optional[float] = None) -> Tensor:
+  """Test function with optional parameter."""
+  if y is not None:
+    return x * y
+  return x
 
-def test_invalid_types():
-    # Basic invalid type test
-    try:
-        x = "not a tensor"
-        y = example_with_type_annotations(x, 2.0)  # Should fail with TYPED=1
-        print("TYPED is not working: Basic test should have failed!")
-    except Exception as e:
-        print(f"Basic type check caught error as expected: {type(e).__name__}")
-    
-    # Invalid float type
-    try:
-        x = Tensor([1, 2, 3, 4])
-        y = example_with_type_annotations(x, "not a float")  # Should fail
-        print("TYPED is not working: Float type test should have failed!")
-    except Exception as e:
-        print(f"Float type check caught error as expected: {type(e).__name__}")
-    
-    # Invalid list type
-    try:
-        x = Tensor([1, 2, 3, 4])
-        y = function_with_multiple_types(x, "not a list", {"key": "value"}, True)
-        print("TYPED is not working: List type test should have failed!")
-    except Exception as e:
-        print(f"List type check caught error as expected: {type(e).__name__}")
-    
-    # Invalid dict type
-    try:
-        x = Tensor([1, 2, 3, 4])
-        y = function_with_multiple_types(x, [1, 2, 3], "not a dict", True)
-        print("TYPED is not working: Dict type test should have failed!")
-    except Exception as e:
-        print(f"Dict type check caught error as expected: {type(e).__name__}")
-    
-    # Invalid boolean flag
-    try:
-        x = Tensor([1, 2, 3, 4])
-        y = function_with_multiple_types(x, [1, 2, 3], {"key": "value"}, "not a boolean")
-        print("TYPED is not working: Boolean type test should have failed!")
-    except Exception as e:
-        print(f"Boolean type check caught error as expected: {type(e).__name__}")
+class TestTypeChecking(unittest.TestCase):
+  """Test suite for runtime type checking in tinygrad."""
+  
+  def setUp(self):
+    """Set up test fixtures."""
+    self.tensor = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float)  # use float dtype
+    self.tensor_list = [
+      Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float), 
+      Tensor([5.0, 6.0, 7.0, 8.0], dtype=dtypes.float)
+    ]
+    self.opts_dict = {"scale": 2.0, "offset": 1}
+
+  def test_tensor_param_valid(self):
+    """Test valid tensor parameter."""
+    result = func_with_tensor_param(self.tensor)
+    self.assertEqual(result.shape, (4,))
+
+  def test_tensor_param_invalid(self):
+    """Test invalid tensor parameter raises TypeError."""
+    with self.assertRaises(Exception):
+      func_with_tensor_param("not a tensor")
+
+  def test_float_param_valid(self):
+    """Test valid float parameter."""
+    result = func_with_float_param(self.tensor, 2.5)
+    self.assertEqual(result.shape, (4,))
+
+  def test_float_param_invalid(self):
+    """Test invalid float parameter raises TypeError."""
+    with self.assertRaises(Exception):
+      func_with_float_param(self.tensor, "not a float")
+
+  def test_complex_types_valid(self):
+    """Test valid complex type parameters."""
+    result = func_with_complex_types(self.tensor, self.tensor_list, self.opts_dict)
+    self.assertEqual(result.shape, (4,))
+
+  def test_complex_types_invalid_list(self):
+    """Test invalid list parameter raises TypeError."""
+    with self.assertRaises(Exception):
+      func_with_complex_types(self.tensor, "not a list", self.opts_dict)
+
+  def test_complex_types_invalid_dict(self):
+    """Test invalid dict parameter raises TypeError."""
+    with self.assertRaises(Exception):
+      func_with_complex_types(self.tensor, self.tensor_list, "not a dict")
+
+  def test_optional_param_none(self):
+    """Test optional parameter with None value."""
+    result = func_with_optional(self.tensor)
+    self.assertEqual(result.shape, (4,))
+
+  def test_optional_param_value(self):
+    """Test optional parameter with a value."""
+    result = func_with_optional(self.tensor, 2.5)
+    self.assertEqual(result.shape, (4,))
+  
+  def test_optional_param_invalid(self):
+    """Test invalid optional parameter raises TypeError."""
+    with self.assertRaises(Exception):
+      func_with_optional(self.tensor, "not a float")
 
 if __name__ == "__main__":
-    print(f"Running with TYPED={os.getenv('TYPED')}")
-    print("=== Testing Valid Types ===")
-    test_valid_types()
-    print("\n=== Testing Invalid Types ===")
-    test_invalid_types()
-    print("\n=== All Type Checking Tests Completed ===") 
+  unittest.main() 
