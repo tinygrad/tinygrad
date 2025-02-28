@@ -18,6 +18,8 @@ class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
   def current_device(self): return 0
+  def _is_in_bad_fork(self): return False
+  def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()

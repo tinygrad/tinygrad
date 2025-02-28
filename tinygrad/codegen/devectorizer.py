@@ -242,8 +242,6 @@ devectorize_load_store = PatternMatcher([
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
-  # TODO: add vectorized support to transcendental
-  (UPat((Ops.EXP2, Ops.LOG2, Ops.SIN), name="alu"), no_vectorized_alu),
   # fallback
   (UPat(Ops.INDEX, name="alu"), no_vectorized_alu),
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
