@@ -172,9 +172,20 @@ def avg_pool2d_backward(grad_out, self, kernel_size, stride=None, padding=0, cei
   out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
+@torch.library.impl("aten::replication_pad1d_backward", "privateuseone")
+def replication_pad1d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="replicate")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
 @torch.library.impl("aten::replication_pad2d_backward", "privateuseone")
-def replication_pad2d_backward(self, grad_out, padding):
-  # print(f"{self=}, {padding=}, {grad_out=}")
+def replication_pad2d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="replicate")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::replication_pad3d_backward", "privateuseone")
+def replication_pad3d_backward(grad_out, self, padding):
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.pad(self, padding, mode="replicate")
   return wrap(out.gradient(self, gradient=grad_out)[0])
@@ -415,9 +426,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten._upsample_nearest_exact1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
   "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
   "aten._upsample_nearest_exact2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
-  "aten.replication_pad2d": functools.partial(Tensor.pad, mode="replicate"),
-  # "aten.replication_pad2d_backward": lambda self, gradient, padding: Tensor.pad(self, padding, mode="replicate").backward(gradient),
   # ===
+  "aten.replication_pad1d": functools.partial(Tensor.pad, mode="replicate"),
+  "aten.replication_pad2d": functools.partial(Tensor.pad, mode="replicate"),
+  "aten.replication_pad3d": functools.partial(Tensor.pad, mode="replicate"),
   "aten.roll": Tensor.roll,
   "aten.where.self": lambda self, x, y: Tensor.where(self, x, y),
   "aten.logcumsumexp": Tensor.logcumsumexp,
