@@ -5,7 +5,6 @@ TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
-from tinygrad.ops import Ops
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
@@ -166,19 +165,6 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
     else:
       return wrap(unwrap(self)[:, :, start:end:step])
 
-# @torch.library.impl("aten::convolution_backward", "privateuseone")
-# TODO: fix this....
-def convolution_backward(grad_out, input, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=0, groups=1, output_mask=None):
-  if TORCH_DEBUG >= 1:
-    print(f"convolution_backward {input.shape=} {weight.shape=} {bias=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(*bias)
-  if not transposed:
-    out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
-  else:
-    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
-  grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
-  return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
-
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
@@ -245,8 +231,6 @@ decomps = [
   aten.logical_or,
   aten.leaky_relu_backward,
   aten.nll_loss2d_forward,
-  # aten.slice_backward,
-  # aten.upsample_linear1d,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -282,7 +266,7 @@ simple_tensor_methods = [
   # reduce
   "all", "any", "argmax", "argmin", "cumsum",
   # complex
-  "linspace"]
+  "avg_pool2d", "linspace"]
 
 tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
@@ -359,10 +343,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
-  # my changes
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.scatter.src": Tensor.scatter, # This might be wrong??
-  # ==== 
   "aten.gather": lambda self, dim, index: Tensor.gather(self, dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
@@ -379,7 +361,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.masked_fill_.Tensor": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
-  # my changes start here:
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
   "aten.acos": Tensor.acos,
@@ -396,9 +377,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter_add.out": lambda self, dim, index, src, out: out.replace(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')),
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
   "aten.avg_pool2d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
-  # "aten.avg_pool2d_backward": lambda grad_out, input, kernel_size, stride=None, padding=1, ceil_mode=False, count_include_pad=True, divisor_override=None: Tensor.avg_pool2d(input, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad).backward(grad_out),
   "aten.avg_pool3d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
-  # "aten.convolution": lambda self, weight, bias=None, stride=1, padding=0, dilation=1, transposed=False, output_padding=1, groups=1: Tensor.conv2d(self, weight, bias, groups, stride, dilation, padding) if not transposed else Tensor.conv_transpose2d(self, weight, bias, groups, stride, dilation, padding),
   "aten.cummax": Tensor.cummax,
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
   "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
@@ -408,7 +387,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logcumsumexp": Tensor.logcumsumexp,
   "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
-  # "aten.slice.Tensor": lambda self, dim=0, start=None, end=None, step=1: self[:, start:end:step] if dim else self[start:end:step, :],
   "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
   "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
   "aten.prod": lambda self: Tensor.prod(self),
@@ -419,21 +397,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.index_put": Tensor.assign,
   "aten.mul.Tensor": Tensor.mul,
-  # "aten.add.Tensor": Tensor.add,
-  # "aten.logical_or": Tensor.__bool__,
-  # "aten.logical_or.out": lambda self, s, out: out.replace(Tensor.__bool__(self)),
-  # "aten.nonzero": Tensor.nonzero,
-  # "aten.eye": lambda n, **kwargs: Tensor.eye(n),
-  # "aten.eye.m_out": lambda n, m, out: out.replace(Tensor.eye(m, n)),
-  # "aten.std": Tensor.std,
-  # "aten.mean": Tensor.mean,
-  # "aten.squeeze.dim": lambda self,dim: Tensor.squeeze(self, dim),
-  # "aten.unsqueeze": Tensor.unsqueeze,
-  # "aten.slice_backward": lambda self: self,
-  # "aten.amax": Tensor.argmax,
-  # "aten.upsample_linear1d": Tensor.interpolate,
-  # "aten.upsample_linear1d": lambda self,size,align: Tensor.interpolate(self, size, mode="linear", align_corners=align),
-  # "aten.upsample_linear1d_backward.grad_input": lambda self, input_size, op_size, align, grad_input: Tensor.interpolate(self, op_size, mode="linear", align_corners=align).backward(grad_input),
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
 }}
 
