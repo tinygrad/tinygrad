@@ -83,7 +83,7 @@ class OnnxNode:
 required_input_python_consts: dict[str, tuple[int, ...]] = {
   "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
   "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
-  "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
+  "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4), "Attention": (7,),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
@@ -199,6 +199,30 @@ def get_onnx_ops():
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
     return _onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))
+
+  # copied from extra/models/llama.py
+  def _precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+    freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+    freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+    return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
+
+  # copied from extra/models/llama.py
+  def _complex_mult(A, c, d):
+    a,b = A[..., 0:1], A[..., 1:2]
+    ro = a*c - b*d
+    co = a*d + b*c
+    return ro.cat(co, dim=-1)
+
+  # copied from extra/models/llama.py
+  def _apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
+    assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
+    xq = xq.reshape(*xq.shape[0:-1], -1, 2)
+    xk = xk.reshape(*xk.shape[0:-1], -1, 2)
+    assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
+    c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+    xq_out = _complex_mult(xq, c, d)
+    xk_out = _complex_mult(xk, c, d)
+    return xq_out.flatten(3), xk_out.flatten(3)
 
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
 
@@ -727,6 +751,12 @@ def get_onnx_ops():
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
+
+  def DynamicQuantizeLinear(x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    scale = ((x.max().maximum(0) - x.min().minimum(0)) / 255).float()
+    zero_point = _clamp_cast((x.min()._inverse() / scale).round(), dtypes.uint8)
+    y = _clamp_cast(((x / scale).round() + zero_point), dtypes.uint8)
+    return y, scale, zero_point
 
   def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point: Tensor|int, B:Tensor|None=None, **opts):
