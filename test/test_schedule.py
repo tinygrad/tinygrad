@@ -89,6 +89,16 @@ class TestSchedule(unittest.TestCase):
     a_np[:4, :1] = b_np
     np.testing.assert_equal(a.numpy(), a_np)
 
+  def test_setitem_row_offset(self):
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      a = Tensor.full((4, 4), 1).contiguous().realize()
+      b = Tensor.full((1, 1), 0).contiguous().realize()
+    a[2:4, :1] = b
+    a_np = np.full((4, 4), 1)
+    b_np = np.full((1, 1), 0)
+    a_np[2:4, :1] = b_np
+    np.testing.assert_equal(a.numpy(), a_np)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   def test_expand_buffer_before_cast(self):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
