@@ -3289,7 +3289,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
+    return a - a.div(b, rounding_mode="floor") * b
 
   def bitwise_xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
