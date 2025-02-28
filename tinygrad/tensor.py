@@ -3251,7 +3251,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
 
-  def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def div(self, x:Union[Tensor, ConstType], reverse=False, rounding_mode=None) -> Tensor:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
@@ -3271,7 +3271,12 @@ class Tensor(SimpleMathTrait):
     ```
     """
     numerator, denominator = self._broadcasted(x, reverse)
-    return numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
+    if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
+    if rounding_mode == "floor": return d.floor().cast(output_dtype)
+    if rounding_mode is not None: raise RuntimeError(f"{rounding_mode=} is not supported")
+    return d
 
   def mod(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
