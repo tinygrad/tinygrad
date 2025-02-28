@@ -92,7 +92,7 @@ class OneCycleLR(LR_Scheduler):
     ).cast(self.optimizer.lr.dtype)
 
 class LambdaLR(LR_Scheduler):
-  def __init__(self, optimizer: Optimizer, lr_lambda: Callable[[int],float]):
+  def __init__(self, optimizer:Optimizer, lr_lambda:Callable[[int], float]):
     super().__init__(optimizer)
     self.lr_lambda = lr_lambda
     self.initial_lr = self.optimizer.lr.numpy()[0]

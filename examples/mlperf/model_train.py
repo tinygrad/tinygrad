@@ -353,6 +353,8 @@ def train_retinanet():
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from tinygrad.helpers import colored
+  from tinygrad.nn.optim import Optimizer
+  from typing import Iterator
   
   import numpy as np
 
@@ -361,18 +363,18 @@ def train_retinanet():
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASE_DIR = getenv("BASE_DIR", BASEDIR)
   BENCHMARK = getenv("BENCHMARK")
-  config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  config["gpus"] = GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
 
   for x in GPUS: Device[x]
   print(f"training on {GPUS}")
 
-  def _freeze_backbone_layers(backbone, trainable_layers):
+  def _freeze_backbone_layers(backbone:resnet.ResNet, trainable_layers:int):
     layers_to_train = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
     for k, v in get_state_dict(backbone).items():
       if all([not k.startswith(layer) for layer in layers_to_train]):
         v.requires_grad = False
 
-  def _data_get(it, val=False):
+  def _data_get(it:Iterator[tuple[Tensor, ...]], val:bool=False):
     if val:
       x, img_ids, img_sizes, cookie = next(it)
       return x.shard(GPUS, axis=0).realize(), img_ids, img_sizes, cookie
@@ -380,7 +382,7 @@ def train_retinanet():
     x, y_boxes, y_labels, matches, anchors, cookie = next(it)
     return x.shard(GPUS, axis=0).realize(), y_boxes.shard(GPUS, axis=0), y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), anchors.shard(GPUS, axis=0), cookie
   
-  def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
+  def _create_lr_scheduler(optim:Optimizer, start_iter:int, warmup_iters:int, warmup_factor:float):
     def _lr_lambda(e):
       e = e + start_iter
       if e >= warmup_iters: return 1.0
@@ -446,7 +448,7 @@ def train_retinanet():
   lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, lr_warmup_factor)
 
   # ** resume from checkpointing **
-  if ckpt:=getenv("RESUME", ""):
+  if (ckpt:=getenv("RESUME", "")):
     load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
     start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
@@ -456,7 +458,7 @@ def train_retinanet():
     import wandb
 
     wandb_args = {"project": "MLPerf-RetinaNet"}
-    if (wandb_id := getenv("WANDB_RESUME", "")):
+    if (wandb_id:=getenv("WANDB_RESUME", "")):
       wandb_args["id"] = wandb_id
       wandb_args["resume"] = "must"
 

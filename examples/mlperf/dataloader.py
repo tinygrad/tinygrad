@@ -1,5 +1,5 @@
 import os, random, pickle, queue
-from typing import List, Optional
+from typing import List
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -351,8 +351,8 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 ### RetinaNet
 
 def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue,
-                        imgs:Tensor, boxes:Tensor, labels:Tensor, matches:Optional[Tensor]=None,
-                        anchors:Optional[Tensor]=None, seed:Optional[int]=None):
+                        imgs:Tensor, boxes:Tensor, labels:Tensor, matches:Tensor|None=None,
+                        anchors:Tensor|None=None, seed:int|None=None):
   from extra.datasets.openimages import image_load, random_horizontal_flip, resize
   from examples.mlperf.helpers import box_iou, find_matches, generate_anchors
   import torch
@@ -386,7 +386,7 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
     queue_out.put(idx)
   queue_out.put(None)
 
-def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, shuffle:bool=True, seed:Optional[int]=None):
+def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, shuffle:bool=True, seed:int|None=None):
   def _enqueue_batch(bc):
     from extra.datasets.openimages import prepare_target
     for idx in range(bc * batch_size, (bc+1) * batch_size):

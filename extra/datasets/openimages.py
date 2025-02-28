@@ -6,7 +6,6 @@ from pathlib import Path
 import boto3, botocore
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import fetch, tqdm, getenv
-from typing import Optional, Dict, Tuple, Union, List
 import pandas as pd
 import concurrent.futures
 
@@ -186,7 +185,7 @@ def random_horizontal_flip(img, tgt, prob=0.5):
     tgt["boxes"][:, [0, 2]] = w - tgt["boxes"][:, [2, 0]]
   return img, tgt
 
-def resize(img:Image, tgt:Optional[Dict[str, Union[np.ndarray, Tuple]]]=None, size:Tuple[int, int]=(800, 800)) -> Union[Tuple[np.ndarray, np.ndarray, Tuple], Tuple[np.ndarray, Tuple]]:
+def resize(img:Image, tgt:dict[str, np.ndarray|tuple]|None=None, size:tuple[int, int]=(800, 800)) -> tuple[np.ndarray, np.ndarray, tuple]|tuple[np.ndarray, tuple]:
   import torchvision.transforms.functional as F
   img_size = img.size[::-1]
   img = F.resize(img, size=size)
@@ -206,7 +205,7 @@ def resize(img:Image, tgt:Optional[Dict[str, Union[np.ndarray, Tuple]]]=None, si
 
   return img, img_size
 
-def normalize(img:Tensor, device:Optional[List[str]] = None):
+def normalize(img:Tensor, device:list[str]|None = None):
   mean = Tensor([0.485, 0.456, 0.406], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   std = Tensor([0.229, 0.224, 0.225], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   img = ((img.permute([0, 3, 1, 2]) / 255.0) - mean) / std

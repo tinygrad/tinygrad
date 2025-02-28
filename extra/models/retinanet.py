@@ -1,7 +1,5 @@
-from typing import Optional, Union, Dict
-
 import math
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
 from examples.mlperf.helpers import generate_anchors, BoxCoder
@@ -37,7 +35,7 @@ def decode_bbox(offsets, anchors):
   return np.stack([pred_x1, pred_y1, pred_x2, pred_y2], axis=1, dtype=np.float32)
 
 class RetinaNet:
-  def __init__(self, backbone: ResNet, num_classes=264, num_anchors=9, scales=None, aspect_ratios=None):
+  def __init__(self, backbone:ResNet, num_classes:int=264, num_anchors:int=9, scales:list[int]|None=None, aspect_ratios:list[float]|None=None):
     assert isinstance(backbone, ResNet)
     scales = tuple((i, int(i*2**(1/3)), int(i*2**(2/3))) for i in 2**np.arange(5, 10)) if scales is None else scales
     aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
@@ -133,12 +131,12 @@ class RetinaNet:
     return detections
 
 class ClassificationHead:
-  def __init__(self, in_channels, num_anchors, num_classes, prior_prob=0.01):
+  def __init__(self, in_channels:int, num_anchors:int, num_classes:int, prior_prob:float=0.01):
     self.num_classes = num_classes
     self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.cls_logits = Conv2dNormal(in_channels, num_anchors * num_classes, kernel_size=3, padding=1, prior_prob=prior_prob)
 
-  def __call__(self, x:Tensor, labels:Optional[Tensor] = None, matches:Optional[Tensor] = None):
+  def __call__(self, x:Tensor, labels:Tensor|None=None, matches:Tensor|None=None):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     out = out[0].cat(*out[1:], dim=1)
 
@@ -156,7 +154,7 @@ class ClassificationHead:
     return loss
 
 class RegressionHead:
-  def __init__(self, in_channels, num_anchors, box_coder:Optional[BoxCoder] = None):
+  def __init__(self, in_channels:int, num_anchors:int, box_coder:BoxCoder|None=None):
     self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
@@ -164,7 +162,7 @@ class RegressionHead:
       box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0), apply_to_remove=False)
     self.box_coder = box_coder
 
-  def __call__(self, x:Tensor, bboxes:Optional[Tensor] = None, matches:Optional[Tensor] = None, anchors:Optional[Tensor] = None):
+  def __call__(self, x:Tensor, bboxes:Tensor|None=None, matches:Tensor|None=None, anchors:Tensor|None=None):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     out = out[0].cat(*out[1:], dim=1)
 
@@ -183,11 +181,11 @@ class RegressionHead:
     return loss
 
 class RetinaHead:
-  def __init__(self, in_channels, num_anchors, num_classes):
+  def __init__(self, in_channels:int, num_anchors:int, num_classes:int):
     self.classification_head = ClassificationHead(in_channels, num_anchors, num_classes)
     self.regression_head = RegressionHead(in_channels, num_anchors)
 
-  def __call__(self, x:Tensor, **kwargs) -> Union[Tensor, Dict[str, Tensor]]:
+  def __call__(self, x:Tensor, **kwargs) -> Tensor|dict[str, Tensor]:
     if Tensor.training:
       return {
         "classification_loss": self.classification_head(x, labels=kwargs["labels"], matches=kwargs["matches"]),
@@ -199,7 +197,7 @@ class RetinaHead:
       return out
 
 class ResNetFPN:
-  def __init__(self, resnet, out_channels=256, returned_layers=[2, 3, 4]):
+  def __init__(self, resnet:ResNet, out_channels:int=256, returned_layers:list[int]=[2, 3, 4]):
     self.out_channels = out_channels
     self.body = resnet
     in_channels_list = [(self.body.in_planes // 8) * 2 ** (i - 1) for i in returned_layers]
@@ -209,7 +207,7 @@ class ResNetFPN:
   def compute_grid_sizes(self, input_size):
     return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor):
     out = self.body.bn1(self.body.conv1(x)).relu()
     out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.body.layer1)
@@ -219,12 +217,12 @@ class ResNetFPN:
     return self.fpn([p3, p4, p5])
 
 class ExtraFPNBlock:
-  def __init__(self, in_channels, out_channels):
+  def __init__(self, in_channels:int, out_channels:int):
     self.p6 = Conv2dKaimingUniform(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
     self.p7 = Conv2dKaimingUniform(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
     self.use_P5 = in_channels == out_channels
 
-  def __call__(self, p, c):
+  def __call__(self, p:Tensor, c:Tensor):
     p5, c5 = p[-1], c[-1]
     x = p5 if self.use_P5 else c5
     p6 = self.p6(x)
@@ -233,14 +231,14 @@ class ExtraFPNBlock:
     return p
 
 class FPN:
-  def __init__(self, in_channels_list, out_channels, extra_blocks=None):
+  def __init__(self, in_channels_list:list[int], out_channels:int, extra_blocks:ExtraFPNBlock|None=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
       self.inner_blocks.append(Conv2dKaimingUniform(in_channels, out_channels, kernel_size=1))
       self.layer_blocks.append(Conv2dKaimingUniform(out_channels, out_channels, kernel_size=3, padding=1))
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 
-  def __call__(self, x):
+  def __call__(self, x:Tensor):
     last_inner = self.inner_blocks[-1](x[-1])
     results = [self.layer_blocks[-1](last_inner)]
     for idx in range(len(x) - 2, -1, -1):
