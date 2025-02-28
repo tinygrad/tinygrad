@@ -226,6 +226,16 @@ def cummax(self, dim):
 def view_dtype(self, dtype):
   return wrap(unwrap(self).bitcast(_from_torch_dtype(dtype)))
 
+@torch.library.impl("aten::avg_pool2d", "privateuseone")
+def avg_pool2d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride == []: stride = None
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+
+@torch.library.impl("aten::avg_pool3d", "privateuseone")
+def avg_pool3d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride == []: stride = None
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
@@ -440,8 +450,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
   "aten.scatter_add.out": lambda self, dim, index, src, out: out.replace(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')),
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
-  "aten.avg_pool2d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
-  "aten.avg_pool3d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
   # fix backward for these
   "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
   # "aten.upsample_linear1d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners).backward(Tensor(gradient)),
