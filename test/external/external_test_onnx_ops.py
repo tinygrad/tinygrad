@@ -188,10 +188,10 @@ class TestContribOnnxOps(TestOnnxOps):
 
     with self.subTest(test_case="round_away_from_zero"):
       inputs = {
-        "A": np.array([1, 1], dtype=np.int8),
+        "A": np.array([1, 1, 1, 1], dtype=np.int8),
         "A_scale": np.array(1, dtype=np.float32),
         "A_zero_point": np.array(0, dtype=np.int8),
-        "B": np.array([1, 5], dtype=np.int8),
+        "B": np.array([1, 5, -3, -7], dtype=np.int8),
         "B_scale": np.array(1, dtype=np.float32),
         "B_zero_point": np.array(0, dtype=np.int8),
         "C_scale": np.array(4, dtype=np.float32),
