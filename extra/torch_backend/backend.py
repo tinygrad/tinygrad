@@ -99,7 +99,7 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
   # TODO: supprt stride [] in tinygrad?
   if stride is not None and len(stride) == 0: stride = None
   # TODO: support return_indices in tinygrad
-  ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode)
+  ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode).cast(_from_torch_dtype(self.dtype))
   # TODO: this is wrong
   return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
@@ -214,6 +214,17 @@ def upsample_nearest1d_backward(grad_out, out_size, input_size, scales=None):
   input = Tensor.zeros(*input_size)
   out = Tensor.interpolate(input, out_size,  mode="nearest")
   return wrap(out.gradient(out, gradient=unwrap(grad_out))[-1])
+
+@torch.library.impl("aten::cummax", "privateuseone")
+def cummax(self, dim):
+  self = unwrap(self)
+  values = Tensor.cummax(self, dim)
+  indicies = Tensor.max(self, dim)
+  return (wrap(values), wrap(indicies))
+
+@torch.library.impl("aten::view.dtype", "privateuseone")
+def view_dtype(self, dtype):
+  return wrap(unwrap(self).bitcast(_from_torch_dtype(dtype)))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
@@ -350,7 +361,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
-
+  "aten.prod.int_out": Tensor.prod,
+  "aten.div.out_mode": Tensor.div,
 }}
 
 # we add the "out" here
@@ -383,6 +395,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
   "aten.mm": Tensor.matmul,
+  "aten.mv": Tensor.matmul,
   "aten.dot": Tensor.dot,
   "aten.prod": Tensor.prod,
   "aten.isnan": Tensor.isnan,
@@ -429,7 +442,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
   "aten.avg_pool2d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
   "aten.avg_pool3d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
-  "aten.cummax": Tensor.cummax,
   # fix backward for these
   "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
   # "aten.upsample_linear1d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners).backward(Tensor(gradient)),
@@ -456,7 +468,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
   "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
   "aten.prod": lambda self: Tensor.prod(self),
-  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
   "aten.repeat": Tensor.repeat,
   "aten.split.Tensor": Tensor.split,
   "aten.lerp.Tensor": Tensor.lerp,
