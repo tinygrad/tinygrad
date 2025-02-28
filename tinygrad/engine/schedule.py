@@ -256,10 +256,23 @@ def create_kernel(b:UOp, x:UOp):
   # NOTE: we add a reshape here so that the downstream shapes match
   return b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))).reshape(x.shape)
 
+def remove_offset(self) -> ShapeTracker:
+  """Creates a ShapeTracker with the same shape and strides but zero offset."""
+  if all(v.offset == 0 for v in self.views):
+    return self  # No need to modify if offset is already zero
+
+  new_views = []
+  offset = 0
+  for v in self.views:
+    offset += v.offset  # Accumulate offsets
+    new_views.append(View.create(v.shape, v.strides, offset=0, mask=v.mask))
+
+  return ShapeTracker(tuple(new_views))
+
 def swizzle_assign(buf:UOp, view:UOp, x:UOp):
   st = view.st
   if view.size == buf.size: return create_kernel(buf, x.view(st))
-  if (offset:=view.arg.views[0].offset): st = ShapeTracker((View.create(st.shape, st.views[0].strides, offset=0),))
+  if (offset:=view.arg.views[0].offset): st = remove_offset(st)
   return create_kernel(UOp(Ops.BUFFER_VIEW, buf.dtype, (buf,), (view.size, offset)), x.view(st))
 
 create_kernels = merge_views+PatternMatcher([
