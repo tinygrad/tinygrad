@@ -190,12 +190,30 @@ def replication_pad3d_backward(grad_out, self, padding):
   out = Tensor.pad(self, padding, mode="replicate")
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-@torch.library.impl("aten::upsample_linear1d_backward", "privateuseone")
-def upsample_linear1d_backward(self, size, grad_out, align_corners=False):
-  # print(f"{self=}, {padding=}, {grad_out=}")
-  # self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.interpolate(unwrap(self), size, mode="linear", align_corners=align_corners)
-  return wrap(out.backward(gradient=Tensor(grad_out))[0])
+@torch.library.impl("aten::reflection_pad1d_backward", "privateuseone")
+def reflection_pad1d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="reflect")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::reflection_pad2d_backward", "privateuseone")
+def reflection_pad2d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="reflect")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::reflection_pad3d_backward", "privateuseone")
+def reflection_pad3d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="reflect")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::upsample_nearest1d_backward", "privateuseone")
+def upsample_nearest1d_backward(grad_out, out_size, input_size, scales=None):
+  print(f"upsample {grad_out=}, {out_size=}, {input_size=}, {scales=}")
+  input = Tensor.zeros(*input_size)
+  out = Tensor.interpolate(input, out_size,  mode="nearest")
+  return wrap(out.gradient(out, gradient=unwrap(grad_out))[-1])
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
@@ -332,6 +350,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
+
 }}
 
 # we add the "out" here
@@ -390,8 +409,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
-  "aten.masked_fill_.Tensor": lambda self,mask,value: self.assign(mask.where(self, value)),
+  "aten.masked_fill_.Scalar": Tensor.masked_fill,
+  "aten.masked_fill_.Tensor": Tensor.masked_fill,
   "aten.multinomial": Tensor.multinomial,
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
@@ -415,7 +434,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
   # "aten.upsample_linear1d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners).backward(Tensor(gradient)),
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
-  "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  # "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
   "aten.upsample_nearest2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
   "aten.upsample_nearest2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
   "aten.upsample_bilinear2d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
@@ -437,13 +456,16 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
   "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
   "aten.prod": lambda self: Tensor.prod(self),
+  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
   "aten.repeat": Tensor.repeat,
   "aten.split.Tensor": Tensor.split,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
   "aten.index_put": Tensor.assign,
   "aten.mul.Tensor": Tensor.mul,
+  "aten.reflection_pad1d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.reflection_pad3d": functools.partial(Tensor.pad, mode="reflect"),
 }}
 
 def wrap_fxn(k,f):
