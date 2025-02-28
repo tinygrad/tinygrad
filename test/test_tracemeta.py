@@ -2,13 +2,13 @@
 
 import unittest
 from tinygrad import Tensor, Context, TRACEMETA
-from tinygrad.ops import UOp, all_metadata
+from tinygrad.ops import all_metadata
 from tinygrad.helpers import ContextVar
 
 class TestTraceMeta(unittest.TestCase):
   def test_tracemeta_default(self):
     t = Tensor([1,2,3,4])
-    t2 = t + t
+    _ = t + t
 
     # should be metadata for the add operation
     self.assertTrue(any(all_metadata.values()))
@@ -18,7 +18,7 @@ class TestTraceMeta(unittest.TestCase):
 
     with Context(TRACEMETA=0):
       t = Tensor([1,2,3,4])
-      t2 = t + t
+      _ = t + t
 
       # no metadata for operations inside the context
       self.assertEqual(len(all_metadata), 0)
@@ -35,7 +35,7 @@ class TestTraceMeta(unittest.TestCase):
       ContextVar._cache["TRACEMETA"].value = 0
 
       t = Tensor([1,2,3,4])
-      t2 = t + t
+      _ = t + t
       # should be no metadata
       self.assertEqual(len(all_metadata), 0)
     finally:
