@@ -446,7 +446,7 @@ def train_retinanet():
   lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, lr_warmup_factor)
 
   # ** resume from checkpointing **
-  if (ckpt:=getenv("RESUME", "")):
+  if ckpt:=getenv("RESUME", ""):
     load_training_state(model, optim, lr_scheduler, safe_load(ckpt))
     start_epoch = int(lr_scheduler.epoch_counter.item() / steps_in_train_epoch)
     print(f"resuming from {ckpt} at epoch {start_epoch}")
@@ -456,7 +456,7 @@ def train_retinanet():
     import wandb
 
     wandb_args = {"project": "MLPerf-RetinaNet"}
-    if (wandb_id:=getenv("WANDB_RESUME", "")):
+    if (wandb_id := getenv("WANDB_RESUME", "")):
       wandb_args["id"] = wandb_id
       wandb_args["resume"] = "must"
 
