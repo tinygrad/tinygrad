@@ -169,7 +169,8 @@ class DSPDevice(Compiled):
     except (OSError, PermissionError):
       # DSP might ask for a connection reset or just fail with operation not permitted, try to reset connection.
       self.init_dsp()
-      _exec_lib()
+      try: _exec_lib()
+      except (OSError, PermissionError) as e: raise RuntimeError(e)
 
   def init_dsp(self):
     if hasattr(self, 'rpc_fd'):

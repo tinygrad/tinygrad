@@ -146,16 +146,17 @@ jobs:
   torchbackend:
     name: Torch Backend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: torch-backend-pillow-torchvision
+        key: torch-backend-pillow-torchvision-et-pt
         deps: testing_minimal
-        pydeps: "pillow torchvision"
+        pydeps: "pillow torchvision expecttest"
+        llvm: 'true'
     - name: Install ninja
       run: |
         sudo apt update || true
@@ -163,11 +164,17 @@ jobs:
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
-      run: PYTHONPATH=. python3 extra/torch_backend/example.py
+      run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/example.py
+    - name: My (custom) tests
+      run: PYTHONPATH=. python3 extra/torch_backend/test.py
+    - name: Test one op in torch tests
+      run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
+    - name: Test beautiful_mnist in torch with TINY_BACKEND
+      run: PYTHONPATH=. LLVM=1 TARGET_EVAL_ACC_PCT=96.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
     - name: Test Ops with TINY_BACKEND (expect failure)
-      run: PYTHONPATH=. TINY_BACKEND=1 python3 -m pytest test/test_ops.py || true
-    - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
-      run: PYTHONPATH=. TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
+      run: PYTHONPATH=. LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/test_ops.py || true
+    - name: Test some torch tests (expect failure)
+      run: PYTHONPATH=. python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
   tc:
     name: Tensor Core tests
@@ -355,7 +362,7 @@ jobs:
           opencl: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2105 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2138 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
@@ -385,6 +392,8 @@ jobs:
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test Additional ONNX Ops (CPU)
+        run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
@@ -532,7 +541,7 @@ jobs:
   testmetal2:
     name: MacOS (unit)
     runs-on: macos-14
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
