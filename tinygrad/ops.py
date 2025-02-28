@@ -152,8 +152,9 @@ class Ops(FastEnum):
   # device
   DEVICE = auto()
   MULTI = auto()
-  CUSTOM = auto()
-  CUSTOMI = auto()
+
+  # CUSTOMI is inline
+  CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
