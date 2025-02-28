@@ -4013,7 +4013,7 @@ class Tensor(SimpleMathTrait):
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
-    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
+    if _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
