@@ -380,10 +380,10 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...]
 
-def schedule_uop(kernel:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
+def schedule_uop(kernel:UOp, buffer_map:dict[UOp, UOp], var_vals:dict[Variable, int]) -> ScheduleItem:
   assert kernel.op is Ops.KERNEL, f"kernel isn't kernel, it's {kernel.op}"
   # substitute kernel sources for the target buffer
-  ast = kernel.arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in kernel.src if s.op is Ops.ASSIGN}).sink()
+  ast = kernel.arg.ast.substitute({k:v for k,v in buffer_map.items() if k is not kernel.arg.ast}).sink()
   # add buffer ops
   ast = graph_rewrite(ast, add_buffer_ops, bufs:=[s.buf_uop for s in kernel.src], bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
@@ -423,10 +423,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
+  buffer_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+      buffer_map[a.src[1].arg.ast] = a.src[0]
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
@@ -467,7 +469,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    schedule.append(schedule_uop(u.src[1], var_vals))
+    schedule.append(schedule_uop(u.src[1], buffer_map, var_vals))
     # increment the refcount of the target buf (this is required by the JIT and memory planner)
     u.buf_uop.buffer.ref(1)
     for x in children.get(u, []):
