@@ -1,7 +1,7 @@
 import sys, atexit, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
+from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites
 from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv, pluralize
@@ -139,8 +139,8 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # always realize ASSIGN/CONTIGUOUS/COPY
+  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}, name="src"),)), realize_before_view),
   # realize before COPY
@@ -238,7 +238,7 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.BUFFER_VIEW}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
@@ -274,9 +274,9 @@ def load_buf(ctx:list[UOp], x:UOp):
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), load_buf),
-  # STORE (except for COPY/BUFFER_VIEW)
-  (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="x"), load_buf),
+  # STORE (except for COPY)
+  (UPat(Ops.SINK, src=(UPat(Ops.COPY, name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
 ])
@@ -391,8 +391,6 @@ def schedule_uop(kernel:UOp, buffer_map:dict[UOp, UOp], var_vals:dict[Variable, 
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
   ast = graph_rewrite(ast, fix_kernel_ops, var_vals)
-  # create subbuffer
-  if ast.op is Ops.BUFFER_VIEW: buffers[bufs[0]] = (base:=bufs[1].buffer).view(ast.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
   return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), kernel.arg.metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
@@ -427,10 +425,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+    elif a is not None and a.op is Ops.BUFFER_VIEW and a.src[0].op is Ops.ASSIGN: becomes_map[k] = a.replace(src=(a.src[0].buf_uop,))
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
-      if v.base.op is Ops.BUFFER: becomes_map[k] = v
+      if v.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: becomes_map[k] = v
       if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
