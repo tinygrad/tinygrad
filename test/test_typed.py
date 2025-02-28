@@ -40,12 +40,12 @@ def func_with_optional(x: Tensor, y: Optional[float] = None) -> Tensor:
 
 class TestTypeChecking(unittest.TestCase):
   """Test suite for runtime type checking in tinygrad."""
-  
+
   def setUp(self):
     """Set up test fixtures."""
     self.tensor = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float)  # use float dtype
     self.tensor_list = [
-      Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float), 
+      Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float),
       Tensor([5.0, 6.0, 7.0, 8.0], dtype=dtypes.float)
     ]
     self.opts_dict = {"scale": 2.0, "offset": 1}
@@ -94,11 +94,11 @@ class TestTypeChecking(unittest.TestCase):
     """Test optional parameter with a value."""
     result = func_with_optional(self.tensor, 2.5)
     self.assertEqual(result.shape, (4,))
-  
+
   def test_optional_param_invalid(self):
     """Test invalid optional parameter raises TypeError."""
     with self.assertRaises(Exception):
       func_with_optional(self.tensor, "not a float")
 
 if __name__ == "__main__":
-  unittest.main() 
+  unittest.main()
