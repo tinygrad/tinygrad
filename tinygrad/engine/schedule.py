@@ -59,6 +59,9 @@ def create_buffer_view(tr:UOp, x:UOp):
   if not tr.device.startswith("DISK"): return None
   return UOp(Ops.BUFFER_VIEW, tr.dtype, (x.base,), (tr.size, unwrap(x.st).views[0].offset)).reshape(tr.shape)
 
+def swizzle_assign(buf:UOp, view:UOp, b:UOp):
+  if (sti:=unwrap(view.st).invert(buf.shape)) is not None: return buf.assign(b.view(sti)).reshape(b.shape)
+
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -98,6 +101,10 @@ sym = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
+  # support for storing to a non-contiguous ShapeTracker if we're assigning to a view
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="buf"),), name="view"), UPat.var("b"))), swizzle_assign),
+  # if we're assigning a const ensure it's contiguous
+  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.cvar("b"))), lambda a,b: a.assign(b.contiguous()) if not b.st.contiguous else None),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="tr"), create_buffer_view),
   # put UnaryOps before EXPANDs
@@ -275,10 +282,12 @@ def load_buf(ctx:list[UOp], x:UOp):
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="x"), load_buf),
+  # remove assign
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"))), lambda x:x),
   # STORE (except for COPY)
   (UPat(Ops.SINK, src=(UPat(Ops.COPY, name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
-   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
+   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), (x.st+x.base.st).to_uop(), x.base).sink()),
 ])
 
 # ** push views to buffer ops
@@ -320,9 +329,6 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([
-  # STORE(.., ASSIGN(VIEW(BUFFER), new_val)) -> VIEW(STORE(.., new_val))
-  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat.assign(UPat.var("target"), UPat.var("val")))),
-   lambda b,target,st,val: apply_swizzle(UOp.store(b, st, val).view(target.st))),
   # STORE is the last child, so we just merge the ShapeTrackers and store the base
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.VIEW, src=(UPat.var("val"),)))), lambda b,st,val: UOp.store(b, st.view(val.st), val)),
   # REDUCE(src.view(contiguous=False)) -> REDUCE(src.view(contiguous=True)).view()
@@ -385,7 +391,7 @@ def schedule_uop(kernel:UOp, buffer_map:dict[UOp, UOp], var_vals:dict[Variable, 
   # substitute kernel sources for the target buffer
   ast = kernel.arg.ast.substitute({k:v for k,v in buffer_map.items() if k is not kernel.arg.ast}).sink()
   # add buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[kernel.src[0].buf_uop], bottom_up=True)
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[kernel.src[0].buf_uop])
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
