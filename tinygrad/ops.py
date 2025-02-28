@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, _METADATA, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, dedup
+from tinygrad.helpers import PICKLE_BUFFERS, dedup, TRACEMETA
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
@@ -229,7 +229,7 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
     for s in src: s.children.add(ref)
     # NOTE: this will soon be set by Tensor once we remove function.py
-    if (metadata:=_METADATA.get()) is not None: all_metadata[created] = metadata
+    if (metadata:=_METADATA.get()) is not None and TRACEMETA > 0: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
