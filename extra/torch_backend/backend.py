@@ -127,7 +127,10 @@ def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+  if not transposed:
+    return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+                                   groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
@@ -135,9 +138,82 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0])
-  out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  if not transposed:
+    out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  else:
+    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
+
+@torch.library.impl("aten::slice.Tensor", "privateuseone")
+def slice_tensor(self, dim=0, start=None, end=None, step=1):
+  # TODO: Do we need more dims?
+  # TODO: rewrite this...
+  print(f"{self.shape=}")
+  if self.ndim == 1:
+    return wrap(unwrap(self)[start:end:step])
+  elif self.ndim == 2:
+    if dim == 0:
+      return wrap(unwrap(self)[start:end:step, :])
+    else:
+      return wrap(unwrap(self)[:, start:end:step])
+  else:
+    if dim == 0:
+      return wrap(unwrap(self)[start:end:step, :, :])
+    elif dim == 1:
+      return wrap(unwrap(self)[:, start:end:step, :])
+    else:
+      return wrap(unwrap(self)[:, :, start:end:step])
+
+@torch.library.impl("aten::avg_pool2d_backward", "privateuseone")
+def avg_pool2d_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride == []: stride = None
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::replication_pad1d_backward", "privateuseone")
+def replication_pad1d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="replicate")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::replication_pad2d_backward", "privateuseone")
+def replication_pad2d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="replicate")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::replication_pad3d_backward", "privateuseone")
+def replication_pad3d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="replicate")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::reflection_pad1d_backward", "privateuseone")
+def reflection_pad1d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="reflect")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::reflection_pad2d_backward", "privateuseone")
+def reflection_pad2d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="reflect")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::reflection_pad3d_backward", "privateuseone")
+def reflection_pad3d_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="reflect")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::upsample_nearest1d_backward", "privateuseone")
+def upsample_nearest1d_backward(grad_out, out_size, input_size, scales=None):
+  print(f"upsample {grad_out=}, {out_size=}, {input_size=}, {scales=}")
+  input = Tensor.zeros(*input_size)
+  out = Tensor.interpolate(input, out_size,  mode="nearest")
+  return wrap(out.gradient(out, gradient=unwrap(grad_out))[-1])
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
@@ -154,7 +230,7 @@ def _copy_from(src, dest, non_blocking=False):
 
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
-  unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
+  return wrap(unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True))
 
 # register some decompositions
 from torch._decomp import get_decompositions
@@ -169,6 +245,7 @@ decomps = [
   aten.threshold_backward,
   aten.softplus_backward,
   aten.elu,  # elu has a scale + input_scale param
+  aten.elu_backward,
   aten.softplus,
   aten.threshold,
   aten.nll_loss_forward,
@@ -195,6 +272,15 @@ decomps = [
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
+  aten.logical_and,
+  aten.cumprod,
+  aten.eye,
+  aten.binary_cross_entropy,
+  aten.binary_cross_entropy_backward,
+  aten.hardsigmoid_backward,
+  aten.logical_or,
+  aten.leaky_relu_backward,
+  aten.nll_loss2d_forward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -253,8 +339,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
   # TODO: support this in tinygrad
-  "aten.bitwise_left_shift.Tensor_out": lambda self, other: Tensor(self << other.numpy()),
-  "aten.bitwise_right_shift.Tensor_out": lambda self, other: Tensor(self >> other.numpy()),
+  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
+  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
@@ -264,6 +350,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
+
 }}
 
 # we add the "out" here
@@ -304,13 +391,15 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var.correction": Tensor.var,
   "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
-  "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
+  "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
-  "aten.gather": Tensor.gather,
+  "aten.scatter.value_reduce": Tensor.scatter,
+  "aten.scatter.src": Tensor.scatter, # This might be wrong??
+  "aten.gather": lambda self, dim, index: Tensor.gather(self, dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
-  "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
+  "aten._log_softmax": lambda self,dim,half_to_float: Tensor.log_softmax(self,dim),
   "aten.random_": lambda self:
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
   "aten.random_.from": lambda self, from_, to:
@@ -320,9 +409,63 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
+  "aten.masked_fill_.Scalar": Tensor.masked_fill,
+  "aten.masked_fill_.Tensor": Tensor.masked_fill,
   "aten.multinomial": Tensor.multinomial,
+  "aten.all": Tensor.all,
+  "aten.sgn": Tensor.sign,
+  "aten.acos": Tensor.acos,
+  "aten.any": Tensor.any,
+  "aten.bitwise_not": Tensor.bitwise_not,
+  "aten.argmax": Tensor.argmax,
+  "aten.argmin": Tensor.argmin,
+  "aten.asinh": Tensor.asinh,
+  "aten.mul": Tensor.mul,
+  "aten.atanh": Tensor.atanh,
+  "aten.fill_.Tensor": Tensor.full,
+  "aten.flip": Tensor.flip,
+  "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
+  "aten.scatter_add.out": lambda self, dim, index, src, out: out.replace(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')),
+  "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
+  "aten.avg_pool2d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
+  "aten.avg_pool3d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
+  "aten.cummax": Tensor.cummax,
+  # fix backward for these
+  "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
+  # "aten.upsample_linear1d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners).backward(Tensor(gradient)),
+  "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
+  # "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  "aten.upsample_nearest2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
+  "aten.upsample_nearest2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  "aten.upsample_bilinear2d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
+  "aten.upsample_trilinear3d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
+  "aten.upsample_bilinear2d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners).backward(Tensor(gradient)),
+  "aten.upsample_trilinear3d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners).backward(Tensor(gradient)),
+  "aten._upsample_nearest_exact1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
+  "aten._upsample_nearest_exact1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
+  "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
+  "aten._upsample_nearest_exact2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
+  # ===
+  "aten.replication_pad1d": functools.partial(Tensor.pad, mode="replicate"),
+  "aten.replication_pad2d": functools.partial(Tensor.pad, mode="replicate"),
+  "aten.replication_pad3d": functools.partial(Tensor.pad, mode="replicate"),
+  "aten.roll": Tensor.roll,
+  "aten.where.self": lambda self, x, y: Tensor.where(self, x, y),
+  "aten.logcumsumexp": Tensor.logcumsumexp,
+  "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
+  "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
+  "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
+  "aten.prod": lambda self: Tensor.prod(self),
+  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
+  "aten.repeat": Tensor.repeat,
+  "aten.split.Tensor": Tensor.split,
+  "aten.lerp.Tensor": Tensor.lerp,
+  "aten.expand": Tensor.expand,
+  "aten.index_put": Tensor.assign,
+  "aten.mul.Tensor": Tensor.mul,
+  "aten.reflection_pad1d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.reflection_pad3d": functools.partial(Tensor.pad, mode="reflect"),
 }}
 
 def wrap_fxn(k,f):
