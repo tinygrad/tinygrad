@@ -414,9 +414,7 @@ def train_retinanet():
   config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
   config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
 
-  if SEED:
-    Tensor.manual_seed(SEED)
-    np.random.seed(seed=SEED)
+  if SEED: Tensor.manual_seed(SEED)
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d

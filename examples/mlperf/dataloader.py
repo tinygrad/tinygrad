@@ -361,13 +361,14 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
     idx, img, tgt = data
     img = image_load(base_dir, img["subset"], img["file_name"])
 
-    if seed is not None:
-      np.random.seed(seed)
-      torch.manual_seed(seed)
-
     if val:
       img = resize(img)[0]
     else:
+      if seed is not None:
+        np.random.seed(seed * 2 ** 10 + idx)
+        random.seed(seed * 2 ** 10 + idx)
+        torch.manual_seed(seed * 2 ** 10 + idx)
+
       img, tgt = random_horizontal_flip(img, tgt)
       img, tgt, _ = resize(img, tgt=tgt)
       match_quality_matrix = box_iou(tgt["boxes"], (anchor := np.concatenate(generate_anchors((800, 800)))))
