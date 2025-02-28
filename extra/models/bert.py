@@ -72,7 +72,7 @@ class BertForPretraining:
     next_sentence_loss = seq_relationship_logits.binary_crossentropy_logits(next_sentence_labels)
 
     # TODO: is it okay that next_sentence_loss is half here?
-    return masked_lm_correct.sum() / valid.sum(), seq_relationship_correct.mean(), masked_lm_loss, next_sentence_loss.float()
+    return masked_lm_correct.sum().float() / valid.sum(), seq_relationship_correct.mean(), masked_lm_loss, next_sentence_loss.float()
 
   def load_from_pretrained(self, tf_weight_path:str=Path(__file__).parent.parent / "datasets" / "wiki"):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' # Mute tf flag info
