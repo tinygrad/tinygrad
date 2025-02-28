@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import unicodedata
-from typing import Optional, Tuple, List
+from typing import Optional
 import math
 import numpy as np
 from tinygrad.nn import state
@@ -258,7 +258,7 @@ def find_matches(match_quality_matrix:np.ndarray, high_threshold:float=0.5, low_
 def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   def _box_area(boxes:np.ndarray) -> np.ndarray: return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
 
-  def _box_inter_union(boxes1:np.ndarray, boxes2:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+  def _box_inter_union(boxes1:np.ndarray, boxes2:np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     area1, area2 = _box_area(boxes1), _box_area(boxes2)
     lt, rb = np.maximum(boxes1[:, None, :2], boxes2[:, :2]), np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])
     wh = np.clip(rb - lt, a_min=0, a_max=None)
@@ -269,8 +269,8 @@ def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   inter, union = _box_inter_union(boxes1, boxes2)
   return inter / union
 
-def generate_anchors(input_size:Tuple[int, int], batch_size:int = 1, scales:Optional[Tuple[Tensor, ...]] = None, aspect_ratios:Optional[Tuple[Tensor, ...]] = None) -> List[np.ndarray]:
-  def _compute_grid_sizes(input_size:Tuple[int, int]) -> np.ndarray:
+def generate_anchors(input_size:tuple[int, int], batch_size:int = 1, scales:Optional[tuple[Tensor, ...]] = None, aspect_ratios:Optional[tuple[Tensor, ...]] = None) -> list[np.ndarray]:
+  def _compute_grid_sizes(input_size:tuple[int, int]) -> np.ndarray:
     return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
   
   scales = tuple((i, int(i * 2 ** (1/3)), int(i * 2 ** (2/3))) for i in 2 ** np.arange(5, 10)) if scales is None else scales
