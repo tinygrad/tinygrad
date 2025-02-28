@@ -43,6 +43,9 @@ setup(name='tinygrad',
             "ruff",
             "types-tqdm",
         ],
+        "typed": [
+            "typeguard>=4.0.0",
+        ],
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
         'testing_minimal': testing_minimal,
         'testing_unit': testing_minimal + [
