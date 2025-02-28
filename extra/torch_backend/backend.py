@@ -165,6 +165,27 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
     else:
       return wrap(unwrap(self)[:, :, start:end:step])
 
+@torch.library.impl("aten::avg_pool2d_backward", "privateuseone")
+def avg_pool2d_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride is not None and len(stride) == 0: stride = None
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::replication_pad2d_backward", "privateuseone")
+def replication_pad2d_backward(self, grad_out, padding):
+  # print(f"{self=}, {padding=}, {grad_out=}")
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode="replicate")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::upsample_linear1d_backward", "privateuseone")
+def upsample_linear1d_backward(self, size, grad_out, align_corners=False):
+  # print(f"{self=}, {padding=}, {grad_out=}")
+  # self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.interpolate(unwrap(self), size, mode="linear", align_corners=align_corners)
+  return wrap(out.backward(gradient=Tensor(grad_out))[0])
+
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
@@ -289,8 +310,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
   # TODO: support this in tinygrad
-  "aten.bitwise_left_shift.Tensor_out": lambda self, other: self.cast(dtypes.uint) << other,
-  "aten.bitwise_right_shift.Tensor_out": lambda self, other: self.cast(dtypes.uint) >> other,
+  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
+  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
@@ -379,18 +400,31 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.avg_pool2d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
   "aten.avg_pool3d": lambda self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True: Tensor.avg_pool2d(self, kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad),
   "aten.cummax": Tensor.cummax,
+  # fix backward for these
+  "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
+  # "aten.upsample_linear1d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners).backward(Tensor(gradient)),
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
   "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  "aten.upsample_nearest2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
+  "aten.upsample_nearest2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  "aten.upsample_bilinear2d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
+  "aten.upsample_trilinear3d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
+  "aten.upsample_bilinear2d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners).backward(Tensor(gradient)),
+  "aten.upsample_trilinear3d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners).backward(Tensor(gradient)),
+  "aten._upsample_nearest_exact1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
+  "aten._upsample_nearest_exact1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
+  "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
+  "aten._upsample_nearest_exact2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
+  "aten.replication_pad2d": functools.partial(Tensor.pad, mode="replicate"),
+  # "aten.replication_pad2d_backward": lambda self, gradient, padding: Tensor.pad(self, padding, mode="replicate").backward(gradient),
+  # ===
   "aten.roll": Tensor.roll,
-  "aten.where.self_out": lambda self, x, y, out: out.replace(Tensor.where(self, x, y)),
   "aten.where.self": lambda self, x, y: Tensor.where(self, x, y),
   "aten.logcumsumexp": Tensor.logcumsumexp,
-  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, axis=dim)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
   "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
   "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
   "aten.prod": lambda self: Tensor.prod(self),
-  "aten.prod.int_out": lambda self, dim, out: out.replace(Tensor.prod(self, dim)),
   "aten.repeat": Tensor.repeat,
   "aten.split.Tensor": Tensor.split,
   "aten.lerp.Tensor": Tensor.lerp,
