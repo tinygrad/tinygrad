@@ -297,7 +297,7 @@ def get_onnx_ops():
   def PRelu(X:Tensor, slope:Tensor):
     slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
     return (X > 0).where(X, X * slope)
-  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
+  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
