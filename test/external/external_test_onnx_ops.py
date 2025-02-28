@@ -72,7 +72,7 @@ class TestMainOnnxOps(TestOnnxOps):
           }
           attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
           outputs = ["out"]
-          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1)
+          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1) # occasionally inaccurate
 
   def test_qlinear_matmul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
@@ -90,7 +90,7 @@ class TestMainOnnxOps(TestOnnxOps):
         }
         attributes = {}
         outputs = ["Y"]
-        self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs, atol=1)
+        self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
 
 class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = "com.microsoft"
@@ -184,7 +184,22 @@ class TestContribOnnxOps(TestOnnxOps):
         }
         attributes = {}
         outputs = ["C"]
-        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs, atol=1)
+        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
+
+    with self.subTest(test_case="round_away_from_zero"):
+      inputs = {
+        "A": np.array([1, 1], dtype=np.int8),
+        "A_scale": np.array(1, dtype=np.float32),
+        "A_zero_point": np.array(0, dtype=np.int8),
+        "B": np.array([1, 5], dtype=np.int8),
+        "B_scale": np.array(1, dtype=np.float32),
+        "B_zero_point": np.array(0, dtype=np.int8),
+        "C_scale": np.array(4, dtype=np.float32),
+        "C_zero_point": np.array(0, dtype=np.int8)
+      }
+      attributes = {}
+      outputs = ["C"]
+      self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
@@ -199,7 +214,7 @@ class TestContribOnnxOps(TestOnnxOps):
         }
         attributes = {"channels_last": 0}
         outputs = ["C"]
-        self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs, atol=1)
+        self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs)
 
 if __name__ == "__main__":
   unittest.main()

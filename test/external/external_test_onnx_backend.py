@@ -50,7 +50,7 @@ backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
 backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 
-# BUG: we don't match ORT here because const folding is done in float64
+# BUG: we don't match ORT here due to some div inaccuracy with floats
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
