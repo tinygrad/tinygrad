@@ -251,7 +251,7 @@ def _copy_from(src, dest, non_blocking=False):
 
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
-  return wrap(unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True))
+  unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
 # register some decompositions
 from torch._decomp import get_decompositions
