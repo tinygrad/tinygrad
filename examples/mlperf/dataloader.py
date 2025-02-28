@@ -71,7 +71,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       #storage_tensor._copyin(img_tensor.numpy())
 
       # faster
-      X[idx].contiguous().realize().lazydata.base.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      X[idx].contiguous().realize().lazydata.base.buffer.ensure_allocated().as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
@@ -261,8 +261,8 @@ def load_unet3d_data(preprocessed_dataset_dir, seed, queue_in, queue_out, X:Tens
       x = random_brightness_augmentation(x)
       x = gaussian_noise(x)
 
-    X[idx].contiguous().realize().lazydata.base.realized.as_buffer(force_zero_copy=True)[:] = x.tobytes()
-    Y[idx].contiguous().realize().lazydata.base.realized.as_buffer(force_zero_copy=True)[:] = y.tobytes()
+    X[idx].contiguous().realize().lazydata.base.buffer.ensure_allocated().as_buffer(force_zero_copy=True)[:] = x.tobytes()
+    Y[idx].contiguous().realize().lazydata.base.buffer.ensure_allocated().as_buffer(force_zero_copy=True)[:] = y.tobytes()
 
     queue_out.put(idx)
   queue_out.put(None)
