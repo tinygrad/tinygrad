@@ -212,12 +212,14 @@ decomps = [
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
   aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
+  aten.leaky_relu_backward,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
   aten.elu, aten.elu_backward,
   aten.upsample_nearest2d.out,
+  aten.hardsigmoid_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -283,9 +285,11 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
   "aten.logical_and.out": lambda self, other: (self != 0) & (other != 0),
+  "aten.logical_or.out": lambda input, other: (input != 0) | (other != 0),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
+  "aten.lerp.Tensor_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
 }}
@@ -344,15 +348,18 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
+  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(value, self)),
+  "aten.masked_fill_.Tensor": lambda self,mask,value: self.assign(mask.where(value, self)),
   "aten.multinomial": Tensor.multinomial,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.sgn": Tensor.sign,
   "aten.all": Tensor.all,
   "aten.any": Tensor.any,
   "aten.logical_and": lambda input, other: (input != 0) & (other != 0),
+  "aten.logical_or": lambda input, other: (input != 0) | (other != 0),
   "aten.repeat": Tensor.repeat,
   "aten.fill_.Tensor": lambda self,fill_value: self.assign(self.full_like(fill_value.item())),
+  "aten.roll": Tensor.roll,
 }}
 
 def wrap_fxn(k,f):
