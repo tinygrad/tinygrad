@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops
+from tinygrad.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, sint
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
 from tinygrad.helpers import all_same, all_int, dedup, prod
 
@@ -9,7 +9,7 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), name="buf_view"),
-   lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all_int(buf_view.arg)),
+   lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(a, sint) for a in buf_view.arg)),
 ])
 
 # *** this is the spec of a Tensor in UOp ***

@@ -61,7 +61,8 @@ def create_buffer_view(tr:UOp, x:UOp):
 
 def swizzle_assign(buf:UOp, view:UOp, b:UOp):
   if (sti:=unwrap(view.st).invert(buf.shape)) is not None: return buf.assign(b.view(sti)).reshape(b.shape)
-  raise Exception("todo!")
+  subbuffer = UOp(Ops.BUFFER_VIEW, buf.dtype, (buf,), (view.size, view.arg.views[0].offset))
+  return subbuffer.view(view.st).assign(b)
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
@@ -103,9 +104,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
   # support for storing to a non-contiguous ShapeTracker if we're assigning to a view
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="buf"),), name="view"), UPat.var("b"))), swizzle_assign),
-  # if we're assigning a const ensure it's contiguous
-  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.cvar("b"))), lambda a,b: a.assign(b.contiguous()) if not b.st.contiguous else None),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"),), name="view"), UPat.var("b"))), swizzle_assign),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="tr"), create_buffer_view),
   # put UnaryOps before EXPANDs
@@ -261,7 +260,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
 
 create_kernels = merge_views+PatternMatcher([
   # always give assign a kernel
-  (UPat.assign(UPat(Ops.BUFFER, name="b"), UPat(GroupOp.All-{Ops.KERNEL}, name="x")),
+  (UPat.assign(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="b"), UPat(GroupOp.All-{Ops.KERNEL}, name="x")),
    lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
   # otherwise check if need to assign this UOp to a new buffer
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
@@ -281,14 +280,18 @@ def load_buf(ctx:list[UOp], x:UOp):
   if x not in ctx: ctx.append(x)
   return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop()))
 
-add_buffer_ops = PatternMatcher([
+add_buffer_ops = merge_views+PatternMatcher([
   # LOAD
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="x"), load_buf),
   (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat())), load_buf),
   # STORE (except for COPY)
   (UPat(Ops.SINK, src=(UPat(Ops.COPY, name="x"),)), lambda x:x),
+  # if it's a VIEW we change the ShapeTracker
+  (UPat(Ops.SINK, src=(UPat(Ops.VIEW, name="view", src=(UPat.var("base"),)),)),
+   lambda view,base: UOp.store(UOp(Ops.DEFINE_GLOBAL, base.dtype.ptr(base.size), (), 0), (view.st+base.st).to_uop(), base).sink()),
+  # otherwise we store to a contiguous
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
-   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), (x.st+x.base.st).to_uop(), x.base).sink()),
+   lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
 ])
 
 # ** push views to buffer ops
