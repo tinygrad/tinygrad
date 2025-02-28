@@ -20,7 +20,7 @@ def func_with_float_param(x: Tensor, scale: float) -> Tensor:
 @typechecked
 def func_with_complex_types(x: Tensor, y: List[Tensor], opts: Dict[str, Union[int, float]]) -> Tensor:
   """Test function with complex type annotations."""
-  result = x 
+  result = x
   for t in y:
     result += t
   if "scale" in opts:
