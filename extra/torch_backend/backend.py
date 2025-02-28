@@ -156,6 +156,23 @@ def _copy_from(src, dest, non_blocking=False):
 def cat_out(tensors, dim=0, out=None):
   unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
+@torch.library.impl("aten::avg_pool2d", "privateuseone")
+def avg_pool2d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride is not None and len(stride) == 0: stride = None
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+
+@torch.library.impl("aten::avg_pool2d_backward", "privateuseone")
+def avg_pool2d_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride is not None and len(stride) == 0: stride = None
+  grad_out, self = unwrap(grad_out), unwrap(self)
+  out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+@torch.library.impl("aten::avg_pool3d", "privateuseone")
+def avg_pool3d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride is not None and len(stride) == 0: stride = None
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+
 # register some decompositions
 from torch._decomp import get_decompositions
 aten = torch.ops.aten
@@ -323,6 +340,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.sgn": Tensor.sign,
+  "aten.all": Tensor.all,
+  "aten.any": Tensor.any,
 }}
 
 def wrap_fxn(k,f):
