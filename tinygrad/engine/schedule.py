@@ -257,8 +257,8 @@ def create_kernel(b:UOp, x:UOp):
   return b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))).reshape(x.shape)
 
 def swizzle_assign(buf:UOp, view:UOp, x:UOp):
-  if view.size == buf.size: return create_kernel(buf, x)
-  return create_kernel(UOp(Ops.BUFFER_VIEW, buf.dtype, (buf,), (view.size, view.arg.views[0].offset)), x)
+  if view.size == buf.size: return create_kernel(buf, x.view(view.st))
+  return create_kernel(UOp(Ops.BUFFER_VIEW, buf.dtype, (buf,), (view.size, view.arg.views[0].offset)), x.view(view.st)) # wrong if you have offset
 
 create_kernels = merge_views+PatternMatcher([
   # support for storing to a non-contiguous ShapeTracker if we're assigning to a view
