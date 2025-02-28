@@ -212,6 +212,7 @@ decomps = [
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
+  aten.elu, aten.elu_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -281,6 +282,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
+  "aten.logical_and.out": lambda self, other: (self != 0) & (other != 0)
 }}
 
 # we add the "out" here
@@ -343,6 +345,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.sgn": Tensor.sign,
   "aten.all": Tensor.all,
   "aten.any": Tensor.any,
+  "aten.logical_and": lambda input, other: (input != 0) & (other != 0)
 }}
 
 def wrap_fxn(k,f):
