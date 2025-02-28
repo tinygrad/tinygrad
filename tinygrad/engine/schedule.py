@@ -423,12 +423,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
-  buffer_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
-      buffer_map[a.src[1].arg.ast] = a.src[0]
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
@@ -437,10 +435,12 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
+  buffer_map: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
+    buffer_map[u.src[1].arg.ast] = u.src[0]
     for s in u.src[1].src:
       if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort):
@@ -457,10 +457,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
-    if u.op is not Ops.ASSIGN: continue
     in_degree[u] = 0
-    for s in u.src[1].src:
-      if s.op is not Ops.ASSIGN: continue
+    for s in u.src:
       children.setdefault(s, []).append(u)
       in_degree[u] += 1
 
