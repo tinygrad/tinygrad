@@ -252,7 +252,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
 
 def create_kernel(b:UOp, x:UOp):
-  assert b.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and b.size == x.size, f"can't create kernel with {buf=} and {x=}"
+  assert b.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and b.size == x.size, f"can't create kernel with {b=} and {x=} {b.size} {x.size}"
   # NOTE: we add a reshape here so that the downstream shapes match
   return b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))).reshape(x.shape)
 
