@@ -253,6 +253,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
+  "aten.where.self_out": Tensor.where,
 }}
 
 # we add the "out" here
@@ -299,7 +300,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter.value": Tensor.scatter,
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where,
-  "aten.where.self_out": lambda cond, self, other, out=None: out.replace(Tensor.where(cond, self, other)),
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": lambda self:
