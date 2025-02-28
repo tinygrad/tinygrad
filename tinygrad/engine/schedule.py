@@ -59,11 +59,6 @@ def create_buffer_view(tr:UOp, x:UOp):
   if not tr.device.startswith("DISK"): return None
   return UOp(Ops.BUFFER_VIEW, tr.dtype, (x.base,), (tr.size, unwrap(x.st).views[0].offset)).reshape(tr.shape)
 
-def swizzle_assign(buf:UOp, view:UOp, b:UOp):
-  if (sti:=unwrap(view.st).invert(buf.shape)) is not None: return buf.assign(b.view(sti)).reshape(b.shape)
-  subbuffer = UOp(Ops.BUFFER_VIEW, buf.dtype, (buf,), (view.size, view.arg.views[0].offset))
-  return subbuffer.view(view.st).assign(b)
-
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
@@ -103,8 +98,6 @@ sym = symbolic_simple+PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPat(Ops.CONTIGUOUS, name="contig", src=(UPat(Ops.VIEW, name="src"),)), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
-  # support for storing to a non-contiguous ShapeTracker if we're assigning to a view
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"),), name="view"), UPat.var("b"))), swizzle_assign),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="tr"), create_buffer_view),
   # put UnaryOps before EXPANDs
@@ -258,13 +251,23 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
   return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
 
+def create_kernel(b:UOp, x:UOp):
+  assert b.op in {Ops.BUFFER, Ops.BUFFER_VIEW} and b.size == x.size, f"can't create kernel with {buf=} and {x=}"
+  # NOTE: we add a reshape here so that the downstream shapes match
+  return b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))).reshape(x.shape)
+
+def swizzle_assign(buf:UOp, view:UOp, x:UOp):
+  if view.size == buf.size: return create_kernel(buf, x)
+  return create_kernel(UOp(Ops.BUFFER_VIEW, buf.dtype, (buf,), (view.size, view.arg.views[0].offset)), x)
+
 create_kernels = merge_views+PatternMatcher([
+  # support for storing to a non-contiguous ShapeTracker if we're assigning to a view
+  (UPat.assign(UPat(Ops.VIEW, src=(UPat.var("buf"),), name="view"), UPat(GroupOp.All-{Ops.KERNEL}, name="x")), swizzle_assign),
   # always give assign a kernel
-  (UPat.assign(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="b"), UPat(GroupOp.All-{Ops.KERNEL}, name="x")),
-   lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
-  # otherwise check if need to assign this UOp to a new buffer
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
-    UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))) if x in ctx.realizes else None),
+  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}, name="x")), create_kernel),
+  # otherwise check if need to store the output to a new buffer
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
+   lambda ctx,x: create_kernel(UOp.new_buffer(x.device, x.size, x.dtype), x) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove CONST/BIND from SINK
@@ -393,7 +396,7 @@ class ScheduleItem:
 def schedule_uop(kernel:UOp, buffer_map:dict[UOp, UOp], var_vals:dict[Variable, int]) -> ScheduleItem:
   assert kernel.op is Ops.KERNEL, f"kernel isn't kernel, it's {kernel.op}"
   # substitute kernel sources for the target buffer
-  ast = kernel.arg.ast.substitute({k:v for k,v in buffer_map.items() if k is not kernel.arg.ast}).sink()
+  ast = kernel.arg.ast.substitute({k:v.view(unwrap(k.st)) for k,v in buffer_map.items() if k is not kernel.arg.ast}).sink()
   # add buffer ops
   ast = graph_rewrite(ast, add_buffer_ops, bufs:=[kernel.src[0].buf_uop], bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
@@ -433,8 +436,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
     # if we created a KERNEL for this tensor, map it to the assigned buffer
-    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
-      becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+    if (a:=kernel_map.get(v.base)) is not None and a.base.op is Ops.ASSIGN:
+      becomes_map[k] = a.base.src[0] if v.st == a.base.src[0].st else a.base.src[0].view(unwrap(v.st))
     elif a is not None and a.op is Ops.BUFFER_VIEW and a.src[0].op is Ops.ASSIGN: becomes_map[k] = a.replace(src=(a.src[0].buf_uop,))
     # tensors can also simplify to an existing buffer/const
     else:
