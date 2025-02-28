@@ -71,7 +71,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       #storage_tensor._copyin(img_tensor.numpy())
 
       # faster
-      X[idx].contiguous().realize().base.buffer.ensure_allocated().as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      X[idx].contiguous().realize().lazydata.base.buffer.ensure_allocated().as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
