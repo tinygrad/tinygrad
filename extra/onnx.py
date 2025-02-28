@@ -202,6 +202,8 @@ def get_onnx_ops():
 
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
 
+  def _round_away_from_zero(x:Tensor): return (x>=0).where((x+0.5).floor(), (x-0.5).ceil())
+
   def _prepare_quantize(x:Tensor, scale:Tensor, zero_point:Tensor|int, axis=1, block_size=0):
     if axis < 0: axis += x.ndim
     # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_quantize_linear.py#L31
@@ -219,7 +221,7 @@ def get_onnx_ops():
     # op execution is done in quantized int
     out = _op_integer(op, inputs, zero_points, **opts)
     assert dtypes.is_int(out.dtype), "quantized op should've done math in int"
-    out_quantized = (out * prod(scales) / out_scale).round() + out_zero_point
+    out_quantized = _round_away_from_zero(out * prod(scales) / out_scale) + out_zero_point
     return _clamp_cast(out_quantized, out_zero_point.dtype)
 
   def _qlinearop_float(op, inputs:list[Tensor], zero_points:list[Tensor], scales:list[Tensor], out_scale:Tensor, out_zero_point:Tensor, **opts):
@@ -227,7 +229,7 @@ def get_onnx_ops():
     dequantized_inputs = [(inp.int() - zp) * scale for inp, zp, scale in zip(inputs, zero_points, scales)]
     out = op(*dequantized_inputs, **opts)
     assert dtypes.is_float(out.dtype), "op should've done math in float"
-    out_quantized = (out / out_scale).round() + out_zero_point
+    out_quantized = _round_away_from_zero(out / out_scale) + out_zero_point
     return _clamp_cast(out_quantized, out_zero_point.dtype)
 
   def _onnx_training(input_group_size):
@@ -723,6 +725,14 @@ def get_onnx_ops():
     out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
+
+  def DynamicQuantizeLinear(x: Tensor):
+    # only support uint8
+    qmin, qmax = dtypes.min(dtypes.uint8), dtypes.max(dtypes.uint8)
+    scale = (x.max().maximum(0) + ((-x).max()).maximum(0)) / (qmax - qmin)
+    zero_point = _clamp_cast((qmin - x.min() / scale).round(), dtypes.uint8)
+    y = _clamp_cast((x / scale).round() + zero_point, dtypes.uint8)
+    return y, scale, zero_point
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
