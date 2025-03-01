@@ -99,7 +99,7 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
   # TODO: supprt stride [] in tinygrad?
   if stride is not None and len(stride) == 0: stride = None
   # TODO: support return_indices in tinygrad
-  ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode).cast(_from_torch_dtype(self.dtype))
+  ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode)
   # TODO: this is wrong
   return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
@@ -147,23 +147,17 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
-  # TODO: Do we need more dims?
-  # TODO: rewrite this...
-  print(f"{self.shape=}")
-  if self.ndim == 1:
-    return wrap(unwrap(self)[start:end:step])
-  elif self.ndim == 2:
-    if dim == 0:
-      return wrap(unwrap(self)[start:end:step, :])
-    else:
-      return wrap(unwrap(self)[:, start:end:step])
-  else:
-    if dim == 0:
-      return wrap(unwrap(self)[start:end:step, :, :])
-    elif dim == 1:
-      return wrap(unwrap(self)[:, start:end:step, :])
-    else:
-      return wrap(unwrap(self)[:, :, start:end:step])
+  slices = [slice(None)] * self.ndim
+  slices[dim] = slice(start, end, step)
+  return wrap(unwrap(self)[*slices])
+
+@torch.library.impl("aten::slice_backward", "privateuseone")
+def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = slice(start, end, step)
+  grad_input[*slices] = unwrap(grad_out)
+  return wrap(grad_input)
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   if stride == []: stride = None
