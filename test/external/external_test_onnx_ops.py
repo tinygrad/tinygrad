@@ -92,6 +92,22 @@ class TestMainOnnxOps(TestOnnxOps):
         outputs = ["Y"]
         self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
 
+    for name,val in (("round_half_down_to_even", 1), ("round_half_up_to_even", 3)):
+      with self.subTest(test_case=name, val=val):
+        inputs = {
+          "A": np.array([val], dtype=np.int8),
+          "A_scale": np.array(0.5, dtype=np.float32),
+          "A_zero_point": np.array(0, dtype=np.int8),
+          "B": np.array([1], dtype=np.int8),
+          "B_scale": np.array(1, dtype=np.float32),
+          "B_zero_point": np.array(0, dtype=np.int8),
+          "Y_scale": np.array(1, dtype=np.float32),
+          "Y_zero_point": np.array(0, dtype=np.int8)
+        }
+        attributes = {}
+        outputs = ["Y"]
+        self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
+
 class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = "com.microsoft"
   def test_attention(self):
@@ -168,21 +184,6 @@ class TestContribOnnxOps(TestOnnxOps):
     outputs = ["C"]
     self.helper_test_single_op("BiasGelu", inputs, attributes, outputs)
 
-  def test_qlinearop_rounding_behavior(self):
-    inputs = {
-      "A": np.array([1, 1, 1, 1], dtype=np.int8),
-      "A_scale": np.array(1, dtype=np.float32),
-      "A_zero_point": np.array(0, dtype=np.int8),
-      "B": np.array([1, 5, -3, -7], dtype=np.int8),
-      "B_scale": np.array(1, dtype=np.float32),
-      "B_zero_point": np.array(0, dtype=np.int8),
-      "C_scale": np.array(4, dtype=np.float32),
-      "C_zero_point": np.array(0, dtype=np.int8)
-    }
-    attributes = {}
-    outputs = ["C"]
-    self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
-
   def test_qlinear_add(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       with self.subTest(dtype=dtype, zero_point=zero_point):
@@ -200,6 +201,21 @@ class TestContribOnnxOps(TestOnnxOps):
         attributes = {}
         outputs = ["C"]
         self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
+
+    with self.subTest(test_case="round_away_from_zero"):
+      inputs = {
+        "A": np.array([1, 1, 1, 1], dtype=np.int8),
+        "A_scale": np.array(1, dtype=np.float32),
+        "A_zero_point": np.array(0, dtype=np.int8),
+        "B": np.array([1, 5, -3, -7], dtype=np.int8),
+        "B_scale": np.array(1, dtype=np.float32),
+        "B_zero_point": np.array(0, dtype=np.int8),
+        "C_scale": np.array(4, dtype=np.float32),
+        "C_zero_point": np.array(0, dtype=np.int8)
+      }
+      attributes = {}
+      outputs = ["C"]
+      self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
