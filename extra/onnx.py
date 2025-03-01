@@ -317,7 +317,7 @@ def get_onnx_ops():
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
   def BitwiseNot(x:Tensor): return ~x
   def Mod(x:Tensor,y:Tensor,fmod=0):
-    if fmod != 0: raise NotImplementedError("float mod is not supported")
+    if fmod: return x - x.div(y, rounding_mode="trunc") * y
     return x % y
 
   # ***** Casting Ops *****
