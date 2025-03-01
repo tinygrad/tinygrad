@@ -4020,7 +4020,7 @@ class Tensor(SimpleMathTrait):
     # This ensures all non-zero values (even small ones like 1e-5) are considered larger
     epsilon_factor = 1e-4
     epsilon_adjust = zero_mask * (-epsilon_factor if largest else epsilon_factor)
-    
+
     # Add positional preference for stable sort of equal values (smaller indices first)
     # use very small value to not interfere with actual values
     pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-15
