@@ -81,6 +81,7 @@ backend_test.exclude('cast_no_saturate')
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_max_float16_cpu')
 backend_test.exclude('test_min_float16_cpu')
+backend_test.exclude('test_mod_mixed_sign_float16_cpu')
 
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
@@ -102,12 +103,6 @@ backend_test.exclude('test_nonzero_*')
 # no support for int pow
 backend_test.exclude('test_pow_types_int32_int32_cpu')
 backend_test.exclude('test_pow_types_int64_int64_cpu')
-
-# no support for fmod
-backend_test.exclude('test_mod_int64_fmod_cpu')
-backend_test.exclude('test_mod_mixed_sign_float16_cpu')
-backend_test.exclude('test_mod_mixed_sign_float32_cpu')
-backend_test.exclude('test_mod_mixed_sign_float64_cpu')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
