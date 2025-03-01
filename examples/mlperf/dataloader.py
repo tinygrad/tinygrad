@@ -312,7 +312,7 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
       proc = Process(target=load_unet3d_data, args=(preprocessed_dataset_dir, seed, queue_in, queue_out, X, Y))
       proc.daemon = True
       proc.start()
-      
+
       procs.append(proc)
 
     for bc in range(batch_count):

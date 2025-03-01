@@ -2140,7 +2140,7 @@ SMU_THROTTLER_PROCHOT_GFX_BIT = 47 # macro
 SMU_THROTTLER_PPM_BIT = 56 # macro
 SMU_THROTTLER_FIT_BIT = 57 # macro
 # def SMU_TABLE_INIT(tables, table_id, s, a, d):  # macro
-#    return {tables[table_id].size=s;tables[table_id].align=a;tables[table_id].domain=d;}(0)  
+#    return {tables[table_id].size=s;tables[table_id].align=a;tables[table_id].domain=d;}(0)
 class struct_smu_hw_power_state(Structure):
     pass
 
