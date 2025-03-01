@@ -3998,31 +3998,37 @@ class Tensor(SimpleMathTrait):
     dim = self._resolve_dim(dim)
     if k > self.shape[dim]:
       raise ValueError(f"k ({k}) is too large for dimension {dim} of size {self.shape[dim]}")
-    
+
     # handle empty tensors
     if 0 in self.shape:
       return Tensor.zeros(*self.shape[:dim], k, *self.shape[dim+1:]), Tensor.zeros(*self.shape[:dim], k, *self.shape[dim+1:], dtype=dtypes.int32)
-    
+
     # create indices tensor
     indices = Tensor.arange(self.shape[dim], device=self.device)
-    
+
     # reshape for broadcasting
     view_shape = [1] * self.ndim
     view_shape[dim] = self.shape[dim]
     indices = indices.reshape(*view_shape).expand(*self.shape)
-    
+
     # for stable sort when there are duplicates, add a small value based on position
     pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * 1e-6
-    
+
+    # ensure proper broadcasting
+    pos_pref = pos_pref.expand(*self.shape)
+
     # adjust values based on whether we want largest or smallest
     modified_data = self - pos_pref if largest else self + pos_pref
+
 
     # find top k values and indices
     result_values = []
     result_indices = []
 
+
     # create a mask for values we've already selected
     mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device)
+
 
     # for each position in the top k
     for i in range(k):
@@ -4039,8 +4045,10 @@ class Tensor(SimpleMathTrait):
         # find the minimum value
         extreme_val = masked_data.min(axis=dim, keepdim=True)
 
+
       # create a mask for the extreme values
       extreme_mask = (masked_data == extreme_val)
+
 
       # use the first occurrence when there are duplicates
       # this ensures stability of the sort
@@ -4048,14 +4056,17 @@ class Tensor(SimpleMathTrait):
       # replace AND operation with multiplication for gradient support
       first_extreme = (cumsum == 1) * extreme_mask
 
+
       # get the indices and values at the positions of the extreme values
       selected_indices = indices * first_extreme
       selected_values = self * first_extreme
+
 
       # sum across the dimension to get the actual indices and values
       # (only one position will have a non-zero value per slice)
       idx = selected_indices.sum(axis=dim)
       val = selected_values.sum(axis=dim)
+
 
       # place the selected indices and values in the result at position i
       # reshape for proper indexing
@@ -4064,9 +4075,11 @@ class Tensor(SimpleMathTrait):
       val_shape = list(val.shape)
       val_shape.insert(dim, 1)
 
+
       # reshape idx and val
       idx = idx.reshape(*idx_shape)
       val = val.reshape(*val_shape)
+
 
       # update result using concatenation
       if i == 0:
@@ -4076,8 +4089,10 @@ class Tensor(SimpleMathTrait):
         result_indices = Tensor.cat(result_indices, idx, dim=dim)
         result_values = Tensor.cat(result_values, val, dim=dim)
 
+
       # update the mask to exclude the selected elements
       mask = mask.maximum(first_extreme)
+
 
     # if sorted is False and k > 1, we need to preserve the original order
     if not sorted and k > 1:
@@ -4085,9 +4100,11 @@ class Tensor(SimpleMathTrait):
       # we can use a simple approach for this specific case
       # since we're only sorting k elements
 
+
       # for now, we'll leave it as is since the current implementation
       # already returns the values in the order they appear in the original tensor
       pass
+
 
     return result_values, result_indices.cast(dtypes.int32)
 
