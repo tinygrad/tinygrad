@@ -206,7 +206,7 @@ def view_dtype(self, dtype):
   return wrap(unwrap(self).bitcast(_from_torch_dtype(dtype)))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
-def _copy_from(src, dest, non_blocking=False):
+def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
     unwrap(dest).replace(unwrap(src).cast(cast_dtype), allow_shape_mismatch=True)
@@ -259,6 +259,7 @@ decomps = [
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
   aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
+  aten.upsample_nearest2d.out,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
@@ -447,6 +448,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.index_put": Tensor.assign,
   "aten.mul.Tensor": Tensor.mul,
+  "aten.pad": Tensor.pad,
 }}
 
 def wrap_fxn(k,f):
