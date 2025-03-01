@@ -4013,12 +4013,15 @@ class Tensor(SimpleMathTrait):
 
     # for stable sort when there are duplicates, add a small value based on position
     # use negative preference to match pytorch behavior with duplicates (earlier indices first)
+    # ensure the preference is strong enough to break ties correctly but small enough
+    # not to affect non-equal values
     pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-6
 
     # ensure proper broadcasting
     pos_pref = pos_pref.expand(*self.shape)
 
     # adjust values based on whether we want largest or smallest
+    # for duplicate values, we want to prioritize the earlier indices
     modified_data = self + pos_pref if largest else self - pos_pref
 
     # find top k values and indices
