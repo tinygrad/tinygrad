@@ -4011,7 +4011,6 @@ class Tensor(SimpleMathTrait):
     view_shape[dim] = int(self.shape[dim])  # explicitly cast to int to avoid UOp
     indices = indices.reshape(*view_shape).expand(*self.shape)
 
-    # simple tie-breaking: add tiny amount based on index position
     # for duplicate values, this ensures higher indices are preferred in PyTorch's behavior
     # when largest=True, adding indices*eps will prefer HIGHER indices for ties
     # when largest=False, subtracting indices*eps will prefer HIGHER indices for ties
@@ -4019,7 +4018,7 @@ class Tensor(SimpleMathTrait):
     modified_data = self.clone()
 
     if largest:
-      modified_data = modified_data - indices * eps
+      modified_data = modified_data + indices * eps
     else:
       modified_data = modified_data - indices * eps
 
