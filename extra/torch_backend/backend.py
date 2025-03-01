@@ -165,48 +165,33 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
     else:
       return wrap(unwrap(self)[:, :, start:end:step])
 
-@torch.library.impl("aten::avg_pool2d_backward", "privateuseone")
-def avg_pool2d_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride == []: stride = None
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+
+def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   if stride == []: stride = None
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-@torch.library.impl("aten::replication_pad1d_backward", "privateuseone")
-def replication_pad1d_backward(grad_out, self, padding):
+def pad_forward(self, padding, mode):
+  return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+
+def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.pad(self, padding, mode="replicate")
+  out = Tensor.pad(self, padding, mode=mode)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-@torch.library.impl("aten::replication_pad2d_backward", "privateuseone")
-def replication_pad2d_backward(grad_out, self, padding):
-  self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.pad(self, padding, mode="replicate")
-  return wrap(out.gradient(self, gradient=grad_out)[0])
+for dim in [1, 2, 3]:
+  torch.library.impl(f"aten::replication_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="replicate"))
+  torch.library.impl(f"aten::reflection_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="reflect"))
+  torch.library.impl(f"aten::replication_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="replicate"))
+  torch.library.impl(f"aten::reflection_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="reflect"))
 
-@torch.library.impl("aten::replication_pad3d_backward", "privateuseone")
-def replication_pad3d_backward(grad_out, self, padding):
-  self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.pad(self, padding, mode="replicate")
-  return wrap(out.gradient(self, gradient=grad_out)[0])
-
-@torch.library.impl("aten::reflection_pad1d_backward", "privateuseone")
-def reflection_pad1d_backward(grad_out, self, padding):
-  self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.pad(self, padding, mode="reflect")
-  return wrap(out.gradient(self, gradient=grad_out)[0])
-
-@torch.library.impl("aten::reflection_pad2d_backward", "privateuseone")
-def reflection_pad2d_backward(grad_out, self, padding):
-  self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.pad(self, padding, mode="reflect")
-  return wrap(out.gradient(self, gradient=grad_out)[0])
-
-@torch.library.impl("aten::reflection_pad3d_backward", "privateuseone")
-def reflection_pad3d_backward(grad_out, self, padding):
-  self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.pad(self, padding, mode="reflect")
-  return wrap(out.gradient(self, gradient=grad_out)[0])
+for dim in [2, 3]:
+  torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
+  torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
 @torch.library.impl("aten::upsample_nearest1d_backward", "privateuseone")
 def upsample_nearest1d_backward(grad_out, out_size, input_size, scales=None):
@@ -225,16 +210,6 @@ def cummax(self, dim):
 @torch.library.impl("aten::view.dtype", "privateuseone")
 def view_dtype(self, dtype):
   return wrap(unwrap(self).bitcast(_from_torch_dtype(dtype)))
-
-@torch.library.impl("aten::avg_pool2d", "privateuseone")
-def avg_pool2d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
-  if stride == []: stride = None
-  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
-
-@torch.library.impl("aten::avg_pool3d", "privateuseone")
-def avg_pool3d(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
-  if stride == []: stride = None
-  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src, dest, non_blocking=False):
@@ -466,9 +441,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
   "aten._upsample_nearest_exact2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
   # ===
-  "aten.replication_pad1d": functools.partial(Tensor.pad, mode="replicate"),
-  "aten.replication_pad2d": functools.partial(Tensor.pad, mode="replicate"),
-  "aten.replication_pad3d": functools.partial(Tensor.pad, mode="replicate"),
   "aten.roll": Tensor.roll,
   "aten.where.self": lambda self, x, y: Tensor.where(self, x, y),
   "aten.logcumsumexp": Tensor.logcumsumexp,
@@ -482,9 +454,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.index_put": Tensor.assign,
   "aten.mul.Tensor": Tensor.mul,
-  "aten.reflection_pad1d": functools.partial(Tensor.pad, mode="reflect"),
-  "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
-  "aten.reflection_pad3d": functools.partial(Tensor.pad, mode="reflect"),
 }}
 
 def wrap_fxn(k,f):
