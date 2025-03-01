@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex, Tuple
+from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -3993,7 +3993,7 @@ class Tensor(SimpleMathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-  def topk(self, k: int, dim: int = -1, largest: bool = True, sorted: bool = True) -> Tuple["Tensor", "Tensor"]:
+  def topk(self, k: int, dim: int = -1, largest: bool = True, sorted: bool = True) -> tuple["Tensor", "Tensor"]:
     """Returns the k largest or smallest elements of a tensor along a dimension."""
     dim = self._resolve_dim(dim)
     if k > self.shape[dim]:
@@ -4012,14 +4012,12 @@ class Tensor(SimpleMathTrait):
     indices = indices.reshape(*view_shape).expand(*self.shape)
     
     # for stable sort when there are duplicates, add a small value based on position
-    # create a tensor with position values along the dimension
     pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * 1e-6
     
     # ensure proper broadcasting
     pos_pref = pos_pref.expand(*self.shape)
     
     # adjust values based on whether we want largest or smallest
-    # use operations that preserve the computational graph
     modified_data = self - pos_pref if largest else self + pos_pref
     
     # find top k values and indices
@@ -4095,40 +4093,6 @@ class Tensor(SimpleMathTrait):
       pass
     
     return result_values, result_indices.cast(dtypes.int32)
-
-  def argsort(self, dim:int=-1) -> "Tensor":
-    """Returns the indices that would sort the tensor along a given dimension."""
-    # This is a simplified implementation that works for the specific use case in topk
-    # It's not a general-purpose argsort implementation
-    dim = self._resolve_dim(dim)
-    
-    # handle empty tensors
-    if 0 in self.shape:
-      return Tensor.zeros(*self.shape, dtype=dtypes.int32)
-    
-    # create a copy to avoid modifying the original tensor
-    x = self.detach()
-    
-    # create indices tensor
-    indices = Tensor.arange(self.shape[dim], device=self.device)
-    
-    # reshape for broadcasting
-    view_shape = [1] * self.ndim
-    view_shape[dim] = self.shape[dim]
-    indices = indices.reshape(*view_shape).expand(*self.shape)
-    
-    # for now, we'll use a simple approach that works for topk
-    # but isn't a full argsort implementation
-    # we'll sort the values and return the corresponding indices
-    
-    # NOTE: This is a placeholder implementation that will be improved in the future
-    # Currently, it's only meant to be used by topk and not as a general-purpose argsort
-    
-    # We'll return the indices in ascending order of values
-    # For topk, we'll handle the descending order separately
-    
-    # For now, we'll return the indices as is, and topk will handle the sorting
-    return indices.cast(dtypes.int32)
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
