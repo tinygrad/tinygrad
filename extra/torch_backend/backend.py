@@ -33,9 +33,9 @@ def masked_select(self, mask):
 
 @torch.library.impl("aten::topk", "privateuseone")
 def topk(self, k, dim=-1, largest=True, sorted=True):
-  # TODO: move to tinygrad
-  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
-  return torch.return_types.topk((t1.tiny(), t2.tiny()))
+  # use tinygrad's implementation
+  values, indices = unwrap(self).topk(k, dim, largest, sorted)
+  return torch.return_types.topk((wrap(values), wrap(indices)))
 
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):

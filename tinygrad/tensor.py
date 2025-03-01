@@ -3,6 +3,7 @@ from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
 from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
+import numpy as np
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -2005,6 +2006,110 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
+
+  def topk(self, k, dim=None, largest=True, sorted=True):
+    """
+    Returns the k largest elements of the given tensor along a given dimension.
+
+    Args:
+        k: the k in "top-k"
+        dim: the dimension to sort along. if none, the tensor is flattened first.
+        largest: if true, return the largest elements, otherwise the smallest
+        sorted: if true, the returned elements are sorted in descending order
+
+    Returns:
+        a tuple of (values, indices) where values contains the top k values and
+        indices contains their original indices
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    values, indices = t.topk(2)  # top 2 values in flattened tensor
+    print(values.numpy(), indices.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    values, indices = t.topk(2, dim=1)  # top 2 values along dimension 1
+    print(values.numpy(), indices.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    values, indices = t.topk(2, dim=0)  # top 2 values along dimension 0
+    print(values.numpy(), indices.numpy())
+    ```
+    """
+    if dim is None:
+      return self.flatten().topk(k, dim=0, largest=largest, sorted=sorted)
+    
+    dim = self._resolve_dim(dim)
+    
+    # limit k to dim size
+    k = min(k, self.shape[dim])
+    
+    # we need to use numpy for implementing topk
+    x_np = self.numpy()
+    
+    # for smallest values, negate the values
+    if not largest:
+      x_np = -x_np
+    
+    # find top k indices using numpy's argpartition
+    idx_np = np.argpartition(x_np, -k, axis=dim)
+    
+    # get the last k indices (these are the indices of the top k values)
+    idx_shape = list(idx_np.shape)
+    idx_shape[dim] = k
+    
+    # select the last k indices along dim - these are the topk values
+    indices_slice = [slice(None)] * len(idx_np.shape)
+    indices_slice[dim] = slice(-k, None)
+    idx_np = idx_np[tuple(indices_slice)]
+    
+    # create a Tensor from these indices
+    indices = Tensor(idx_np, device=self.device)
+    
+    # gather the values using these indices
+    values = self.gather(dim, indices)
+    
+    # if sorted is True, we need to sort the values and indices
+    if sorted:
+      # sort the values
+      if largest:
+        vals_np = values.numpy()
+        # get sort order along dim
+        sort_idx_np = np.argsort(-vals_np, axis=dim)
+        
+        # rearrange indices based on sorted order
+        arrange_indices = [slice(None)] * len(indices.shape)
+        for i in range(len(indices.shape)):
+          if i == dim:
+            arrange_indices[i] = sort_idx_np
+        
+        # get sorted indices and values
+        sorted_indices_np = np.take_along_axis(idx_np, sort_idx_np, axis=dim)
+        sorted_values_np = np.take_along_axis(vals_np, sort_idx_np, axis=dim)
+        
+        indices = Tensor(sorted_indices_np, device=self.device)
+        values = Tensor(sorted_values_np, device=self.device)
+      else:
+        # for smallest values, we've negated the values, so we need to sort in ascending order
+        vals_np = -values.numpy()  # negate again to get correct sort order
+        sort_idx_np = np.argsort(-vals_np, axis=dim)  # sort in descending order
+        
+        # rearrange indices based on sorted order
+        sorted_indices_np = np.take_along_axis(idx_np, sort_idx_np, axis=dim)
+        # original values are in self, not in negated form
+        sorted_values = self.gather(dim, Tensor(sorted_indices_np, device=self.device))
+        
+        indices = Tensor(sorted_indices_np, device=self.device)
+        values = sorted_values
+        return values, indices.cast(dtypes.int32)
+    
+    # if we were looking for smallest values, get the real values from original tensor
+    if not largest:
+      values = self.gather(dim, indices)
+    
+    return values, indices.cast(dtypes.int32)
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:Optional[DTypeLike]=None) -> Tensor:
