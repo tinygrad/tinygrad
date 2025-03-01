@@ -4027,11 +4027,11 @@ class Tensor(SimpleMathTrait):
     # Use very small value to not interfere with actual values
     pos_pref_factor = 1e-15
     if largest:
-        # When finding largest elements, prefer larger indices for tied values
-        pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * pos_pref_factor
+      # When finding largest elements, prefer larger indices for tied values
+      pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * pos_pref_factor
     else:
-        # When finding smallest elements, prefer smaller indices for tied values
-        pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -pos_pref_factor
+      # When finding smallest elements, prefer smaller indices for tied values
+      pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -pos_pref_factor
     pos_pref = pos_pref.expand(*self.shape)
 
     # combine both adjustments
