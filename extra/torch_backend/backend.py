@@ -271,8 +271,6 @@ decomps = [
   aten.logical_and,
   aten.cumprod,
   aten.eye,
-  aten.binary_cross_entropy,
-  aten.binary_cross_entropy_backward,
   aten.hardsigmoid_backward,
   aten.logical_or,
   aten.leaky_relu_backward,
