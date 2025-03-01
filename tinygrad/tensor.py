@@ -4012,13 +4012,14 @@ class Tensor(SimpleMathTrait):
     indices = indices.reshape(*view_shape).expand(*self.shape)
 
     # for stable sort when there are duplicates, add a small value based on position
-    pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * 1e-6
+    # use negative preference to match pytorch behavior with duplicates (later indices first)
+    pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-6
 
     # ensure proper broadcasting
     pos_pref = pos_pref.expand(*self.shape)
 
     # adjust values based on whether we want largest or smallest
-    modified_data = self - pos_pref if largest else self + pos_pref
+    modified_data = self + pos_pref if largest else self - pos_pref
 
     # find top k values and indices
     result_values = []
