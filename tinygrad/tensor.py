@@ -4033,11 +4033,15 @@ class Tensor(SimpleMathTrait):
     position_indices = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape)
     # Apply negative factor for largest=True to prefer smaller indices
     # Apply positive factor for largest=False to prefer larger indices
-    pos_pref = position_indices * (-pos_pref_factor if largest else pos_pref_factor)
+    # For largest=True: smaller indices should get higher scores, so add negative position preference
+    # For largest=False: larger indices should get lower scores, so add positive position preference
+    pos_pref = position_indices * (pos_pref_factor if largest else -pos_pref_factor)
     pos_pref = pos_pref.expand(*self.shape)
 
     # combine both adjustments
-    modified_data = self + epsilon_adjust + pos_pref if largest else self - epsilon_adjust - pos_pref
+    # For largest=True: subtract the preference to make smaller indices larger
+    # For largest=False: add the preference to make larger indices smaller
+    modified_data = self + epsilon_adjust - pos_pref if largest else self - epsilon_adjust + pos_pref
 
     # find top k values and indices
     result_values = None  # will be initialized with tensor on first iteration
