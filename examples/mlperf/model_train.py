@@ -570,18 +570,20 @@ def train_retinanet():
       if getenv("RESET_STEP", 1): _eval_step.reset()
       total_fw_time = sum(eval_times) / len(eval_times)
 
-      tqdm.write(f"eval time: {total_fw_time:.2f}")
-
-      if WANDB:
-        wandb.log({"eval/forward_time": total_fw_time, "epoch": e + 1})
-
       coco_val.params.imgIds = val_img_ids
       coco_val._paramsEval.imgIds = val_img_ids
       coco_val.evalImgs = list(np.concatenate(val_imgs, -1).flatten())
       coco_val.accumulate()
       coco_val.summarize()
 
-      if getenv("CKPT"):
+      val_metric = coco_val.stats[0]
+
+      tqdm.write(f"eval time: {total_fw_time:.2f}, eval metric: {val_metric:.4f}")
+
+      if WANDB:
+        wandb.log({"eval/forward_time": total_fw_time, "eval/metric": val_metric, "epoch": e + 1})
+
+      if getenv("CKPT", 1):
         if not os.path.exists(ckpt_dir := Path(getenv("CKPT_DIR", "./ckpts"))): os.mkdir(ckpt_dir)
         if WANDB and wandb.run is not None:
           fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}_seed{SEED}.safe")
@@ -589,12 +591,12 @@ def train_retinanet():
           fn = ckpt_dir / Path(f"{time.strftime('%Y%m%d_%H%M%S')}_e{e}_seed{SEED}.safe")
 
         print(f"saving ckpt to {fn}")
-        if (val_metric:=coco_val.stats[0]) >= target_metric:
-          safe_save(get_state_dict(model), fn)
-          print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}"))
-          break
-        else:
-          safe_save(get_training_state(model, optim, lr_scheduler), fn)
+        safe_save(get_training_state(model, optim, lr_scheduler), fn)
+
+      if val_metric >= target_metric:
+        print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}"))
+        safe_save(get_state_dict(model), fn)
+        break
 
 def train_unet3d():
   """
