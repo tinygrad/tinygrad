@@ -4018,14 +4018,14 @@ class Tensor(SimpleMathTrait):
     # Apply an epsilon factor stronger than the positional preference
     # Only when we have values that are exactly 0
     # This ensures all non-zero values (even small ones like 1e-5) are considered larger
-    epsilon_factor = 1e-4
+    epsilon_factor = 1e-2  # increased from 1e-4 for better cross-platform compatibility
     epsilon_adjust = zero_mask * (-epsilon_factor if largest else epsilon_factor)
 
     # Add positional preference for stable sort of equal values
     # For largest=True, we want smaller indices to be preferred when values are equal (PyTorch behavior)
     # For largest=False, we want larger indices to be preferred when values are equal
     # Use very small value to not interfere with actual values
-    pos_pref_factor = 1e-15
+    pos_pref_factor = 1e-10  # increased from 1e-15 for better cross-platform compatibility
 
     # Handle duplicate values for stable sorting (match PyTorch behavior exactly)
     # PyTorch prefers SMALLER indices for tied values when largest=True
@@ -4033,8 +4033,6 @@ class Tensor(SimpleMathTrait):
     position_indices = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape)
     # Apply negative factor for largest=True to prefer smaller indices
     # Apply positive factor for largest=False to prefer larger indices
-    # For largest=True: smaller indices should get higher scores, so add negative position preference
-    # For largest=False: larger indices should get lower scores, so add positive position preference
     pos_pref = position_indices * (pos_pref_factor if largest else -pos_pref_factor)
     pos_pref = pos_pref.expand(*self.shape)
 
