@@ -4021,9 +4021,17 @@ class Tensor(SimpleMathTrait):
     epsilon_factor = 1e-4
     epsilon_adjust = zero_mask * (-epsilon_factor if largest else epsilon_factor)
 
-    # Add positional preference for stable sort of equal values (smaller indices first)
-    # use very small value to not interfere with actual values
-    pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-15
+    # Add positional preference for stable sort of equal values
+    # For largest=True, we want larger indices to be preferred when values are equal
+    # For largest=False, we want smaller indices to be preferred when values are equal
+    # Use very small value to not interfere with actual values
+    pos_pref_factor = 1e-15
+    if largest:
+        # When finding largest elements, prefer larger indices for tied values
+        pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * pos_pref_factor
+    else:
+        # When finding smallest elements, prefer smaller indices for tied values
+        pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -pos_pref_factor
     pos_pref = pos_pref.expand(*self.shape)
 
     # combine both adjustments
