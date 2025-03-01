@@ -4011,30 +4011,10 @@ class Tensor(SimpleMathTrait):
     view_shape[dim] = int(self.shape[dim])  # explicitly cast to int to avoid UOp
     indices = indices.reshape(*view_shape).expand(*self.shape)
 
-    # completely rewrite the value adjustment approach for better cross-platform stability
-    # instead of using tiny epsilons, we'll use a more deterministic approach
-    
-    # Special case handling: zero vs tiny values
-    # PyTorch seems to always pick tiny values over zero when largest=True
-    zero_mask = (self == 0)
-    zero_adjustment = zero_mask * (-0.1 if largest else 0.1)  # much larger than position factor
-    
-    # convert positions to a very small fraction (ensuring they don't affect actual values)
-    # when largest=True, we want to break ties by preferring smaller indices
-    # when largest=False, we want to break ties by preferring larger indices
-    pos_factor = 1e-6  # large enough to be consistent across platforms
-    
-    # for largest=True: we subtract a small value based on position
-    # for largest=False: we add a small value based on position
-    # this ensures ties are broken deterministically based on position
-    if largest:
-        # smaller indices get higher priority by subtracting a smaller amount
-        position_preference = indices * pos_factor
-        modified_data = self + zero_adjustment - position_preference
-    else:
-        # larger indices get higher priority by adding a smaller amount
-        position_preference = (self.shape[dim] - 1 - indices) * pos_factor
-        modified_data = self + zero_adjustment + position_preference
+    # simple tie-breaking: add tiny amount based on index position
+    # for duplicate values, this ensures higher indices are preferred
+    eps = 1e-10
+    modified_data = self + indices * eps if largest else self - indices * eps
 
     # find top k values and indices
     result_values = None  # will be initialized with tensor on first iteration
@@ -4053,10 +4033,10 @@ class Tensor(SimpleMathTrait):
         masked_data = modified_data - mask * large_value
         # find the maximum value
         extreme_val = masked_data.max(axis=dim, keepdim=True)
-      else:  # pragma: no cover
-        masked_data = modified_data + mask * large_value  # type: ignore[unreachable]
+      else:
+        masked_data = modified_data + mask * large_value
         # find the minimum value
-        extreme_val = masked_data.min(axis=dim, keepdim=True)  # type: ignore[unreachable]
+        extreme_val = masked_data.min(axis=dim, keepdim=True)
 
       # create a mask for the extreme values
       extreme_mask = (masked_data == extreme_val)
