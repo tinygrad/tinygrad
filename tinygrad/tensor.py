@@ -4019,7 +4019,7 @@ class Tensor(SimpleMathTrait):
     modified_data = self.clone()
 
     if largest:
-      modified_data = modified_data + indices * eps
+      modified_data = modified_data - indices * eps
     else:
       modified_data = modified_data - indices * eps
 
