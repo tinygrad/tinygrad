@@ -140,16 +140,16 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
-def _copy_from(src, dest, non_blocking=False):
+def _copy_from(src: torch.Tensor, dest, non_blocking=False):
+  cast_dtype = _from_torch_dtype(dest.dtype)
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
-    dest, src = unwrap(dest), unwrap(src)
-    dest.replace(src.cast(dest.dtype), allow_shape_mismatch=True)
+    unwrap(dest).replace(unwrap(src).cast(cast_dtype), allow_shape_mismatch=True)
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).numpy()))
+    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
-    unwrap(dest).assign(Tensor(src.numpy()))
+    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 

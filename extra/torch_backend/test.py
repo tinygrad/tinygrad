@@ -81,7 +81,16 @@ class TestTorchBackend(unittest.TestCase):
     x = torch.arange(3*3, device=device).reshape(1, 1, 3, 3).requires_grad_(True)
     torch.nn.functional.max_pool2d(x, kernel_size=2, stride=1).sum().backward()
     np.testing.assert_equal(x.grad.squeeze().cpu().numpy(), [[0, 0, 0], [0, 1, 1], [0, 1, 1]])
-
+  
+  def test_copy_cast(self):
+    x = torch.zeros(4, device=device, dtype=torch.int64)
+    y = torch.ones(4, device=device, dtype=torch.float32).to(dtype=torch.int64)
+    res1 = x ^ y # an operation that only works on int types
+    print(res1.cpu().numpy())
+    y = y.cpu().float().to(device=device, dtype=torch.int64)
+    res2 = x ^ y
+    print(res2.cpu().numpy())
+  
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
