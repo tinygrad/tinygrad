@@ -4012,7 +4012,7 @@ class Tensor(SimpleMathTrait):
     indices = indices.reshape(*view_shape).expand(*self.shape)
 
     # for stable sort when there are duplicates, add a small value based on position
-    # use negative preference to match pytorch behavior with duplicates (later indices first)
+    # use negative preference to match pytorch behavior with duplicates (earlier indices first)
     pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-6
 
     # ensure proper broadcasting
