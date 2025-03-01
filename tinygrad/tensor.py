@@ -4017,7 +4017,7 @@ class Tensor(SimpleMathTrait):
     # not to affect non-equal values
     # NOTE: We use a preference factor that's clearly smaller than any potential value difference
     # but large enough to consistently break ties in any floating point environment
-    pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-5  # increased from -1e-6 to -1e-5 for more stability
+    pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * -1e-10
 
     # ensure proper broadcasting
     pos_pref = pos_pref.expand(*self.shape)
