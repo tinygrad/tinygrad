@@ -3993,30 +3993,27 @@ class Tensor(SimpleMathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-  def topk(self, k: int, dim: int = -1, largest: bool = True, sorted: bool = True) -> tuple["Tensor", "Tensor"]:
+  def topk(self, k: int, dim: int = -1, largest: bool = True, sort_results: bool = True) -> tuple["Tensor", "Tensor"]:
     """Returns the k largest or smallest elements of a tensor along a dimension."""
     dim = self._resolve_dim(dim)
     if k > self.shape[dim]:
       raise ValueError(f"k ({k}) is too large for dimension {dim} of size {self.shape[dim]}")
-
+    
     # handle empty tensors
     if 0 in self.shape:
       return Tensor.zeros(*self.shape[:dim], k, *self.shape[dim+1:]), Tensor.zeros(*self.shape[:dim], k, *self.shape[dim+1:], dtype=dtypes.int32)
-
+    
     # create indices tensor
     indices = Tensor.arange(self.shape[dim], device=self.device)
-
+    
     # reshape for broadcasting
     view_shape = [1] * self.ndim
     view_shape[dim] = self.shape[dim]
     indices = indices.reshape(*view_shape).expand(*self.shape)
-
+    
     # for stable sort when there are duplicates, add a small value based on position
     pos_pref = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape) * 1e-6
-
-    # ensure proper broadcasting
-    pos_pref = pos_pref.expand(*self.shape)
-
+    
     # adjust values based on whether we want largest or smallest
     modified_data = self - pos_pref if largest else self + pos_pref
 
