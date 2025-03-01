@@ -46,6 +46,10 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
 def index_tensor(x, y):
   return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
 
+@torch.library.impl("aten::index_put", "privateuseone")
+def index_put(self, indices, values, accumulate=False):
+  return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
+
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
@@ -159,6 +163,14 @@ def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
 
+@torch.library.impl("aten::select_backward", "privateuseone")
+def select_backward(grad_out, input_sizes, dim, index):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = index
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
+
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   if stride == []: stride = None
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
@@ -198,8 +210,8 @@ def upsample_nearest1d_backward(grad_out, out_size, input_size, scales=None):
 def cummax(self, dim):
   self = unwrap(self)
   values = Tensor.cummax(self, dim)
-  indicies = Tensor.max(self, dim)
-  return (wrap(values), wrap(indicies))
+  indices = Tensor.max(self, dim)
+  return (wrap(values), wrap(indices))
 
 @torch.library.impl("aten::view.dtype", "privateuseone")
 def view_dtype(self, dtype):
@@ -446,7 +458,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.split.Tensor": Tensor.split,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
-  "aten.index_put": Tensor.assign,
   "aten.mul.Tensor": Tensor.mul,
 }}
 
