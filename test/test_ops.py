@@ -1034,6 +1034,49 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
+  def test_topk(self):
+    # test values
+    helper_test_op([(10,)], lambda x: x.topk(3)[0], lambda x: x.topk(3)[0], forward_only=True)
+    helper_test_op([(10,)], lambda x: x.topk(5, largest=False)[0], lambda x: x.topk(5, largest=False)[0], forward_only=True)
+    
+    # test indices
+    helper_test_op([(10,)], lambda x: x.topk(3)[1].type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
+    helper_test_op([(10,)], lambda x: x.topk(5, largest=False)[1].type(torch.int32), lambda x: x.topk(5, largest=False)[1], forward_only=True)
+    
+    # test 2D tensor
+    helper_test_op([(5,10)], lambda x: x.topk(3, dim=1)[0], lambda x: x.topk(3, dim=1)[0], forward_only=True)
+    helper_test_op([(5,10)], lambda x: x.topk(3, dim=1)[1].type(torch.int32), lambda x: x.topk(3, dim=1)[1], forward_only=True)
+    helper_test_op([(5,10)], lambda x: x.topk(3, dim=0)[0], lambda x: x.topk(3, dim=0)[0], forward_only=True)
+    helper_test_op([(5,10)], lambda x: x.topk(3, dim=0)[1].type(torch.int32), lambda x: x.topk(3, dim=0)[1], forward_only=True)
+    
+    # test 3D tensor
+    helper_test_op([(3,5,10)], lambda x: x.topk(3, dim=2)[0], lambda x: x.topk(3, dim=2)[0], forward_only=True)
+    helper_test_op([(3,5,10)], lambda x: x.topk(3, dim=2)[1].type(torch.int32), lambda x: x.topk(3, dim=2)[1], forward_only=True)
+    
+    # test with specific values
+    helper_test_op(None, lambda x: x.topk(2)[0], lambda x: x.topk(2)[0], forward_only=True, 
+                   vals=[[1, 3, 5, 7, 9]])
+    helper_test_op(None, lambda x: x.topk(2)[1].type(torch.int32), lambda x: x.topk(2)[1], forward_only=True, 
+                   vals=[[1, 3, 5, 7, 9]])
+    
+    # test with duplicate values (should return first indices)
+    helper_test_op(None, lambda x: x.topk(2)[0], lambda x: x.topk(2)[0], forward_only=True, 
+                   vals=[[5, 5, 3, 2]])
+    helper_test_op(None, lambda x: x.topk(2)[1].type(torch.int32), lambda x: x.topk(2)[1], forward_only=True, 
+                   vals=[[5, 5, 3, 2]])
+    
+    # test k=1 (should be equivalent to max/argmax)
+    helper_test_op([(10,)], lambda x: x.topk(1)[0].squeeze(), lambda x: x.topk(1)[0].squeeze(), forward_only=True)
+    helper_test_op([(10,)], lambda x: x.topk(1)[1].type(torch.int32).squeeze(), lambda x: x.topk(1)[1].squeeze(), forward_only=True)
+    
+    # test negative dimension indexing
+    helper_test_op([(5,10)], lambda x: x.topk(3, dim=-1)[0], lambda x: x.topk(3, dim=-1)[0], forward_only=True)
+    helper_test_op([(5,10)], lambda x: x.topk(3, dim=-2)[0], lambda x: x.topk(3, dim=-2)[0], forward_only=True)
+
+    # test empty tensor and tensor with zeroes in shape
+    helper_test_op([(0,10)], lambda x: x.topk(0, dim=1)[0], lambda x: x.topk(0, dim=1)[0], forward_only=True)
+    helper_test_op([(5,0)], lambda x: x.topk(0, dim=0)[0], lambda x: x.topk(0, dim=0)[0], forward_only=True)
+
   def test_einsum(self):
     # matrix transpose
     helper_test_op([(150,150)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))

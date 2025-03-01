@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
+from typing import Callable, Optional, ClassVar, Union, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex, Tuple
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -3992,6 +3992,85 @@ class Tensor(SimpleMathTrait):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+
+  def topk(self, k: int, dim: int = -1, largest: bool = True, sorted: bool = True) -> Tuple["Tensor", "Tensor"]:
+    """Returns the k largest or smallest elements of a tensor along a dimension."""
+    dim = self._resolve_dim(dim)
+    if k > self.shape[dim]:
+      raise ValueError(f"k ({k}) is too large for dimension {dim} of size {self.shape[dim]}")
+    
+    # handle empty tensors
+    if 0 in self.shape:
+      return Tensor.zeros(*self.shape[:dim], k, *self.shape[dim+1:]), Tensor.zeros(*self.shape[:dim], k, *self.shape[dim+1:], dtype=dtypes.int32)
+    
+    # use CPU for operations and ensure tensor is contiguous
+    cpu_tensor = self.to("CPU").contiguous()
+    
+    # convert integers to float for handling infinities during masking
+    is_int = dtypes.is_int(cpu_tensor.dtype) 
+    if is_int:
+      cpu_tensor = cpu_tensor.cast(dtypes.float32)
+    
+    # create output shape and preallocate output tensors
+    output_shape = list(cpu_tensor.shape)
+    output_shape[dim] = k
+    values = Tensor.zeros(*output_shape, device="CPU", dtype=cpu_tensor.dtype).contiguous()
+    indices = Tensor.zeros(*output_shape, dtype=dtypes.int32, device="CPU").contiguous()
+    
+    # reshape for slicing along the target dimension
+    # flatten before/after dim for easier iteration
+    flat_shape_pre = prod(cpu_tensor.shape[:dim]) if dim > 0 else 1
+    flat_shape_post = prod(cpu_tensor.shape[dim+1:]) if dim < len(cpu_tensor.shape)-1 else 1
+    
+    # reshape tensors for iteration and results collection 
+    reshaped = cpu_tensor.reshape(flat_shape_pre, cpu_tensor.shape[dim], flat_shape_post).contiguous()
+    reshaped_values = values.reshape(flat_shape_pre, k, flat_shape_post).contiguous()
+    reshaped_indices = indices.reshape(flat_shape_pre, k, flat_shape_post).contiguous()
+    
+    # for each slice, find the top-k values
+    for i in range(flat_shape_pre):
+      for j in range(flat_shape_post):
+        # get a modifiable copy of the slice
+        slice_1d = reshaped[i, :, j].clone().contiguous()
+        
+        # collect top-k values and indices
+        topk_values = []
+        topk_indices = []
+        
+        # iteratively find the next largest/smallest value
+        for _ in range(k):
+          if largest:
+            # find max value and mask it out with -inf for next iteration
+            idx = slice_1d.argmax().item()
+            val = slice_1d[idx].item()
+            slice_1d[idx] = float('-inf')
+          else:
+            # find min value and mask it out with +inf for next iteration
+            idx = slice_1d.argmin().item()
+            val = slice_1d[idx].item()
+            slice_1d[idx] = float('inf')
+          
+          topk_values.append(val)
+          topk_indices.append(idx)
+        
+        # write values to output tensors
+        for ki in range(k):
+          reshaped_values[i, ki, j] = topk_values[ki]
+          reshaped_indices[i, ki, j] = topk_indices[ki]
+    
+    # reshape results back to output shape
+    values = reshaped_values.reshape(*output_shape)
+    indices = reshaped_indices.reshape(*output_shape)
+    
+    # restore original dtype if needed
+    if is_int and self.dtype != dtypes.float32:
+      values = values.cast(self.dtype)
+    
+    # move back to original device
+    values = values.to(self.device)
+    indices = indices.to(self.device)
+    
+    return values, indices
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
