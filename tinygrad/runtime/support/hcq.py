@@ -434,7 +434,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
-        ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
+        libc.memcpy(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
@@ -470,7 +470,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
         self.dev.timeline_signal.wait(self.dev.timeline_value)
         self.dev.timeline_value += 1
 
-        ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+        libc.memcpy(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:DeviceType, dest_dev:DeviceType):
     cast(HCQAllocator, src_dev.allocator).map(dest)
