@@ -50,6 +50,16 @@ def index_tensor(x, y):
 def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
+@torch.library.impl("aten::cumprod", "privateuseone")
+def cumprod(self, dim, dtype=None):
+  # TODO: implement in tinygrad
+  return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
+
+@torch.library.impl("aten::nonzero", "privateuseone")
+def nonzero(self):
+  # TODO: implement in tinygrad
+  return aten.nonzero(self.cpu()).tiny()
+
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
@@ -151,7 +161,7 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
-  slices = [slice(None)] * self.ndim
+  slices = [slice(None)] * unwrap(self).ndim
   slices[dim] = slice(start, end, step)
   return wrap(unwrap(self)[slices])
 
@@ -170,6 +180,12 @@ def select_backward(grad_out, input_sizes, dim, index):
   slices[dim] = index
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
+
+@torch.library.impl("aten::select.int", "privateuseone")
+def select_int(self, dim, index):
+  slices = [slice(None)] * unwrap(self).ndim
+  slices[dim] = index
+  return wrap(unwrap(self)[tuple(slices)])
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   if stride == []: stride = None
@@ -212,6 +228,25 @@ def cummax(self, dim):
   values = Tensor.cummax(self, dim)
   indices = Tensor.max(self, dim)
   return (wrap(values), wrap(indices))
+
+@torch.library.impl("aten::scatter_add", "privateuseone")
+def scatter_add(self, dim, index, src):
+  # TODO: why doesn't this work??? failing test: TestOps.test_cummax
+  if unwrap(self).shape == (): return src
+  out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
+  return wrap(out)
+
+@torch.library.impl("aten::max.dim", "privateuseone")
+def max_dim(self, dim, keepdim=False):
+  self = unwrap(self)
+  values = Tensor.max(self, dim, keepdim)
+  indices = Tensor.max(self, dim)
+  return (wrap(values), wrap(indices))
+
+@torch.library.impl("aten::masked_fill_.Scalar", "privateuseone")
+def masked_fill_(self, mask, value):
+  # TODO: why doesn't this work???
+  return wrap(unwrap(self).masked_fill(unwrap(mask), value))
 
 @torch.library.impl("aten::view.dtype", "privateuseone")
 def view_dtype(self, dtype):
@@ -277,10 +312,9 @@ decomps = [
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
   aten.logical_and,
-  aten.cumprod,
+  aten.randint,
   aten.eye,
   aten.hardsigmoid_backward,
-  aten.logical_or,
   aten.leaky_relu_backward,
   aten.nll_loss2d_forward,
   # NOTE: many of these don't work or cause infinite loops
@@ -354,6 +388,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
   "aten.div.out_mode": Tensor.div,
+  "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
 }}
 
 # we add the "out" here
@@ -399,7 +434,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.scatter.value_reduce": Tensor.scatter,
-  "aten.scatter.src": Tensor.scatter, # This might be wrong??
   "aten.gather": lambda self, dim, index: Tensor.gather(self, dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
@@ -413,8 +447,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.masked_fill_.Scalar": Tensor.masked_fill,
-  "aten.masked_fill_.Tensor": Tensor.masked_fill,
+  "aten.masked_fill.Scalar": Tensor.masked_fill,
+  "aten.masked_fill.Tensor": Tensor.masked_fill,
+  "aten.logical_or_": lambda x, y: x | y,
   "aten.multinomial": Tensor.multinomial,
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
@@ -428,8 +463,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.atanh": Tensor.atanh,
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
-  "aten.scatter_add": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
-  "aten.scatter_add.out": lambda self, dim, index, src, out: out.replace(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')),
+  # "aten.scatter.src: gives wrong results for TestOps.test_max"
+  "aten.scatter.src": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
   # fix backward for these
   "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
@@ -447,6 +482,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
   "aten._upsample_nearest_exact2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
   # ===
+  "aten.maximum": Tensor.maximum,
+  "aten.squeeze.dim": Tensor.squeeze,
+  "aten.unsqueeze": Tensor.unsqueeze,
+  "aten.add.Tensor":  Tensor.add,
   "aten.roll": Tensor.roll,
   "aten.where.self": lambda self, x, y: Tensor.where(self, x, y),
   "aten.logcumsumexp": Tensor.logcumsumexp,
