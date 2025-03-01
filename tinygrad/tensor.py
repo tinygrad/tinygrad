@@ -4026,13 +4026,14 @@ class Tensor(SimpleMathTrait):
     # For largest=False, we want larger indices to be preferred when values are equal
     # Use very small value to not interfere with actual values
     pos_pref_factor = 1e-15
-    
-    # Create positional preference tensor
-    pos_indices = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape)
-    
-    # For largest=True, prefer smaller indices (negative factor)
-    # For largest=False, prefer larger indices (positive factor)
-    pos_pref = pos_indices * (-pos_pref_factor if largest else pos_pref_factor)
+
+    # Handle duplicate values for stable sorting (match PyTorch behavior exactly)
+    # PyTorch prefers SMALLER indices for tied values when largest=True
+    # PyTorch prefers LARGER indices for tied values when largest=False
+    position_indices = Tensor.arange(self.shape[dim], dtype=self.dtype, device=self.device).reshape(*view_shape)
+    # Apply negative factor for largest=True to prefer smaller indices
+    # Apply positive factor for largest=False to prefer larger indices
+    pos_pref = position_indices * (-pos_pref_factor if largest else pos_pref_factor)
     pos_pref = pos_pref.expand(*self.shape)
 
     # combine both adjustments
