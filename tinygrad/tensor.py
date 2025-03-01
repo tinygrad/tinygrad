@@ -4017,7 +4017,7 @@ class Tensor(SimpleMathTrait):
     # when largest=False, subtracting indices*eps will prefer HIGHER indices for ties
     eps = 1e-10
     modified_data = self.clone()
-    
+
     if largest:
       modified_data = modified_data + indices * eps
     else:
@@ -4035,13 +4035,13 @@ class Tensor(SimpleMathTrait):
       # apply mask to modified data
       large_value = Tensor(1e9, device=self.device, dtype=self.dtype)
       masked_data = modified_data.clone()
-      
+
       if largest:
         # for largest=True, mask by setting masked values very negative
         masked_data = masked_data - mask * large_value
         extreme_val = masked_data.max(axis=dim, keepdim=True)
       else:
-        # for largest=False, mask by setting masked values very positive  
+        # for largest=False, mask by setting masked values very positive
         masked_data = masked_data + mask * large_value
         extreme_val = masked_data.min(axis=dim, keepdim=True)
 
