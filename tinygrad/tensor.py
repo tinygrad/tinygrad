@@ -4012,42 +4012,47 @@ class Tensor(SimpleMathTrait):
     indices = indices.reshape(*view_shape).expand(*self.shape)
 
     # simple tie-breaking: add tiny amount based on index position
-    # for duplicate values, this ensures higher indices are preferred
+    # for duplicate values, this ensures higher indices are preferred in PyTorch's behavior
+    # when largest=True, adding indices*eps will prefer HIGHER indices for ties
+    # when largest=False, subtracting indices*eps will prefer HIGHER indices for ties
     eps = 1e-10
-    modified_data = self + indices * eps if largest else self - indices * eps
+    modified_data = self.clone()
+    
+    if largest:
+      modified_data = modified_data + indices * eps
+    else:
+      modified_data = modified_data - indices * eps
 
     # find top k values and indices
-    result_values = None  # will be initialized with tensor on first iteration
-    result_indices = None  # will be initialized with tensor on first iteration
+    result_values = None  # will be initialized on first iteration
+    result_indices = None  # will be initialized on first iteration
 
     # create a mask for values we've already selected
     mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device)
 
     # for each position in the top k
     for i in range(k):
-      # set a large negative value for masked elements if looking for largest
-      # or a large positive value if looking for smallest
-      # ensure operations preserve the computational graph
+      # apply mask to modified data
       large_value = Tensor(1e9, device=self.device, dtype=self.dtype)
+      masked_data = modified_data.clone()
+      
       if largest:
-        masked_data = modified_data - mask * large_value
-        # find the maximum value
+        # for largest=True, mask by setting masked values very negative
+        masked_data = masked_data - mask * large_value
         extreme_val = masked_data.max(axis=dim, keepdim=True)
       else:
-        masked_data = modified_data + mask * large_value
-        # find the minimum value
+        # for largest=False, mask by setting masked values very positive  
+        masked_data = masked_data + mask * large_value
         extreme_val = masked_data.min(axis=dim, keepdim=True)
 
       # create a mask for the extreme values
       extreme_mask = (masked_data == extreme_val)
 
       # use the first occurrence when there are duplicates
-      # this ensures stability of the sort
       cumsum = extreme_mask.cumsum(axis=dim)
-      # replace AND operation with multiplication for gradient support
       first_extreme = (cumsum == 1) * extreme_mask
 
-      # get the indices and values at the positions of the extreme values
+      # get the indices and values at these positions
       selected_indices = indices * first_extreme
       selected_values = self * first_extreme
 
@@ -4056,14 +4061,12 @@ class Tensor(SimpleMathTrait):
       idx = selected_indices.sum(axis=dim)
       val = selected_values.sum(axis=dim)
 
-      # place the selected indices and values in the result at position i
       # reshape for proper indexing
       idx_shape = list(idx.shape)
       idx_shape.insert(dim, 1)
       val_shape = list(val.shape)
       val_shape.insert(dim, 1)
 
-      # reshape idx and val
       idx = idx.reshape(*idx_shape)
       val = val.reshape(*val_shape)
 
@@ -4072,24 +4075,17 @@ class Tensor(SimpleMathTrait):
         result_indices = idx
         result_values = val
       else:
-        # mypy fix: ensure we're dealing with Tensors
-        result_indices = Tensor.cat(result_indices, idx, dim=dim)  # type: ignore
-        result_values = Tensor.cat(result_values, val, dim=dim)  # type: ignore
+        assert isinstance(result_indices, Tensor), "result_indices must be a Tensor"
+        assert isinstance(result_values, Tensor), "result_values must be a Tensor"
+        result_indices = Tensor.cat(result_indices, idx, dim=dim)
+        result_values = Tensor.cat(result_values, val, dim=dim)
 
       # update the mask to exclude the selected elements
       mask = mask.maximum(first_extreme)
 
-    # if sorted is False and k > 1, we need to preserve the original order
-    if not sorted:  # removed k > 1 condition as it was unreachable
-      # sort indices based on their position in the original tensor
-      # we can use a simple approach for this specific case
-      # since we're only sorting k elements
+    # Note: sorted=False functionality is not currently implemented
+    # Current implementation always returns values in sorted order
 
-      # for now, we'll leave it as is since the current implementation
-      # already returns the values in the order they appear in the original tensor
-      pass
-
-    # mypy fix: ensure we have proper Tensors to return
     assert isinstance(result_values, Tensor), "result_values must be a Tensor"
     assert isinstance(result_indices, Tensor), "result_indices must be a Tensor"
     return result_values, result_indices.cast(dtypes.int32)
