@@ -202,7 +202,7 @@ class TestContribOnnxOps(TestOnnxOps):
         outputs = ["C"]
         self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
 
-    with self.subTest(test_case="round_away_from_zero"):
+    with self.subTest(test_case="round_half_to_even"):
       inputs = {
         "A": np.array([1, 1, 1, 1], dtype=np.int8),
         "A_scale": np.array(1, dtype=np.float32),
@@ -216,6 +216,39 @@ class TestContribOnnxOps(TestOnnxOps):
       attributes = {}
       outputs = ["C"]
       self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
+
+  def test_qlinear_mul(self):
+    for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
+      with self.subTest(dtype=dtype, zero_point=zero_point):
+        dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
+        inputs = {
+          "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
+          "A_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "A_zero_point": np.array(zero_point, dtype=dtype),
+          "B": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
+          "B_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "B_zero_point": np.array(zero_point, dtype=dtype),
+          "C_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "C_zero_point": np.array(zero_point, dtype=dtype)
+        }
+        attributes = {}
+        outputs = ["C"]
+        self.helper_test_single_op("QLinearMul", inputs, attributes, outputs)
+
+    with self.subTest(test_case="round_half_to_even"):
+      inputs = {
+        "A": np.array([1, 1, 1, 1], dtype=np.int8),
+        "A_scale": np.array(1, dtype=np.float32),
+        "A_zero_point": np.array(0, dtype=np.int8),
+        "B": np.array([2, 6, -2, -6], dtype=np.int8),
+        "B_scale": np.array(1, dtype=np.float32),
+        "B_zero_point": np.array(0, dtype=np.int8),
+        "C_scale": np.array(4, dtype=np.float32),
+        "C_zero_point": np.array(0, dtype=np.int8)
+      }
+      attributes = {}
+      outputs = ["C"]
+      self.helper_test_single_op("QLinearMul", inputs, attributes, outputs)
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
