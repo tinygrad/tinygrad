@@ -149,14 +149,14 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
   slices = [slice(None)] * self.ndim
   slices[dim] = slice(start, end, step)
-  return wrap(unwrap(self)[*slices])
+  return wrap(unwrap(self)[slices])
 
 @torch.library.impl("aten::slice_backward", "privateuseone")
 def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
   grad_input = Tensor.zeros(input_sizes).contiguous()
   slices = [slice(None)] * len(input_sizes)
   slices[dim] = slice(start, end, step)
-  grad_input[*slices] = unwrap(grad_out)
+  grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
@@ -448,7 +448,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.index_put": Tensor.assign,
   "aten.mul.Tensor": Tensor.mul,
-  "aten.pad": Tensor.pad,
 }}
 
 def wrap_fxn(k,f):
