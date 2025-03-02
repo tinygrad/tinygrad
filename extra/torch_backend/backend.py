@@ -238,7 +238,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
   "aten.sub.out": lambda input,other,alpha=1: input-alpha*other, # NOTE: this is also needed to handle reverse
   "aten.mul.out": operator.mul,
-  "aten.div.out": operator.truediv,
   "aten.div.out_mode": lambda input,other,*,rounding_mode=None: input.div(other) if rounding_mode is None else input.div(other).round() if rounding_mode == "trunc" else input.div(other).floor(),
   "aten.bmm.out": operator.matmul,
   "aten.leaky_relu.out": Tensor.leaky_relu,
