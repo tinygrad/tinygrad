@@ -133,22 +133,21 @@ def linearize_uop(root_uop:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
       for elem in self.start:
         linear.append(elem)
-      
-      if self.start[0].op is Ops.ASSIGN:
+
+      if self.start[0].op in {Ops.ASSIGN, Ops.STORE}:
         for elem in self.end[::-1]:
-          linear.append(UOp(Ops.ENDRANGE, src=(elem,)))
-      
-      if self.start[0].op is Ops.STORE:
-        for elem in self.end[::-1]:
-          linear.append(UOp(Ops.ENDIF, src=(elem,)))
+          linear.append(UOp(Ops.ENDRANGE if elem.op is Ops.RANGE else Ops.ENDIF, src=(elem,)))
 
       if self.start[0].op is Ops.SINK:
         for i, o in enumerate(linear):
           for s in o.src:
             assert o.op is Ops.DEFINE_ACC or s in linear[:i]
 
-      assert root_uop.arg is not None
-      linear = [UOp(Ops.NAME, arg=root_uop.arg.name)] + [elem for elem in root_uop.toposort if elem.op is Ops.DEFINE_GLOBAL] + [elem for elem in linear if elem.op is not Ops.DEFINE_GLOBAL]
+      linear = sorted([elem for elem in root_uop.toposort if elem.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg) + [elem for elem in linear if elem.op is not Ops.DEFINE_GLOBAL]
+      if self.start[0].op is Ops.SINK:
+        assert root_uop.arg is not None
+        linear = [UOp(Ops.NAME, arg=root_uop.arg.name)] + linear
+
       return linear
 
   def _make_scope(scope_start:UOp):
@@ -167,8 +166,7 @@ def linearize_uop(root_uop:UOp, skip_check:bool=not __debug__) -> list[UOp]:
         visited.add(curr_uop)
 
       if bubbling:
-        if curr_uop.op == Ops.RANGE and scope_start.op == Ops.ASSIGN or \
-           curr_uop.op == Ops.IF and scope_start.op == Ops.STORE or\
+        if curr_uop.op in {Ops.RANGE, Ops.IF} and scope_start.op in {Ops.ASSIGN, Ops.STORE} or \
            curr_uop.src == () and scope_start.op == Ops.SINK:
           scope.end.append(curr_uop)
           scope.subgraph_nodes.add(curr_uop)
