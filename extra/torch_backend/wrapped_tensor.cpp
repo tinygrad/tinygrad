@@ -54,6 +54,7 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
     return Stream(Stream::DEFAULT, Device(D, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
+    // TODO: stub
     return 1;
   }
   // Event-related functions
@@ -109,7 +110,7 @@ int register_hook() {
 }
 int temp_register_hook = register_hook();
 
-at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype) {
+at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
@@ -127,7 +128,7 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype) {
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
     c10::scalarTypeToTypeMeta(dtype),
-    at::Device(at::kPrivateUse1),
+    at::Device(at::kPrivateUse1, device_index),
     std::make_shared<c10::SafePyObject>(py_obj.release().ptr(), getPyInterpreter()),
     sizes, strides);
 }
