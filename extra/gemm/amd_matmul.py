@@ -5,12 +5,40 @@ from dataclasses import replace
 from tinygrad import Tensor, Device, Context
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
+from tinygrad.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
 N = 4096
 run_count = 5
 
-#src = (pathlib.Path(__file__).parent / "fp32_sgemm_amd" / "src" / "kernel8_batched_gmem.s").read_text()
-src = (pathlib.Path(__file__).parent / "kernel8_batched_gmem.s").read_text()
+from tinygrad.shape.shapetracker import ShapeTracker
+def transform_load(ctx:tuple[Kernel, set[UOp]], x:UOp):
+  if x.src[0].op is not Ops.DEFINE_GLOBAL: return None
+  if x in ctx[1]: return None
+  ctx[1].add(x)
+  local_st = ShapeTracker.from_shape((1,1,16,16,1,1))
+  input_st: ShapeTracker = x.src[1].arg
+  if input_st.real_strides()[2] == 0:
+    load_st = local_st.permute((0,1,5,3,4,2))
+    input_st = input_st.permute((0,1,5,3,4,2))
+  elif input_st.real_strides()[3] == 0:
+    load_st = local_st.permute((0,1,2,5,4,3))
+    input_st = input_st.permute((0,1,2,5,4,3))
+  else:
+    return None
+  lcl = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(local_st.real_size(), local=True), (), f"temp{x.src[0].arg}")
+  global_load = x.replace(src=(x.src[0], input_st.to_uop()))
+  ret = UOp(Ops.STORE, src=(lcl, local_st.to_uop(), global_load))
+  return UOp(Ops.LOAD, x.dtype, src=(lcl, load_st.to_uop(), ret))
+
+local_loads_pm = PatternMatcher([
+  (UPat(Ops.LOAD, name="x"), transform_load),
+])
+
+def ast_transform(k, ast):
+  #return ast
+  ast = graph_rewrite(ast, local_loads_pm, ctx=(k, set()))
+  print(ast)
+  return ast
 
 if __name__ == "__main__":
   rng = np.random.default_rng()
@@ -28,11 +56,15 @@ if __name__ == "__main__":
   #        Opt(op=OptOps.UPCAST, axis=0, arg=4),
   #        Opt(op=OptOps.LOCAL, axis=1, arg=8),
   #        Opt(op=OptOps.LOCAL, axis=0, arg=4)]
-  #opts = [Opt(op=OptOps.LOCAL, axis=1, arg=16),
-  #        Opt(op=OptOps.LOCAL, axis=0, arg=16)]
-  #for opt in opts: k.apply_opt(opt)
-  prg = k.to_program()
-  prg = replace(prg, src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
+  opts = [Opt(op=OptOps.LOCAL, axis=1, arg=16),
+          Opt(op=OptOps.LOCAL, axis=0, arg=16),
+          Opt(op=OptOps.UNROLL, axis=0, arg=16)]
+  for opt in opts: k.apply_opt(opt)
+  prg = k.to_program(ast_transform=ast_transform)
+  if Device.DEFAULT == "AMD":
+    #src = (pathlib.Path(__file__).parent / "fp32_sgemm_amd" / "src" / "kernel8_batched_gmem.s").read_text()
+    src = (pathlib.Path(__file__).parent / "kernel8_batched_gmem.s").read_text()
+    prg = replace(prg, src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
   print(prg.global_size, prg.local_size)
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   with Context(DEBUG=2):

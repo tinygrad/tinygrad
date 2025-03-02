@@ -31,6 +31,7 @@ def fold_expanded(ex, buf):
     else: root_src, arg = idx, 0
     # add gates for gated
     if len(s.src[0].src) == 3: root_src = (s.src[0].src[2], root_src)
+    if arg not in offsets_rootsrc[root_src]: return None
     assert arg not in offsets_rootsrc[root_src], f"{offsets_rootsrc[root_src][arg]} != {i} with {len(s.src)} sources"
     offsets_rootsrc[root_src][arg] = i
 
