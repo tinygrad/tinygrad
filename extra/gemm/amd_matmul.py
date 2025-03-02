@@ -23,10 +23,10 @@ def transform_load(ctx:tuple[Kernel, set[UOp]], x:UOp):
   #strides = (0,0)+strides[2:]
   if input_st.real_strides()[2] == 0:
     perm = (0,1,5,3,4,2)
-    strides = (0,0,LN*4,4,0,0,0,1)
+    strides = (0,0,LN*4,4,0,0,1,0)
   elif input_st.real_strides()[3] == 0:
     perm = (0,1,2,5,4,3)
-    strides = (0,0,LN*4,4,0,0,1,0)
+    strides = (0,0,LN*4,4,0,0,0,1)
   else:
     return None
   local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1,4,4), strides),))
@@ -69,8 +69,8 @@ if __name__ == "__main__":
   opts = [Opt(op=OptOps.UNROLL, axis=0, arg=LN),
           Opt(op=OptOps.UPCAST, axis=0, arg=4),
           Opt(op=OptOps.UPCAST, axis=1, arg=4),
-          Opt(op=OptOps.LOCAL, axis=0, arg=LN),
-          Opt(op=OptOps.LOCAL, axis=1, arg=LN)]
+          Opt(op=OptOps.LOCAL, axis=1, arg=LN),
+          Opt(op=OptOps.LOCAL, axis=0, arg=LN)]
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program(ast_transform=ast_transform)
   if getenv("FAST", 1) and Device.DEFAULT == "AMD":
