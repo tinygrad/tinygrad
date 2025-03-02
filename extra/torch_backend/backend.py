@@ -220,7 +220,7 @@ for k,v in get_decompositions(decomps).items():
 simple_tensor_methods = [
   # unary (ish)
   "log", "log2", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
-  "sigmoid", "clamp", "mish", "erf",
+  "sigmoid", "clamp", "mish", "erf", "leaky_relu",
   # trig
   "acos", "acosh", "cos", "cosh", "asin", "asinh", "sin", "sinh", "atan", "atanh", "tan", "tanh",
   # rounding
@@ -237,10 +237,12 @@ simple_tensor_methods = [
 tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
   "aten.sub.out": lambda input,other,alpha=1: input-alpha*other, # NOTE: this is also needed to handle reverse
+<<<<<<< Updated upstream
   "aten.mul.out": operator.mul,
   "aten.div.out_mode": lambda input,other,*,rounding_mode=None: input.div(other) if rounding_mode is None else input.div(other).round() if rounding_mode == "trunc" else input.div(other).floor(),
+=======
+>>>>>>> Stashed changes
   "aten.bmm.out": operator.matmul,
-  "aten.leaky_relu.out": Tensor.leaky_relu,
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
   "aten.remainder.Tensor_out": Tensor.mod,
   "aten.pow.Tensor_Tensor_out": Tensor.pow,
