@@ -378,7 +378,7 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
   for state_dict in optimizer.state.values():
     for key, value in state_dict.items():
       if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
+  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device).startswith("tiny")]
   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
 _optimizer_init = torch.optim.Optimizer.__init__
@@ -413,7 +413,7 @@ torch.nn.parallel.comm.scatter = _torch_patched_scatter
 
 _torch_broadcast_coalesced = torch.nn.parallel.comm.broadcast_coalesced
 def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
-  if not str(tensors[0].device).startswith("tiny"): return _torch_broadcast_coalesced(tensors, devices, buffer_size)
+  if tensors and not str(tensors[0].device).startswith("tiny"): return _torch_broadcast_coalesced(tensors, devices, buffer_size)
   # NOTE: ignoring buffer_size and straightforward broadcast
   return [[wrap(unwrap(x).to(_to_tiny_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
 torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
