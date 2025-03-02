@@ -1,3 +1,4 @@
+import torch.nn.parallel.comm
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import DEBUG, getenv, prod
 import torch.lib
@@ -20,7 +21,7 @@ class TinyBackend:
   def current_device(self): return 0
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
-  def get_device_properties(self, i): 
+  def get_device_properties(self, i):
     # TODO: stub
     props = {"total_memory": 1, "multi_processor_count": 1}
     return collections.namedtuple("props", props)(**props)
@@ -391,9 +392,9 @@ torch.optim.Optimizer.__init__ = _optimizer_patched_init
 for m in ['torch._utils', 'torch.nn.parallel.data_parallel']:
   sys.modules[m]._get_available_device_type = lambda: "tiny"
 
-_torch_C_scatter = torch._C._scatter
+_torch_scatter = torch.nn.parallel.comm.scatter
 def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0, streams=None):
-  if not str(self.device).startswith("tiny"): return _torch_C_scatter(self, devices, chunk_sizes, dim, streams)
+  if not str(self.device).startswith("tiny"): return _torch_patched_scatter(self, devices, chunk_sizes, dim, streams)
   #assert chunk_sizes is None, "not yet supported" # TODO: support it
   # TODO: alternative?
   # self = unwrap(self).shard([_to_tiny_device(torch.device("tiny", d)) for d in devices], dim)
@@ -407,18 +408,18 @@ def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0,
   for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
     lbs.append(self.shrink(tuple((0,s) if i != dim else (off,off+sz) for i,s in enumerate(self.shape))))
   sharded_lbs = [wrap(lb.to(d)) for lb,d in zip(lbs, devices)]
-  return sharded_lbs
-torch._C._scatter = _torch_patched_scatter
+  return tuple(sharded_lbs)
+torch.nn.parallel.comm.scatter = _torch_patched_scatter
 
-_torch_C_broadcast_coalesced = torch._C._broadcast_coalesced
-def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size):
-  # TODO: only if tensors in tiny
-  # NOTE: ignoring buffer_size and straightforward broadcast for now
+_torch_broadcast_coalesced = torch.nn.parallel.comm.broadcast_coalesced
+def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
+  if not str(tensors[0].device).startswith("tiny"): return _torch_broadcast_coalesced(tensors, devices, buffer_size)
+  # NOTE: ignoring buffer_size and straightforward broadcast
   return [[wrap(unwrap(x).to(_to_tiny_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
-torch._C._broadcast_coalesced = _torch_patched_broadcast_coalesced
+torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
 
 def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
-  # TODO: only if tensors in tiny, check devices 
+  # TODO: only if tensors in tiny, check devices
   if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
   if devices is None: devices = (torch.device("tiny"),) * len(modules)
   return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
@@ -426,8 +427,8 @@ torch.nn.parallel.data_parallel.parallel_apply = _torch_patched_parallel_apply
 for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']:
   sys.modules[m].parallel_apply = _torch_patched_parallel_apply
 
-_torch_C_gather = torch._C._gather
+_torch_gather = torch.nn.parallel.comm.gather
 def _torch_patched_gather(tensors, dim, dest_index):
-  # TODO: only if tensors in tiny
+  if not str(tensors[0].device).startswith("tiny"): return _torch_patched_gather(tensors, dim, dest_index)
   return wrap(Tensor.cat(*(unwrap(x).to(_to_tiny_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
-torch._C._gather = _torch_patched_gather
+torch.nn.parallel.comm.gather = _torch_patched_gather
