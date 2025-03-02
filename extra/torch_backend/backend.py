@@ -244,7 +244,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.remainder.Tensor_out": Tensor.mod,
   "aten.pow.Tensor_Tensor_out": Tensor.pow,
   "aten.pow.Tensor_Scalar_out": Tensor.pow,
-  "aten.pow.Scalar_out": lambda x,y: x**y,
+  "aten.pow.Scalar_out": lambda input,exponent: input**exponent,
   "aten.bitwise_and.Tensor_out": Tensor.bitwise_and,
   "aten.bitwise_or.Tensor_out": Tensor.bitwise_or,
   "aten.bitwise_xor.Tensor_out": Tensor.bitwise_xor,
@@ -254,17 +254,20 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.gt.Tensor_out": Tensor.__gt__, "aten.gt.Scalar_out": Tensor.__gt__,
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
-  "aten.clamp_max.Tensor_out": lambda self,max_: self.clamp(max_=max_),
-  "aten.clamp_min.Tensor_out": lambda self,min_: self.clamp(min_=min_),
+  "aten.clamp_max.Tensor_out": lambda input,max_: input.clamp(max_=max_),
+  "aten.clamp_min.Tensor_out": lambda input,min_: input.clamp(min_=min_),
+  "aten.fmod.Tensor_out": lambda input,other: input-input.div(other, rounding_mode="trunc")*other,
   # TODO: support this in tinygrad
-  "aten.bitwise_left_shift.Tensor_out": lambda self, other: Tensor(self << other.numpy()),
-  "aten.bitwise_right_shift.Tensor_out": lambda self, other: Tensor(self >> other.numpy()),
+  "aten.bitwise_left_shift.Tensor_out": lambda input,other: Tensor(input << other.numpy()),
+  "aten.bitwise_right_shift.Tensor_out": lambda input,other: Tensor(input >> other.numpy()),
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
   # TODO: move to tinygrad
   "aten.copysign.out": lambda input,other: input.abs() * other.sign(),
+  "aten.fmax.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.maximum(input, other))),
+  "aten.fmin.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.minimum(input, other))),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
