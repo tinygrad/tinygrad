@@ -933,7 +933,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** movement low level ops *****
 
-  def view(self, *shape) -> Tensor:
+  def view(self, *shape:tuple[sint, ...]) -> Tensor:
     """`.view` is an alias for `.reshape`."""
     return self.reshape(shape)
 
@@ -1725,9 +1725,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
     ```
     """
-    # TODO: Tensor.isfinite
-    def isfinite(t): return (t.isinf()|t.isnan()).logical_not()
-    is_finite_close = isfinite(self) & isfinite(other) & ((self - other).abs() <= atol + rtol * other.abs())
+    is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
     is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
@@ -2097,7 +2095,8 @@ class Tensor(SimpleMathTrait):
     return pads
 
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
+  def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                 ceil_mode=False, count_include_pad=True):
     """
     Applies average pooling over a tensor.
 
@@ -2144,7 +2143,8 @@ class Tensor(SimpleMathTrait):
     if not ceil_mode: return pool(self, reg_pads).mean(axis)
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
+  def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                 ceil_mode=False):
     """
     Applies max pooling over a tensor.
 
@@ -2793,7 +2793,7 @@ class Tensor(SimpleMathTrait):
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
 
-  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True):
+  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True) -> Tensor:
     """
     Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
 
@@ -2802,7 +2802,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
-  def isnan(self:Tensor):
+  def isnan(self:Tensor) -> Tensor:
     """
     Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
 
@@ -2811,6 +2811,15 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self != self
+  def isfinite(self:Tensor) -> Tensor:
+    """
+    Checks the tensor element-wise to return True where the element is finite, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isfinite().numpy())
+    ```
+    """
+    return (self.isinf()|self.isnan()).logical_not()
 
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
@@ -3455,8 +3464,8 @@ class Tensor(SimpleMathTrait):
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
 
-  def __lshift__(self, x) -> Tensor: return self.lshift(x)
-  def __rshift__(self, x) -> Tensor: return self.rshift(x)
+  def __lshift__(self, x:int) -> Tensor: return self.lshift(x)
+  def __rshift__(self, x:int) -> Tensor: return self.rshift(x)
 
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
@@ -3474,8 +3483,8 @@ class Tensor(SimpleMathTrait):
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x))
-  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
-  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
+  def __ilshift__(self, x:int) -> Tensor: return self.assign(self.lshift(x))
+  def __irshift__(self, x:int) -> Tensor: return self.assign(self.rshift(x))
 
   def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
   def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
