@@ -90,12 +90,7 @@ def block_merge(ctx, x:UOp):
         early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
         # NOTE: we have to add a barrier at the start if barrier is used in the range
         if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
-          new_late_ops = [UOp(Ops.BARRIER)]
-          for y in late_ops:
-            # peephole optimization, two barriers next to each other is one
-            if y.op is Ops.BARRIER and new_late_ops[-1].op is Ops.BARRIER: continue
-            new_late_ops.append(y)
-          late_ops = new_late_ops
+          late_ops = [UOp(Ops.BARRIER)] + late_ops
         return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
                   BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end), tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)))
 
