@@ -472,9 +472,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
-
   # confirm everything was toposorted correctly
   assert len(schedule) == (kc:=len(kernel_assign)), f"created {kc} kernels but scheduled {len(schedule)}"
+
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
