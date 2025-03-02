@@ -223,17 +223,25 @@ def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
 pad_forward = lambda self, padding, mode=None: wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+upsample = lambda self, size, align_corners=False, mode=None: wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 
 def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.pad(self, padding, mode=mode)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
+
 for dim in [1, 2, 3]:
   torch.library.impl(f"aten::replication_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="replicate"))
   torch.library.impl(f"aten::reflection_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="reflect"))
   torch.library.impl(f"aten::replication_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="replicate"))
   torch.library.impl(f"aten::reflection_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="reflect"))
+  torch.library.impl(f"aten::upsample_nearest{dim}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
+  torch.library.impl(f"aten::_upsample_nearest_exact{dim}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
+
+torch.library.impl(f"aten::upsample_linear1d", "privateuseone")(functools.partial(upsample, mode="linear")),
+torch.library.impl(f"aten::upsample_bilinear2d", "privateuseone")(functools.partial(upsample, mode="linear")),
+torch.library.impl(f"aten::upsample_trilinear3d", "privateuseone")(functools.partial(upsample, mode="linear")),
 
 for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
@@ -491,15 +499,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
-  "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
-  "aten.upsample_nearest1d": functools.partial(Tensor.interpolate, mode="nearest"),
-  "aten.upsample_nearest2d": functools.partial(Tensor.interpolate, mode="nearest"),
-  "aten.upsample_nearest3d": functools.partial(Tensor.interpolate, mode="nearest"),
-  "aten.upsample_bilinear2d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
-  "aten.upsample_trilinear3d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
-  "aten._upsample_nearest_exact1d": functools.partial(Tensor.interpolate, mode="nearest-exact"),
-  "aten._upsample_nearest_exact2d": functools.partial(Tensor.interpolate, mode="nearest-exact"),
-  "aten._upsample_nearest_exact3d": functools.partial(Tensor.interpolate, mode="nearest-exact"),
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.squeeze_.dim": lambda self, dim: Tensor.squeeze(self, dim), # shape mismatch in TestOps.test_matmul
   "aten.unsqueeze": Tensor.unsqueeze,
