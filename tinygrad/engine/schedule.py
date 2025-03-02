@@ -455,10 +455,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
-    if u.op is not Ops.ASSIGN: continue
     in_degree[u] = 0
-    for s in u.src[1].src:
-      if s.op is not Ops.ASSIGN: continue
+    for s in u.src:
       children.setdefault(s, []).append(u)
       in_degree[u] += 1
 
@@ -467,15 +465,16 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    schedule.append(schedule_uop(u, var_vals))
-    # increment the refcount of the target buf (this is required by the JIT and memory planner)
-    u.buf_uop.buffer.ref(1)
+    if u.op is Ops.ASSIGN:
+      schedule.append(schedule_uop(u, var_vals))
+      # increment the refcount of the target buf (this is required by the JIT and memory planner)
+      u.buf_uop.buffer.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
-  # confirm everything was scheduled correctly
-  if len(schedule) != (kc:=len(in_degree)): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
+  # confirm everything was toposorted correctly
+  assert len(schedule) == (kc:=len(kernel_assign)), f"created {kc} kernels but scheduled {len(schedule)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
