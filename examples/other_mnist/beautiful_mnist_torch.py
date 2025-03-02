@@ -43,6 +43,8 @@ if __name__ == "__main__":
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
+  if (GPUS:=getenv("GPUS", 1)) > 1: model = torch.nn.DataParallel(model, range(GPUS))
+
   loss_fn = nn.CrossEntropyLoss()
   #@torch.compile
   def step(samples):

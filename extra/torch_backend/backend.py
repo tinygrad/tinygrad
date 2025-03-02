@@ -1,8 +1,9 @@
-from tinygrad import Tensor, dtypes
+import torch.nn.parallel.comm
+from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import DEBUG, getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools
+import torch, pathlib, math, operator, functools, itertools, collections, sys
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -10,7 +11,7 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[pathlib.Path(__file__).parent / "wrapped_tensor.cpp"])
-def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype))
+def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device_index(x.device))
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -20,6 +21,10 @@ class TinyBackend:
   def current_device(self): return 0
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
+  def get_device_properties(self, i):
+    # TODO: stub
+    props = {"total_memory": 1, "multi_processor_count": 1}
+    return collections.namedtuple("props", props)(**props)
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
@@ -82,16 +87,24 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   for mo in cached_to_movement_ops(tuple(tensor.shape), st): ret = apply_mop(ret, mo)
   return wrap(ret)
 
+def _to_tiny_device(device: torch.device):
+  assert device.type == 'tiny'
+  return f"{Device.DEFAULT}:{device.index or 0}"
+
+def _to_torch_device_index(device: str):
+  assert (d:=device.partition(":"))[0] == Device.DEFAULT
+  return int(d[2] or 0)
+
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype))
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_to_tiny_device(device))
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
   if TORCH_DEBUG: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()))
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_to_tiny_device(device))
   return wrap(ret)
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
@@ -134,7 +147,7 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0])
+  grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0], device=_to_tiny_device(weight.device))
   out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
@@ -142,14 +155,16 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
-  if str(src.device) == "tiny" and str(dest.device) == "tiny":
-    unwrap(dest).replace(unwrap(src).cast(cast_dtype), allow_shape_mismatch=True)
-  elif str(src.device) == "tiny" and str(dest.device) == "cpu":
+  if str(src.device).startswith("tiny") and str(dest.device).startswith("tiny"):
+    to_device = _to_tiny_device(dest.device)
+    unwrap(dest).replace(unwrap(src).cast(cast_dtype).to(to_device), allow_shape_mismatch=True)
+  elif str(src.device).startswith("tiny") and str(dest.device) == "cpu":
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
-  elif str(src.device) == "cpu" and str(dest.device) == "tiny":
-    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype))
+  elif str(src.device) == "cpu" and str(dest.device).startswith("tiny"):
+    to_device = _to_tiny_device(dest.device)
+    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
@@ -275,6 +290,7 @@ def wrap_out(f):
     assigned = f(*args, **kwargs)
     if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
+    assert out.device == assigned.device, f"device mismatch: {assigned.device} -> {out.device}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
     return out.replace(assigned)
   return _wrap_out
@@ -331,8 +347,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
-      print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
-                          {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
+      print(k, len(args), [(x.shape, x.device) if isinstance(x, torch.Tensor) else x for x in args],
+                          {k:(v.shape, v.device) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     out = f(*args, **kwargs)
@@ -362,7 +378,7 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
   for state_dict in optimizer.state.values():
     for key, value in state_dict.items():
       if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
+  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device).startswith("tiny")]
   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
 _optimizer_init = torch.optim.Optimizer.__init__
@@ -370,3 +386,49 @@ def _optimizer_patched_init(self, *args, **kwargs):
   _optimizer_init(self, *args, **kwargs)
   self.register_step_post_hook(realize_optimizer_step)
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
+
+# NOTE: patches for multigpu
+# TODO: how would this look upstreamed?
+for m in ['torch._utils', 'torch.nn.parallel.data_parallel']:
+  sys.modules[m]._get_available_device_type = lambda: "tiny"
+
+_torch_scatter = torch.nn.parallel.comm.scatter
+def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0, streams=None):
+  if not str(self.device).startswith("tiny"): return _torch_patched_scatter(self, devices, chunk_sizes, dim, streams)
+  #assert chunk_sizes is None, "not yet supported" # TODO: support it
+  # TODO: alternative?
+  # self = unwrap(self).shard([_to_tiny_device(torch.device("tiny", d)) for d in devices], dim)
+  # return [wrap(Tensor(src, device=d, requires_grad=self.requires_grad)) for src,d in zip(self.lazydata.src,self.device)]
+  self = unwrap(self)
+  devices = [_to_tiny_device(torch.device("tiny", d)) for d in devices]
+  # NOTE: copied from Tensor.shard, torch expects tuple of tensors
+  sz = self.shape[dim] // len(devices)
+  sizes = [max(0, min(sz, self.shape[dim] - sz*i)) for i in range(len(devices))]
+  lbs = []
+  for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
+    lbs.append(self.shrink(tuple((0,s) if i != dim else (off,off+sz) for i,s in enumerate(self.shape))))
+  sharded_lbs = [wrap(lb.to(d)) for lb,d in zip(lbs, devices)]
+  return tuple(sharded_lbs)
+torch.nn.parallel.comm.scatter = _torch_patched_scatter
+
+_torch_broadcast_coalesced = torch.nn.parallel.comm.broadcast_coalesced
+def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
+  if tensors and not str(tensors[0].device).startswith("tiny"): return _torch_broadcast_coalesced(tensors, devices, buffer_size)
+  # NOTE: ignoring buffer_size and straightforward broadcast
+  return [[wrap(unwrap(x).to(_to_tiny_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
+torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
+
+def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
+  # TODO: only if tensors in tiny, check devices
+  if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
+  if devices is None: devices = (torch.device("tiny"),) * len(modules)
+  return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
+torch.nn.parallel.data_parallel.parallel_apply = _torch_patched_parallel_apply
+for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']:
+  sys.modules[m].parallel_apply = _torch_patched_parallel_apply
+
+_torch_gather = torch.nn.parallel.comm.gather
+def _torch_patched_gather(tensors, dim, dest_index):
+  if not str(tensors[0].device).startswith("tiny"): return _torch_patched_gather(tensors, dim, dest_index)
+  return wrap(Tensor.cat(*(unwrap(x).to(_to_tiny_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
+torch.nn.parallel.comm.gather = _torch_patched_gather
