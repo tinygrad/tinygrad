@@ -317,7 +317,7 @@ def get_onnx_ops():
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
   def BitwiseNot(x:Tensor): return ~x
   def Mod(x:Tensor,y:Tensor,fmod=0):
-    if fmod != 0: raise NotImplementedError("float mod is not supported")
+    if fmod: return x - x.div(y, rounding_mode="trunc") * y
     return x % y
 
   # ***** Casting Ops *****
@@ -724,6 +724,14 @@ def get_onnx_ops():
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
 
+  def DynamicQuantizeLinear(x: Tensor):
+    # only support uint8
+    qmin, qmax = dtypes.min(dtypes.uint8), dtypes.max(dtypes.uint8)
+    scale = (x.max().maximum(0) + ((-x).max()).maximum(0)) / (qmax - qmin)
+    zero_point = _clamp_cast((qmin - x.min() / scale).round(), dtypes.uint8)
+    y = _clamp_cast((x / scale).round() + zero_point, dtypes.uint8)
+    return y, scale, zero_point
+
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
@@ -738,6 +746,9 @@ def get_onnx_ops():
 
   def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
     return _qlinearop_float(Tensor.add, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
+
+  def QLinearMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+    return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
   def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
     assert channels_last == 0, "unsure what this does"

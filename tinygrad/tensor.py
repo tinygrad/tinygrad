@@ -1725,9 +1725,7 @@ class Tensor(SimpleMathTrait):
     print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
     ```
     """
-    # TODO: Tensor.isfinite
-    def isfinite(t): return (t.isinf()|t.isnan()).logical_not()
-    is_finite_close = isfinite(self) & isfinite(other) & ((self - other).abs() <= atol + rtol * other.abs())
+    is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
     is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
@@ -1783,6 +1781,23 @@ class Tensor(SimpleMathTrait):
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     return squares.sum(axis=axis, keepdim=keepdim).div(smax([0, n-correction]))
+
+  def var_mean(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
+    """
+    Calculates the variance and mean over the dimensions specified by dim.
+    Syntactic sugar around `Tensor.var` and `Tensor.mean` to match `torch.var_mean`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    var, mean = t.var_mean()
+    print(var.numpy(), mean.numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
 
   def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
@@ -2776,7 +2791,7 @@ class Tensor(SimpleMathTrait):
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
 
-  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True):
+  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True) -> Tensor:
     """
     Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
 
@@ -2785,7 +2800,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
-  def isnan(self:Tensor):
+  def isnan(self:Tensor) -> Tensor:
     """
     Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
 
@@ -2794,6 +2809,15 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self != self
+  def isfinite(self:Tensor) -> Tensor:
+    """
+    Checks the tensor element-wise to return True where the element is finite, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isfinite().numpy())
+    ```
+    """
+    return (self.isinf()|self.isnan()).logical_not()
 
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
@@ -3234,7 +3258,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
 
-  def div(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+  def div(self, x:Union[Tensor, ConstType], reverse=False, rounding_mode=None) -> Tensor:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
@@ -3254,7 +3278,12 @@ class Tensor(SimpleMathTrait):
     ```
     """
     numerator, denominator = self._broadcasted(x, reverse)
-    return numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
+    if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
+    if rounding_mode == "floor": return d.floor().cast(output_dtype)
+    if rounding_mode is not None: raise RuntimeError(f"{rounding_mode=} is not supported")
+    return d
 
   def mod(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """
@@ -3267,7 +3296,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return (r := a._apply_uop(UOp.mod, b)) + b * (((r < 0) & (b > 0)) | ((r > 0) & (b < 0)))
+    return a - a.div(b, rounding_mode="floor") * b
 
   def bitwise_xor(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
     """

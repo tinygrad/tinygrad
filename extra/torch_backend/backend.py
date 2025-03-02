@@ -18,9 +18,38 @@ class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
   def current_device(self): return 0
+  def _is_in_bad_fork(self): return False
+  def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
+
+# *** bad functions on CPU ***
+
+@torch.library.impl("aten::masked_select", "privateuseone")
+def masked_select(self, mask):
+  # err, bad
+  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
+
+@torch.library.impl("aten::topk", "privateuseone")
+def topk(self, k, dim=-1, largest=True, sorted=True):
+  # TODO: move to tinygrad
+  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
+  return torch.return_types.topk((t1.tiny(), t2.tiny()))
+
+@torch.library.impl("aten::_index_put_impl_", "privateuseone")
+def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
+  # TODO: move to tinygrad
+  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+
+@torch.library.impl("aten::index.Tensor", "privateuseone")
+def index_tensor(x, y):
+  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
+
+@torch.library.impl("aten::randperm.generator_out", "privateuseone")
+def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
+
+# *** end bad functions on CPU ***
 
 @torch.library.impl("aten::zero_", "privateuseone")
 def zero_(x):
@@ -34,11 +63,6 @@ def fill_scalar(x, y):
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
-
-@torch.library.impl("aten::masked_select", "privateuseone")
-def masked_select(self, mask):
-  # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
 @functools.lru_cache(None)
 def cached_to_movement_ops(shape, st) -> list:
@@ -72,6 +96,8 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
 def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
+  # TODO: supprt stride [] in tinygrad?
+  if stride is not None and len(stride) == 0: stride = None
   # TODO: support return_indices in tinygrad
   ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode)
   # TODO: this is wrong
@@ -79,6 +105,7 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
 
 @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
 def max_pool2d_with_indices_backward(grad_out:Tensor, self:Tensor, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
+  if stride is not None and len(stride) == 0: stride = None
   # TODO: utilize input indices once they are correct
   grad_out, self = unwrap(grad_out), unwrap(self)
   out = Tensor.max_pool2d(self, kernel_size, stride, dilation, padding, ceil_mode)
@@ -95,24 +122,6 @@ def arange_start(start, end, dtype=None, device=None, pin_memory=None):
 @torch.library.impl("aten::arange.start_step", "privateuseone")
 def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
   return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
-
-@torch.library.impl("aten::topk", "privateuseone")
-def topk(self, k, dim=-1, largest=True, sorted=True):
-  # TODO: move to tinygrad
-  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
-  return torch.return_types.topk((t1.tiny(), t2.tiny()))
-
-@torch.library.impl("aten::_index_put_impl_", "privateuseone")
-def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
-  # TODO: move to tinygrad
-  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
-
-@torch.library.impl("aten::randperm.generator_out", "privateuseone")
-def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator).tiny())
-
-@torch.library.impl("aten::index.Tensor", "privateuseone")
-def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
@@ -131,15 +140,16 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
-def _copy_from(src, dest, non_blocking=False):
+def _copy_from(src: torch.Tensor, dest, non_blocking=False):
+  cast_dtype = _from_torch_dtype(dest.dtype)
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
-    unwrap(dest).replace(unwrap(src), allow_shape_mismatch=True)
+    unwrap(dest).replace(unwrap(src).cast(cast_dtype), allow_shape_mismatch=True)
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).numpy()))
+    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
-    unwrap(dest).assign(Tensor(src.numpy()))
+    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
@@ -181,6 +191,8 @@ decomps = [
   aten.native_dropout, aten.native_dropout_backward,
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
+  aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
+  aten.upsample_nearest2d.out,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
@@ -292,14 +304,13 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.std.correction": Tensor.std,
   "aten.std_mean.correction": Tensor.std_mean,
   "aten.var.correction": Tensor.var,
-  # TODO: support var_mean in tinygrad
-  "aten.var_mean.correction": lambda self, dims, keepdim=False, correction=1: (self.var(dims, keepdim, correction), self.mean(dims, keepdim)),
+  "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.gather": Tensor.gather,
-  "aten.where.self": Tensor.where,
+  "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": lambda self:
@@ -307,14 +318,14 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.random_.from": lambda self, from_, to:
     self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype)),
   "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
-  "aten.normal_": lambda self, low=0, high=1: self.assign(Tensor.normal(*self.shape, low=low, high=high)),
+  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std)),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
   "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
-  # TODO: this is wrong
-  "aten.reflection_pad2d": Tensor.pad,
+  "aten.pad": Tensor.pad,
+  "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
 }}
 
 def wrap_fxn(k,f):
