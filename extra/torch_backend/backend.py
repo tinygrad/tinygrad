@@ -238,6 +238,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
   "aten.sub.out": lambda input,other,alpha=1: input-alpha*other, # NOTE: this is also needed to handle reverse
   "aten.mul.out": operator.mul,
+  "aten.div.out": operator.truediv,
+  "aten.div.out_mode": lambda input,other,*,rounding_mode=None: input.div(other) if rounding_mode is None else input.div(other).round() if rounding_mode == "trunc" else input.div(other).floor(),
   "aten.bmm.out": operator.matmul,
   "aten.leaky_relu.out": Tensor.leaky_relu,
   # NOTE: because these methods have a name with "Tensor" in them, they can't go in simple tensor methods
@@ -254,6 +256,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.gt.Tensor_out": Tensor.__gt__, "aten.gt.Scalar_out": Tensor.__gt__,
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
+  "aten.clamp_max.Tensor_out": lambda self,max_: self.clamp(max_=max_),
+  "aten.clamp_min.Tensor_out": lambda self,min_: self.clamp(min_=min_),
   # TODO: support this in tinygrad
   "aten.bitwise_left_shift.Tensor_out": lambda self, other: Tensor(self << other.numpy()),
   "aten.bitwise_right_shift.Tensor_out": lambda self, other: Tensor(self >> other.numpy()),
@@ -261,6 +265,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
+  "aten.copysign.out": lambda input,other: input.abs() * other.sign(),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
