@@ -257,6 +257,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.clamp_max.Tensor_out": lambda input,max_: input.clamp(max_=max_),
   "aten.clamp_min.Tensor_out": lambda input,min_: input.clamp(min_=min_),
   "aten.fmod.Tensor_out": lambda input,other: input-input.div(other, rounding_mode="trunc")*other,
+  # TODO: this might result in overflow issues
+  "aten.round.decimals_out": lambda self,decimals: (self*10**decimals).round()/10**decimals,
   # TODO: support this in tinygrad
   "aten.bitwise_left_shift.Tensor_out": lambda input,other: Tensor(input << other.numpy()),
   "aten.bitwise_right_shift.Tensor_out": lambda input,other: Tensor(input >> other.numpy()),
