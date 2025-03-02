@@ -9,8 +9,9 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
 import torch.utils.cpp_extension
-mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[pathlib.Path(__file__).parent / "wrapped_tensor.cpp"])
+mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
 def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype))
+@functools.lru_cache(None)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -95,7 +96,7 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
   return wrap(ret)
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
-def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False):
+def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False):
   # TODO: supprt stride [] in tinygrad?
   if stride is not None and len(stride) == 0: stride = None
   # TODO: support return_indices in tinygrad
@@ -104,12 +105,11 @@ def max_pool2d_with_indices(self:Tensor, kernel_size, stride=None, padding=0, di
   return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
 
 @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
-def max_pool2d_with_indices_backward(grad_out:Tensor, self:Tensor, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
+def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
   if stride is not None and len(stride) == 0: stride = None
   # TODO: utilize input indices once they are correct
-  grad_out, self = unwrap(grad_out), unwrap(self)
-  out = Tensor.max_pool2d(self, kernel_size, stride, dilation, padding, ceil_mode)
-  return wrap(out.gradient(self, gradient=grad_out)[0])
+  out = Tensor.max_pool2d(unwrap(self), kernel_size, stride, dilation, padding, ceil_mode)
+  return wrap(out.gradient(unwrap(self), gradient=unwrap(grad_out))[0])
 
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
@@ -364,7 +364,7 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
       if param is None: continue
       tinygrad_tensors.append(param.data)
   for state_dict in optimizer.state.values():
-    for key, value in state_dict.items():
+    for value in state_dict.values():
       if torch.is_tensor(value): tinygrad_tensors.append(value)
   real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
