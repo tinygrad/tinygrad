@@ -40,7 +40,7 @@ def topk(self, k, dim=-1, largest=True, sorted=True):
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
-  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  return aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).tiny()
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
@@ -55,13 +55,38 @@ def cumprod(self, dim, dtype=None):
   # TODO: implement in tinygrad
   return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
 
-@torch.library.impl("aten::nonzero", "privateuseone")
-def nonzero(self):
-  # TODO: implement in tinygrad
-  return aten.nonzero(self.cpu()).tiny()
-
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
+
+def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
+  f = getattr(aten, f)
+  return f(grad_out.cpu(), output_size, input_size, scales).tiny()
+
+def upsample_2d_backward(grad_out, output_size, input_size, scales_h=None, scales_w=None, f=None):
+  f = getattr(aten, f)
+  return f(grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
+
+def upsample_3d_backward(grad_out, output_size, input_size, scales_d=None, scales_h=None, scales_w=None, f=None):
+  f = getattr(aten, f)
+  return f(grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
+
+@torch.library.impl("aten::upsample_trilinear3d_backward", "privateuseone")
+def upsample_trilinear3d_backward(grad_output, output_size, input_size,  align_corners, scales_d=None, scales_h=None, scales_w=None):
+  return aten.upsample_trilinear3d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_d, scales_h, scales_w).tiny()
+
+@torch.library.impl("aten::upsample_bilinear2d_backward", "privateuseone")
+def upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners, scales_h=None, scales_w=None):
+  return aten.upsample_bilinear2d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_h, scales_w).tiny()
+
+torch.library.impl("aten::upsample_linear1d_backward", "privateuseone")(functools.partial(upsample_1d_backward, f="upsample_linear1d_backward"))
+torch.library.impl("aten::upsample_nearest1d_backward", "privateuseone")(functools.partial(upsample_1d_backward, f="upsample_nearest1d_backward"))
+torch.library.impl("aten::_upsample_nearest_exact1d_backward", "privateuseone")(functools.partial(upsample_1d_backward, f="_upsample_nearest_exact1d_backward"))
+
+torch.library.impl("aten::upsample_nearest2d_backward", "privateuseone")(functools.partial(upsample_2d_backward, f="upsample_nearest2d_backward"))
+torch.library.impl("aten::_upsample_nearest_exact2d_backward", "privateuseone")(functools.partial(upsample_2d_backward, f="_upsample_nearest_exact2d_backward"))
+
+torch.library.impl("aten::upsample_nearest3d_backward", "privateuseone")(functools.partial(upsample_3d_backward, f="upsample_nearest3d_backward"))
+torch.library.impl("aten::_upsample_nearest_exact3d_backward", "privateuseone")(functools.partial(upsample_3d_backward, f="_upsample_nearest_exact3d_backward"))
 
 # *** end bad functions on CPU ***
 
@@ -197,8 +222,7 @@ def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_
   out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-def pad_forward(self, padding, mode):
-  return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+pad_forward = lambda self, padding, mode=None: wrap(Tensor.pad(unwrap(self), padding, mode=mode))
 
 def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
@@ -215,42 +239,39 @@ for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
   torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
-@torch.library.impl("aten::upsample_nearest1d_backward", "privateuseone")
-def upsample_nearest1d_backward(grad_out, out_size, input_size, scales=None):
-  print(f"upsample {grad_out=}, {out_size=}, {input_size=}, {scales=}")
-  input = Tensor.zeros(*input_size)
-  out = Tensor.interpolate(input, out_size,  mode="nearest")
-  return wrap(out.gradient(out, gradient=unwrap(grad_out))[-1])
-
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
+  # TODO: custom code fails in TestOps.test_cummax due to ndim mismatch, use cpu func for now
+  out = aten.cummax(self.cpu(), dim)
+  return [o.tiny() for o in out]
   self = unwrap(self)
   values = Tensor.cummax(self, dim)
   indices = Tensor.max(self, dim)
   return (wrap(values), wrap(indices))
 
+@torch.library.impl("aten::scatter.src", "privateuseone")
+def scatter_src(self, dim, index, src):
+  # TODO: custom code is failing in TestOps.test_scatter, use cpu func for now
+  return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
+  if unwrap(self).shape == (): return src
+  out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
+  return wrap(out)
+
 @torch.library.impl("aten::scatter_add", "privateuseone")
 def scatter_add(self, dim, index, src):
-  # TODO: why doesn't this work??? failing test: TestOps.test_cummax
   if unwrap(self).shape == (): return src
   out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
   return wrap(out)
 
 @torch.library.impl("aten::max.dim", "privateuseone")
 def max_dim(self, dim, keepdim=False):
+  # TODO: custom code is failing in TestOps.test_max due to dtype mismatch, use cpu func for now
+  out = aten.max.dim(self.cpu(), dim, keepdim=keepdim)
+  return [o.tiny() for o in out]
   self = unwrap(self)
   values = Tensor.max(self, dim, keepdim)
   indices = Tensor.max(self, dim)
   return (wrap(values), wrap(indices))
-
-@torch.library.impl("aten::masked_fill_.Scalar", "privateuseone")
-def masked_fill_(self, mask, value):
-  # TODO: why doesn't this work???
-  return wrap(unwrap(self).masked_fill(unwrap(mask), value))
-
-@torch.library.impl("aten::view.dtype", "privateuseone")
-def view_dtype(self, dtype):
-  return wrap(unwrap(self).bitcast(_from_torch_dtype(dtype)))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
@@ -448,6 +469,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
   "aten.masked_fill.Scalar": Tensor.masked_fill,
+  "aten.masked_fill_.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.logical_or_": lambda x, y: x | y,
   "aten.multinomial": Tensor.multinomial,
@@ -463,31 +485,23 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.atanh": Tensor.atanh,
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
-  # "aten.scatter.src: gives wrong results for TestOps.test_max"
-  "aten.scatter.src": lambda self, dim, index, src: Tensor.scatter_reduce(self, dim, index, src, reduce='sum'),
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
-  # fix backward for these
   "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
-  # "aten.upsample_linear1d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners).backward(Tensor(gradient)),
   "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
-  # "aten.upsample_nearest1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
   "aten.upsample_nearest2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
-  "aten.upsample_nearest2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest").backward(Tensor(gradient)),
+  "aten.upsample_nearest3d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
   "aten.upsample_bilinear2d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
   "aten.upsample_trilinear3d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
-  "aten.upsample_bilinear2d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners).backward(Tensor(gradient)),
-  "aten.upsample_trilinear3d_backward": lambda self, size, gradient, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners).backward(Tensor(gradient)),
   "aten._upsample_nearest_exact1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
-  "aten._upsample_nearest_exact1d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
   "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
-  "aten._upsample_nearest_exact2d_backward": lambda self, size, gradient: Tensor.interpolate(self, size, mode="nearest-exact").backward(Tensor(gradient)),
-  # ===
-  "aten.maximum": Tensor.maximum,
+  "aten._upsample_nearest_exact3d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.add.Tensor":  Tensor.add,
+  "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
+    Tensor.linspace(start, stop, steps, dtype=_from_torch_dtype(dtype) if dtype is not None else dtypes.default_float),
+  "aten::view.dtype": lambda self, dtype: Tensor.bitcast(self, _from_torch_dtype(dtype)),
   "aten.roll": Tensor.roll,
-  "aten.where.self": lambda self, x, y: Tensor.where(self, x, y),
   "aten.logcumsumexp": Tensor.logcumsumexp,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
   "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
@@ -515,14 +529,13 @@ def wrap_fxn(k,f):
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
-if TORCH_DEBUG:
-  from torch.utils._python_dispatch import TorchDispatchMode
-  class DispatchLog(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args, kwargs=None):
-      #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
+from torch.utils._python_dispatch import TorchDispatchMode
+class DispatchLog(TorchDispatchMode):
+  def __torch_dispatch__(self, func, types, args, kwargs=None):
+    if TORCH_DEBUG:
       print(f"Dispatch Log: {func}")
-      return func(*args, **(kwargs or {}))
-  DispatchLog().__enter__()
+    return func(*args, **(kwargs or {}))
+DispatchLog().__enter__()
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
