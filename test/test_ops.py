@@ -404,6 +404,9 @@ class TestOps(unittest.TestCase):
   def test_isnan(self):
     helper_test_op(None, torch.isnan, Tensor.isnan, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
 
+  def test_isfinite(self):
+    helper_test_op(None, torch.isfinite, Tensor.isfinite, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
+
   def test_lerp(self):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
