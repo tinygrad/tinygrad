@@ -3,28 +3,37 @@ import pathlib
 import numpy as np
 from dataclasses import replace
 from tinygrad import Tensor, Device, Context
+from tinygrad.helpers import getenv
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
 N = 4096
+LN = 16
 run_count = 5
 
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 def transform_load(ctx:tuple[Kernel, set[UOp]], x:UOp):
   if x.src[0].op is not Ops.DEFINE_GLOBAL: return None
   if x in ctx[1]: return None
+  print(ctx[0].colored_shape())
   ctx[1].add(x)
-  local_st = ShapeTracker.from_shape((1,1,16,16,1,1))
   input_st: ShapeTracker = x.src[1].arg
+  #strides = input_st.real_strides()
+  #strides = (0,0)+strides[2:]
   if input_st.real_strides()[2] == 0:
-    load_st = local_st.permute((0,1,5,3,4,2))
-    input_st = input_st.permute((0,1,5,3,4,2))
+    perm = (0,1,5,3,4,2)
+    strides = (0,0,LN*4,4,0,0,0,1)
   elif input_st.real_strides()[3] == 0:
-    load_st = local_st.permute((0,1,2,5,4,3))
-    input_st = input_st.permute((0,1,2,5,4,3))
+    perm = (0,1,2,5,4,3)
+    strides = (0,0,LN*4,4,0,0,1,0)
   else:
     return None
+  local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1,4,4), strides),))
+  perm = perm + (6,7)
+  #local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1)),))
+  load_st = local_st.permute(perm)
+  input_st = input_st.permute(perm)
   lcl = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(local_st.real_size(), local=True), (), f"temp{x.src[0].arg}")
   global_load = x.replace(src=(x.src[0], input_st.to_uop()))
   ret = UOp(Ops.STORE, src=(lcl, local_st.to_uop(), global_load))
@@ -37,6 +46,7 @@ local_loads_pm = PatternMatcher([
 def ast_transform(k, ast):
   #return ast
   ast = graph_rewrite(ast, local_loads_pm, ctx=(k, set()))
+  #ast = ast.replace(arg=replace(ast.arg, upcasted=0))
   print(ast)
   return ast
 
@@ -56,12 +66,14 @@ if __name__ == "__main__":
   #        Opt(op=OptOps.UPCAST, axis=0, arg=4),
   #        Opt(op=OptOps.LOCAL, axis=1, arg=8),
   #        Opt(op=OptOps.LOCAL, axis=0, arg=4)]
-  opts = [Opt(op=OptOps.LOCAL, axis=1, arg=16),
-          Opt(op=OptOps.LOCAL, axis=0, arg=16),
-          Opt(op=OptOps.UNROLL, axis=0, arg=16)]
+  opts = [Opt(op=OptOps.UNROLL, axis=0, arg=LN),
+          Opt(op=OptOps.UPCAST, axis=0, arg=4),
+          Opt(op=OptOps.UPCAST, axis=1, arg=4),
+          Opt(op=OptOps.LOCAL, axis=0, arg=LN),
+          Opt(op=OptOps.LOCAL, axis=1, arg=LN)]
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program(ast_transform=ast_transform)
-  if Device.DEFAULT == "AMD":
+  if getenv("FAST", 1) and Device.DEFAULT == "AMD":
     #src = (pathlib.Path(__file__).parent / "fp32_sgemm_amd" / "src" / "kernel8_batched_gmem.s").read_text()
     src = (pathlib.Path(__file__).parent / "kernel8_batched_gmem.s").read_text()
     prg = replace(prg, src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
