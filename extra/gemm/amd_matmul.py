@@ -8,6 +8,14 @@ from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
+# TODO: on METAL for `DEBUG=4 python3 extra/gemm/amd_matmul.py`
+#  * fix load grouping (like float4). idk why it's not working, need new devectorizer
+#  * DONE - remove extra barrier
+#  * DONE (moved Ops.ADD) - fix load order to be in order (the +0 one is last!)
+#  * explore async (fast) global load -> local store
+#  * why is TC=3 broken for 4096x4096?
+#  * write syntactic sugar for these local additions + use it in tensor core kernel.py
+
 N = 4096
 LN = 16
 run_count = 5
@@ -29,8 +37,11 @@ def transform_load(ctx:tuple[Kernel, set[UOp]], x:UOp):
     strides = (0,0,LN*4,4,0,0,0,1)
   else:
     return None
-  local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1,4,4), strides),))
-  perm = perm + (6,7)
+  if len(input_st.shape) == 8:
+    local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1,4,4), strides),))
+    perm = perm + (6,7)
+  else:
+    local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1)),))
   #local_st = ShapeTracker(views=(View.create((1,1,LN,LN,1,1)),))
   load_st = local_st.permute(perm)
   input_st = input_st.permute(perm)
@@ -67,8 +78,8 @@ if __name__ == "__main__":
   #        Opt(op=OptOps.LOCAL, axis=1, arg=8),
   #        Opt(op=OptOps.LOCAL, axis=0, arg=4)]
   opts = [Opt(op=OptOps.UNROLL, axis=0, arg=LN),
-          Opt(op=OptOps.UPCAST, axis=0, arg=4),
-          Opt(op=OptOps.UPCAST, axis=1, arg=4),
+          #Opt(op=OptOps.UPCAST, axis=0, arg=4),
+          #Opt(op=OptOps.UPCAST, axis=1, arg=4),
           Opt(op=OptOps.LOCAL, axis=1, arg=LN),
           Opt(op=OptOps.LOCAL, axis=0, arg=LN)]
   for opt in opts: k.apply_opt(opt)
