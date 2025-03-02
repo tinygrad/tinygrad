@@ -170,7 +170,7 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
     return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
   return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
-                                   groups=groups, stride=stride, dilation=dilation, padding=padding))
+                                   groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
@@ -180,7 +180,7 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   if not transposed:
     out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   else:
-    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
@@ -239,9 +239,14 @@ for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
   torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
+@torch.library.impl("aten::cumsum", "privateuseone")
+def cumsum(self, dim):
+  # TODO: Tensor.cumsum fails for TestOps.test_simple_cumsum due to wrong result, use cpu func for now
+  return aten.cumsum(self.cpu(), dim).tiny()
+
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
-  # TODO: custom code fails in TestOps.test_cummax due to ndim mismatch, use cpu func for now
+  # TODO: custom code fails for TestOps.test_cummax due to ndim mismatch, using cpu func for now
   out = aten.cummax(self.cpu(), dim)
   return [o.tiny() for o in out]
   self = unwrap(self)
@@ -251,7 +256,7 @@ def cummax(self, dim):
 
 @torch.library.impl("aten::scatter.src", "privateuseone")
 def scatter_src(self, dim, index, src):
-  # TODO: custom code is failing in TestOps.test_scatter, use cpu func for now
+  # TODO: custom code fails for TestOps.test_scatter, using cpu func for now
   return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
   if unwrap(self).shape == (): return src
   out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
@@ -265,7 +270,7 @@ def scatter_add(self, dim, index, src):
 
 @torch.library.impl("aten::max.dim", "privateuseone")
 def max_dim(self, dim, keepdim=False):
-  # TODO: custom code is failing in TestOps.test_max due to dtype mismatch, use cpu func for now
+  # TODO: custom code fails for TestOps.test_max due to dtype mismatch, using cpu func for now
   out = aten.max.dim(self.cpu(), dim, keepdim=keepdim)
   return [o.tiny() for o in out]
   self = unwrap(self)
@@ -371,7 +376,7 @@ simple_tensor_methods = [
   # modify
   "tril", "triu",
   # reduce
-  "all", "any", "argmax", "argmin", "cumsum",
+  "all", "any", "argmax", "argmin",
   # complex
   "avg_pool2d", "linspace"]
 
@@ -487,31 +492,28 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
   "aten.upsample_linear1d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, mode="linear", align_corners=align_corners),
-  "aten.upsample_nearest1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
-  "aten.upsample_nearest2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
-  "aten.upsample_nearest3d": lambda self, size: Tensor.interpolate(self, size, mode="nearest"),
+  "aten.upsample_nearest1d": functools.partial(Tensor.interpolate, mode="nearest"),
+  "aten.upsample_nearest2d": functools.partial(Tensor.interpolate, mode="nearest"),
+  "aten.upsample_nearest3d": functools.partial(Tensor.interpolate, mode="nearest"),
   "aten.upsample_bilinear2d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
   "aten.upsample_trilinear3d": lambda self, size, align_corners=False: Tensor.interpolate(self, size, align_corners=align_corners),
-  "aten._upsample_nearest_exact1d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
-  "aten._upsample_nearest_exact2d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
-  "aten._upsample_nearest_exact3d": lambda self, size: Tensor.interpolate(self, size, mode="nearest-exact"),
+  "aten._upsample_nearest_exact1d": functools.partial(Tensor.interpolate, mode="nearest-exact"),
+  "aten._upsample_nearest_exact2d": functools.partial(Tensor.interpolate, mode="nearest-exact"),
+  "aten._upsample_nearest_exact3d": functools.partial(Tensor.interpolate, mode="nearest-exact"),
   "aten.squeeze.dim": Tensor.squeeze,
+  "aten.squeeze_.dim": lambda self, dim: Tensor.squeeze(self, dim), # shape mismatch in TestOps.test_matmul
   "aten.unsqueeze": Tensor.unsqueeze,
-  "aten.add.Tensor":  Tensor.add,
+  "aten.add.Tensor":  lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, dtype=_from_torch_dtype(dtype) if dtype is not None else dtypes.default_float),
   "aten::view.dtype": lambda self, dtype: Tensor.bitcast(self, _from_torch_dtype(dtype)),
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: Tensor.pad(self, padding, mode="constant", value=value),
-  "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
   "aten.logsumexp": lambda self, axis, keepdim=False: Tensor.logsumexp(self, *axis, keepdim=keepdim),
-  "aten.prod": lambda self: Tensor.prod(self),
   "aten.repeat": Tensor.repeat,
-  "aten.split.Tensor": Tensor.split,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
-  "aten.mul.Tensor": Tensor.mul,
 }}
 
 def wrap_fxn(k,f):
