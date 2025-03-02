@@ -9,7 +9,7 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 
 # TODO: on METAL for `DEBUG=4 python3 extra/gemm/amd_matmul.py`
-#  * fix load grouping (like float4). idk why it's not working, need new devectorizer
+#  * fix load grouping (like float4). idk why it's not working, need new devectorizer (this is a Monday project)
 #  * DONE - remove extra barrier
 #  * DONE (moved Ops.ADD) - fix load order to be in order (the +0 one is last!)
 #  * explore async (fast) global load -> local store
