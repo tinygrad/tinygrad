@@ -9,7 +9,6 @@ TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
-from tinygrad.ops import Ops
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
@@ -256,6 +255,7 @@ for dim in [2, 3]:
 
 @torch.library.impl("aten::cumsum", "privateuseone")
 def cumsum(self, dim):
+  from tinygrad.ops import Ops
   # TODO: Tensor.cumsum fails for TestOps.test_simple_cumsum due to wrong result
   if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
   return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
