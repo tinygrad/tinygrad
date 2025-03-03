@@ -132,8 +132,8 @@ class Ops(FastEnum):
   WMMA = auto()
 
   # BinaryOps
-  MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto(); SHL = auto(); SHR = auto() # noqa: E702
-  OR = auto(); AND = auto(); THREEFRY = auto(); ADD = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
+  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
