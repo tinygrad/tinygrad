@@ -14,7 +14,8 @@ def expect(x, err, ret=None):
 class LLVMCompiler(Compiler):
   def __init__(self, target_arch:str, gpu:str|None=None):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{target_arch}{component}')()
-    if target_arch == "AMDGPU": triple, processor, feats = b"amdgcn-amd-amdhsa", (gpu or "gfx1100").encode(), b"+cumode"
+    if target_arch == "AMDGPU":
+      triple, processor, feats = b"amdgcn-amd-amdhsa", (gpu or "gfx1100").encode(), b"+cumode,+wavefrontsize32,-wavefrontsize64"
     else:
       triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[target_arch] + b'-none-unknown-elf'
       processor = ctypes.string_at(llvm.LLVMGetHostCPUName())
@@ -27,7 +28,7 @@ class LLVMCompiler(Compiler):
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if (opt:=bool(getenv("LLVMOPT", "1"))):
-      self.passes = b'default<O2>'
+      self.passes = b'default<O3>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
