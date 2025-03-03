@@ -1,4 +1,4 @@
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Callable, cast
 import functools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
@@ -66,54 +66,54 @@ def fold_expanded(ex, buf):
   # remove Nones for STORE
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
-def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
-  """
-  new_srcs = dedup(list(vec.src))
+# ***** load/store grouping *****
 
-  # TODO: get the device from the buffer somehow
-  # NOTE: this can't be Device.DEFAULT because it opens devices
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
-  lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
+def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
+  is_image = isinstance(buf.dtype, ImageDType)
+  lengths = []
+  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+    pass
+  elif ctx is not None and ctx.supports_float4:
+    # TODO: a better way to get this than ctx
+    lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
+  lengths.append(1)  # worst case, it's not folded
 
   # first, extract all the relevant offsets
-  offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
-  for i,s in enumerate(new_srcs):
-    print(i, s)
-  """
-  is_image = isinstance(buf.dtype, ImageDType)
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): lengths = []
-  else: lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
-  lengths.append(1)
-
-  offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
+  offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
     idx = vec.gep(i)
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     if mask is not None: root_src = (mask.gep(i), root_src)
-    offsets_rootsrc[root_src][arg] = i
+    offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # then rewrite everything we can
   ret = []
-  used: set[tuple[UOp, UOp]] = set()
-  idxs = []
+  idxs: list[int|None] = [None]*vec.dtype.count
+  used: set[tuple[Any, int]] = set()
   global_offset = 0
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
       for fold_length in lengths:
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
-          lidx = UOp(Ops.INDEX, buf.dtype.base.vec(fold_length), (buf, vec.gep(o), mask.gep(o)) if mask is not None else (buf, vec.gep(o)))
-          ret.append(lidx.cast(buf.dtype.base.vec(fold_length).ptr(size=buf.dtype.size, local=buf.dtype.local)))
-          used.update((rootsrc,o+i) for i in range(fold_length))
-          for i in range(fold_length): idxs.append(offsets[o+i])
+          # get the index offset for this element. using [0] is okay, because they are the same
+          oidx = vec.gep(offsets[o][0])
+          if oidx.divides(fold_length) is None: continue
+          lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
+          # if we are folding, we set the dtype correctly
+          if fold_length > 1:
+            ptrdtype = cast(PtrDType, buf.dtype)
+            lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
+          # set the idxs of the output
+          for i in range(fold_length):
+            used.add((rootsrc,o+i))
+            for oo in offsets[o+i]: idxs[oo] = global_offset+i
+          # add this lidx to the CAT
+          ret.append(lidx)
           global_offset += fold_length
-  assert len(idxs) == vec.dtype.count
-
-  #ret = []
-  #for i in range(vec.dtype.count):
-  #  ret.append(UOp(Ops.INDEX, buf.dtype.base, (buf, vec.gep(i), mask.gep(i)) if mask is not None else (buf, vec.gep(i))))
-  return UOp(Ops.CAT, buf.dtype.vec(vec.dtype.count), tuple(ret)).gep(tuple(idxs))
+  assert None not in idxs, f"some idxs are missing {idxs}"
+  return UOp(Ops.CAT, buf.dtype.vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
   # TODO: this is written in many places
@@ -124,18 +124,28 @@ def cat_after_store(cat:UOp, data:UOp):
     offset += s.dtype.count
   return UOp.sink(ret[0], *ret[1:])
 
-buf_idx_pat = UPat(Ops.INDEX, src=(UPat.var("buf"),), allow_any_len=True)
+def gep_on_store(gep:UOp, st:UOp):
+  # NOTE: we need to invert the gep here, but it may be an expanding gep
+  # fake argsort. TODO: handle duplicates
+  a = {}
+  for i,x in enumerate(gep.arg): a[x] = i
+  new_arg = tuple(x[1] for x in sorted(a.items()))
+  return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
+
 load_store_folding = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_GLOBAL, name="buf")), UPat.var("vec"), UPat.var("mask"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
+                        UPat.var("mask"))), expand_index),
+  # GEP after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
+   lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
+  # GEP on data of STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
   # put CAT after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld"),
-   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)) for x in cat.src))),
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld", allow_any_len=True),
+   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
-
-  #(UPat(Ops.VECTORIZE, src=UPat(Ops.LOAD, src=(buf_idx_pat,), allow_any_len=True), name="ex"), fold_expanded),
-  #(UPat((Ops.BARRIER, Ops.SINK), src=UPat(Ops.STORE, src=(buf_idx_pat,), allow_any_len=True), name="ex"), fold_expanded),
 ])
 
 # ***** image load valid simplification *****
@@ -299,7 +309,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   if DEVECTORIZE:
     # devectorize + load_store_indexing
-    sink = graph_rewrite(sink, sym+devectorize+load_store_folding+load_store_indexing)
+    sink = graph_rewrite(sink, sym+devectorize+load_store_folding+load_store_indexing, ctx=opts)
   else:
     # new devectorize only for load/store
     sink = graph_rewrite(sink, sym+devectorize_load_store)
