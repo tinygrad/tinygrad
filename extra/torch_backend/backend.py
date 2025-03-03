@@ -107,9 +107,9 @@ def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stri
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
   if stride is not None and len(stride) == 0: stride = None
   # TODO: utilize input indices once they are correct
-  grad_out, self = unwrap(grad_out), unwrap(self)
-  out = Tensor.max_pool2d(self, kernel_size, stride, dilation, padding, ceil_mode)
-  return wrap(out.gradient(self, gradient=grad_out)[0])
+  self_ = unwrap(self)
+  out = Tensor.max_pool2d(self_, kernel_size, stride, dilation, padding, ceil_mode)
+  return wrap(out.gradient(self_, gradient=unwrap(grad_out))[0])
 
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
