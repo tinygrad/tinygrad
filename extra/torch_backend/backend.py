@@ -182,6 +182,12 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
+@torch.library.impl("aten::convolution_backward", "privateuseone")
+def convolution_backward(grad_out, input, weight, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, output_mask):
+  # TODO: write a custom backward for this
+  out = aten.convolution_backward(grad_out.cpu(), input.cpu(), weight.cpu(), bias_sizes, stride, padding, dilation, transposed, output_padding, groups, output_mask=output_mask)
+  return [o.tiny() if o is not None else None for o in out]
+
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
   slices = [slice(None)] * unwrap(self).ndim
@@ -257,9 +263,7 @@ def cummax(self, dim):
   return [o.tiny() for o in out]
   print(f"cummax {unwrap(self).shape=} {dim=}")
   self = unwrap(self)
-  if (self.shape == () and dim == 0) or (0 in self.shape):
-    return (wrap(self), wrap(Tensor.empty(self.shape).cast(dtype=dtypes.int64)))
-  values = Tensor.cummax(self, dim)
+  values = self.cummax(dim)
   indices = Tensor.argmax(self, dim, keepdim=True).cast(dtype=dtypes.int64)
   return (wrap(values), wrap(indices))
   return (wrap(unwrap(self)._cumalu(dim, Ops.MAX)), wrap(unwrap(self).max(dim)))
@@ -269,7 +273,7 @@ def scatter_src(self, dim, index, src):
   # TODO: custom code fails for TestOps.test_scatter, using cpu func for now
   return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
   if unwrap(self).shape == (): return src
-  out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
+  out = unwrap(self).assign(Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum'))
   return wrap(out)
 
 @torch.library.impl("aten::scatter_add", "privateuseone")
@@ -277,13 +281,6 @@ def scatter_add(self, dim, index, src):
   if unwrap(self).shape == (): return src
   out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
   return wrap(out)
-
-@torch.library.impl("aten::max.dim", "privateuseone")
-def max_dim(self, dim, keepdim=False):
-  self = unwrap(self)
-  values = Tensor.max(self, dim, keepdim)
-  indices = Tensor.argmax(self, dim, keepdim).cast(dtype=dtypes.int64)
-  return (wrap(values), wrap(indices))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
@@ -470,7 +467,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None,out=None:
-    out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
+    out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim, acc_dtype=_from_torch_dtype(dtype) if dtype is not None else dtypes.default_float), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": lambda self, dim, index: Tensor.gather(self, dim, index.cast(dtypes.int)),
@@ -489,7 +486,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_or_": lambda x, y: x | y,
   "aten.multinomial": Tensor.multinomial,
   "aten.masked_fill.Scalar": Tensor.masked_fill,
-  "aten.masked_fill_.Scalar": Tensor.masked_fill,
+  "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(Tensor.masked_fill(self, mask, value)),
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
@@ -503,8 +500,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.atanh": Tensor.atanh,
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
-  "aten.scatter_reduce.two": lambda self, dim, index, src, reduce, include_self=True: Tensor.scatter_reduce(self, dim, index, src, reduce=reduce, include_self=include_self),
-  "aten.squeeze_.dim": lambda self, dim: Tensor.squeeze(self, dim), # shape mismatch in TestOps.test_matmul
+  "aten.scatter_reduce.two": Tensor.scatter_reduce,
+  "aten.squeeze_.dim": lambda self, dim: self.replace(Tensor.squeeze(self, dim), allow_shape_mismatch=True),
   "aten.add.Tensor":  lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, dtype=_from_torch_dtype(dtype) if dtype is not None else dtypes.default_float),
@@ -518,6 +515,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
+  "aten.t": Tensor.transpose,
+  "aten.detach": Tensor.detach,
+  "aten.max.dim": lambda self, dim, keepdim=False: (Tensor.max(self, dim, keepdim), Tensor.argmax(self, dim, keepdim).cast(dtype=dtypes.int64))
 }}
 
 def wrap_fxn(k,f):
