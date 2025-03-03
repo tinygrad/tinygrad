@@ -2,7 +2,7 @@ from typing import List
 import unittest, time, pytest
 from tinygrad import dtypes, Device
 from tinygrad.helpers import DEBUG, AMX
-from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
+from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher, track_rewrites
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.devectorizer import full_graph_rewrite, graph_rewrite, sym
@@ -502,7 +502,9 @@ class TestUOpGraph(unittest.TestCase):
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
+@track_rewrites()
 def expander_rewrite(sink): return graph_rewrite(sink, sym + expander)
+@track_rewrites()
 def float4_rewrite(sink): return full_graph_rewrite(sink, Renderer())
 
 class TestExpander(unittest.TestCase):

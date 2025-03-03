@@ -1435,8 +1435,8 @@ class TestFloat4(unittest.TestCase):
   # TODO: express opts below as auto opts
 
   def test_float4_basic(self):
-    a = Tensor.rand(2, 8).realize()
-    b = Tensor.rand(2, 8).realize()
+    a = Tensor.empty(2, 8).realize()
+    b = Tensor.empty(2, 8).realize()
     c = a + b
 
     s = c.schedule()[0]
