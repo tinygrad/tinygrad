@@ -5,6 +5,7 @@ TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
+from tinygrad.ops import Ops
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
@@ -245,18 +246,23 @@ for dim in [2, 3]:
 
 @torch.library.impl("aten::cumsum", "privateuseone")
 def cumsum(self, dim):
-  # TODO: Tensor.cumsum fails for TestOps.test_simple_cumsum due to wrong result, use cpu func for now
-  return aten.cumsum(self.cpu(), dim).tiny()
+  # TODO: Tensor.cumsum fails for TestOps.test_simple_cumsum due to wrong result
+  if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
+  return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
   # TODO: custom code fails for TestOps.test_cummax due to ndim mismatch, using cpu func for now
   out = aten.cummax(self.cpu(), dim)
   return [o.tiny() for o in out]
+  print(f"cummax {unwrap(self).shape=} {dim=}")
   self = unwrap(self)
+  if (self.shape == () and dim == 0) or (0 in self.shape):
+    return (wrap(self), wrap(Tensor.empty(self.shape).cast(dtype=dtypes.int64)))
   values = Tensor.cummax(self, dim)
-  indices = Tensor.max(self, dim)
+  indices = Tensor.argmax(self, dim, keepdim=True).cast(dtype=dtypes.int64)
   return (wrap(values), wrap(indices))
+  return (wrap(unwrap(self)._cumalu(dim, Ops.MAX)), wrap(unwrap(self).max(dim)))
 
 @torch.library.impl("aten::scatter.src", "privateuseone")
 def scatter_src(self, dim, index, src):
@@ -274,12 +280,9 @@ def scatter_add(self, dim, index, src):
 
 @torch.library.impl("aten::max.dim", "privateuseone")
 def max_dim(self, dim, keepdim=False):
-  # TODO: custom code fails for TestOps.test_max due to dtype mismatch, using cpu func for now
-  out = aten.max.dim(self.cpu(), dim, keepdim=keepdim)
-  return [o.tiny() for o in out]
   self = unwrap(self)
   values = Tensor.max(self, dim, keepdim)
-  indices = Tensor.max(self, dim)
+  indices = Tensor.argmax(self, dim, keepdim).cast(dtype=dtypes.int64)
   return (wrap(values), wrap(indices))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
