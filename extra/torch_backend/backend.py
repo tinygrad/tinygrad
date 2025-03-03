@@ -1,3 +1,7 @@
+# ruff: noqa: E501, A001, A002, A006
+# A001 Variable `input` is shadowing a Python builtin
+# A002 Function argument `input` is shadowing a Python builtin
+# A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, prod
 import torch.lib
@@ -423,7 +427,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
-  "aten.div.out_mode": Tensor.div,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
 }}
 
