@@ -24,32 +24,25 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 
-# *** bad functions on CPU ***
-
 @torch.library.impl("aten::masked_select", "privateuseone")
 def masked_select(self, mask):
-  # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
+  return wrap(unwrap(self).masked_select(unwrap(mask)))
 
 @torch.library.impl("aten::topk", "privateuseone")
 def topk(self, k, dim=-1, largest=True, sorted=True):
-  # TODO: move to tinygrad
-  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
-  return torch.return_types.topk((t1.tiny(), t2.tiny()))
+  t1, t2 = unwrap(self).topk(k, dim, largest, sorted)
+  return torch.return_types.topk((wrap(t1), wrap(t2)))
 
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
-  # TODO: move to tinygrad
-  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  return wrap(unwrap(self).index_put([unwrap(x) for x in indices], unwrap(values), accumulate, unsafe))
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
+  return wrap(unwrap(x).index([unwrap(z) if isinstance(z, torch.Tensor) else None for z in y]))
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
-
-# *** end bad functions on CPU ***
 
 @torch.library.impl("aten::zero_", "privateuseone")
 def zero_(x):
