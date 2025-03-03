@@ -323,7 +323,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var.correction": Tensor.var,
   "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
-  "aten.sum.IntList_out": lambda self,axis,dtype=None,keepdim=False,out=None:
+  "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.scatter.value_reduce": Tensor.scatter,
