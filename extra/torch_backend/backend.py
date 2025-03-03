@@ -220,13 +220,13 @@ def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
 pad_forward = lambda self, padding, mode=None: wrap(Tensor.pad(unwrap(self), padding, mode=mode))
-upsample = lambda self, size, align_corners=False, mode=None: wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 
 def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.pad(self, padding, mode=mode)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
+upsample = lambda self, size, align_corners=False, mode=None: wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 
 for dim in [1, 2, 3]:
   torch.library.impl(f"aten::replication_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="replicate"))
@@ -236,9 +236,8 @@ for dim in [1, 2, 3]:
   torch.library.impl(f"aten::upsample_nearest{dim}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
   torch.library.impl(f"aten::_upsample_nearest_exact{dim}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
-torch.library.impl(f"aten::upsample_linear1d", "privateuseone")(functools.partial(upsample, mode="linear")),
-torch.library.impl(f"aten::upsample_bilinear2d", "privateuseone")(functools.partial(upsample, mode="linear")),
-torch.library.impl(f"aten::upsample_trilinear3d", "privateuseone")(functools.partial(upsample, mode="linear")),
+for i in ["upsample_linear1d", "upsample_bilinear2d", "upsample_trilinear3d"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample, mode="linear"))
 
 for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
