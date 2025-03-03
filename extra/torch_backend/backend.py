@@ -505,7 +505,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
   "aten.squeeze_.dim": lambda self, dim: self.replace(Tensor.squeeze(self, dim), allow_shape_mismatch=True),
-  "aten.add.Tensor":  lambda input,other,alpha=1: input+alpha*other,
+  "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, dtype=_from_torch_dtype(dtype) if dtype is not None else dtypes.default_float),
   "aten::view.dtype": lambda self, dtype: Tensor.bitcast(self, _from_torch_dtype(dtype)),
