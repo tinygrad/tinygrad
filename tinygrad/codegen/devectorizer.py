@@ -103,7 +103,8 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     for o in offsets:
       for fold_length in lengths:
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
-          ret.append(UOp(Ops.INDEX, buf.dtype.base.vec(fold_length), (buf, vec.gep(i), mask.gep(i)) if mask is not None else (buf, vec.gep(i))))
+          lidx = UOp(Ops.INDEX, buf.dtype.base.vec(fold_length), (buf, vec.gep(o), mask.gep(o)) if mask is not None else (buf, vec.gep(o)))
+          ret.append(lidx.cast(buf.dtype.base.vec(fold_length).ptr(size=buf.dtype.size, local=buf.dtype.local)))
           used.update((rootsrc,o+i) for i in range(fold_length))
           for i in range(fold_length): idxs.append(offsets[o+i])
           global_offset += fold_length
