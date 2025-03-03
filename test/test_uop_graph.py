@@ -654,6 +654,7 @@ class TestExpander(unittest.TestCase):
     sink = expander_rewrite(sink)
     print(sink)
 
+@unittest.skip("this isn't how it works anymore, behavior is tested in test_linearizer")
 class TestLoadStoreFolder(unittest.TestCase):
   def test_simple_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())

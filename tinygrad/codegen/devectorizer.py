@@ -5,12 +5,13 @@ from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym
-from tinygrad.helpers import getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
 
+"""
 def fold_expanded(ex, buf):
   new_srcs = dedup(list(ex.src))
   old_new_srcs = new_srcs[:]
@@ -65,6 +66,7 @@ def fold_expanded(ex, buf):
   if is_load and len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
   # remove Nones for STORE
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
+"""
 
 # ***** load/store grouping *****
 
@@ -100,9 +102,13 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
           # get the index offset for this element. using [0] is okay, because they are the same
           oidx = vec.gep(offsets[o][0])
           if oidx.divides(fold_length) is None: continue
-          lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
+          if is_image:
+            assert isinstance(buf.dtype, ImageDType) and fold_length == 4, "images must fold 4"
+            oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1]))))
+          # on images, the index dtype is the load dtype
+          lidx = UOp(Ops.INDEX, buf.dtype if not is_image else buf.dtype.base.vec(4), (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
           # if we are folding, we set the dtype correctly
-          if fold_length > 1:
+          if fold_length > 1 and not is_image:
             ptrdtype = cast(PtrDType, buf.dtype)
             lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
           # set the idxs of the output
