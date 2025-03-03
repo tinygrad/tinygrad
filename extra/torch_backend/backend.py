@@ -226,7 +226,7 @@ simple_tensor_methods = [
   # rounding
   "ceil", "round", "floor", "trunc",
   # binary
-  "mul", "div", "maximum", "minimum",
+  "mul", "div", "maximum", "minimum", "copysign",
   # modify
   "tril", "triu",
   # reduce
@@ -266,8 +266,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
-  # TODO: move to tinygrad
-  "aten.copysign.out": lambda input,other: input.abs() * other.sign(),
   "aten.fmax.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.maximum(input, other))),
   "aten.fmin.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.minimum(input, other))),
   # TODO: this gets the shape wrong
