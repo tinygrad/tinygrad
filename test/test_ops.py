@@ -1779,6 +1779,10 @@ class TestOps(unittest.TestCase):
       x = Tensor.ones((4,3,6,6))
       x.reshape([])
 
+  def test_view(self):
+    helper_test_op([(4,3,6,6)], lambda x: x.view((12,6,6)))
+    helper_test_op([(4,3,6,6)], lambda x: x.view((-1,3,6,6)))
+
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,)))
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,1)))

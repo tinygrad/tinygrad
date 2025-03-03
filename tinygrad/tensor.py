@@ -933,9 +933,9 @@ class Tensor(SimpleMathTrait):
 
   # ***** movement low level ops *****
 
-  def view(self, *shape:tuple[sint, ...]) -> Tensor:
+  def view(self, shape:tuple[sint, ...], *args) -> Tensor:
     """`.view` is an alias for `.reshape`."""
-    return self.reshape(shape)
+    return self.reshape(argfix(shape, *args))
 
   def reshape(self, shape, *args) -> Tensor:
     """
