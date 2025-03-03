@@ -200,30 +200,6 @@ def get_onnx_ops():
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
     return _onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))
 
-  # copied from extra/models/llama.py
-  def _precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
-    freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
-    freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-    return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
-
-  # copied from extra/models/llama.py
-  def _complex_mult(A, c, d):
-    a,b = A[..., 0:1], A[..., 1:2]
-    ro = a*c - b*d
-    co = a*d + b*c
-    return ro.cat(co, dim=-1)
-
-  # copied from extra/models/llama.py
-  def _apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
-    assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
-    xq = xq.reshape(*xq.shape[0:-1], -1, 2)
-    xk = xk.reshape(*xk.shape[0:-1], -1, 2)
-    assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
-    c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
-    xq_out = _complex_mult(xq, c, d)
-    xk_out = _complex_mult(xk, c, d)
-    return xq_out.flatten(3), xk_out.flatten(3)
-
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
 
   def _prepare_quantize(x:Tensor, scale:Tensor, zero_point:Tensor|int, axis=1, block_size=0):
