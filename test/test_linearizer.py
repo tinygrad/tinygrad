@@ -19,9 +19,10 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
   if isinstance(r, Tensor): r = [r]
   s = Tensor.schedule(*r)
   run_schedule(s[:-1])  # run all kernels except the last one
-  # now all input LazyBuffers buffers in s[-1] should be realized
-  # create fresh buffers for the output buffer
-  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if x in s[-1].outputs else x for x in s[-1].bufs]
+  assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
+  # now all input buffers in s[-1] should be realized
+  # create fresh buffers for the outputs
+  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return s[-1].ast, bufs
 
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
@@ -101,7 +102,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in lin.uops if u.op is Ops.STORE]
     mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
-    assert [u.arg for u in mutable_bufs] == [0, 1]
+    self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
@@ -1434,8 +1435,8 @@ class TestFloat4(unittest.TestCase):
   # TODO: express opts below as auto opts
 
   def test_float4_basic(self):
-    a = Tensor.rand(2, 8).realize()
-    b = Tensor.rand(2, 8).realize()
+    a = Tensor.empty(2, 8).realize()
+    b = Tensor.empty(2, 8).realize()
     c = a + b
 
     s = c.schedule()[0]
@@ -1447,8 +1448,8 @@ class TestFloat4(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim(self):
-    a = Tensor.rand(2, 8).realize()
-    b = Tensor.rand(2, 8).realize()
+    a = Tensor.empty(2, 8).realize()
+    b = Tensor.empty(2, 8).realize()
     c = a + b
 
     s = c.schedule()[0]
@@ -1465,8 +1466,8 @@ class TestFloat4(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
     def kernel_for_shape(size, shift):
-      a = Tensor.rand(2, size).realize()
-      b = Tensor.rand(2, size).realize()
+      a = Tensor.empty(2, size).realize()
+      b = Tensor.empty(2, size).realize()
       c = a + b
 
       s = c.schedule()[0]
@@ -1489,8 +1490,8 @@ class TestFloat4(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_unaligned_load(self):
-    a = Tensor.rand(9).realize().shrink(((1, 9),))
-    b = Tensor.rand(9).realize().shrink(((1, 9),))
+    a = Tensor.empty(9).realize().shrink(((1, 9),))
+    b = Tensor.empty(9).realize().shrink(((1, 9),))
     c = a + b
 
     s = c.schedule()[0]
@@ -1502,8 +1503,8 @@ class TestFloat4(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load(self):
-    a = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
-    b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
+    a = Tensor.empty(2, 9).realize().shrink(((0, 2), (1, 9),))
+    b = Tensor.empty(2, 9).realize().shrink(((0, 2), (1, 9),))
     c = a + b
 
     s = c.schedule()[0]
@@ -1520,8 +1521,8 @@ class TestFloat4(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
     def kernel_for_shape(size, shift):
-      a = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
-      b = Tensor.rand(2, size).realize().shrink(((0, 2), (1, size),))
+      a = Tensor.empty(2, size).realize().shrink(((0, 2), (1, size),))
+      b = Tensor.empty(2, size).realize().shrink(((0, 2), (1, size),))
       c = a + b
 
       s = c.schedule()[0]
@@ -1543,8 +1544,8 @@ class TestFloat4(unittest.TestCase):
       assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
-    a = Tensor.rand(1, 1, 8).realize()
-    b = Tensor.rand(1, 1, 5).realize().shrink(((0, 1), (0, 1), (1, 5)))
+    a = Tensor.empty(1, 1, 8).realize()
+    b = Tensor.empty(1, 1, 5).realize().shrink(((0, 1), (0, 1), (1, 5)))
     c = a.conv2d(b)
     # only the first and last conv dot products are aligned in a, and b is never aligned, so no
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
@@ -1557,8 +1558,8 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(k) == (0, 0)
 
   def test_float4_multidim_sometimes_unaligned(self):
-    a = Tensor.rand(1, 1, 7).realize()
-    b = Tensor.rand(1, 1, 5).realize().shrink(((0, 1), (0, 1), (1, 5)))
+    a = Tensor.empty(1, 1, 7).realize()
+    b = Tensor.empty(1, 1, 5).realize().shrink(((0, 1), (0, 1), (1, 5)))
     c = a.conv2d(b)
     # the first conv dot product is aligned in a. If we upcast the output and reduce
     # dimension, then we could do float4 for only that one set of loads, but we currently
@@ -1574,8 +1575,8 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(k) in {(0,1), (1,1)}
 
   def test_float4_noncontiguous(self):
-    a = Tensor.rand(4, 2).realize()
-    b = Tensor.rand(4, 2).realize()
+    a = Tensor.empty(4, 2).realize()
+    b = Tensor.empty(4, 2).realize()
     c = a + b
 
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
@@ -1590,8 +1591,8 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(k) == (0, 0)
 
   def test_float4_expand(self):
-    a = Tensor.rand(9).realize().shrink(((1, 9),))
-    b = Tensor.rand(2).realize().reshape((2, 1)).expand((2,4)).reshape((8,))
+    a = Tensor.empty(9).realize().shrink(((1, 9),))
+    b = Tensor.empty(2).realize().reshape((2, 1)).expand((2,4)).reshape((8,))
     c = a + b
 
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
@@ -1606,8 +1607,8 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(k) == (0, 1)
 
   def test_float4_heterogeneous(self):
-    a = Tensor.rand(8).realize()
-    b = Tensor.rand(9).realize().shrink(((1, 9),))
+    a = Tensor.empty(8).realize()
+    b = Tensor.empty(9).realize().shrink(((1, 9),))
     c = a + b
 
     # should float4 b but not a
@@ -1703,8 +1704,8 @@ class TestFloat4(unittest.TestCase):
 
 class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast(self):
-    layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
+    layer_1 = Tensor.cat(*[Tensor.empty(5) for _ in range(4)])
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
 
     s = layer_2.schedule()[-1]
     k = Kernel(s.ast)
@@ -1717,7 +1718,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "METAL", "METAL can only run kernels with up to 32 buffers")
   def test_masked_upcast_wino(self):
-    monster = Tensor.stack(*[Tensor.stack(*[Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
+    monster = Tensor.stack(*[Tensor.stack(*[Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
 
     s = monster.schedule()[-1]
     k = Kernel(s.ast)

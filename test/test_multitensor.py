@@ -536,8 +536,8 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in out.schedule() if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
-    assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
+    scheds = [sched for sched in out.schedule() if sched.bufs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
+    assert set(sched.bufs[0].device for sched in scheds) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
     # test case to show that ast can be different on devices
@@ -781,6 +781,15 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(len([x for x in sched if any(u.op is Ops.COPY for u in x.ast.toposort)]), 2)
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
+
+  @unittest.expectedFailure
+  def test_dont_realize_intermediate_expand(self):
+    a = Tensor.empty(16, 1).shard_(devices_2, axis=0)
+    b = Tensor.empty(16, 16).to_(devices_2)
+    c = Tensor.empty(16, 16).shard_(devices_2, axis=1)
+    d = a+b
+    (d*c).realize()
+    assert not d.lazydata.is_realized
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
