@@ -933,9 +933,9 @@ class Tensor(SimpleMathTrait):
 
   # ***** movement low level ops *****
 
-  def view(self, *shape) -> Tensor:
+  def view(self, shape:tuple[sint, ...], *args) -> Tensor:
     """`.view` is an alias for `.reshape`."""
-    return self.reshape(shape)
+    return self.reshape(argfix(shape, *args))
 
   def reshape(self, shape, *args) -> Tensor:
     """
@@ -2095,7 +2095,8 @@ class Tensor(SimpleMathTrait):
     return pads
 
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
+  def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                 ceil_mode=False, count_include_pad=True):
     """
     Applies average pooling over a tensor.
 
@@ -2142,7 +2143,8 @@ class Tensor(SimpleMathTrait):
     if not ceil_mode: return pool(self, reg_pads).mean(axis)
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
+  def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                 ceil_mode=False):
     """
     Applies max pooling over a tensor.
 
@@ -3258,7 +3260,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
 
-  def div(self, x:Union[Tensor, ConstType], reverse=False, rounding_mode=None) -> Tensor:
+  def div(self, x:Union[Tensor, ConstType], reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
@@ -3458,12 +3460,21 @@ class Tensor(SimpleMathTrait):
 
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
+  def copysign(self, other) -> Tensor:
+    """
+    Return a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
+    """
+    # NOTE: torch always return in float, we return based on the broadcasting rule.
+    other = self._broadcasted(other)[1]
+    # TODO: remove other*0?
+    return (other < 0).where(-self.abs(), self.abs()) + other*0
+
   # ***** op wrappers *****
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
 
-  def __lshift__(self, x) -> Tensor: return self.lshift(x)
-  def __rshift__(self, x) -> Tensor: return self.rshift(x)
+  def __lshift__(self, x:int) -> Tensor: return self.lshift(x)
+  def __rshift__(self, x:int) -> Tensor: return self.rshift(x)
 
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
@@ -3481,8 +3492,8 @@ class Tensor(SimpleMathTrait):
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x))
-  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
-  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
+  def __ilshift__(self, x:int) -> Tensor: return self.assign(self.lshift(x))
+  def __irshift__(self, x:int) -> Tensor: return self.assign(self.rshift(x))
 
   def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
   def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
