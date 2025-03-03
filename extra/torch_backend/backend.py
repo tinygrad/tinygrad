@@ -39,7 +39,7 @@ def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
-  return wrap(unwrap(x).index([unwrap(z) if isinstance(z, torch.Tensor) else None for z in y]))
+  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
