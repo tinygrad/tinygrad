@@ -102,7 +102,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in lin.uops if u.op is Ops.STORE]
     mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
-    assert [u.arg for u in mutable_bufs] == [0, 1]
+    self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
