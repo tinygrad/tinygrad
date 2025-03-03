@@ -108,14 +108,6 @@ sym = symbolic_simple+PatternMatcher([
     and x.base.op is Ops.BUFFER and resolve(prod(v.shape) > prod(x.shape)) else None),
 ])
 
-remove_movement_ops = merge_views+PatternMatcher([
-  # NOTE: movement ops are always applied to base
-  (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov: x.view(unwrap(mov.st))),
-  # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
-  (UPat(Ops.VIEW, name="view"),
-   lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
-])
-
 # **** UOp realization
 
 @dataclass(frozen=True)
@@ -405,8 +397,8 @@ if CAPTURE_PROCESS_REPLAY:
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # remove_movement_ops + sym
-  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
+  # merge_views + sym
+  tensor_map = graph_rewrite_map(big_sink, merge_views+sym, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
