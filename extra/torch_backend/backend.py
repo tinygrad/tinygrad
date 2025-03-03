@@ -383,13 +383,14 @@ def wrap_fxn(k,f):
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
-from torch.utils._python_dispatch import TorchDispatchMode
-class DispatchLog(TorchDispatchMode):
-  def __torch_dispatch__(self, func, types, args, kwargs=None):
-    if TORCH_DEBUG:
+if TORCH_DEBUG:
+  from torch.utils._python_dispatch import TorchDispatchMode
+  class DispatchLog(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args, kwargs=None):
+      #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
       print(f"Dispatch Log: {func}")
-    return func(*args, **(kwargs or {}))
-DispatchLog().__enter__()
+      return func(*args, **(kwargs or {}))
+  DispatchLog().__enter__()
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
