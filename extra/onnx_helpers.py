@@ -13,7 +13,9 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
         case int(): shape.append(onnx_dim)
         case "width" | "height": shape.append(config.get("size", {}).get(onnx_dim, 224))
         case "sequence_length": shape.append(16)
-        case "decoder_sequence_length" | "encoder_sequence_length": shape.append(config.get("nb_max_frames", 16))
+        case "sequence": shape.append(16)
+        case "decoder_sequence_length" | "encoder_sequence_length": shape.append(16)
+        case "encoder_sequence_length / 2": shape.append(8)
         case "past_decoder_sequence_length" | "encoder_sequence_length_out": shape.append(16)
         case "batch_size": shape.append(1)
         case "num_channels": shape.append(config.get("in_channels", 3))
@@ -25,7 +27,7 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
   def _get_value(name, shape, dtype):
     match name:
       case "input_ids":
-        vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 30000) # safe vocab_size
+        vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 32)
         val = np.random.randint(0, vocab_size-1, shape)
       case "attention_mask": val = np.random.randint(0, 2, size=shape)
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
