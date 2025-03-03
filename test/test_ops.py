@@ -891,6 +891,16 @@ class TestOps(unittest.TestCase):
   def test_sign_exact(self):
     helper_test_op(None, torch.sign, Tensor.sign, vals=[[-1.,0,1]])
 
+  def test_copysign(self):
+    helper_test_op([(45,65), (45,65)], torch.copysign, Tensor.copysign)
+    helper_test_op([(45,65), (45,1)], torch.copysign, Tensor.copysign)
+    helper_test_op([(45,1), (1,65)], torch.copysign, Tensor.copysign)
+    helper_test_op([(), ()], torch.copysign, Tensor.copysign)
+  def test_copysign_exact(self):
+    for i in [-1.,0.,1.]:
+      for j in [-1., 0., 1.]:
+        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
+
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
     helper_test_op([()], torch.nn.functional.softsign, Tensor.softsign)
