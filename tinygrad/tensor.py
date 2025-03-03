@@ -3260,7 +3260,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._apply_broadcasted_uop(UOp.idiv, x, reverse)
 
-  def div(self, x:Union[Tensor, ConstType], reverse=False, rounding_mode=None) -> Tensor:
+  def div(self, x:Union[Tensor, ConstType], reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
