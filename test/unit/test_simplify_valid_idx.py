@@ -260,7 +260,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load,
                "((((idx2*2)+ridx0)<11)&((((idx1*8)+ridx1)<3)!=True))",
                "(((idx0+((idx1*512)+(ridx1*64)))+832)%1024)",
-               "((((idx2*2)+ridx0)+(((idx1+((ridx1+5)//8))+1)//2))+-4)")
+               "(((((idx1+((ridx1+5)//8))+1)//2)+((idx2*2)+ridx0))+-4)")
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)

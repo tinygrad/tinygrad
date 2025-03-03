@@ -1,5 +1,5 @@
 from tinygrad import dtypes, getenv
-from tinygrad.helpers import trange
+from tinygrad.helpers import trange, colored
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
@@ -60,3 +60,8 @@ if __name__ == "__main__":
     loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
+
+  # verify eval acc
+  if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
+    if test_acc >= target and test_acc != 100.0: print(colored(f"{test_acc=} >= {target}", "green"))
+    else: raise ValueError(colored(f"{test_acc=} < {target}", "red"))
