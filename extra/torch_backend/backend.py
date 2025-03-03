@@ -23,6 +23,7 @@ class TinyBackend:
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
+aten = torch.ops.aten
 
 # *** bad functions on CPU ***
 
@@ -58,17 +59,14 @@ def cumprod(self, dim, dtype=None):
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
-def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
-  f = getattr(aten, f)
-  return f(grad_out.cpu(), output_size, input_size, scales).tiny()
+upsample_1d_backward = lambda grad_out, output_size, input_size, scales=None, f=None: f(
+  grad_out.cpu(), output_size, input_size, scales).tiny()
 
-def upsample_2d_backward(grad_out, output_size, input_size, scales_h=None, scales_w=None, f=None):
-  f = getattr(aten, f)
-  return f(grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
+upsample_2d_backward = lambda grad_out, output_size, input_size, scales_h=None, scales_w=None, f=None: f(
+  grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
 
-def upsample_3d_backward(grad_out, output_size, input_size, scales_d=None, scales_h=None, scales_w=None, f=None):
-  f = getattr(aten, f)
-  return f(grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
+upsample_3d_backward = lambda grad_out, output_size, input_size, scales_d=None, scales_h=None, scales_w=None, f=None: f(
+  grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
 
 @torch.library.impl("aten::upsample_trilinear3d_backward", "privateuseone")
 def upsample_trilinear3d_backward(grad_output, output_size, input_size,  align_corners, scales_d=None, scales_h=None, scales_w=None):
@@ -79,13 +77,13 @@ def upsample_bilinear2d_backward(grad_output, output_size, input_size, align_cor
   return aten.upsample_bilinear2d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_h, scales_w).tiny()
 
 for i in ["upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward"]:
-  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_1d_backward, f=f"{i}"))
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_1d_backward, f=getattr(aten, i)))
 
 for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
-  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_2d_backward, f=f"{i}"))
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_2d_backward, f=getattr(aten, i)))
 
 for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
-  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=f"{i}"))
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=getattr(aten, i)))
 
 # *** end bad functions on CPU ***
 
@@ -305,7 +303,6 @@ def cat_out(tensors, dim=0, out=None):
 
 # register some decompositions
 from torch._decomp import get_decompositions
-aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm, aten.native_batch_norm_backward,
   aten.native_layer_norm_backward,
