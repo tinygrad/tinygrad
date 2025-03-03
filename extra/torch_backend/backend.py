@@ -78,15 +78,14 @@ def upsample_trilinear3d_backward(grad_output, output_size, input_size,  align_c
 def upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners, scales_h=None, scales_w=None):
   return aten.upsample_bilinear2d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_h, scales_w).tiny()
 
-torch.library.impl("aten::upsample_linear1d_backward", "privateuseone")(functools.partial(upsample_1d_backward, f="upsample_linear1d_backward"))
-torch.library.impl("aten::upsample_nearest1d_backward", "privateuseone")(functools.partial(upsample_1d_backward, f="upsample_nearest1d_backward"))
-torch.library.impl("aten::_upsample_nearest_exact1d_backward", "privateuseone")(functools.partial(upsample_1d_backward, f="_upsample_nearest_exact1d_backward"))
+for i in ["upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_1d_backward, f=f"{i}"))
 
-torch.library.impl("aten::upsample_nearest2d_backward", "privateuseone")(functools.partial(upsample_2d_backward, f="upsample_nearest2d_backward"))
-torch.library.impl("aten::_upsample_nearest_exact2d_backward", "privateuseone")(functools.partial(upsample_2d_backward, f="_upsample_nearest_exact2d_backward"))
+for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_2d_backward, f=f"{i}"))
 
-torch.library.impl("aten::upsample_nearest3d_backward", "privateuseone")(functools.partial(upsample_3d_backward, f="upsample_nearest3d_backward"))
-torch.library.impl("aten::_upsample_nearest_exact3d_backward", "privateuseone")(functools.partial(upsample_3d_backward, f="_upsample_nearest_exact3d_backward"))
+for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=f"{i}"))
 
 # *** end bad functions on CPU ***
 
