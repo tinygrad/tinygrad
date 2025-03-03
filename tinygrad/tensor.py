@@ -3469,15 +3469,6 @@ class Tensor(SimpleMathTrait):
     # TODO: remove other*0?
     return (other < 0).where(-self.abs(), self.abs()) + other*0
 
-  def copysign(self, other) -> Tensor:
-    """
-    Return a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
-    """
-    # NOTE: torch always return in float, we return based on the broadcasting rule.
-    other = self._broadcasted(other)[1]
-    # TODO: remove other*0?
-    return (other < 0).where(-self.abs(), self.abs()) + other*0
-
   # ***** op wrappers *****
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
