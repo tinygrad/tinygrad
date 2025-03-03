@@ -11,7 +11,6 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
 def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype))
-@functools.lru_cache(None)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -108,8 +107,9 @@ def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stri
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
   if stride is not None and len(stride) == 0: stride = None
   # TODO: utilize input indices once they are correct
-  out = Tensor.max_pool2d(unwrap(self), kernel_size, stride, dilation, padding, ceil_mode)
-  return wrap(out.gradient(unwrap(self), gradient=unwrap(grad_out))[0])
+  grad_out, self = unwrap(grad_out), unwrap(self)
+  out = Tensor.max_pool2d(self, kernel_size, stride, dilation, padding, ceil_mode)
+  return wrap(out.gradient(self, gradient=grad_out)[0])
 
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
