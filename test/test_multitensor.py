@@ -388,22 +388,22 @@ class TestMultiTensor(unittest.TestCase):
 
     # Save the current metadata state
     old_metadata = _METADATA.get()
-    
+
     # Shard parameters and realize them
-    for p in get_parameters(m): 
-        p.shard_(devices_2).realize()
-    
+    for p in get_parameters(m):
+      p.shard_(devices_2).realize()
+
     GlobalCounters.reset()
     optimizer.zero_grad()
-    
+
     # Ensure metadata is preserved during sharded operations
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
     shard_output.backward()
-    
+
     # Restore metadata if needed
     if old_metadata is not None and _METADATA.get() != old_metadata:
-        _METADATA.set(old_metadata)
-        
+      _METADATA.set(old_metadata)
+
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
@@ -808,35 +808,33 @@ class TestMultiTensor(unittest.TestCase):
     assert not d.lazydata.is_realized
 
   def test_metadata_preservation_during_sharding(self):
-    from tinygrad.helpers import _METADATA, Metadata
-    
     # Create a test tensor
     x = Tensor.rand((4, 4))
-    
+
     # Set metadata
     test_metadata = Metadata(name="test_op", caller="test_caller")
     token = _METADATA.set(test_metadata)
-    
+
     try:
       # Shard the tensor
       x_sharded = x.shard(devices_2, axis=0)
-      
+
       # Perform an operation that should preserve metadata
       y_sharded = x_sharded * 2
       y_sharded.realize()
-      
+
       # Check if metadata is preserved
       current_metadata = _METADATA.get()
       self.assertIsNotNone(current_metadata, "Metadata was lost during sharding operation")
       self.assertEqual(current_metadata.name, "test_op", "Metadata name was not preserved")
       self.assertEqual(current_metadata.caller, "test_caller", "Metadata caller was not preserved")
-      
+
       # Test with shard_ in-place operation
       z = Tensor.rand((4, 4))
       z.shard_(devices_2, axis=0)
       z_result = z * 3
       z_result.realize()
-      
+
       # Check if metadata is still preserved
       current_metadata = _METADATA.get()
       self.assertIsNotNone(current_metadata, "Metadata was lost during in-place sharding operation")
