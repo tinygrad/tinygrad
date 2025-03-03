@@ -1,3 +1,7 @@
+# ruff: noqa: E501, A001, A002, A006
+# A001 Variable `input` is shadowing a Python builtin
+# A002 Function argument `input` is shadowing a Python builtin
+# A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, prod
 import torch.lib
@@ -280,7 +284,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
-  "aten.div.out_mode": Tensor.div,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
 }}
 
@@ -340,12 +343,11 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.multinomial": Tensor.multinomial,
   "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
-  "aten.masked_fill_.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
