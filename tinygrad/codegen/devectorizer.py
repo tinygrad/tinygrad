@@ -9,65 +9,6 @@ from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTO
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
-# ***** float4/image store handling *****
-
-"""
-def fold_expanded(ex, buf):
-  new_srcs = dedup(list(ex.src))
-  old_new_srcs = new_srcs[:]
-  is_load, is_image = new_srcs[0].op is Ops.LOAD, isinstance(buf.dtype, ImageDType)
-
-  # TODO: get the device from the buffer somehow
-  # NOTE: this can't be Device.DEFAULT because it opens devices
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType): return None
-  lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
-
-  # first, extract all the relevant offsets
-  offsets_rootsrc: defaultdict[Any, dict] = defaultdict(dict)
-  for i,s in enumerate(new_srcs):
-    idx = s.src[0].src[1]
-    if s.dtype.count != 1 or (is_image and idx.dtype.count == 2): continue
-    if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
-    elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
-    else: root_src, arg = idx, 0
-    # add gates for gated
-    if len(s.src[0].src) == 3: root_src = (s.src[0].src[2], root_src)
-    assert arg not in offsets_rootsrc[root_src], f"{offsets_rootsrc[root_src][arg]} != {i} with {len(s.src)} sources"
-    offsets_rootsrc[root_src][arg] = i
-
-  # then rewrite everything we can
-  used: set[tuple[UOp, UOp]] = set()
-  for rootsrc, offsets in offsets_rootsrc.items():
-    for o in offsets:
-      for fold_length in lengths:
-        if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
-          load_1 = new_srcs[offsets[o]]
-          new_src = list(load_1.src)
-          oidx = new_src[0].src[1]
-          if oidx.divides(fold_length) is None: continue
-          if is_image:
-            # for images, we rewrite the index. it must evenly divide 4 from the above check
-            new_src[0] = buf.index(
-              UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1])))),
-              rootsrc[0] if isinstance(rootsrc, tuple) else None)
-          else:
-            # for non image, we upcast the index pointer
-            new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(size=new_src[0].dtype.size, local=new_src[0].dtype.local))
-          # generate the folded new_srcs
-          if is_load:
-            new_load = UOp(Ops.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
-            for i in range(fold_length): new_srcs[offsets[o+i]] = new_load.gep(i)
-          else: # vectorize the store
-            new_src[1] = UOp(Ops.VECTORIZE, new_src[1].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[1] for i in range(fold_length)))
-            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(Ops.STORE, dtypes.void, tuple(new_src)) if i == 0 else None
-          used.update((rootsrc,o+i) for i in range(fold_length))
-
-  # dedup expand for LOAD
-  if is_load and len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
-  # remove Nones for STORE
-  return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
-"""
-
 # ***** load/store grouping *****
 
 def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
@@ -245,13 +186,6 @@ def no_vectorized_alu(alu):
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
-def no_vectorized_load_store(ls:UOp):
-  idx = ls.src[0]
-  assert isinstance(idx.dtype, PtrDType)
-  if idx.dtype.v == 1: return None
-  tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.v)]
-  return UOp(Ops.VECTORIZE, ls.dtype, tuple(tv))
-
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
@@ -263,20 +197,12 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  #(UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
-])
-
-devectorize_load_store = PatternMatcher([
-  # TODO: add vectorized support to transcendental
-  (UPat((Ops.INDEX), name="alu"), no_vectorized_alu),
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
   if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
-
 
 load_store_indexing = PatternMatcher([
   # simplify valid
@@ -315,12 +241,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
-  if DEVECTORIZE:
-    # devectorize + load_store_indexing
-    sink = graph_rewrite(sink, sym+devectorize+load_store_folding+load_store_indexing, ctx=opts)
-  else:
-    # new devectorize only for load/store
-    sink = graph_rewrite(sink, sym+devectorize_load_store)
+  # devectorize is optional
+  if DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+load_store_indexing, ctx=opts)
+  else: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
 
   # optional pre matcher
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
