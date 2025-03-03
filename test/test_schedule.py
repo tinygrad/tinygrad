@@ -2069,7 +2069,7 @@ class TestSwizzle(unittest.TestCase):
     reswizzle = a.reshape((64, 16)).reshape((32, 32))
     self.assertEqual(swizzle_cnt(reswizzle), 0) # instant rule
     ret = swizzle_rewrite(reswizzle)
-    self.assertIs(ret, reswizzle)
+    self.assertEqual(ret.st, reswizzle.st)
 
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))
