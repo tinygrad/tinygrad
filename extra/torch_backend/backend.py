@@ -197,6 +197,12 @@ decomps = [
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
+  aten.logical_and,
+  aten.randint,
+  aten.eye,
+  aten.hardsigmoid_backward,
+  aten.leaky_relu_backward,
+  aten.nll_loss2d_forward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -273,6 +279,9 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lerp.Scalar_out": Tensor.lerp,
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
+  "aten.prod.int_out": Tensor.prod,
+  "aten.div.out_mode": Tensor.div,
+  "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
 }}
 
 # we add the "out" here
@@ -305,6 +314,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
   "aten.mm": Tensor.matmul,
+  "aten.mv": Tensor.matmul,
   "aten.dot": Tensor.dot,
   "aten.prod": Tensor.prod,
   "aten.isnan": Tensor.isnan,
@@ -313,9 +323,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var.correction": Tensor.var,
   "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
-  "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
+  "aten.sum.IntList_out": lambda self,axis,dtype=None,keepdim=False,out=None:
     out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
+  "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
@@ -333,6 +344,28 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.multinomial": Tensor.multinomial,
   "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.masked_fill.Scalar": Tensor.masked_fill,
+  "aten.masked_fill_.Scalar": Tensor.masked_fill,
+  "aten.masked_fill.Tensor": Tensor.masked_fill,
+  "aten.all": Tensor.all,
+  "aten.sgn": Tensor.sign,
+  "aten.acos": Tensor.acos,
+  "aten.any": Tensor.any,
+  "aten.bitwise_not": Tensor.bitwise_not,
+  "aten.argmax": Tensor.argmax,
+  "aten.argmin": Tensor.argmin,
+  "aten.asinh": Tensor.asinh,
+  "aten.mul": Tensor.mul,
+  "aten.atanh": Tensor.atanh,
+  "aten.fill_.Tensor": Tensor.full,
+  "aten.flip": Tensor.flip,
+  "aten.squeeze.dim": Tensor.squeeze,
+  "aten.unsqueeze": Tensor.unsqueeze,
+  "aten.roll": Tensor.roll,
+  "aten.logcumsumexp": Tensor.logcumsumexp,
+  "aten.repeat": Tensor.repeat,
+  "aten.lerp.Tensor": Tensor.lerp,
+  "aten.expand": Tensor.expand,
 }}
 
 def wrap_fxn(k,f):
@@ -350,14 +383,13 @@ def wrap_fxn(k,f):
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
-if TORCH_DEBUG:
-  from torch.utils._python_dispatch import TorchDispatchMode
-  class DispatchLog(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args, kwargs=None):
-      #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
+from torch.utils._python_dispatch import TorchDispatchMode
+class DispatchLog(TorchDispatchMode):
+  def __torch_dispatch__(self, func, types, args, kwargs=None):
+    if TORCH_DEBUG:
       print(f"Dispatch Log: {func}")
-      return func(*args, **(kwargs or {}))
-  DispatchLog().__enter__()
+    return func(*args, **(kwargs or {}))
+DispatchLog().__enter__()
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
