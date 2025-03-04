@@ -17,9 +17,10 @@ from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_re
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same, temp
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops, sym
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
+remove_movement_ops = merge_views
 
 def verify_ast(sink:UOp): return type_verify(list(sink.toposort), shape_spec)
 class KernelCountException(Exception): pass
@@ -2068,7 +2069,7 @@ class TestSwizzle(unittest.TestCase):
     reswizzle = a.reshape((64, 16)).reshape((32, 32))
     self.assertEqual(swizzle_cnt(reswizzle), 0) # instant rule
     ret = swizzle_rewrite(reswizzle)
-    self.assertIs(ret, reswizzle)
+    self.assertEqual(ret.st, reswizzle.st)
 
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))

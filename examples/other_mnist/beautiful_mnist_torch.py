@@ -26,11 +26,8 @@ class Model(nn.Module):
     return self.lin(torch.flatten(x, 1))
 
 if __name__ == "__main__":
-  if getenv("TINY_BACKEND2"):
-    import extra.torch_backend.backend2
-    device = torch.device("cpu")
-  elif getenv("TINY_BACKEND"):
-    import extra.torch_backend.backend
+  if getenv("TINY_BACKEND"):
+    import tinygrad.frontend.torch
     device = torch.device("tiny")
   else:
     device = torch.device("mps")
