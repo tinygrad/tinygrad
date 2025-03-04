@@ -347,7 +347,7 @@ jobs:
 
   testgpuimage:
     name: 'GPU IMAGE Tests'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -371,7 +371,7 @@ jobs:
 
   testopenpilot:
     name: 'openpilot Compile Tests'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
