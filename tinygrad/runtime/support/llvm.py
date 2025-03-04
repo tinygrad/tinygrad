@@ -30,7 +30,7 @@ def get_lld_path():
   lld_path = shutil.which('ld.lld')
   for ver in reversed(range(14, 19+1)):
     if lld_path is not None: break
-    lld_path = shutil.which('ld.lld-{ver}')
+    lld_path = shutil.which(f'ld.lld-{ver}')
   if lld_path is None:
     lld_path = "/opt/rocm/llvm/bin/ld.lld" # try rocm
     if not os.path.exists(lld_path ):
