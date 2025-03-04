@@ -55,13 +55,24 @@ def index_tensor(x, y):
 def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
 
-@torch.library.impl("aten::cumprod", "privateuseone")
-def cumprod(self, dim, dtype=None):
-  # TODO: implement in tinygrad
-  return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
-
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
+
+@torch.library.impl("aten::cumprod", "privateuseone")
+def cumprod(self, dim, dtype=None):
+  # TODO: move to tinygrad
+  return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
+
+@torch.library.impl("aten::cummax", "privateuseone")
+def cummax(self, dim):
+  # TODO: support cummax with indices to match torch
+  out = aten.cummax(self.cpu(), dim)
+  return [o.tiny() for o in out]
+
+@torch.library.impl("aten::scatter.src", "privateuseone")
+def scatter_src(self, dim, index, src):
+  # TODO: refactor to use Tensor.scatter_reduce, fails for TestOps.test_scatter
+  return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
 
 upsample_1d_backward = lambda grad_out, output_size, input_size, scales=None, f=None: f(
   grad_out.cpu(), output_size, input_size, scales).tiny()
@@ -260,26 +271,6 @@ def cumsum(self, dim):
   if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
   return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
 
-@torch.library.impl("aten::cummax", "privateuseone")
-def cummax(self, dim):
-  # TODO: custom code fails for TestOps.test_cummax due to ndim mismatch, using cpu func for now
-  out = aten.cummax(self.cpu(), dim)
-  return [o.tiny() for o in out]
-  print(f"cummax {unwrap(self).shape=} {dim=}")
-  self = unwrap(self)
-  values = self.cummax(dim)
-  indices = Tensor.argmax(self, dim, keepdim=True).cast(dtype=dtypes.int64)
-  return (wrap(values), wrap(indices))
-  return (wrap(unwrap(self)._cumalu(dim, Ops.MAX)), wrap(unwrap(self).max(dim)))
-
-@torch.library.impl("aten::scatter.src", "privateuseone")
-def scatter_src(self, dim, index, src):
-  # TODO: custom code fails for TestOps.test_scatter, using cpu func for now
-  return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
-  if unwrap(self).shape == (): return src
-  out = unwrap(self).assign(Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum'))
-  return wrap(out)
-
 @torch.library.impl("aten::scatter_add", "privateuseone")
 def scatter_add(self, dim, index, src):
   if unwrap(self).shape == (): return src
@@ -383,7 +374,7 @@ simple_tensor_methods = [
   # modify
   "tril", "triu",
   # reduce
-  "all", "any", "argmax", "argmin",
+  "all", "any", "argmax", "argmin", "cumsum",
   # complex
   "avg_pool2d", "linspace"]
 
