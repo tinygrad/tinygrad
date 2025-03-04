@@ -98,7 +98,7 @@ def f_ops_load(ctx, x, idx, idx1):
 base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: barrier),
   # memory load/store
-  (UPat(Ops.INDEX, name="x"), lambda ctx,x: f_ops_index(ctx, x)),
+  (UPat(Ops.INDEX, name="x"), f_ops_index),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
@@ -117,7 +117,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
                                                             f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f_ops_cast(ctx, x)),
+  (UPat(Ops.CAST, name="x"), f_ops_cast),
 
   # unary/binary/ternary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x:
