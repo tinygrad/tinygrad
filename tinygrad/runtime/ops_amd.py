@@ -43,8 +43,8 @@ class AMDComputeQueue(HWQueue):
 
   def pkt3(self, cmd, *vals): self.q(amd_gpu.PACKET3(cmd, len(vals) - 1), *vals)
 
-  def sqtt_userdata(self, data):
-    data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))]
+  def sqtt_userdata(self, data, *extra_dwords):
+    data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
     for i in range(0, len(data_ints), 2):
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_USERDATA_2), *data_ints[i:i+2])
 
@@ -144,23 +144,6 @@ class AMDComputeQueue(HWQueue):
 
     self.acquire_mem(gli=0, gl2=0)
 
-    if prg.dev.sqtt_enabled:
-      self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
-        _0=sqtt.union_rgp_sqtt_marker_pipeline_bind_0(_0=sqtt.struct_rgp_sqtt_marker_pipeline_bind_0_0(
-          identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE,
-          bind_point=1, # compute
-        )),
-        _1=sqtt.union_rgp_sqtt_marker_pipeline_bind_1(api_pso_hash=data64_le(prg.libhash[0])),
-      ))
-      self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event_with_dims(
-        event=sqtt.struct_rgp_sqtt_marker_event(
-          _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
-          _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=prg.dev.cmd_id),
-        ),
-        thread_x=global_size[0], thread_y=global_size[1], thread_z=global_size[2],
-      ))
-      prg.dev.cmd_id += 1
-
     if prg.enable_private_segment_sgpr:
       scratch_hilo = data64_le(prg.dev.scratch.va_addr)
       # sgpr word1 bit31 enables swizzle
@@ -176,6 +159,20 @@ class AMDComputeQueue(HWQueue):
       user_regs += [*data64_le(dp_addr)]
 
     user_regs += [*data64_le(args_state.ptr)]
+
+    if prg.dev.sqtt_enabled:
+      self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
+        _0=sqtt.union_rgp_sqtt_marker_pipeline_bind_0(_0=sqtt.struct_rgp_sqtt_marker_pipeline_bind_0_0(
+          identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE,
+          bind_point=1, # compute
+        )),
+        _1=sqtt.union_rgp_sqtt_marker_pipeline_bind_1(api_pso_hash=data64_le(prg.libhash[0])),
+      ))
+      self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(
+        _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
+        _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=prg.dev.cmd_id),
+      ), *global_size)
+      prg.dev.cmd_id += 1
 
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2)
