@@ -177,9 +177,8 @@ def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
-    print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  if not transposed:
-    return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+    print(f"convolution {input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+  if not transposed: return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
   return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
@@ -189,18 +188,12 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0])
-  if not transposed:
-    out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  if not transposed: out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   else:
+    bias = Tensor.zeros(weight.shape[1] * groups)
     out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
-
-@torch.library.impl("aten::convolution_backward", "privateuseone")
-def convolution_backward(grad_out, input, weight, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, output_mask):
-  # TODO: write a custom backward for this
-  out = aten.convolution_backward(grad_out.cpu(), input.cpu(), weight.cpu(), bias_sizes, stride, padding, dilation, transposed, output_padding, groups, output_mask=output_mask)
-  return [o.tiny() if o is not None else None for o in out]
 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
