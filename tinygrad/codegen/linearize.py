@@ -1,10 +1,32 @@
 from __future__ import annotations
+import os
 import functools
+from dataclasses import dataclass
 from tinygrad.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
 from tinygrad.helpers import dedup
 
 DONT_PLACE_IN_BLOCK = {Ops.NAME, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
+def disp(y:UOp) -> str:
+  if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
+  if y.op is Ops.IF: return f'IF{id(y)}'
+  if y.op is Ops.RANGE: return str(y.arg)
+  return "<NONE>"
+
+@dataclass(frozen=True)
+class BasicBlock:
+  ctx: tuple[UOp, ...]
+  lst: tuple[UOp, ...]
+  end: UOp|None = None
+  def __lt__(self, o:BasicBlock): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
+  def __repr__(self):
+    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
+           f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+
+def block_from_list(ctx:tuple[UOp], x:UOp):
+  src = [elem for elem in ctx if elem.op in DONT_PLACE_IN_BLOCK]
+  blk_elems = [UOp(elem.op, elem.dtype, (), elem.arg) for elem in ctx if elem.op not in DONT_PLACE_IN_BLOCK]
+  return UOp(Ops.BLOCK, src=tuple(src), arg=BasicBlock((), tuple(blk_elems)))
 
 # root_uop -> sink
 def linearize_uop(root_uop: UOp, skip_check: bool = not __debug__) -> list[UOp]:
@@ -207,4 +229,9 @@ def linearize_uop(root_uop: UOp, skip_check: bool = not __debug__) -> list[UOp]:
     scope_blocks[scope_start] = scope
 
   scope: LinearizeScope = _make_scope(root_uop)
+
+  if (int)(os.getenv("VIZ", 0)):
+    make_block = PatternMatcher([(UPat(Ops.SINK, name="x"), block_from_list)])
+    graph_rewrite(root_uop, make_block, ctx=tuple(scope.linear))
+
   return scope.linear[:-1]
