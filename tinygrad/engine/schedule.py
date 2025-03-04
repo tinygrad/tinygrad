@@ -1,7 +1,7 @@
 import sys, atexit, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites
+from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
 from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv, pluralize
@@ -108,14 +108,6 @@ sym = symbolic_simple+PatternMatcher([
     and x.base.op is Ops.BUFFER and resolve(prod(v.shape) > prod(x.shape)) else None),
 ])
 
-remove_movement_ops = merge_views+PatternMatcher([
-  # NOTE: movement ops are always applied to base
-  (UPat(GroupOp.Movement, name="mov", src=(UPat.var("x"),)), lambda x,mov: x.view(unwrap(mov.st))),
-  # some masked views can collapse to 0, VIEW(x) -> CONST(VIEW)
-  (UPat(Ops.VIEW, name="view"),
-   lambda view: view.const_like(0) if (vm:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in vm) else None),
-])
-
 # **** UOp realization
 
 @dataclass(frozen=True)
@@ -139,8 +131,8 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
-  # always realize ASSIGN/CONTIGUOUS/COPY
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY}, name="tr"), realize),
+  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}, name="src"),)), realize_before_view),
   # realize before COPY
@@ -238,7 +230,7 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.BUFFER_VIEW}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
@@ -274,9 +266,9 @@ def load_buf(ctx:list[UOp], x:UOp):
 
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="x"), load_buf),
-  # STORE (except for COPY)
-  (UPat(Ops.SINK, src=(UPat(Ops.COPY, name="x"),)), lambda x:x),
+  (UPat(Ops.BUFFER, name="x"), load_buf),
+  # STORE (except for COPY/BUFFER_VIEW)
+  (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
 ])
@@ -380,18 +372,20 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...]
 
-def schedule_uop(kernel:UOp, buffer_map:dict[UOp, UOp], var_vals:dict[Variable, int]) -> ScheduleItem:
-  assert kernel.op is Ops.KERNEL, f"kernel isn't kernel, it's {kernel.op}"
+def schedule_uop(sink:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
+  assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
   # substitute kernel sources for the target buffer
-  ast = kernel.arg.ast.substitute({k:v for k,v in buffer_map.items() if k is not kernel.arg.ast}).sink()
+  ast = sink.src[1].arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in sink.src[1].src if s.op is Ops.ASSIGN}).sink()
   # add buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[kernel.src[0].buf_uop], bottom_up=True)
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
   ast = graph_rewrite(ast, fix_kernel_ops, var_vals)
-  return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), kernel.arg.metadata)
+  # create subbuffer
+  if ast.op is Ops.BUFFER_VIEW: buffers[bufs[0]] = (base:=bufs[1].buffer).view(ast.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+  return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].arg.metadata)
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -403,8 +397,8 @@ if CAPTURE_PROCESS_REPLAY:
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # remove_movement_ops + sym
-  tensor_map = graph_rewrite_map(big_sink, remove_movement_ops+sym, ctx={})
+  # merge_views + sym
+  tensor_map = graph_rewrite_map(big_sink, merge_views+sym, ctx={})
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
@@ -425,21 +419,18 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
-    elif a is not None and a.op is Ops.BUFFER_VIEW and a.src[0].op is Ops.ASSIGN: becomes_map[k] = a.replace(src=(a.src[0].buf_uop,))
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
-      if v.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: becomes_map[k] = v
+      if v.base.op is Ops.BUFFER: becomes_map[k] = v
       if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
-  buffer_map: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
   for u in sched_sink.toposort:
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
-    buffer_map[u.src[1].arg.ast] = u.src[0]
     for s in u.src[1].src:
       if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort):
@@ -456,8 +447,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   children: dict[UOp, list[UOp]] = {}
   in_degree: dict[UOp, int] = {}
   for u in sched_sink.toposort:
+    if u.op is not Ops.ASSIGN: continue
     in_degree[u] = 0
-    for s in u.src:
+    for s in u.src[1].src:
+      if s.op is not Ops.ASSIGN: continue
       children.setdefault(s, []).append(u)
       in_degree[u] += 1
 
@@ -466,16 +459,15 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    if u.op is Ops.ASSIGN:
-      schedule.append(schedule_uop(u.src[1], buffer_map, var_vals))
-      # increment the refcount of the target buf (this is required by the JIT and memory planner)
-      u.buf_uop.buffer.ref(1)
+    schedule.append(schedule_uop(u, var_vals))
+    # increment the refcount of the target buf (this is required by the JIT and memory planner)
+    u.buf_uop.buffer.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
 
   # confirm everything was scheduled correctly
-  if len(schedule) != (kc:=len(buffer_map)): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
+  if len(schedule) != (kc:=len(in_degree)): raise RuntimeError(f"cycle detected in graph, created {kc} kernels but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   # capture process replay
   if CAPTURE_PROCESS_REPLAY:
