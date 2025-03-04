@@ -2049,6 +2049,113 @@ class Tensor(SimpleMathTrait):
     return functools.reduce(lambda a,b:a*b, xs_) \
       .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output], acc_dtype=acc_dtype).permute(rhs_order)
 
+
+  
+     
+
+  def topk(self, k:int, axis:int=-1, largest:bool=True, sorted:bool=True) -> tuple[Tensor, Tensor]:
+
+    """
+      topk: Returns the k largest or k smallest elements of the tensor along a given axis.
+
+      args: 
+       - k: int: number of top elements to select
+       - axis: int: the axis to sort along
+       - largest: bool: if True, select the k largest elements, else select the k smallest elements
+       - sorted: bool: if True, the returned elements will be sorted in descending order, else they will be in random order
+    """
+
+    if axis < 0: axis += self.ndim
+    assert 0 <= axis < self.ndim
+    assert 0 < k <= self.shape[axis]
+
+    tensor_permuted = self.transpose(axis, 0)
+    original_shape = tensor_permuted.shape  # save shape for later
+
+    flat_tensor = tensor_permuted.reshape(original_shape[0], -1)
+
+    def _topk_1d(tensor: Tensor, k: int, compare: Callable, sorted: bool = True) -> tuple[Tensor, Tensor]:
+      assert len(tensor.shape) == 1, "1-dimensional tensor required 🐉"
+
+      def heap_push(heap, item):
+          heap.append(item)
+          idx = len(heap) - 1
+          while idx > 0:
+              parent = (idx - 1) // 2
+              if compare(heap[idx][0], heap[parent][0]):
+                  heap[idx], heap[parent] = heap[parent], heap[idx]
+                  idx = parent
+              else:
+                  break
+
+      def heap_replace(heap, item):
+          heap[0] = item
+          idx, size = 0, len(heap)
+          while True:
+              left = 2 * idx + 1
+              right = 2 * idx + 2
+              target = idx
+
+              # Check left child
+              if left < size and compare(heap[left][0], heap[target][0]):
+                  target = left
+              # Check right child
+              if right < size and compare(heap[right][0], heap[target][0]):
+                  target = right
+
+              if target != idx:
+                  heap[idx], heap[target] = heap[target], heap[idx]
+                  idx = target
+              else:
+                  break
+
+      def heapify(items):
+          heap = []
+          for item in items:
+              heap_push(heap, item)
+          return heap
+      
+      n = tensor.shape[0]
+      if k <= 0:
+          return Tensor([]), Tensor([])
+
+      initial_k = min(k, n)
+      heap = heapify([(tensor[i].item(), i) for i in range(initial_k)])
+
+      for i in range(initial_k, n):
+          current_val = tensor[i].item()
+          if compare(heap[0][0], current_val):
+              heap_replace(heap, (current_val, i))
+
+      if sorted:
+          heap.sort(reverse=largest, key=lambda x: x[0])
+
+      values, idxs = zip(*heap) if heap else ([], [])
+      return Tensor(values), Tensor(idxs)
+
+    # Comparison operator based on largest param
+    compare = (lambda child, parent: child < parent) if largest else (lambda child, parent: child > parent)
+
+    #Apply topk_1d individually on each column
+    values_list = []
+    indices_list = []
+    for i in range(flat_tensor.shape[1]):
+        values, indices = _topk_1d(flat_tensor[:, i], k, compare,sorted)
+        values_list.append(values.unsqueeze(1))   # unsqueeze for concatenation
+        indices_list.append(indices.unsqueeze(1))
+
+    # Concatenate results back into tensor shape
+    values_tensor = Tensor.stack(*values_list, dim=1)
+    indices_tensor = Tensor.stack(*indices_list, dim=1)
+    
+    # reshape back & invert the first transpose
+    new_shape = (k,) + original_shape[1:]
+    values_final = values_tensor.reshape(new_shape).transpose(0, axis)
+    indices_final = indices_tensor.reshape(new_shape).transpose(0, axis)
+
+    return values_final, indices_final
+
+
   # ***** processing ops *****
 
   def _pool(self, k_:tuple[sint, ...], stride:int|tuple[int, ...]=1, dilation:int|tuple[int, ...]=1) -> Tensor:

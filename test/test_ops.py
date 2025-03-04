@@ -1135,6 +1135,27 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Tensor.einsum('ij,jk->ij', a)
 
+  def test_topk(self):
+    # test with k=2, dim=1, largest=True (default)
+    helper_test_op([(5,5)], lambda x: torch.topk(x, k=2, dim=1)[0], lambda x: x.topk(k=2, axis=1)[0], forward_only=True)
+    helper_test_op([(5,5)], lambda x: torch.topk(x, k=2, dim=1)[1].type(torch.int32), lambda x: x.topk(k=2, axis=1)[1], forward_only=True)
+    
+    # test with k=2, dim=1, largest=False
+    helper_test_op([(5,5)], lambda x: torch.topk(x, k=2, dim=1, largest=False)[0], lambda x: x.topk(k=2, axis=1, largest=False)[0], forward_only=True)
+    helper_test_op([(5,5)], lambda x: torch.topk(x, k=2, dim=1, largest=False)[1].type(torch.int32), lambda x: x.topk(k=2, axis=1, largest=False)[1], forward_only=True)
+    
+    # test with specific values
+    vals = Tensor([[1, 3, 2], [5, 4, 0]])
+    ret_vals, ret_idxs = vals.topk(k=2, axis=1)
+    assert ret_vals.numpy().tolist() == [[3, 2], [5, 4]]
+    assert ret_idxs.numpy().tolist() == [[1, 2], [0, 1]]
+
+    # test woith large tensors
+    helper_test_op([(10,20)], lambda x: torch.topk(x, k=5, dim=1)[0], lambda x: x.topk(k=5, axis=1)[0], forward_only=True)
+    helper_test_op([(20,10)], lambda x: torch.topk(x, k=3, dim=1)[1].type(torch.int32), lambda x: x.topk(k=3, axis=1)[1], forward_only=True)
+
+
+
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):
     helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot)
