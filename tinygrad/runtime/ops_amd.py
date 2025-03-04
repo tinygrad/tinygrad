@@ -692,7 +692,7 @@ class AMDDevice(HCQCompiled):
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
     if self.sqtt_enabled:
       assert self.arch == 'gfx1100', 'SQTT tracing is only supported on 7900XTX'
-      SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 128) # in mb, per shader engine
+      SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       SQTT_NUM = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(SQTT_NUM)]
       self.cmd_id = 0
