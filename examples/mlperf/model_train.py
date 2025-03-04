@@ -771,48 +771,50 @@ def train_bert():
     if MLLOGGER:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*BS, metadata={"epoch_num": i*BS})
 
+  # TODO: put copy into jit
   while train_data is not None and i < train_steps and not achieved:
-    Tensor.training = True
-    BEAM.value = TRAIN_BEAM
-    st = time.perf_counter()
-    GlobalCounters.reset()
-    loss, global_norm = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
-      train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-      train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
+    if getenv("TRAIN", 1):
+      Tensor.training = True
+      BEAM.value = TRAIN_BEAM
+      st = time.perf_counter()
+      GlobalCounters.reset()
+      loss, global_norm = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
+        train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
+        train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
 
-    pt = time.perf_counter()
+      pt = time.perf_counter()
 
-    try:
-      next_data = next(train_it)
-    except StopIteration:
-      next_data = None
+      try:
+        next_data = next(train_it)
+      except StopIteration:
+        next_data = None
 
-    dt = time.perf_counter()
+      dt = time.perf_counter()
 
-    device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-    loss = loss.item()
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      loss = loss.item()
 
-    cl = time.perf_counter()
-    if BENCHMARK: step_times.append(cl - st)
+      cl = time.perf_counter()
+      if BENCHMARK: step_times.append(cl - st)
 
-    tqdm.write(
-      f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
-      f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer_wd.lr.numpy()[0]:.6f} LR, "
-      f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
-    if WANDB:
-      wandb.log({"lr": optimizer_wd.lr.numpy(), "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
-                  "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*BS})
+      tqdm.write(
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
+        f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {optimizer_wd.lr.numpy()[0]:.6f} LR, "
+        f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      if WANDB:
+        wandb.log({"lr": optimizer_wd.lr.numpy(), "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
+                    "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
+                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*BS})
 
-    train_data, next_data = next_data, None
-    i += 1
+      train_data, next_data = next_data, None
+      i += 1
 
-    if i == BENCHMARK:
-      median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
-      estimated_total_minutes = int(median_step_time * train_steps / 60)
-      print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
-      print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
-            f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
+      if i == BENCHMARK:
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        estimated_total_minutes = int(median_step_time * train_steps / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
 
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
