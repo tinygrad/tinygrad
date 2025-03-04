@@ -2384,6 +2384,21 @@ class Tensor(SimpleMathTrait):
     """
     return self._split_cumalu(axis, Ops.MAX)
 
+  def topk(self, k, dim=-1, largest=True, sorted=True):
+    # TODO: terrible impl
+    if not sorted: raise NotImplementedError
+    x = self
+    dim = x._resolve_dim(dim)
+    values, indices  = [], []
+    for _ in range(k):
+      idx = x.argmax(dim, keepdim=True) if largest else x.argmin(dim, keepdim=True)
+      val = x.gather(dim, idx)
+      values.append(val)
+      indices.append(idx)
+      mask = Tensor.zeros_like(x, dtype=dtypes.bool).scatter(dim, idx, True)
+      x = mask.where(-9999 if largest else 9999, x)
+    return Tensor.cat(*values, dim=dim), Tensor.cat(*indices, dim=dim)
+
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
     assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"

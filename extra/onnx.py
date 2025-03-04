@@ -82,7 +82,7 @@ class OnnxNode:
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
   "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
-  "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+  "CumSum": (1,), "TopK": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
   "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
@@ -457,6 +457,10 @@ def get_onnx_ops():
     if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
     return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
+
+  def TopK(X:Tensor, K:list[int], axis:int=-1, largest:int=1, sorted:int=1):
+    val, idx = X.topk(K[0], axis, largest, sorted)
+    return val, idx.cast(dtypes.int64)
 
   def Trilu(x:Tensor, k:int=0, upper:int=1): return x.triu(k) if upper else x.tril(k)
 

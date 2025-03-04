@@ -1047,6 +1047,37 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
+  def test_topk(self):
+    with self.subTest(name="default"):
+      helper_test_op([(10,20)],
+                      lambda x: x.topk(5).values,
+                      lambda x: x.topk(5)[0], forward_only=True)
+      helper_test_op([(10,20)],
+                      lambda x: x.topk(5).indices.type(torch.int32),
+                      lambda x: x.topk(5)[1], forward_only=True)
+
+    for dim in [0, 1, -1]:
+      for largest in [True, False]:
+        for sorted in [True]: # TODO support False
+          with self.subTest(largest=largest, sorted=sorted, dim=dim):
+            helper_test_op([(10,20,30)],
+                            lambda x: x.topk(5, dim=dim, largest=largest, sorted=sorted).values,
+                            lambda x: x.topk(5, dim=dim, largest=largest, sorted=sorted)[0], forward_only=True)
+            helper_test_op([(10,20,30)],
+                            lambda x: x.topk(5, dim=dim, largest=largest, sorted=sorted).indices.type(torch.int32),
+                            lambda x: x.topk(5, dim=dim, largest=largest, sorted=sorted)[1], forward_only=True)
+
+    with self.subTest(name="duplicate values"):
+      helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
+                    vals=[[5, 5, 3, 2]])
+      helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
+                    vals=[[5, 5, 3, 2]])
+      # TODO yeah....
+      # helper_test_op(None, lambda x: x.topk(3, largest=False).values, lambda x: x.topk(3, largest=False)[0], forward_only=True,
+      #               vals=[[5, 5, 3, 2]])
+      # helper_test_op(None, lambda x: x.topk(3, largest=False).indices.type(torch.int32), lambda x: x.topk(3, largest=False)[1], forward_only=True,
+      #               vals=[[5, 5, 3, 2]])
+
   def test_einsum(self):
     # matrix transpose
     helper_test_op([(150,150)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
@@ -2633,6 +2664,13 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[1., 2., 3.]])
+
+  @unittest.expectedFailure
+  def test_gather_failure(self):
+    # gather with inf values do not work, other values results in nan
+    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
+                         lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
+                         vals=[[-float("inf"), 2., 3.]])
 
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
