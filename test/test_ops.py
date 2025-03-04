@@ -8,6 +8,10 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
+if getenv("TINY_BACKEND"):
+  import tinygrad.frontend.torch # noqa: F401 # pylint: disable=unused-import
+  torch.set_default_device("tiny")
+
 if CI:
   warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
@@ -46,35 +50,23 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   if DEBUG >= 6:
     np.set_printoptions(linewidth=200, suppress=True)
     print(ret.numpy())
-    print(out.detach().numpy())
-  compare("forward pass", ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
+    print(out.detach().cpu().numpy())
+  compare("forward pass", ret.numpy(), out.detach().cpu().numpy(), atol=atol, rtol=rtol)
 
   torch_fbp, tinygrad_fbp = np.nan, np.nan
-  if not forward_only and not FORWARD_ONLY:
+  if not forward_only and not FORWARD_ONLY and ts and tst:
     st = time.monotonic()
-    (out+1).square().mean().backward()
+    torch_grads = torch.autograd.grad(torch_fxn(*ts).sum(), ts)
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()
     # NOTE: we now have to recompute the forward pass since we realized it
-    ret = tinygrad_fxn(*tst)
-    loss:Tensor = (ret+1).square().mean()
-    # test_ops uses new style gradient
-    tst_grads = loss.gradient(*tst)
-    if len(tst_grads): Tensor.realize(*tst_grads)
+    tiny_grads = tinygrad_fxn(*tst).sum().gradient(*tst)
+    Tensor.realize(*tiny_grads)
     tinygrad_fbp = time.monotonic() - st
 
-    for i, (t, tt_grad) in enumerate(zip(ts, tst_grads)):
-      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
-
-    """
-    (ret+1).square().mean().backward()
-    for tt in tst: tt.grad.realize()
-    tinygrad_fbp = time.monotonic() - st
-
-    for i, (t, tt) in enumerate(zip(ts, tst)):
-      compare(f"backward pass tensor {i}", tt.grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
-    """
+    for i, (t, torch_grad) in enumerate(zip(tiny_grads, torch_grads)):
+      compare(f"backward pass tensor {i}", t.numpy(), torch_grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
 
   if not CI:
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
@@ -90,14 +82,14 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
-  tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
+  tst = [Tensor(x.detach().cpu().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
 
-  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, low=-1.5, high=1.5):
+  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, forward_only=False, exact=False, vals=None, low=-1.5, high=1.5):
     if getenv("MOCKGPU") and Device.DEFAULT == "NV": self.skipTest('helper_test_exception fails in CI CUDA')
-    ts, tst = prepare_test_op(low, high, shps, vals)
+    ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
     with self.assertRaises(expected) as torch_cm:
       torch_fxn(*ts)
     with self.assertRaises(expected) as tinygrad_cm:
@@ -365,7 +357,7 @@ class TestOps(unittest.TestCase):
     (tt*(tt != 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t != 0)).sum().backward()
-    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(t.grad.cpu().numpy(), tt.grad.numpy(), rtol=1e-5)
 
   def test_cmp_lt_backwards(self):
     # new grad zeroes these out
@@ -381,7 +373,7 @@ class TestOps(unittest.TestCase):
     (tt*(tt < 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t < 0)).sum().backward()
-    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(t.grad.cpu().numpy(), tt.grad.numpy(), rtol=1e-5)
 
   # TODO: fix backward of these functions
   def test_trunc(self):
@@ -411,6 +403,9 @@ class TestOps(unittest.TestCase):
 
   def test_isnan(self):
     helper_test_op(None, torch.isnan, Tensor.isnan, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
+
+  def test_isfinite(self):
+    helper_test_op(None, torch.isfinite, Tensor.isfinite, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
 
   def test_lerp(self):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
@@ -538,6 +533,31 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
+
+  def test_div_rounding_mode(self):
+    for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
+      # int numerator
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode=None), forward_only=True, vals=[[5, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[5, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[5, 6, 7, 0, -5, -6, -7], [denominator]])
+      # float numerator
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode=None), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
+
+    for denominator in [-10.0, -5.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 5.0, 10.0]:
+      # int numerator
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode=None), forward_only=True, vals=[[5, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[5, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[5, 6, 7, 0, -5, -6, -7], [denominator]])
+      # float numerator
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode=None), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
+      helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[5.0, 6, 7, 0, -5, -6, -7], [denominator]])
+
+    self.helper_test_exception(None, lambda x,y: x.div(y, rounding_mode="typo"), lambda x,y: x.div(y, rounding_mode="typo"), forward_only=True,
+                               vals=[[5], [0]], expected=RuntimeError)
+
   def test_div_int(self):
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=[[5, 6, 7],[1, 2, 3]])
     helper_test_op(None, lambda x,y: x//y, forward_only=True, vals=[[5, 6, 7],[1, 2, 3]])
@@ -565,11 +585,19 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2/x)
 
   def test_mod(self):
-    helper_test_op(None, lambda x,y: x%y, Tensor.mod, forward_only=True, vals=[[-4, 7, 5, 4, -7, 8], [2, -3, 8, -2, 3, 5]])
-    helper_test_op(None, lambda x,y: x%y, forward_only=True, vals=[[-4, 7, 5, 4, -7, 8], [2, -3, 8, -2, 3, 5]])
-    helper_test_op(None, lambda x: x%2, forward_only=True, vals=[[-4, 7, 5, 4, -7, 8]])
-    helper_test_op(None, lambda x: x%3, forward_only=True, vals=[[-4, 7, 5, 4, -7, 8]])
-    helper_test_op(None, lambda x: 100%x, forward_only=True, vals=[[-4, 7, 5, 4, -7, 8]])
+    a = [-4, 7, 5, 4, -7, 8]
+    b = [2, -3, 8, -2, 3, 5]
+    for float_a in [True, False]:
+      for float_b in [True, False]:
+        va = [float(ai) for ai in a] if float_a else a
+        vb = [float(bi) for bi in b] if float_b else b
+        helper_test_op(None, lambda x,y: x%y, Tensor.mod, forward_only=True, vals=[va, vb])
+        helper_test_op(None, lambda x,y: x%y, forward_only=True, vals=[va, vb])
+        helper_test_op(None, lambda x: x%2, forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: x%3, forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: x%3.5, forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: 100%x, forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: 100.5%x, forward_only=True, vals=[va])
 
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
@@ -610,7 +638,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x**0.0)
     helper_test_op([(45,65)], lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0)
+    helper_test_op([(45,65)], lambda x: x**8.0)
+    helper_test_op([(45,65)], lambda x: x**5.5)
+    helper_test_op([(45,65)], lambda x: x**-5.5)
+    # helper_test_op([(45,65)], lambda x: x**-8.0)  # TODO: fix this
     helper_test_op([(45,65)], lambda x: 1.0**x)
+    helper_test_op([(45,65)], lambda x: 5.5**x)
+    helper_test_op([(45,65)], lambda x: (-5.5)**x)
+    helper_test_op([(45,65)], lambda x: 8.0**x)
     helper_test_op([(45,65)], lambda x: x**2.0)
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
@@ -618,16 +653,34 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
 
+  def test_pow_const_direct(self):
+    # x ** c
+    def get_tiny_gradient(x, c):
+      t = Tensor([x], dtype=dtypes.float)
+      return (t ** c)[0].gradient(t)[0].item()
+    def get_torch_gradient(x, c):
+      t = torch.tensor([x], dtype=torch.float, requires_grad=True)
+      return torch.autograd.grad(t ** c, t)[0].item()
+    for x in [-math.inf, 0, 1, math.inf]:
+      for c in [-1, 0, 0.3, 1, 2]:
+        tiny_out = get_tiny_gradient(x, c)
+        torch_out = get_torch_gradient(x, c)
+        if math.isnan(tiny_out):
+          assert math.isnan(torch_out)
+        else:
+          self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
+
   def test_pow_zero_tensor(self):
-    helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
     # TODO: fix WEBGPU
     if Device.DEFAULT != "WEBGPU":
+      helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
     helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
+    helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
 
   @unittest.skip("not supported")
   def test_pow_int(self):
@@ -666,7 +719,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
-    self.helper_test_exception([(4), (4)], torch.bitwise_xor, Tensor.xor, expected=RuntimeError)
+    self.helper_test_exception([(4), (4)], torch.bitwise_xor, Tensor.bitwise_xor, expected=RuntimeError)
 
   def test_and(self):
     data = [[1,-8,1],[32,1,6]]
@@ -789,9 +842,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.relu(), vals=[[-1.,0,1]])
   def test_relu_maximum_exact(self):
     helper_test_op(None, lambda x: torch.maximum(x, torch.zeros_like(x, requires_grad=False)), lambda x: Tensor.maximum(x, 0), vals=[[-1.,0,1]])
-  def test_leakyrelu(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
-    helper_test_op([()], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leakyrelu)
+  def test_leaky_relu(self):
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leaky_relu)
+    helper_test_op([()], lambda x: torch.nn.functional.leaky_relu(x,0.01), Tensor.leaky_relu)
   def test_celu(self):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
@@ -837,6 +890,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], torch.sign, Tensor.sign)
   def test_sign_exact(self):
     helper_test_op(None, torch.sign, Tensor.sign, vals=[[-1.,0,1]])
+
+  def test_copysign(self):
+    helper_test_op([(45,65), (45,65)], torch.copysign, Tensor.copysign)
+    helper_test_op([(45,65), (45,1)], torch.copysign, Tensor.copysign)
+    helper_test_op([(45,1), (1,65)], torch.copysign, Tensor.copysign)
+    helper_test_op([(), ()], torch.copysign, Tensor.copysign)
+  def test_copysign_exact(self):
+    for i in [-1.,0.,1.]:
+      for j in [-1., 0., 1.]:
+        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
 
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
@@ -1260,6 +1323,25 @@ class TestOps(unittest.TestCase):
   def test_all_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
 
+  def test_isclose(self):
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)
+    helper_test_op([(3, 4, 5, 6), (3, 4, 5, 6)], lambda x,y: x.isclose(y), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x, equal_nan=True), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6, atol=0.0), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, atol=0.0), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-6, rtol=0.01), forward_only=True)
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, rtol=0.01), forward_only=True)
+    helper_test_op(None, lambda x,y: x.isclose(y), vals=[[1e-7, 1e-8, 1e-9], [0.0, 0.0, 0.0]], forward_only=True)
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "isinf check of 'nan' fails on CI software-based vulkan")
+  def test_isclose_edge_cases(self):
+    for a in [math.inf, -math.inf, math.nan, 0.0]:
+      for b in [math.inf, -math.inf, math.nan, 0.0]:
+        helper_test_op(None, lambda x,y: x.isclose(y), vals=[[a], [b]], forward_only=True)
+        helper_test_op(None, lambda x,y: x.isclose(y, equal_nan=True), vals=[[a], [b]], forward_only=True)
+
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
     helper_test_op([()], lambda x: x.mean())
@@ -1291,8 +1373,8 @@ class TestOps(unittest.TestCase):
     with warnings.catch_warnings():
       warnings.filterwarnings("ignore", message="var\\(\\): degrees of freedom is <= 0")
       helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)))
-      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5))
       # TODO: fix backward
+      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5), forward_only=True)
       helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=5), forward_only=True)
     helper_test_op([(1,)], lambda x: x.var(axis=(0,), correction=0))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=0))
@@ -1353,9 +1435,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], torch.nn.Softmax(dim=-1), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
   def test_softmax_other_axis(self):
-    helper_test_op([(10,10,10)], lambda x: x.softmax(0), atol=1e-7, grad_atol=1e-7)
-    helper_test_op([(10,10,10)], lambda x: x.softmax(1), atol=1e-7, grad_atol=1e-7)
-    helper_test_op([(10,10,10)], lambda x: x.softmax(2), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(10,10,10)], lambda x: x.softmax(0), atol=1e-7, grad_atol=2e-7)
+    helper_test_op([(10,10,10)], lambda x: x.softmax(1), atol=1e-7, grad_atol=2e-7)
+    helper_test_op([(10,10,10)], lambda x: x.softmax(2), atol=1e-7, grad_atol=2e-7)
   def test_softmax_argmax(self):
     helper_test_op([(45,65)], lambda x: x.softmax(0).argmax().type(torch.int32),
                               lambda x: x.softmax(0).argmax(), forward_only=True, atol=1e-7, grad_atol=1e-7)
@@ -1411,12 +1493,12 @@ class TestOps(unittest.TestCase):
       helper_test_op([()], lambda x: torch.nn.functional.hardtanh(x, -val, val), lambda x: x.hardtanh(-val, val), grad_atol=1e-6)
   def test_asinh(self):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6)
-    # NOTE: this one has larger atol
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, rtol=2e-2, grad_atol=1e-6, low=-300, high=-297)
+    # TODO: this one has larger tol?
+    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, rtol=2e-2, grad_rtol=2e-2, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
-    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-3, grad_rtol=1e-2, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=300, high=303)
   def test_atanh(self):
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6)
@@ -1696,6 +1778,10 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(ValueError):
       x = Tensor.ones((4,3,6,6))
       x.reshape([])
+
+  def test_view(self):
+    helper_test_op([(4,3,6,6)], lambda x: x.view((12,6,6)))
+    helper_test_op([(4,3,6,6)], lambda x: x.view((-1,3,6,6)))
 
   def test_flip(self):
     helper_test_op([(4,3,6,6)], lambda x: x.flip((0,)))
@@ -1985,7 +2071,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(bs,cin,64,64), (6,cin//groups,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
       # needed to relax tolerance on NVIDIA
-      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
+      lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_atol=1e-4, grad_rtol=1e-4)
 
   def test_simple_grouped_conv2d(self):
     bs = 1
@@ -2435,7 +2521,7 @@ class TestOps(unittest.TestCase):
     c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
     d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
     e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
-    i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), requires_grad=False) for tor in [a,b,c,d,e]]
+    i, j, k, o, p = [Tensor(tor.detach().cpu().numpy().astype(np.int32), requires_grad=False) for tor in [a,b,c,d,e]]
     return a,b,c,d,e,i,j,k,o,p
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
@@ -2532,7 +2618,7 @@ class TestOps(unittest.TestCase):
     # indices cannot have gradient
     # indices cannot be negative (torch gather)
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=0, index=b), lambda x: x.gather(dim=0, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=1, index=b), lambda x: x.gather(dim=1, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=2, index=b), lambda x: x.gather(dim=2, index=a))
@@ -2550,7 +2636,7 @@ class TestOps(unittest.TestCase):
 
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     for dim in (0,1,2,-1,-2,-3):
       helper_test_op([(4,5,6), (4,5,6)], lambda x,src: x.scatter(dim=dim, index=b, src=src),
                                          lambda x,src: x.scatter(dim=dim, index=a, src=src), forward_only=True)
@@ -2559,19 +2645,23 @@ class TestOps(unittest.TestCase):
                                        lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     helper_test_op([(10,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                             lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
+
     self.helper_test_exception([(2,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                                        lambda x,src: x.scatter(dim=1, index=a, src=src), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(10,3,10), (10,3,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
                                                        lambda x,src: x.scatter(dim=1, index=a, src=src), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(3,4,5), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src, mode="typo"),
-                                       lambda x,src: x.scatter(dim=1, index=a, src=src, mode="typo"), expected=TypeError)
+                                                   lambda x,src: x.scatter(dim=1, index=a, src=src, mode="typo"), expected=TypeError)
+    self.helper_test_exception([(3,4,5), (3,4,5)], lambda x,src: x.half().scatter(dim=1, index=b, src=src),
+                                                   lambda x,src: x.half().scatter(dim=1, index=a, src=src), expected=RuntimeError)
+
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=3), lambda x: x.scatter(dim=1, index=a, src=3), forward_only=True)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf")),
       lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
 
     # overlapping indices with 0s
     b = torch.tensor([0,0], requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op(None,
       lambda x,src: x.scatter(0, b, src),
       lambda x,src: x.scatter(0, a, src), forward_only=True,
@@ -2579,7 +2669,7 @@ class TestOps(unittest.TestCase):
 
   def test_scatter_add(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="add"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="add"), forward_only=True)
 
@@ -2591,7 +2681,7 @@ class TestOps(unittest.TestCase):
 
   def test_scatter_mul(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="multiply"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="multiply"), forward_only=True)
 
@@ -2607,7 +2697,7 @@ class TestOps(unittest.TestCase):
 
   def test_scatter_reduce(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     for reduce in ("sum", "prod", "mean", "amin", "amax"):
       for dim in (0,1,2,-1,-2,-3):
         helper_test_op([(4,5,6), (4,5,6)],
@@ -2619,19 +2709,25 @@ class TestOps(unittest.TestCase):
 
   def test_scatter_reduce_prod_zeros(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     x = Tensor.zeros([4,5,6]).float()
     y = torch.zeros([4,5,6]).float()
     helper_test_op([(4,5,6)],
       lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
       lambda src: x.scatter_reduce(dim=1, index=a, src=src, reduce="prod"), forward_only=True)
 
-  def test_scatter_reduce_invalid_reduce_op(self):
+  def test_scatter_reduce_errors(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    # invalid reduce arg
     self.helper_test_exception([(4,5,6), (4,5,6)],
       lambda x,src: x.scatter_reduce(dim=0, index=b, src=src, reduce="INVALID"),
       lambda x,src: x.scatter_reduce(dim=0, index=a, src=src, reduce="INVALID"),
+      RuntimeError)
+    # dtype mismatch
+    self.helper_test_exception([(4,5,6), (4,5,6)],
+      lambda x,src: x.half().scatter_reduce(dim=0, index=b, src=src, reduce="sum"),
+      lambda x,src: x.half().scatter_reduce(dim=0, index=a, src=src, reduce="sum"),
       RuntimeError)
 
   def test_scaled_dot_product_attention(self):

@@ -34,7 +34,7 @@ class TestTensorMutates(unittest.TestCase):
     is_pattern_uop(c.lazydata.base, realized_pattern)
     # NOTE: we keep movement ops on top of the buffer view
     is_pattern_uop(c.lazydata, UPat(Ops.BUFFER))
-    is_pattern_uop(d.lazydata, UPat(Ops.RESHAPE, src=(realized_pattern,)))
+    is_pattern_uop(d.lazydata, UPat(Ops.VIEW, src=(realized_pattern,)))
 
   def test_reshape_is_same_child(self):
     a = Tensor([1,2,3])
@@ -121,7 +121,7 @@ class TestTensorUopRepresentation(unittest.TestCase):
     vi = UOp.variable("i", 1, 3).bind(1)
     a = Tensor.empty(3, vi)
     is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)))
-    self.assertEqual(a.lazydata.base.realized.size, 9)
+    self.assertEqual(a.lazydata.base.buffer.size, 9)
 
 if __name__ == '__main__':
   unittest.main()

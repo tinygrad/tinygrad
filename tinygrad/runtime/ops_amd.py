@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Any, cast
-import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select, atexit
+from typing import Any, cast, ClassVar
+import os, ctypes, ctypes.util, functools, mmap, errno, array, contextlib, sys, select
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
@@ -28,10 +28,7 @@ def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
   def __init__(self, base_addr:int|None=None, **kwargs):
-    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
-
-  def __del__(self):
-    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
+    super().__init__(base_addr, **kwargs, timestamp_divider=100, dev_t=AMDDevice)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -104,7 +101,7 @@ class AMDComputeQueue(HWQueue):
     if prg.dev.has_scratch_base_registers:
       self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.dev.scratch.va_addr >> 8))
     if prg.dev.target < 110000: self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.mmCP_COHER_START_DELAY), 0x20)
-    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0), 0xFFFFFFFF, 0xFFFFFFFF)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2), 0xFFFFFFFF, 0xFFFFFFFF)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4), 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
@@ -563,9 +560,11 @@ class PCIIface:
   def device_fini(self): self.adev.fini()
 
 class AMDDevice(HCQCompiled):
+  devices: ClassVar[list[HCQCompiled]] = []
+  signal_pages: ClassVar[list[Any]] = []
+  signal_pool: ClassVar[list[int]] = []
+
   driverless:bool = not HWInterface.exists('/sys/module/amdgpu') or bool(getenv("AMD_DRIVERLESS", 0))
-  signals_page:Any = None
-  signals_pool:list[int] = []
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -573,11 +572,6 @@ class AMDDevice(HCQCompiled):
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
     if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
-
-    if AMDDevice.signals_page is None:
-      AMDDevice.signals_page = self.dev_iface.alloc(16 * 65536, host=True, uncached=True, cpu_access=True)
-      AMDDevice.signals_pool = [AMDDevice.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-    else: self.dev_iface.map(AMDDevice.signals_page)
 
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
     self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
@@ -602,8 +596,6 @@ class AMDDevice(HCQCompiled):
     # Scratch setup
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
-
-    atexit.register(self.device_fini)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
@@ -634,6 +626,6 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
 
-  def device_fini(self):
+  def finalize(self):
     self.synchronize()
     if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()

@@ -72,7 +72,7 @@ class AMDCompiler(Compiler):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
   def compile(self, src:str) -> bytes:
-    try: return compile_llvm(src, self.arch) if os.getenv("AMD_LLVM")=="1" else compile_hip(src, self.arch)
+    try: return compile_llvm(src, self.arch) if os.getenv("AMD_LLVM")=="1" else compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text')
     except RuntimeError as e: raise CompileError(e) from e
   def disassemble(self, lib:bytes):
     asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)

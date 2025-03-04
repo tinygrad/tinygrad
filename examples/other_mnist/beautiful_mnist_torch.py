@@ -1,5 +1,5 @@
-from tinygrad import dtypes
-from tinygrad.helpers import trange
+from tinygrad import dtypes, getenv
+from tinygrad.helpers import trange, colored
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
@@ -26,14 +26,18 @@ class Model(nn.Module):
     return self.lin(torch.flatten(x, 1))
 
 if __name__ == "__main__":
-  mps_device = torch.device("mps")
+  if getenv("TINY_BACKEND"):
+    import tinygrad.frontend.torch
+    device = torch.device("tiny")
+  else:
+    device = torch.device("mps")
   X_train, Y_train, X_test, Y_test = mnist()
-  X_train = torch.tensor(X_train.float().numpy(), device=mps_device)
-  Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=mps_device)
-  X_test = torch.tensor(X_test.float().numpy(), device=mps_device)
-  Y_test = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=mps_device)
+  X_train = torch.tensor(X_train.float().numpy(), device=device)
+  Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
+  X_test = torch.tensor(X_test.float().numpy(), device=device)
+  Y_test = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=device)
 
-  model = Model().to(mps_device)
+  model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
@@ -53,3 +57,8 @@ if __name__ == "__main__":
     loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
+
+  # verify eval acc
+  if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
+    if test_acc >= target and test_acc != 100.0: print(colored(f"{test_acc=} >= {target}", "green"))
+    else: raise ValueError(colored(f"{test_acc=} < {target}", "red"))

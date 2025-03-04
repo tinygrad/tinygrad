@@ -26,9 +26,8 @@ class TestConvShapetracker(unittest.TestCase):
     print(si)
     ldb = [x for x in si.ast.toposort if x.op is Ops.LOAD][0]
     st: ShapeTracker = ldb.st_arg.simplify()
-    # NOTE: st.real_size() is broken
-    print(si.inputs[0].size)
-    #self.assertEqual(si.inputs[0].size, st.real_size())
+    print(si.bufs[1].size)
+    self.assertEqual(si.bufs[1].size, st.real_size())
     for v in st.views: print(v)
 
     # same st
@@ -46,7 +45,7 @@ class TestConvShapetracker(unittest.TestCase):
     for v in test_st.views: print(v)
     for i in range(prod(st.shape)):
       i1, i2 = shapetracker_getitem(st, i), shapetracker_getitem(test_st, i)
-      print(i, i1, i2, si.inputs[0].size, i1==i2)
+      print(i, i1, i2, si.bufs[1].size, i1==i2)
       #self.assertEqual(i1, i2)
 
     with self.assertRaises(AssertionError):

@@ -16,7 +16,7 @@ def gen_prg(device, inputs_cnt):
   with Context(DEBUG=0):
     fst = [Tensor.randn(BUF_LEN, dtype=dtypes.int).realize() for i in range(inputs_cnt)]
     s = fst[0]
-    for i in range(1, inputs_cnt): s = s.xor(fst[i])
+    for i in range(1, inputs_cnt): s = s.bitwise_xor(fst[i])
 
     si = s.schedule()[-1]
     prg = get_runner(device, si.ast)

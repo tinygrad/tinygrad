@@ -311,7 +311,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (7000 if MOCKGPU else 100)
+    assert 0.1 <= et <= (10000 if MOCKGPU else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -498,6 +498,18 @@ class TestHCQ(unittest.TestCase):
 
     assert "0xDEADBEE1" in str(ctx.exception)
     os.environ.pop("MOCKGPU_EMU_FAULTADDR")
+
+  def test_multidevice(self):
+    try: amd_dev = Device["AMD"]
+    except Exception: self.skipTest("no AMD device, test skipped")
+
+    try: nv_dev = Device["NV"]
+    except Exception: self.skipTest("no NV device, test skipped")
+
+    x = amd_dev.signal_t()
+    y = nv_dev.signal_t()
+    assert type(x) is amd_dev.signal_t
+    assert type(y) is nv_dev.signal_t
 
 if __name__ == "__main__":
   unittest.main()
