@@ -93,9 +93,17 @@ class GPT:
       idx_cond = idx if idx.shape[1] <= self.config.block_size else idx[:, -self.config.block_size:]
       logits, _ = self(idx_cond)
       logits = logits[:, -1, :] / temperature
+
+      if top_k is not None:
+        # restrict to top_k tokens by setting others' logits to -inf
+        values, _ = logits.topk(top_k, dim=1)
+        min_values = values[:, -1].unsqueeze(1)
+        logits = logits.masked_fill(logits < min_values, float('-inf'))
+
       idx_next = logits.softmax().multinomial()
       idx = Tensor.cat(idx, idx_next, dim=1)
     return idx
+    
 
   def __call__(self, idx:Tensor, targets=None):
     b, t = idx.shape
