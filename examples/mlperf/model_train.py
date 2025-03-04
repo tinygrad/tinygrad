@@ -531,7 +531,6 @@ def train_retinanet():
         return
       
     # ** eval loop **
-
     if getenv("RESET_STEP", 1): _train_step.reset()
 
     with Tensor.train(mode=False), Tensor.test():
