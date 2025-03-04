@@ -124,9 +124,15 @@ if __name__ == "__main__":
   parser.add_argument("--batch_size", type=int, default=4, help="batch size")
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
+  parser.add_argument("--device", type=str, default="default", help="device to use")
   args = parser.parse_args()
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
+
+  if args.device != "default":
+    Device.DEFAULT = args.device
+  
+  print(f"running on device {Device.DEFAULT}")
 
   model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
   model.load_pretrained()
