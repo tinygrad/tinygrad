@@ -34,6 +34,17 @@ if __name__ == "__main__":
     device = torch.device("tiny")
   else:
     device = torch.device("mps")
+
+  GPUS = getenv("GPUS", 1)
+  if getenv("DDP"):
+    import os
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "29500"
+    rank = int(getenv("LOCAL_RANK", 0))
+    device = torch.device(device.type, index=rank)
+    backend = "cpu:gloo,cuda:nccl" + ",tiny:tiny" if device.type == "tiny" else ""
+    torch.distributed.init_process_group(backend=backend, rank=rank, world_size=GPUS)
+
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
   Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
@@ -43,7 +54,12 @@ if __name__ == "__main__":
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
-  if (GPUS:=getenv("GPUS", 1)) > 1: model = torch.nn.DataParallel(model, range(GPUS))
+  if GPUS > 1:
+    if getenv("DDP"):
+      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+      model.use_side_stream_for_tensor_copies = False # TODO:
+    else:
+      model = torch.nn.DataParallel(model, range(GPUS))
 
   loss_fn = nn.CrossEntropyLoss()
   #@torch.compile

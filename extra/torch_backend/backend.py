@@ -1,6 +1,5 @@
-import torch.nn.parallel.comm
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import DEBUG, getenv, prod
+from tinygrad.helpers import DEBUG, getenv, prod, flatten
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, itertools, collections, sys
@@ -21,6 +20,7 @@ class TinyBackend:
   def current_device(self): return 0
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
+  def device_count(self): return getenv("GPUS", 1) # TODO: query device count instead?
   def get_device_properties(self, i):
     # TODO: stub
     props = {"total_memory": 1, "multi_processor_count": 1}
@@ -34,7 +34,7 @@ torch.utils.generate_methods_for_privateuse1_backend()
 @torch.library.impl("aten::masked_select", "privateuseone")
 def masked_select(self, mask):
   # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
+  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()], device=_to_tiny_device(self.device)))
 
 @torch.library.impl("aten::topk", "privateuseone")
 def topk(self, k, dim=-1, largest=True, sorted=True):
@@ -45,11 +45,11 @@ def topk(self, k, dim=-1, largest=True, sorted=True):
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
-  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
+  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).to(x.device)
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
@@ -432,3 +432,27 @@ def _torch_patched_gather(tensors, dim, dest_index):
   if not str(tensors[0].device).startswith("tiny"): return _torch_patched_gather(tensors, dim, dest_index)
   return wrap(Tensor.cat(*(unwrap(x).to(_to_tiny_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
 torch.nn.parallel.comm.gather = _torch_patched_gather
+
+class TinyDistributedBackend:
+  rank = 0
+  size = 1
+  # TODO: optimize these to be off CPU
+  def allreduce(self, tensors, opts):
+    tensors_cpu = [x.cpu() for x in tensors]
+    for a,b in zip(tensors, tensors_cpu):
+      assert a.device.index == self.rank
+      torch.distributed.all_reduce(b, op=opts.reduceOp)
+      a.copy_(b)
+  def broadcast(self, tensors, opts):
+    tensors_cpu = [x.cpu() for x in tensors]
+    for a,b in zip(tensors, tensors_cpu):
+      assert a.device.index == self.rank
+      torch.distributed.broadcast(b, src=opts.rootRank)
+      a.copy_(b)
+  def allgather(self, outputs, inputs, opts):
+    inputs_cpu = [x.cpu() for x in inputs]
+    outputs_cpu = [[torch.empty_like(x) for _ in range(self.size)] for x in inputs_cpu]
+    for a,b in zip(outputs_cpu,inputs_cpu): torch.distributed.all_gather(a,b)
+    for a,b in zip(flatten(outputs),flatten(outputs_cpu)): a.copy_(b)
+
+mod.register_dist_backend(TinyDistributedBackend)

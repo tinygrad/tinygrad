@@ -85,6 +85,13 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
 C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
 }
 
+class TinyLazyStorage final : public c10::StorageImpl {
+public:
+  TinyLazyStorage() : c10::StorageImpl(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(), nullptr, /*resizable=*/false) {
+    // TODO: investigate why can't turn the following on without everything breaking
+    // release_data_and_set_meta_custom_data_ptr_error_msg_("TinyLazyStorage: data access is not supported");
+  }
+};
 template <typename OpaqueHandle>
 struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   TinyOpaqueTensorImpl(
@@ -94,8 +101,12 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       OpaqueHandle opaque_handle,
       c10::IntArrayRef sizes,
       c10::IntArrayRef strides)
-      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes)
-        { this->sizes_and_strides_.set_strides(strides); }
+      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
+    this->sizes_and_strides_.set_strides(strides);
+    this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorage>());
+    TensorImpl::storage_access_should_throw_ = false;
+  }
+  //const c10::Storage& storage() const override { return this->storage_; }
 };
 }
 
@@ -140,7 +151,113 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
 
+// NOTE: Distributed pytorch
+#include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <pybind11/chrono.h>
+
+class WorkShim : public c10d::Work {
+public:
+  WorkShim(c10d::OpType opType, c10::intrusive_ptr<c10::ivalue::Future> future)
+    : c10d::Work(-1, opType), future_(std::move(future)) {}
+  bool isCompleted() override {
+    return future_->completed();
+  }
+  bool isSuccess() const override {
+    return future_->hasValue();
+  }
+  bool wait(std::chrono::milliseconds timeout = c10d::kUnsetTimeout) override {
+    future_->wait();
+    return true;
+  }
+  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+    return future_;
+  }
+private:
+  c10::intrusive_ptr<c10::ivalue::Future> future_;
+};
+
+class PyDistBackend : public c10d::Backend {
+public:
+  PyDistBackend(int rank, int size, py::object py_backend)
+    : c10d::Backend(rank, size), py_backend_(py_backend) {}
+
+  virtual const std::string getBackendName() const override { return "tiny"; }
+
+  c10::intrusive_ptr<c10d::Work> allreduce(std::vector<at::Tensor>& tensors, const c10d::AllreduceOptions& opts) {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("allreduce")(tensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::TensorType::get()));
+    fut->markCompleted(c10::IValue(tensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLREDUCE, std::move(fut));
+  }
+
+  virtual c10::intrusive_ptr<c10d::Work> broadcast(std::vector<at::Tensor>& tensors, const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("broadcast")(tensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::TensorType::get()));
+    fut->markCompleted(c10::IValue(tensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::BROADCAST, std::move(fut));
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("allgather")(outputTensors, inputTensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+    fut->markCompleted(c10::IValue(outputTensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
+  }
+
+  c10::intrusive_ptr<c10d::Work> _allgather_base(at::Tensor& output, at::Tensor& input, const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("allgather")(output, input, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::TensorType::get());
+    fut->markCompleted(c10::IValue(output));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("allgather")(outputTensors, inputTensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+    fut->markCompleted(c10::IValue(outputTensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
+  }
+
+private:
+  py::object py_backend_;
+};
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+  m.def("register_dist_backend", [](py::object backendcls) {
+    auto factory = [backendcls](const c10::intrusive_ptr<c10d::Store>& /*store*/,
+                             int rank, int size, const std::chrono::duration<float>& /*timeout*/) -> c10::intrusive_ptr<c10d::Backend> {
+        py::object backend = backendcls();
+        backend.attr("rank") = rank;
+        backend.attr("size") = size;
+        return c10::make_intrusive<PyDistBackend>(rank, size, backend);
+    };
+    py::object torch_distributed = py::module::import("torch.distributed");
+    py::object backend_class = torch_distributed.attr("Backend");
+    py::list devices; devices.append("tiny");
+    backend_class.attr("register_backend")("tiny", py::cpp_function(factory), false, devices);
+  });
+}
+
+// TODO: do we need autograd for these?
+TORCH_LIBRARY_IMPL(c10d, AutogradPrivateUse1, m) {
+  m.impl("allgather_", torch::CppFunction::makeFallthrough());
+  m.impl("broadcast_", torch::CppFunction::makeFallthrough());
+  m.impl("allreduce_", torch::CppFunction::makeFallthrough());
 }
