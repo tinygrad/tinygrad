@@ -267,7 +267,6 @@ for dim in [2, 3]:
 @torch.library.impl("aten::cumsum", "privateuseone")
 def cumsum(self, dim):
   from tinygrad.ops import Ops
-  # TODO: Tensor.cumsum fails for TestOps.test_simple_cumsum due to wrong result
   if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
   return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
 
