@@ -412,6 +412,8 @@ def train_retinanet():
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
   config["bs"] = BS = getenv("BS", 256)
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
+  config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
+  config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
   config["lr"] = lr = getenv("LR", 0.0001)
   config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
   config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
@@ -468,6 +470,8 @@ def train_retinanet():
 
   for e in range(start_epoch, EPOCHS):
     # ** training loop **
+    BEAM.value = TRAIN_BEAM
+
     train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
     it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, _data_get(it)
@@ -527,9 +531,12 @@ def train_retinanet():
         return
       
     # ** eval loop **
+
     if getenv("RESET_STEP", 1): _train_step.reset()
 
     with Tensor.train(mode=False), Tensor.test():
+      BEAM.value = EVAL_BEAM
+
       val_dataloader = batch_load_retinanet(val_dataset, (val:=True), Path(BASE_DIR), batch_size=BS, shuffle=False, seed=SEED)
       it = iter(tqdm(val_dataloader, total=steps_in_val_epoch))
       i, proc = 0, _data_get(it, val=val)
