@@ -2385,19 +2385,18 @@ class Tensor(SimpleMathTrait):
     return self._split_cumalu(axis, Ops.MAX)
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
-    # TODO: terrible impl
+    # TODO: not ideal impl
     if not sorted_: raise NotImplementedError
     x = self
     dim = x._resolve_dim(dim)
-    values, indices  = [], []
+    indices = []
     for _ in range(k):
       idx = x.argmax(dim, keepdim=True) if largest else x.argmin(dim, keepdim=True)
-      val = x.gather(dim, idx)
-      values.append(val)
       indices.append(idx)
-      mask = Tensor.zeros_like(x, dtype=dtypes.bool).scatter(dim, idx, True)
-      x = mask.where(-9999 if largest else 9999, x)
-    return values[0].cat(*values[1:], dim=dim), indices[0].cat(*indices[1:], dim=dim)
+      mask = Tensor.zeros_like(x, dtype=dtypes.bool, device=self.device, requires_grad=False).scatter(dim, idx, True)
+      x = mask.where(float("-inf") if largest else float("inf"), x) # have to use where here instead of scattering directly
+    combined_indices = indices[0].cat(*indices[1:], dim=dim)
+    return self.gather(dim, combined_indices), combined_indices
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:

@@ -1067,12 +1067,12 @@ class TestOps(unittest.TestCase):
                             lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
                             lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
 
-    # TODO: linux behaves differently than macos?
+    # why does this fail on linux runner
     # with self.subTest(name="duplicate values"):
-      # helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
-      #               vals=[[5, 5, 3, 2]])
-      # helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
-      #               vals=[[5, 5, 3, 2]])
+    #   helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
+    #                 vals=[[5, 5, 3, 2]])
+    #   helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
+    #                 vals=[[5, 5, 3, 2]])
       # TODO yeah....
       # helper_test_op(None, lambda x: x.topk(3, largest=False).values, lambda x: x.topk(3, largest=False)[0], forward_only=True,
       #               vals=[[5, 5, 3, 2]])
