@@ -393,12 +393,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     if self.hw_copy_queue_t is None: gpu2cpu_copy_time_diff = decimal.Decimal(0)
     else: gpu2cpu_copy_time_diff = statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
-    Compiled.profile_events += [ProfileDeviceEvent(self.device, gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff, self.get_dspec())]
-
-  def get_dspec(self):
-    """
-    Allow HCQ devices to return device-specific data (like SQTT on AMD) at profile finalization
-    """
+    Compiled.profile_events += [ProfileDeviceEvent(self.device, gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff)]
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
