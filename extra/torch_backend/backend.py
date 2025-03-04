@@ -75,13 +75,13 @@ def scatter_src(self, dim, index, src):
   return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
 
 def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
-  f(grad_out.cpu(), output_size, input_size, scales).tiny()
+  return f(grad_out.cpu(), output_size, input_size, scales).tiny()
 
 def upsample_2d_backward(grad_out, output_size, input_size, scales_h=None, scales_w=None, f=None):
-  f(grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
+  return f(grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
 
 def upsample_3d_backward(grad_out, output_size, input_size, scales_d=None, scales_h=None, scales_w=None, f=None):
-  f(grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
+  return f(grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
 
 @torch.library.impl("aten::upsample_trilinear3d_backward", "privateuseone")
 def upsample_trilinear3d_backward(grad_output, output_size, input_size,  align_corners, scales_d=None, scales_h=None, scales_w=None):
@@ -233,14 +233,14 @@ def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_
   out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-def pad_forward(self, padding, mode=None): wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+def pad_forward(self, padding, mode=None): return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
 
 def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.pad(self, padding, mode=mode)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-def upsample(self, size, align_corners=False, mode=None): wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 
 for dim in [1, 2, 3]:
   torch.library.impl(f"aten::replication_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="replicate"))
