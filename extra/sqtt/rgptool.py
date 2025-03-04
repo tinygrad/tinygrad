@@ -142,14 +142,21 @@ class RGP:
     assert i == len(blob), f'{i} != {len(blob)}'
     return RGP(file_header, chunks)
   @staticmethod
-  def from_profile(profile_pickled):
+  def from_profile(profile_pickled, device:str|None=None):
     profile: list[ProfileEvent] = pickle.loads(profile_pickled)
-    device_event = next(x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD'))
+    device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD')}
+    if device is None:
+      if len(device_events) == 0: raise RuntimeError('No supported devices found in profile')
+      if len(device_events) > 1: raise RuntimeError(f"More than one supported device found, select which one to export: {', '.join(device_events.keys())}")
+      _, device_event = device_events.popitem()
+    else:
+      if device not in device_events: raise RuntimeError(f"Device {device} not found in profile, devices in profile: {', '.join(device_events.keys())} ")
+      device_event = device_events[device]
+    if device_event.dspec is None: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
     load_events = [x for x in profile if isinstance(x, ProfileProgramEvent) and x.device == device_event.device]
     loads = [(event.base, struct.unpack('<Q', hashlib.md5(event.lib).digest()[:8])*2) for event in load_events if event.base is not None and event.lib is not None]
     code_objects = list(dict.fromkeys([x.lib for x in load_events if x.lib is not None]).keys())
-    assert device_event.dspec is not None, f'No SQTT data in {device_event}'
-    assert len(loads) > 0, f'No load events in profile'
+    if len(loads) == 0: raise RuntimeError('No load events in profile')
     # TODO: tons of stuff hardcoded for 7900xtx, tons of stuff is wrong, tons of stuff are guesses. The right way is for someone to capture a trace on
     # windows with 7900xtx and just take those values for what can't be autodetected
     file_header = sqtt.struct_sqtt_file_header(
@@ -293,6 +300,7 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(prog='rgptool', description='A tool to create (from pickled tinygrad profile), inspect and modify Radeon GPU Profiler files')
   parser.add_argument('command')
   parser.add_argument('input')
+  parser.add_argument('-d', '--device')
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
 
@@ -303,7 +311,7 @@ if __name__ == '__main__':
       rgp = RGP.from_bytes(input_bytes)
       rgp.print()
     case 'create':
-      rgp = RGP.from_profile(input_bytes)
+      rgp = RGP.from_profile(input_bytes, device=args.device)
       # rgp.to_bytes() # fixup
       # rgp.print()
     case 'repl':
