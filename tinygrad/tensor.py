@@ -2386,15 +2386,15 @@ class Tensor(SimpleMathTrait):
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
     # TODO: not ideal impl
+    # TODO: maybe go from value to index instead of index to value.
     if not sorted_: raise NotImplementedError
-    x = self
-    dim = x._resolve_dim(dim)
-    indices = []
+    dim = self._resolve_dim(dim)
+    x, indices = self, []
+    select_fxn, mask_value = (Tensor.argmax, float("-inf")) if largest else (Tensor.argmin, float("inf"))
     for _ in range(k):
-      idx = x.argmax(dim, keepdim=True) if largest else x.argmin(dim, keepdim=True)
+      idx = select_fxn(x, dim, keepdim=True)
       indices.append(idx)
-      mask = Tensor.zeros_like(x, dtype=dtypes.bool, device=self.device, requires_grad=False).scatter(dim, idx, True)
-      x = mask.where(float("-inf") if largest else float("inf"), x) # have to use where here instead of scattering directly
+      x = x.scatter(dim, idx, mask_value)
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
 

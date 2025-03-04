@@ -35,11 +35,6 @@ def masked_select(self, mask):
   # err, bad
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
-@torch.library.impl("aten::topk", "privateuseone")
-def topk(self, k, dim=None, largest=True, sorted=True):
-  val, idx, = unwrap(self).topk(k, -1 if dim is None else dim, largest, sorted)
-  return torch.return_types.topk((wrap(val), wrap(idx)))
-
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
@@ -159,6 +154,11 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
   unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
+
+@torch.library.impl("aten::topk", "privateuseone")
+def topk(self, k, dim=None, largest=True, sorted=True):
+  val, idx, = unwrap(self).topk(k, -1 if dim is None else dim, largest, sorted)
+  return torch.return_types.topk((wrap(val), wrap(idx)))
 
 # register some decompositions
 from torch._decomp import get_decompositions
