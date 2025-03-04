@@ -6,9 +6,9 @@ from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 
-def ldt(dt:DType, local=False):
+def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
-  if isinstance(dt, PtrDType): return ldt(dt.base) + (" addrspace(3)*" if local else "*")
+  if isinstance(dt, PtrDType): return ldt(dt.base) + (" addrspace(3)*" if dt.local else "*")
   return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1",
@@ -71,34 +71,13 @@ fence syncscope("workgroup") release
 tail call void @llvm.amdgcn.s.barrier()
 fence syncscope("workgroup") acquire
 """
-local_map = {}
 
-def f_ops_index(ctx, x):
-  if ctx[x.src[0]] in local_map:
-    local_map[ctx[x]] = 1
-  return f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype, local=ctx[x.src[0]] in local_map)} \
-      {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"
-
-def f_ops_cast(ctx, x):
-  if ctx[x.src[0]] in local_map:
-    local_map[ctx[x]] = 1
-  return f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, local=ctx[x.src[0]] in local_map)} {ctx[x.src[0]]} to \
-      {ldt(x.dtype, local=ctx[x.src[0]] in local_map)}" if isinstance(x.dtype, PtrDType) else None
-
-def f_ops_store(ctx, x):
-  if ctx[x.src[0]] in local_map:
-    local_map[x.src[1]] = 1
-  return f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype, local=ctx[x.src[0]] in local_map)} {ctx[x.src[0]]}"
-
-def f_ops_load(ctx, x, idx, idx1):
-  if ctx[idx] in local_map:
-    local_map[ctx[x]] = 1
-  return f"  {ctx[x]} = load {ldt(x.dtype)}, ptr addrspace(3) {ctx[idx]}"
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: barrier),
   # memory load/store
-  (UPat(Ops.INDEX, name="x"), f_ops_index),
+  (UPat(Ops.INDEX, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
@@ -106,8 +85,9 @@ base_rewrite = PatternMatcher([
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
-  (UPat(Ops.LOAD, src=(UPat.var('idx'),UPat.var('idx1')), name="x"), f_ops_load),
-  (UPat(Ops.STORE, name="x"), f_ops_store),
+  (UPat(Ops.LOAD, src=(UPat.var('idx'),UPat.var('idx1')), name="x"), lambda ctx,x,idx,idx1: \
+    f"  {ctx[x]} = load {ldt(x.dtype)}, ptr addrspace(3) {ctx[idx]}"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"  {ctx[x]} = extractelement {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {x.arg[0]}"),
@@ -117,7 +97,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
                                                             f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
-  (UPat(Ops.CAST, name="x"), f_ops_cast),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}" if isinstance(x.dtype, PtrDType) else None),
 
   # unary/binary/ternary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x:
@@ -172,7 +153,6 @@ class LLVMRenderer(Renderer):
   ])
 
   def render(self, uops: list[UOp]) -> str:
-    local_map.clear()
     r: dict[UOp, str] = {}
     args: list[str] = []
     kernel: list[str] = []
@@ -204,7 +184,7 @@ class LLVMRenderer(Renderer):
         args.append(f"{ldt(u.dtype)}{' noalias align 32' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
       elif u.op == Ops.DEFINE_LOCAL:
         r[u] = f"@local_{u.arg}"
-        local_map[r[u]] = 1
+        assert isinstance(u.dtype, PtrDType)
         local_args.append(f"{r[u]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
