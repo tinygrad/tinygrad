@@ -5,7 +5,7 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
-from tinygrad.device import BufferSpec, CPUProgram, PROFILE
+from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio, sqtt
@@ -373,6 +373,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
 MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
 
+@dataclass(frozen=True)
+class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes # noqa: E702
+
 @dataclass
 class AMDQueueDesc:
   ring: memoryview
@@ -727,25 +730,23 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
 
-  # Device-specific profiling data on AMD is a list of bytes which are plain SQTT blobs from gpu if SQTT is enabled, None otherwise
-  def get_dspec(self) -> list[bytes]|None:
-    if not self.sqtt_enabled: return None
-    wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
-    AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
-    self.synchronize()
-    if DEBUG>=2: print('Saving SQTT in profile...')
-    rets = []
-    for i,buf0 in enumerate(self.sqtt_buffers):
-      wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - ((buf0.va_addr//32) & 0x1FFFFFFF)) * 32
-      if DEBUG>=2: print(f'Se {i} blob size {wptr:#x}')
-      assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
-      # When sqtt buffer overflows, wptr stops at the last dword
-      if wptr >= buf0.size-32: print(f"WARNING: SQTT BUFFER IS FULL (SE {i})! INCREASE SQTT BUFFER SIZE WITH SQTT_BUFFER_SIZE=X (in MB)")
-      self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
-      rets.append(bytes(sqtt_buf))
-    return rets
+  def _at_profile_finalize(self):
+    if self.sqtt_enabled:
+      wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
+      wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
+      AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.timeline_value).submit(self)
+      self.timeline_value += 1
+      self.synchronize()
+      if DEBUG>=2: print('Saving SQTT in profile...')
+      for i,buf0 in enumerate(self.sqtt_buffers):
+        wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - ((buf0.va_addr//32) & 0x1FFFFFFF)) * 32
+        if DEBUG>=2: print(f'Se {i} blob size {wptr:#x}')
+        assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
+        # When sqtt buffer overflows, wptr stops at the last dword
+        if wptr >= buf0.size-32: print(f"WARNING: SQTT BUFFER IS FULL (SE {i})! INCREASE SQTT BUFFER SIZE WITH SQTT_BUFFER_SIZE=X (in MB)")
+        self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
+        Compiled.profile_events += [ProfileSQTTEvent(self.device, i, bytes(sqtt_buf))]
+    super()._at_profile_finalize()
 
   def finalize(self):
     self.synchronize()

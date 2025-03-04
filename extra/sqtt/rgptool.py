@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse, ctypes, struct, hashlib, pickle, code, typing
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
+from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.helpers import round_up, flatten
 from dataclasses import dataclass
 
@@ -152,7 +153,8 @@ class RGP:
     else:
       if device not in device_events: raise RuntimeError(f"Device {device} not found in profile, devices in profile: {', '.join(device_events.keys())} ")
       device_event = device_events[device]
-    if device_event.dspec is None: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
+    sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
+    if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
     load_events = [x for x in profile if isinstance(x, ProfileProgramEvent) and x.device == device_event.device]
     loads = [(event.base, struct.unpack('<Q', hashlib.md5(event.lib).digest()[:8])*2) for event in load_events if event.base is not None and event.lib is not None]
     code_objects = list(dict.fromkeys([x.lib for x in load_events if x.lib is not None]).keys())
@@ -246,10 +248,10 @@ class RGP:
       *flatten([(
         RGPChunk(sqtt.struct_sqtt_file_chunk_sqtt_desc(
           header=sqtt.struct_sqtt_file_chunk_header(
-            chunk_id=sqtt.struct_sqtt_file_chunk_id(type=sqtt.SQTT_FILE_CHUNK_TYPE_SQTT_DESC, index=se),
+            chunk_id=sqtt.struct_sqtt_file_chunk_id(type=sqtt.SQTT_FILE_CHUNK_TYPE_SQTT_DESC, index=sqtt_event.se),
             major_version=0, minor_version=2,
           ),
-          shader_engine_index=se,
+          shader_engine_index=sqtt_event.se,
           sqtt_version=sqtt.SQTT_VERSION_3_2,
           _0=sqtt.union_sqtt_file_chunk_sqtt_desc_0(
             v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
@@ -261,11 +263,11 @@ class RGP:
         )),
         RGPChunk(sqtt.struct_sqtt_file_chunk_sqtt_data(
           header=sqtt.struct_sqtt_file_chunk_header(
-            chunk_id=sqtt.struct_sqtt_file_chunk_id(type=sqtt.SQTT_FILE_CHUNK_TYPE_SQTT_DATA, index=se),
+            chunk_id=sqtt.struct_sqtt_file_chunk_id(type=sqtt.SQTT_FILE_CHUNK_TYPE_SQTT_DATA, index=sqtt_event.se),
             major_version=0, minor_version=0,
           ),
-        ), blob),
-      ) for se,blob in enumerate(device_event.dspec)]),
+        ), sqtt_event.blob),
+      ) for sqtt_event in sqtt_events]),
       RGPChunk(sqtt.struct_sqtt_file_chunk_code_object_database(
         header=sqtt.struct_sqtt_file_chunk_header(
           chunk_id=sqtt.struct_sqtt_file_chunk_id(type=sqtt.SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_DATABASE),
