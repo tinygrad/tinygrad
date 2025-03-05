@@ -298,7 +298,9 @@ class AMDQueueDesc:
 
     # Ensure all prior writes are visible to the GPU.
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
-    dev.dev_iface.adev.gmc.flush_hdp()
+
+    # Flush hdp if queue is in dev mem.
+    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     self.doorbell[0] = self.put_value
 
 class KFDIface:
