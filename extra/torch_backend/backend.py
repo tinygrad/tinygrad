@@ -174,6 +174,7 @@ decomps = [
   aten.threshold_backward,
   aten.softplus_backward,
   aten.elu,  # elu has a scale + input_scale param
+  aten.elu_backward,
   aten.softplus,
   aten.threshold,
   aten.nll_loss_forward,
@@ -331,7 +332,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
                            acc_dtype=_from_torch_dtype(dtype) if dtype is not None else dtypes.default_float), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.scatter.value_reduce": Tensor.scatter,
-  "aten.gather": lambda self, dim, index: Tensor.gather(self, dim, index.cast(dtypes.int)),
+  "aten.gather": Tensor.gather,
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
