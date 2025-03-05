@@ -286,6 +286,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
+  "aten.reflection_pad1d.out": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.replication_pad1d.out": functools.partial(Tensor.pad, mode="replicate"),
 }}
 
 # we add the "out" here
@@ -347,7 +349,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": lambda x, y: x.assign(x | y),
   "aten.multinomial": Tensor.multinomial,
-  "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
