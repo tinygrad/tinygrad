@@ -17,9 +17,10 @@ from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_re
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same, temp
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops, sym
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
+remove_movement_ops = merge_views
 
 def verify_ast(sink:UOp): return type_verify(list(sink.toposort), shape_spec)
 class KernelCountException(Exception): pass
@@ -72,6 +73,33 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, remove_movement_ops+sym, {})
 
 class TestSchedule(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
+  def test_error_on_device_mismatch(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10, device="CPU")
+    c = a+b
+    with self.assertRaises(RuntimeError): check_schedule(c, 1)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
+  def test_expand_buffer_before_cast(self):
+    a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
+    b = a.cast(dtypes.half).expand((2, 4, 4))+2
+    run_schedule(check_schedule(b, 1))
+    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+
+  def test_empty_is_not_realized(self):
+    a = Tensor.empty(10)
+    child = a+2
+    assert not a.lazydata.is_realized
+    child.realize()
+    assert a.lazydata.is_realized
+
+  # NOTE: because empty does not have an ExecItem if realize is called on a childless empty, it never gets allocated.
+  def test_childless_empty_never_allocates(self):
+    a = Tensor.empty(10)
+    a.realize()
+    assert not a.lazydata.is_realized
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -1540,7 +1568,6 @@ class TestSchedule(unittest.TestCase):
   def test_late_fusion_post_expand(self):
     self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
-  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_padded_view(self):
     a = Tensor.arange(4).reshape(1, 4)
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
@@ -1550,18 +1577,16 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(realized_view.lazydata.base.realized.size, 8)
     self.assertListEqual(realized_view.tolist(), [[0.0, 1.0, 2.0, 3.0], [0.0, 0.0, 0.0, 0.0]])
 
-  # NOTE: we might want to reconsider pushing this cast before the shrink
-  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
+  # NOTE: we only reorder CAST if it's an EXPAND
   def test_cast_after_shrink(self):
     a = Tensor.arange(4).reshape(1, 4)
     casted_view = a.shrink(((0, 1), (0, 2))).cast(dtypes.float)
     casted_view.realize()
-    self.assertEqual(casted_view.lazydata.base.realized.size, 4)
+    self.assertEqual(casted_view.lazydata.base.realized.size, 2)
     realized_view = casted_view.contiguous().realize()
     self.assertEqual(realized_view.lazydata.base.realized.size, 2)
     self.assertListEqual(realized_view.tolist(), [[0, 1]])
 
-  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_const_view(self):
     a = Tensor.ones((4, 4), dtype=dtypes.float32)
     casted_view = a.cast(dtypes.int32)
@@ -1571,7 +1596,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
-  @unittest.skip("CAST_BEFORE_VIEW=1 is not supported")
   def test_cast_padded_const(self):
     a = Tensor(1, dtype=dtypes.int32).reshape(1, 1).pad(((1, 1), None))
     casted_view = a.cast(dtypes.float32)
@@ -2045,7 +2069,7 @@ class TestSwizzle(unittest.TestCase):
     reswizzle = a.reshape((64, 16)).reshape((32, 32))
     self.assertEqual(swizzle_cnt(reswizzle), 0) # instant rule
     ret = swizzle_rewrite(reswizzle)
-    self.assertIs(ret, reswizzle)
+    self.assertEqual(ret.st, reswizzle.st)
 
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))
@@ -2127,10 +2151,10 @@ class TestView(unittest.TestCase):
     late_mul = a*bv
     other_child = b+2
     s = check_schedule([late_mul, other_child], 2)
-    # the arange realizes
-    self.assertIsNotNone(b.lazydata.base.realized)
+    # the arange becomes a BUFFER
+    self.assertIs(b.lazydata.base.op, Ops.BUFFER)
     # mul still collapses
-    self.assertIsNone(late_mul.lazydata.base.realized)
+    self.assertIs(late_mul.lazydata.base.op, Ops.CONST)
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
@@ -2527,7 +2551,6 @@ class TestUOpBecome(unittest.TestCase):
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
-  @unittest.expectedFailure
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
@@ -2551,7 +2574,7 @@ class TestUOpBecome(unittest.TestCase):
     noop.realize()
     # it becomes a realized view after realize
     assert noop.lazydata is not noop.lazydata.base
-    assert noop.lazydata.is_realized
+    assert noop.lazydata.base.op is Ops.BUFFER
     late_add = noop+2
     late_add.realize()
 
@@ -2583,7 +2606,7 @@ class TestUOpBecome(unittest.TestCase):
     a = Tensor.empty(4, 4)
     b = a+0
     check_schedule(b, 0)
-    assert b.lazydata.is_realized
+    assert b.lazydata.base.op is Ops.BUFFER
     self.assertIs(a.lazydata, b.lazydata)
 
   # they can also chain other movement ops on top of the tensor source
@@ -2605,7 +2628,7 @@ class TestUOpBecome(unittest.TestCase):
     b = (a.permute((1, 0))+0).reshape((8, 2))+0
     check_schedule(b, 0)
     self.assertEqual(b.lazydata.st, a.lazydata.permute((1, 0)).reshape((8, 2)).st)
-    assert b.lazydata.is_realized
+    assert b.lazydata.base.op is Ops.BUFFER
 
   def test_become_multiple_choices(self):
     a = Tensor.empty(16)

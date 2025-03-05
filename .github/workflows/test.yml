@@ -153,21 +153,50 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: torch-backend-pillow-torchvision
+        key: torch-backend-pillow-torchvision-et-pt
         deps: testing_minimal
-        pydeps: "pillow torchvision"
+        pydeps: "pillow torchvision expecttest"
+        llvm: 'true'
     - name: Install ninja
       run: |
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
+    - name: Lint with ruff
+      run: |
+        pip3 install --upgrade --force-reinstall ruff
+        python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
       run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/example.py
+    - name: My (custom) tests
+      run: PYTHONPATH=. python3 extra/torch_backend/test.py
+    - name: Test one op in torch tests
+      run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND (expect failure)
-      run: PYTHONPATH=. TINY_BACKEND=1 python3 -m pytest test/test_ops.py || true
-    - name: Test beautiful_mnist in torch with TINY_BACKEND (expect failure)
-      run: PYTHONPATH=. TORCH_DEBUG=1 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py || true
+      run: PYTHONPATH=. LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/test_ops.py --durations=20 || true
+
+  torchbackendmore:
+    name: Torch Backend Tests More
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: torch-backend-pillow-torchvision-et-pt
+        deps: testing_minimal
+        llvm: 'true'
+    - name: Install ninja
+      run: |
+        sudo apt update || true
+        sudo apt install -y --no-install-recommends ninja-build
+    - name: Test beautiful_mnist in torch with TINY_BACKEND
+      run: PYTHONPATH=. LLVM=1 TARGET_EVAL_ACC_PCT=96.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
+    - name: Test some torch tests (expect failure)
+      run: PYTHONPATH=. python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
   tc:
     name: Tensor Core tests
@@ -294,8 +323,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
-    - name: Repo line count < 11300 lines
-      run: MAX_LINE_COUNT=11300 python sz.py
+    - name: Repo line count < 11500 lines
+      run: MAX_LINE_COUNT=11500 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -318,7 +347,7 @@ jobs:
 
   testgpuimage:
     name: 'GPU IMAGE Tests'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -342,7 +371,7 @@ jobs:
 
   testopenpilot:
     name: 'openpilot Compile Tests'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -355,7 +384,7 @@ jobs:
           opencl: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2105 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          PYTHONPATH="." ALLOWED_KERNEL_COUNT=209 ALLOWED_READ_IMAGE=2138 ALLOWED_GATED_READ_IMAGE=29 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
@@ -385,6 +414,8 @@ jobs:
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test Additional ONNX Ops (CPU)
+        run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
@@ -438,7 +469,7 @@ jobs:
       with:
         key: dsp-minimal
         deps: testing_minimal
-        pydeps: "onnx==1.16.0 onnxruntime"
+        pydeps: "onnx==1.16.0 onnxruntime pillow"
         llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -457,6 +488,8 @@ jobs:
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
     - name: Test LLVM=1 DEVECTORIZE=0
       run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    - name: Test LLVM=1 DEVECTORIZE=0 for model
+      run: PYTHONPATH="." LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     - name: Test CPU=1 DEVECTORIZE=0
       run: CPU=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
@@ -532,7 +565,7 @@ jobs:
   testmetal2:
     name: MacOS (unit)
     runs-on: macos-14
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code

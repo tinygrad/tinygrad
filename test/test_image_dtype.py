@@ -123,16 +123,16 @@ class TestImageDType(unittest.TestCase):
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
       sched = unwrap(w1.grad).schedule()
-      # NOTE: the w1 grad must realize to a seperate kernel
-      assert w1.grad.lazydata.is_realized, f"never realized {w1.grad}"
-      self.assertEqual(w1.grad.lazydata.base.buffer.dtype, dtypes.float32)
-      self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
         if s.bufs[0].dtype == dtypes.float:
           lst = s.bufs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
+      # NOTE: the w1 grad must realize to a seperate kernel
+      assert w1.grad.lazydata.is_realized, f"never realized {w1.grad}"
+      self.assertEqual(w1.grad.lazydata.base.buffer.dtype, dtypes.float32)
+      self.assertEqual(len(sched), 10)
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageRealization(unittest.TestCase):

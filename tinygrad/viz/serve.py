@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap
@@ -13,7 +13,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
-               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
+               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.NAME:"#808080"}
 
 # VIZ API
@@ -172,6 +172,9 @@ def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
   with open(path, "rb") as f: return pickle.load(f)
 
+# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
+class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=str, help='Path to kernels', default=None)
@@ -193,7 +196,7 @@ if __name__ == "__main__":
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
 
-  server = HTTPServer(('', PORT), Handler)
+  server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(f"*** started viz on {HOST}:{PORT}")

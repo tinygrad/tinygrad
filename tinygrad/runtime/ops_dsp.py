@@ -20,11 +20,11 @@ dsp_pm = PatternMatcher([
 ])
 
 dsp_pm_late = PatternMatcher([
-  (UPat.var("x")+UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")),
-  (UPat.var("x")*UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")),
-  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOM, x.dtype, (y,), arg="{0}")),
+  (UPat.var("x")+UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
+  (UPat.var("x")*UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
+  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
-   lambda d: d.replace(src=(UOp(Ops.CUSTOM, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+   lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
 ])
 
 class DSPRenderer(ClangRenderer):
@@ -169,7 +169,8 @@ class DSPDevice(Compiled):
     except (OSError, PermissionError):
       # DSP might ask for a connection reset or just fail with operation not permitted, try to reset connection.
       self.init_dsp()
-      _exec_lib()
+      try: _exec_lib()
+      except (OSError, PermissionError) as e: raise RuntimeError(e)
 
   def init_dsp(self):
     if hasattr(self, 'rpc_fd'):
