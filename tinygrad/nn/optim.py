@@ -141,7 +141,7 @@ class LAMB(Optimizer):
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
         r2 = up.square().sum().sqrt()
-        r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
+        r: Tensor|float = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
       t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
