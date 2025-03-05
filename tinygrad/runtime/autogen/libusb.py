@@ -5,7 +5,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
+import ctypes, os
 
 
 class FunctionFactoryStub:
@@ -154,8 +154,9 @@ if ctypes.sizeof(ctypes.c_longdouble) == 16:
 else:
     c_long_double_t = ctypes.c_ubyte*16
 
-_libraries['libusb-1.0.so'] = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libusb-1.0.so')
-
+_path = os.getenv("LIBUSB_PATH", ctypes.util.find_library("usb-1.0"))
+print("libusb path", _path)
+_libraries['libusb-1.0.so'] = ctypes.CDLL(_path)
 
 LIBUSB_H = True # macro
 ZERO_SIZED_ARRAY = True # macro
