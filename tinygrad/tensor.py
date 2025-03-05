@@ -2390,7 +2390,7 @@ class Tensor(SimpleMathTrait):
     if not sorted_: raise NotImplementedError
     dim = self._resolve_dim(dim)
     x, indices = self, []
-    select_fxn, mask_value = (Tensor.argmax, float("-inf")) if largest else (Tensor.argmin, float("inf"))
+    select_fxn, mask_value = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
       idx = select_fxn(x, dim, keepdim=True)
       indices.append(idx)

@@ -1048,36 +1048,29 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
   def test_topk(self):
-    with self.subTest(name="default"):
-      helper_test_op([(10)],
-                      lambda x: x.topk(3).values,
-                      lambda x: x.topk(3)[0], forward_only=True)
-      helper_test_op([(10)],
-                      lambda x: x.topk(3).indices.type(torch.int32),
-                      lambda x: x.topk(3)[1], forward_only=True)
-
+    helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
+    helper_test_op([(10)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
+    helper_test_op([(10)], lambda x: x.topk(1).values, lambda x: x.topk(1)[0], forward_only=True)
+    helper_test_op([(10)], lambda x: x.topk(1).indices.type(torch.int32), lambda x: x.topk(1)[1], forward_only=True)
     for dim in [0, 1, -1]:
       for largest in [True, False]:
         for sorted_ in [True]: # TODO support False
-          with self.subTest(largest=largest, sorted=sorted_, dim=dim):
-            helper_test_op([(10,20,30)],
-                            lambda x: x.topk(5, dim, largest, sorted_).values,
-                            lambda x: x.topk(5, dim, largest, sorted_)[0], forward_only=True)
-            helper_test_op([(10,20,30)],
-                            lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
-                            lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
-
-    # why does this fail on linux runner
-    # with self.subTest(name="duplicate values"):
-    #   helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
-    #                 vals=[[5, 5, 3, 2]])
-    #   helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
-    #                 vals=[[5, 5, 3, 2]])
-      # TODO yeah....
-      # helper_test_op(None, lambda x: x.topk(3, largest=False).values, lambda x: x.topk(3, largest=False)[0], forward_only=True,
-      #               vals=[[5, 5, 3, 2]])
-      # helper_test_op(None, lambda x: x.topk(3, largest=False).indices.type(torch.int32), lambda x: x.topk(3, largest=False)[1], forward_only=True,
-      #               vals=[[5, 5, 3, 2]])
+          helper_test_op([(10,20,30)],
+                          lambda x: x.topk(5, dim, largest, sorted_).values,
+                          lambda x: x.topk(5, dim, largest, sorted_)[0], forward_only=True)
+          helper_test_op([(10,20,30)],
+                          lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
+                          lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
+    # duplicated values
+    helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
+                  vals=[[5, 5, 3, 2]])
+    helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
+                  vals=[[5, 5, 3, 2]])
+    helper_test_op(None, lambda x: x.topk(3, largest=False).values, lambda x: x.topk(3, largest=False)[0], forward_only=True,
+                  vals=[[5, 5, 3, 2]])
+    # TODO index selects the second of the duplicated values for largest=False
+    # helper_test_op(None, lambda x: x.topk(3, largest=False).indices.type(torch.int32), lambda x: x.topk(3, largest=False)[1], forward_only=True,
+    #               vals=[[5, 5, 3, 2]])
 
   def test_einsum(self):
     # matrix transpose
