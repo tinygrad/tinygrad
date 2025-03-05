@@ -31,11 +31,6 @@ def masked_select(self, mask):
   # err, bad
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
-@torch.library.impl("aten::topk", "privateuseone")
-def topk(self, k, dim=-1, largest=True, sorted=True):
-  # TODO: move to tinygrad
-  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
-  return torch.return_types.topk((t1.tiny(), t2.tiny()))
 
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
@@ -50,6 +45,23 @@ def index_tensor(x, y):
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
 # *** end bad functions on CPU ***
+
+@torch.library.impl("aten::sort", "privateuseone")
+def sort(x, dim=-1, descending=False, *, stable=False):
+
+    # Fix potential integer-to-boolean issue
+    descending = bool(int(descending))
+
+
+    tt = unwrap(x)
+    values, indices = tt.sort(dim, descending)
+    return wrap(values), wrap(indices)
+
+@torch.library.impl("aten::topk", "privateuseone")
+def topk(x, k, dim=-1, largest=True, sorted=True):
+  tt = unwrap(x)
+  values, indices = tt.topk(k, dim, largest, sorted)
+  return wrap(values), wrap(indices)
 
 @torch.library.impl("aten::zero_", "privateuseone")
 def zero_(x):

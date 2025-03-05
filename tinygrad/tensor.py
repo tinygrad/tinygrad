@@ -16,6 +16,44 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
+# *** TODO find a place for the helper function ***
+def _sort(tensor, dim=-1, descending=False):
+    """
+    Sorts a tensor along the specified dimension using a topk-like approach.
+    
+    Args:
+        tensor (Tensor): The input tensor to be sorted.
+        dim (int): The dimension along which to sort.
+        descending (bool): Whether to sort in descending order.
+
+    Returns:
+        sorted_tensor (Tensor): The sorted tensor.
+        sorted_indices (Tensor): The indices that sort the input tensor.
+    """
+    dim = tensor._resolve_dim(dim)
+    x, indices = tensor.clone().contiguous(), []
+
+    if descending:
+        select_fxn = Tensor.argmax
+        mask_value = float("-inf")  # Remove largest element
+    else:
+        select_fxn = Tensor.argmin
+        mask_value = float("inf")   # Remove smallest element
+
+    for _ in range(x.shape[dim]):
+        idx = select_fxn(x, axis=dim, keepdim=True)  # Find min/max index based on `descending`
+        indices.append(idx)
+        x = x.scatter(dim, idx, mask_value)  # Mask out the selected element correctly
+
+    # **Ensure indices are properly concatenated**
+    combined_indices = indices[0].cat(*indices[1:], dim=dim)
+
+    # **Gather values from the input tensor using realized indices**
+    sorted_values = tensor.gather(dim, combined_indices)
+
+    return sorted_values, combined_indices
+
+
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: set[weakref.ref[Tensor]] = set()
@@ -3424,6 +3462,28 @@ class Tensor(SimpleMathTrait):
     """
     t, x = self._broadcasted(x)
     return t._inverse().maximum(x._inverse())._inverse()
+
+
+  def sort(self, dim=-1, descending=False):
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+
+    values = self.clone().contiguous()
+    indices = Tensor.arange(0, self.shape[dim], device=self.device).expand(*self.shape)
+
+    # Sort values and get the sorted indices
+    sorted_values, sorted_indices = _sort(values, dim=dim, descending=descending)
+
+    return sorted_values, sorted_indices
+
+  def topk(self, k, dim=-1, largest=True, sorted=True):
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+
+    k = min(k, self.shape[dim])
+    values, indices = self.sort(dim=dim, descending=largest)
+    values, indices = values[..., :k], indices[..., :k]
+    if sorted:
+        values, indices = values.sort(dim=dim, descending=largest)
+    return values, indices
 
   def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """

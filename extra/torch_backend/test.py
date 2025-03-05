@@ -94,5 +94,38 @@ class TestTorchBackend(unittest.TestCase):
     result = a // b
     np.testing.assert_equal(result.cpu().numpy(), [3., 3., 2.])
 
+  def test_topk(self):
+    torch.manual_seed(0)
+
+    # Generate random tensor
+    x = torch.randn(3, 3, device=device)
+    k = 2
+
+    # Compute top-k in PyTorch with our backend
+    values, indices = torch.topk(x, k, dim=-1, largest=True, sorted=True)
+
+    # Expected results computed using NumPy
+    expected_values = np.sort(x.cpu().numpy(), axis=-1)[:, -k:][:, ::-1]  # Take last k and reverse
+
+    np.testing.assert_allclose(values.cpu().numpy(), expected_values, rtol=1e-5)
+
+  def test_sort(self):
+    torch.manual_seed(1)
+
+    # Generate random tensor
+    x = torch.randn(3, 10, device=device)
+
+    # Compute sort in PyTorch with our backend
+    values, indices = torch.sort(x, dim=-1, descending=False)
+
+    # Expected results computed using NumPy
+    expected_values = np.sort(x.cpu().numpy(), axis=-1) # Take last k and reverse
+
+    np.testing.assert_allclose(values.cpu().numpy(), expected_values, rtol=1e-5)
+
+def debug_sort(*args, **kwargs):
+    print(f"Intercepted torch.sort() - args: {args}, kwargs: {kwargs}")
+    return torch.sort(*args, **kwargs)
+
 if __name__ == "__main__":
   unittest.main()
