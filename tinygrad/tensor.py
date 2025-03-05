@@ -16,44 +16,6 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
-# *** TODO find a place for the helper function ***
-def _sort(tensor, dim=-1, descending=False):
-    """
-    Sorts a tensor along the specified dimension using a topk-like approach.
-    
-    Args:
-        tensor (Tensor): The input tensor to be sorted.
-        dim (int): The dimension along which to sort.
-        descending (bool): Whether to sort in descending order.
-
-    Returns:
-        sorted_tensor (Tensor): The sorted tensor.
-        sorted_indices (Tensor): The indices that sort the input tensor.
-    """
-    dim = tensor._resolve_dim(dim)
-    x, indices = tensor.clone().contiguous(), []
-
-    if descending:
-        select_fxn = Tensor.argmax
-        mask_value = float("-inf")  # Remove largest element
-    else:
-        select_fxn = Tensor.argmin
-        mask_value = float("inf")   # Remove smallest element
-
-    for _ in range(x.shape[dim]):
-        idx = select_fxn(x, axis=dim, keepdim=True)  # Find min/max index based on `descending`
-        indices.append(idx)
-        x = x.scatter(dim, idx, mask_value)  # Mask out the selected element correctly
-
-    # **Ensure indices are properly concatenated**
-    combined_indices = indices[0].cat(*indices[1:], dim=dim)
-
-    # **Gather values from the input tensor using realized indices**
-    sorted_values = tensor.gather(dim, combined_indices)
-
-    return sorted_values, combined_indices
-
-
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: set[weakref.ref[Tensor]] = set()
@@ -3463,16 +3425,54 @@ class Tensor(SimpleMathTrait):
     t, x = self._broadcasted(x)
     return t._inverse().maximum(x._inverse())._inverse()
 
+  def argsort(self, dim=-1, descending=False):
+    """
+    Computes the indices that would sort the tensor along a specified dim.
+
+    Args:
+        self (Tensor): The input tensor.
+        dim (int): The dimension along which to sort.
+        descending (bool): Whether to sort in descending order.
+
+    Returns:
+        Tensor: The indices that sort the input tensor.
+    """
+    dim = self._resolve_dim(dim)
+    temp_tensor, sorted_indices = self.clone().contiguous(), []
+
+    if descending:
+        selection_function = Tensor.argmax
+        mask_value = float("-inf")  # Mask out the largest selected value
+    else:
+        selection_function = Tensor.argmin
+        mask_value = float("inf")  # Mask out the smallest selected value
+
+    for _ in range(temp_tensor.shape[dim]):
+        selected_idx = selection_function(temp_tensor, axis=dim, keepdim=True)
+        sorted_indices.append(selected_idx)
+        temp_tensor = temp_tensor.scatter(dim, selected_idx, mask_value)  # Mask out selected index
+
+    # Concatenate indices along the specified axis
+    sorted_indices_tensor = sorted_indices[0].cat(*sorted_indices[1:], dim=dim)
+
+    return sorted_indices_tensor
+
 
   def sort(self, dim=-1, descending=False):
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    """
+    Sorts a tensor along the specified axis.
 
-    values = self.clone().contiguous()
-    indices = Tensor.arange(0, self.shape[dim], device=self.device).expand(*self.shape)
+    Args:
+        self (Tensor): The tensor to be sorted.
+        axis (int): The dimension along which to sort.
+        descending (bool): Whether to sort in descending order.
 
-    # Sort values and get the sorted indices
-    sorted_values, sorted_indices = _sort(values, dim=dim, descending=descending)
-
+    Returns:
+        Tensor: The sorted tensor.
+        Tensor: The indices that sort the input tensor.
+    """
+    sorted_indices = self.argsort(dim=dim, descending=descending)
+    sorted_values = self.gather(dim, sorted_indices)
     return sorted_values, sorted_indices
 
   def topk(self, k, dim=-1, largest=True, sorted=True):

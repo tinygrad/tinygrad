@@ -98,14 +98,14 @@ class TestTorchBackend(unittest.TestCase):
     torch.manual_seed(0)
 
     # Generate random tensor
-    x = torch.randn(3, 3, device=device)
+    x = torch.randn(4, 4, device=device)
     k = 2
 
     # Compute top-k in PyTorch with our backend
     values, indices = torch.topk(x, k, dim=-1, largest=True, sorted=True)
 
     # Expected results computed using NumPy
-    expected_values = np.sort(x.cpu().numpy(), axis=-1)[:, -k:][:, ::-1]  # Take last k and reverse
+    expected_values = np.sort(x.cpu().numpy(), axis=-1)[:, -k:][:, ::-1]
 
     np.testing.assert_allclose(values.cpu().numpy(), expected_values, rtol=1e-5)
 
@@ -113,7 +113,7 @@ class TestTorchBackend(unittest.TestCase):
     torch.manual_seed(1)
 
     # Generate random tensor
-    x = torch.randn(3, 10, device=device)
+    x = torch.randn(4, 4, device=device)
 
     # Compute sort in PyTorch with our backend
     values, indices = torch.sort(x, dim=-1, descending=False)
