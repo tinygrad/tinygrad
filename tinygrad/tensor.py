@@ -292,8 +292,8 @@ class Tensor(SimpleMathTrait):
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
     cpu = self.cast(self.dtype.base).contiguous().to("CPU").realize()
-    buf = cast(UOp, cpu.lazydata).base.realized
-    assert buf is not None, f"{cast(UOp, cpu.lazydata).base} was not realized"
+    buf = cpu.lazydata.base.realized
+    assert buf is not None, f"{cpu.lazydata.base} was not realized"
     if self.device != "CPU": buf.options = BufferSpec(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CPU" else False)
 
@@ -467,7 +467,7 @@ class Tensor(SimpleMathTrait):
   _device_seeds: dict[str, Tensor] = {}
   _device_rng_counters: dict[str, Tensor] = {}
   @staticmethod
-  def manual_seed(seed=0):
+  def manual_seed(seed=0) -> None:
     """
     Sets the seed for random operations.
 
@@ -4033,7 +4033,7 @@ class Tensor(SimpleMathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-def _metadata_wrapper(fn):
+def _metadata_wrapper(fn: Callable) -> Callable:
   def _wrapper(*args, **kwargs):
     if _METADATA.get() is not None: return fn(*args, **kwargs)
 
