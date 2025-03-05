@@ -25,6 +25,21 @@ else:
 
 if DEBUG>=3: print(f'Using LLVM at {repr(LLVM_PATH)}')
 
+def get_llvm_version():
+  major = ctypes.c_uint32(0)
+  minor = ctypes.c_uint32(0)
+  patch = ctypes.c_uint32(0)
+  try:
+    LLVMGetVersion = ctypes.CDLL(LLVM_PATH).LLVMGetVersion
+    LLVMGetVersion.restype = None
+    LLVMGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+    LLVMGetVersion(ctypes.byref(major), ctypes.byref(minor), ctypes.byref(patch))
+  except Exception as e:
+    print(f"LLVMGetVersion failed on {LLVM_PATH}, {e}")
+  return major.value, minor.value, patch.value
+if getenv("AMD_LLVM", 0):
+  assert (llvm_major := get_llvm_version()[0]) >= 18, f"AMD with LLVM backend requires LLVM >= 18, got {LLVM_PATH} (major={llvm_major})"
+
 @functools.lru_cache(None)
 def get_lld_path():
   lld_path = shutil.which('ld.lld')
