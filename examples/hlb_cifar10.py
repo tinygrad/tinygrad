@@ -11,6 +11,7 @@ from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
+from icecream import ic
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -186,7 +187,7 @@ def train_cifar():
 
   # ========== Preprocessing ==========
   # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
-  def pad_reflect(X, size=2) -> Tensor:
+  def pad_reflect(X:Tensor, size=2) -> Tensor:
     X = X[...,:,1:size+1].flip(-1).cat(X, X[...,:,-(size+1):-1].flip(-1), dim=-1)
     X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
     return X
@@ -307,6 +308,7 @@ def train_cifar():
   params_bias = []
   params_non_bias = []
   for params in params_dict:
+    ic(params, params_dict[params].requires_grad)
     if params_dict[params].requires_grad is not False:
       if 'bias' in params:
         params_bias.append(params_dict[params])
