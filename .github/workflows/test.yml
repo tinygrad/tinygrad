@@ -562,10 +562,10 @@ jobs:
 
 # ****** OSX Tests ******
 
-  testmetal2:
-    name: MacOS (unit)
+  testmetal2_setup:
+    name: MacOS (unit / setup)
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
     - name: Checkout Code
@@ -578,43 +578,47 @@ jobs:
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
-    - name: Run real world test
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
-    - name: Test models (Metal)
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
-    - name: Run ONNX
-      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-    - name: Test tensor core ops (fake)
-      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
-    - name: Test tensor core ops (real)
-      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    - name: Test Beam Search
-      run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-    - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
-    # - name: Fuzz Test models schedule
-    # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
-    - name: Run TRANSCENDENTAL math
-      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    - name: Run pytest (amd)
-      env:
-        MOCKGPU: 1
-        AMD: 1
-        FORWARD_ONLY: 1
-      run: |
-        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
-    - name: Run pytest (ptx)
-      env:
-        MOCKGPU: 1
-        PTX: 1
-        NV: 1
-        FORWARD_ONLY: 1
-      run: |
-        python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
+  
+  testmetal2_parallel:
+    name: MacOS (unit / parallel tests)
+    runs-on: macos-14
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: Run real world test
+            run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
+          - name: Test models (Metal)
+            run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
+          - name: Run ONNX
+            run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+          - name: Test tensor core ops (fake)
+            run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
+          - name: Test tensor core ops (real)
+            run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+          - name: Test LLaMA compile speed
+            run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
+          - name: Test Beam Search
+            run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+          - name: Fuzz Test linearizer
+            run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+          # - name: Fuzz Test models schedule
+          # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
+          - name: Run TRANSCENDENTAL math
+            run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+          - name: Run pytest (amd)
+            env: { MOCKGPU: 1, AMD: 1, FORWARD_ONLY: 1 }
+            run: python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+          - name: Run pytest (ptx)
+            env: { MOCKGPU: 1, PTX: 1, NV: 1, FORWARD_ONLY: 1 }
+            cmd: python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+          # - name: Run process replay tests
+          #   uses: ./.github/actions/process-replay
+    steps:
+      - name: Run ${{ matrix.test.name }}
+        env: ${{ matrix.test.env }}
+        run: ${{ matrix.test.run }}
 
   osxwebgpu:
     name: MacOS (WebGPU)
