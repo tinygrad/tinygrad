@@ -1640,8 +1640,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._reduce(Ops.MAX, axis, keepdim)
 
-  def _inverse(self) -> Tensor:
-    return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
+  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
 
   def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
