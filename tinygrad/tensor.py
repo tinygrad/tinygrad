@@ -1564,7 +1564,7 @@ class Tensor(SimpleMathTrait):
     ret = self._apply_uop(UOp.r, op=op, axis=axis)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
-  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None):
+  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None) -> Tensor:
     """
     Returns the sum of the elements of the tensor along the specified axis or axes.
 
@@ -1753,7 +1753,8 @@ class Tensor(SimpleMathTrait):
     """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
-    return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])).cast(output_dtype)
+    return numerator.div(prod([cast(int, si) for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])) \
+      .cast(output_dtype)
 
   def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Tensor:
     """
