@@ -45,14 +45,9 @@ def index_tensor(x, y):
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
 # *** end bad functions on CPU ***
-
 @torch.library.impl("aten::sort", "privateuseone")
 def sort(x, dim=-1, descending=False, *, stable=False):
-
-    # Fix potential integer-to-boolean issue
     descending = bool(int(descending))
-
-
     tt = unwrap(x)
     values, indices = tt.sort(dim, descending)
     return wrap(values), wrap(indices)

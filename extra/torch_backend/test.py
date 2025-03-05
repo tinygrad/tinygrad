@@ -123,9 +123,6 @@ class TestTorchBackend(unittest.TestCase):
 
     np.testing.assert_allclose(values.cpu().numpy(), expected_values, rtol=1e-5)
 
-def debug_sort(*args, **kwargs):
-    print(f"Intercepted torch.sort() - args: {args}, kwargs: {kwargs}")
-    return torch.sort(*args, **kwargs)
 
 if __name__ == "__main__":
   unittest.main()

@@ -3428,6 +3428,7 @@ class Tensor(SimpleMathTrait):
   def argsort(self, dim=-1, descending=False):
     """
     Computes the indices that would sort the tensor along a specified dim.
+    TODO: make this use a better sorting algorithm
 
     Args:
         self (Tensor): The input tensor.
