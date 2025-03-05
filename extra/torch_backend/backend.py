@@ -61,7 +61,6 @@ def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n,
 @torch.library.impl("aten::cumprod", "privateuseone")
 # TODO: move to tinygrad
 def cumprod(self, dim, dtype=None): return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
-  
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
