@@ -1,4 +1,4 @@
-# ruff: noqa: E501, A001, A002, A006, F821
+# ruff: noqa: E501, A001, A002, A006
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
