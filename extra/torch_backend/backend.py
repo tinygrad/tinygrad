@@ -370,7 +370,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
   # commenting this out, fixed problems
-  "aten.pad": Tensor.pad,
+  # "aten.pad": Tensor.pad,
   # "aten.unfold": ,
 }}
 

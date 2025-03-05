@@ -26,7 +26,7 @@ from tinygrad import getenv
 from icecream import ic
 
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
-device = torch.device("tiny" if getenv("TINY_BACKEND") else "mps")
+device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("mps")
 
 ## <-- teaching comments
 # <-- functional comments
