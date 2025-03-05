@@ -587,24 +587,33 @@ jobs:
       matrix:
         test:
           - name: Run real world test
+            env: {}
             run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
           - name: Test models (Metal)
+            env: {}
             run: JIT=2 METAL=1 python -m pytest -n=auto test/models --durations=20
           - name: Run ONNX
+            env: {}
             run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
           - name: Test tensor core ops (fake)
+            env: {}
             run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
           - name: Test tensor core ops (real)
+            env: {}
             run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
           - name: Test LLaMA compile speed
+            env: {}
             run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
           - name: Test Beam Search
+            env: {}
             run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
           - name: Fuzz Test linearizer
+            env: {}
             run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
           # - name: Fuzz Test models schedule
           # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
           - name: Run TRANSCENDENTAL math
+            env: {}
             run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
           - name: Run pytest (amd)
             env: { MOCKGPU: 1, AMD: 1, FORWARD_ONLY: 1 }
