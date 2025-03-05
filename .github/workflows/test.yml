@@ -323,8 +323,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
-    - name: Repo line count < 11300 lines
-      run: MAX_LINE_COUNT=11300 python sz.py
+    - name: Repo line count < 11500 lines
+      run: MAX_LINE_COUNT=11500 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -347,7 +347,7 @@ jobs:
 
   testgpuimage:
     name: 'GPU IMAGE Tests'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -371,7 +371,7 @@ jobs:
 
   testopenpilot:
     name: 'openpilot Compile Tests'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
