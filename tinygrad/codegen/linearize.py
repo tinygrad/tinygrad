@@ -7,29 +7,78 @@ from tinygrad.helpers import dedup
 
 DONT_PLACE_IN_BLOCK = {Ops.NAME, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
-def disp(y:UOp) -> str:
-  if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
-  if y.op is Ops.IF: return f'IF{id(y)}'
-  if y.op is Ops.RANGE: return str(y.arg)
+
+def disp(y: UOp) -> str:
+  if y.op is Ops.BLOCKSTART:
+    return "w" + disp(y.src[0])
+  if y.op is Ops.IF:
+    return f"IF{id(y)}"
+  if y.op is Ops.RANGE:
+    return str(y.arg)
   return "<NONE>"
+
 
 @dataclass(frozen=True)
 class BasicBlock:
   ctx: tuple[UOp, ...]
   lst: tuple[UOp, ...]
-  end: UOp|None = None
-  def __lt__(self, o:BasicBlock): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
-  def __repr__(self):
-    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
-           f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+  end: UOp | None = None
 
-def block_from_list(ctx:tuple[UOp], x:UOp):
+  def __lt__(self, o: BasicBlock):
+    return tuple(x.tuplize for x in self.ctx + self.lst) < tuple(x.tuplize for x in o.ctx + o.lst)
+
+  def __repr__(self):
+    return (
+      f"{(str(disp(self.end)) + ' ') if self.end is not None else ''}"
+      + f"{[disp(y) for y in self.ctx]} {len(self.lst)}"
+      + "\n"
+      + "\n".join([str(x.op) for x in self.lst])
+    )
+
+
+def block_from_list(ctx: tuple[UOp], x: UOp):
   src = [elem for elem in ctx if elem.op in DONT_PLACE_IN_BLOCK]
   blk_elems = [UOp(elem.op, elem.dtype, (), elem.arg) for elem in ctx if elem.op not in DONT_PLACE_IN_BLOCK]
   return UOp(Ops.BLOCK, src=tuple(src), arg=BasicBlock((), tuple(blk_elems)))
 
+
+def make_store_ctx(root_uop: UOp):
+  _store_order_context: dict[int, list[UOp]] = {}
+  for elem in root_uop.toposort:
+    if elem.op is Ops.STORE and elem.src[0] is Ops.INDEX and elem.src[0].src[0] is Ops.DEFINE_GLOBAL:
+      _store_order_context.setdefault(elem.src[0].src[0].arg, []).append(elem)
+
+  store_order_context: dict[int, list[UOp]] = {}
+  keys = sorted(_store_order_context.keys())
+  if not keys:
+    return store_order_context
+
+  prev: int = keys[0]
+  keys = keys[1:]
+  store_order_context[prev] = []
+  for k in keys:
+    store_order_context[k] = _store_order_context[prev]
+    prev = k
+
+  return store_order_context
+
+
+def append_sources(ctx: dict[int, list[UOp]], x: UOp):
+  if x.src[0] is not Ops.INDEX and x.src[0].src[0] is not Ops.DEFINE_GLOBAL:
+    return None
+
+  for elem in ctx[x.src[0].src[0].arg]:
+    if elem not in x.src:
+      return UOp(Ops.STORE, dtype=x.dtype, src=tuple(dedup(list(x.src) + ctx[x.src[0].src[0].arg])), arg=x.arg)
+
+  return None
+
+
 # root_uop -> sink
 def linearize_uop(root_uop: UOp, skip_check: bool = not __debug__) -> list[UOp]:
+  make_explicit_dep = PatternMatcher([(UPat(Ops.STORE, name="x"), append_sources)])
+  root_uop = graph_rewrite(root_uop, make_explicit_dep, ctx=make_store_ctx(root_uop))
+
   scope_blocks: dict[UOp, LinearizeScope] = {}
 
   class LinearizeScope:
