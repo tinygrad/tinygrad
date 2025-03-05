@@ -1564,7 +1564,7 @@ class Tensor(SimpleMathTrait):
     ret = self._apply_uop(UOp.r, op=op, axis=axis)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
-  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None) -> Tensor:
+  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None):
     """
     Returns the sum of the elements of the tensor along the specified axis or axes.
 
@@ -3456,7 +3456,7 @@ class Tensor(SimpleMathTrait):
     t, x = self._broadcasted(x)
     return t._inverse().maximum(x._inverse())._inverse()
 
-  def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
+  def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint):
     """
     Return a tensor of elements selected from either `x` or `y`, depending on `self`.
     `output_i = x_i if self_i else y_i`.
