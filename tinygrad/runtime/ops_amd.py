@@ -10,7 +10,7 @@ from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEB
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.compiler_hip import AMDCompiler
+from tinygrad.runtime.support.compiler_hip import AMDCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -589,8 +589,8 @@ class AMDDevice(HCQCompiled):
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
-    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer() if os.getenv("AMD_LLVM")=="1" else AMDRenderer(),
-                     AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer() if getenv("AMD_LLVM", 0) else AMDRenderer(),
+                     AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
     # Scratch setup
