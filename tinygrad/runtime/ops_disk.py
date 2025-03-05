@@ -84,7 +84,9 @@ class DiskAllocator(Allocator):
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.dev.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
-        fo.readinto(dest)
+        bytes_read = 0
+        while (n := fo.readinto(dest[bytes_read:])) > 0:
+          bytes_read += n
     else:
       dest[:] = src._buf()
 
