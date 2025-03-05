@@ -22,8 +22,8 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
-def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
-def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
+def gfxreg(reg): return reg + amd_gpu.GC_BASE__INST0_SEG0 - amd_gpu.PACKET3_SET_SH_REG_START
+def nbioreg(reg): return reg + amd_gpu.NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
   def __init__(self, base_addr:int|None=None, **kwargs):
