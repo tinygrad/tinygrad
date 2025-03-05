@@ -1064,11 +1064,13 @@ class TestOps(unittest.TestCase):
     # duplicated values
     helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
                   vals=[[5, 5, 3, 2]])
-    helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
-                  vals=[[5, 5, 3, 2]])
     helper_test_op(None, lambda x: x.topk(3, largest=False).values, lambda x: x.topk(3, largest=False)[0], forward_only=True,
                   vals=[[5, 5, 3, 2]])
-    # TODO index selects the second of the duplicated values for largest=False
+    # TODO: torch on linux has different behavior for duplicated values
+    # indices: macos returns [0, 1, 2], linux returns [1, 0, 2]
+    # helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
+    #               vals=[[5, 5, 3, 2]])
+    # indices: macos returns [1, 0, 2], linux returns [0, 1, 2]
     # helper_test_op(None, lambda x: x.topk(3, largest=False).indices.type(torch.int32), lambda x: x.topk(3, largest=False)[1], forward_only=True,
     #               vals=[[5, 5, 3, 2]])
 
