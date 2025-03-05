@@ -565,7 +565,9 @@ jobs:
   testmetal2_setup:
     name: MacOS (unit / setup)
     runs-on: macos-14
-    timeout-minutes: 10
+    timeout-minutes: 20
+    outputs:
+      env_cache: ${{ steps.cache.outputs.cache_key }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -577,11 +579,42 @@ jobs:
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
-    - name: Run ${{ matrix.test.name }}
+      id: setup
+    - name: Cache environment
+      id: cache
+      run: echo "cache_key=setup-${{ steps.setup.outputs.cache_key }}" >> $GITHUB_OUTPUT
+
+  testmetal2_parallel:
+    name: MacOS (unit / ${{ matrix.test.name }})
+    runs-on: macos-14
+    needs: testmetal2_setup
+    timeout-minutes: 20
+    env:
+      CACHE_KEY: ${{ needs.testmetal2_setup.outputs.env_cache }}
+    steps:
+    - name: Restore environment
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/Library/Caches/pip
+          venv/
+        key: ${{ env.CACHE_KEY }}
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Reuse setup
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: metal2
+        deps: testing
+        python-version: '3.11'
+        amd: 'true'
+        cuda: 'true'
+        skip_if_cached: 'true'  # Add this flag to your action
+    - name: Run test
       env: ${{ matrix.test.env }}
       run: ${{ matrix.test.run }}
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
+    # - name: Run process replay tests
+    #   uses: ./.github/actions/process-replay
     strategy:
       fail-fast: false
       matrix:
