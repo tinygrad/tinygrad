@@ -59,15 +59,15 @@ def index_put(self, indices, values, accumulate=False):
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
 
 @torch.library.impl("aten::cumprod", "privateuseone")
-def cumprod(self, dim, dtype=None):
-  # TODO: move to tinygrad
-  return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
+# TODO: move to tinygrad
+def cumprod(self, dim, dtype=None): return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
+  
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
   # TODO: support cummax with indices to match torch
-  out = aten.cummax(self.cpu(), dim)
-  return [o.tiny() for o in out]
+  cummax, indices = aten.cummax(self.cpu(), dim)
+  return (cummax.tiny(), indices.tiny())
 
 @torch.library.impl("aten::scatter.src", "privateuseone")
 def scatter_src(self, dim, index, src):
