@@ -582,6 +582,7 @@ jobs:
   testmetal2_parallel:
     name: MacOS (unit / parallel tests)
     runs-on: macos-14
+    needs: testmetal2_setup
     timeout-minutes: 10
     strategy:
       fail-fast: false
