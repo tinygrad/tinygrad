@@ -1564,7 +1564,7 @@ class Tensor(SimpleMathTrait):
     ret = self._apply_uop(UOp.r, op=op, axis=axis)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
-  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None):
+  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None) -> Tensor:
     """
     Returns the sum of the elements of the tensor along the specified axis or axes.
 
@@ -1591,7 +1591,7 @@ class Tensor(SimpleMathTrait):
     ret = self.cast(sum_acc_dtype(self.dtype) if acc_dtype is None else acc_dtype)._reduce(Ops.ADD, axis, keepdim)
     return ret.cast(self.dtype) if acc_dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16) else ret
 
-  def prod(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None):
+  def prod(self, axis:int|Sequence[int]|None=None, keepdim=False, acc_dtype:DTypeLike|None=None) -> Tensor:
     """
     Returns the product of the elements of the tensor along the specified axis or axes.
 
@@ -1617,7 +1617,7 @@ class Tensor(SimpleMathTrait):
     """
     return self.cast(acc_dtype if acc_dtype is not None else self.dtype)._reduce(Ops.MUL, axis, keepdim)
 
-  def max(self, axis:int|Sequence[int]|None=None, keepdim=False):
+  def max(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the maximum value of the tensor along the specified axis or axes.
 
@@ -1643,7 +1643,7 @@ class Tensor(SimpleMathTrait):
   def _inverse(self) -> Tensor:
     return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
 
-  def min(self, axis:int|Sequence[int]|None=None, keepdim=False):
+  def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the minimum value of the tensor along the specified axis or axes.
 
@@ -1666,7 +1666,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._inverse().max(axis=axis, keepdim=keepdim)._inverse()
 
-  def any(self, axis:int|Sequence[int]|None=None, keepdim=False):
+  def any(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Tests if any element evaluates to `True` along the specified axis or axes.
 
@@ -1688,7 +1688,7 @@ class Tensor(SimpleMathTrait):
     """
     return self.bool().max(axis, keepdim)
 
-  def all(self, axis:int|Sequence[int]|None=None, keepdim=False):
+  def all(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Tests if all element evaluates to `True` along the specified axis or axes.
 
@@ -1730,7 +1730,7 @@ class Tensor(SimpleMathTrait):
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
 
-  def mean(self, axis:int|Sequence[int]|None=None, keepdim=False):
+  def mean(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the mean value of the tensor along the specified axis or axes.
 
@@ -1756,7 +1756,7 @@ class Tensor(SimpleMathTrait):
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])).cast(output_dtype)
 
-  def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1):
+  def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Tensor:
     """
     Returns the variance of the tensor along the specified axis or axes.
 
@@ -1799,7 +1799,7 @@ class Tensor(SimpleMathTrait):
     """
     return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def std(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1):
+  def std(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Tensor:
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
 
