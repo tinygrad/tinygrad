@@ -148,7 +148,7 @@ class AMDComputeQueue(HWQueue):
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
-    dev.compute_queue.signal_doorbell()
+    dev.compute_queue.signal_doorbell(dev)
 
 class AMDCopyQueue(HWQueue):
   def __init__(self, max_copy_size=0x40000000):
@@ -232,7 +232,7 @@ class AMDCopyQueue(HWQueue):
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
-    dev.sdma_queue.signal_doorbell()
+    dev.sdma_queue.signal_doorbell(dev)
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -293,11 +293,14 @@ class AMDQueueDesc:
   doorbell: memoryview
   put_value: int = 0
 
-  def signal_doorbell(self):
+  def signal_doorbell(self, dev):
     self.write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+
+    # Flush hdp if queue is in dev mem.
+    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     self.doorbell[0] = self.put_value
 
 class KFDIface:
