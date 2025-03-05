@@ -174,6 +174,7 @@ decomps = [
   aten.threshold_backward,
   aten.softplus_backward,
   aten.elu,  # elu has a scale + input_scale param
+  aten.elu_backward,
   aten.softplus,
   aten.threshold,
   aten.nll_loss_forward,
@@ -270,8 +271,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   # TODO: this might result in overflow issues
   "aten.round.decimals_out": lambda self,decimals: (self*10**decimals).round()/10**decimals,
   # TODO: support this in tinygrad
-  "aten.bitwise_left_shift.Tensor_out": lambda input,other: Tensor(input << other.numpy()),
-  "aten.bitwise_right_shift.Tensor_out": lambda input,other: Tensor(input >> other.numpy()),
+  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
+  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
@@ -328,11 +329,12 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.var.correction": Tensor.var,
   "aten.var_mean.correction": Tensor.var_mean,
   # NOTE: axis=[] in torch means all, change tinygrad?
-  "aten.sum.IntList_out": lambda self,axis,keepdim=False,out=None:
-    out.replace(Tensor.sum(self, axis if axis is None or len(axis) else None, keepdim), allow_shape_mismatch=True),
+  "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None,out=None:
+    out.replace(self.sum(axis if axis is None or len(axis) else None, keepdim,
+                         acc_dtype = _from_torch_dtype(dtype) if dtype is not None else None), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.scatter.value_reduce": Tensor.scatter,
-  "aten.gather": Tensor.gather,
+  "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
@@ -345,9 +347,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
+  "aten.logical_or_": lambda x, y: x.assign(x | y),
   "aten.multinomial": Tensor.multinomial,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
-  "aten.masked_fill_.Scalar": lambda self,mask,value: self.assign(mask.where(self, value)),
+  "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.all": Tensor.all,
@@ -362,6 +365,14 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.atanh": Tensor.atanh,
   "aten.fill_.Tensor": Tensor.full,
   "aten.flip": Tensor.flip,
+  "aten.scatter_reduce.two": Tensor.scatter_reduce,
+  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True),
+  "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
+  "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
+    Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
+  "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
+  "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.roll": Tensor.roll,
@@ -369,9 +380,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
-  # commenting this out, fixed problems
-  # "aten.pad": Tensor.pad,
-  # "aten.unfold": ,
+  "aten.t": Tensor.transpose,
+  "aten.detach": Tensor.detach,
+  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
 }}
 
 def wrap_fxn(k,f):
@@ -392,11 +403,11 @@ for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::")
 if TORCH_DEBUG:
   from torch.utils._python_dispatch import TorchDispatchMode
   class DispatchLog(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args, kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
       #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
       print(f"Dispatch Log: {func}")
       return func(*args, **(kwargs or {}))
-  DispatchLog().__enter__()
+  (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
