@@ -45,7 +45,7 @@ def block_from_list(ctx: tuple[UOp], x: UOp):
 def make_store_ctx(root_uop: UOp):
   _store_order_context: dict[int, list[UOp]] = {}
   for elem in root_uop.toposort:
-    if elem.op is Ops.STORE and elem.src[0] is Ops.INDEX and elem.src[0].src[0] is Ops.DEFINE_GLOBAL:
+    if elem.op is Ops.STORE and elem.src[0].op is Ops.INDEX and elem.src[0].src[0].op is Ops.DEFINE_GLOBAL:
       _store_order_context.setdefault(elem.src[0].src[0].arg, []).append(elem)
 
   store_order_context: dict[int, list[UOp]] = {}
@@ -64,7 +64,7 @@ def make_store_ctx(root_uop: UOp):
 
 
 def append_sources(ctx: dict[int, list[UOp]], x: UOp):
-  if x.src[0] is not Ops.INDEX and x.src[0].src[0] is not Ops.DEFINE_GLOBAL:
+  if x.src[0].op is not Ops.INDEX or x.src[0].src[0].op is not Ops.DEFINE_GLOBAL:
     return None
 
   for elem in ctx[x.src[0].src[0].arg]:
@@ -238,7 +238,14 @@ def linearize_uop(root_uop: UOp, skip_check: bool = not __debug__) -> list[UOp]:
 
       if bubbling:
         visited.add(curr_uop)
-        if curr_uop.op in {Ops.RANGE, Ops.IF} and scope_start.op in {Ops.ASSIGN, Ops.STORE} or curr_uop.src == () and scope_start.op == Ops.SINK:
+        if (
+          curr_uop.op in {Ops.RANGE, Ops.IF}
+          and scope_start.op is Ops.STORE
+          or curr_uop.op is Ops.RANGE
+          and scope_start.op is Ops.ASSIGN
+          or curr_uop.src == ()
+          and scope_start.op == Ops.SINK
+        ):
           scope.end.append(curr_uop)
           scope.subgraph_nodes.add(curr_uop)
 
