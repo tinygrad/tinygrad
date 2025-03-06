@@ -164,7 +164,7 @@ class X86Renderer(Renderer):
     return x86_reg_map[reg][dt.itemsize]
 
   def __getitem__(self, key:UOp): return self.regt(self.r[key], key.dtype) if self.r[key] in self.all_regs else self.r[key]  # hacky helper
-  def render(self, name:str, uops:List[UOp]) -> str:
+  def render(self, uops:List[UOp]) -> str:
     # 64 bit general registers, rsp/rbp not included, r15 temp register
     gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14"]
     float_regs = ["xmm" + str(i) for i in range(0,16)]
@@ -209,8 +209,10 @@ class X86Renderer(Renderer):
       mov_to_stack(chosen)
       return reg
 
+    name = "test"
     for i,u in enumerate(uops):
-      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+      if u.op is Ops.NAME: name = u.arg
+      elif u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = assign_reg(i, u.dtype)
         if r[u] in ("rax", "xmm8"): # value is in stack instead of register, rbp + 8 is return address
           free_reg(r[u])
