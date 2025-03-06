@@ -7,19 +7,27 @@ class USBConnector:
     ret = libusb.libusb_init(ctypes.byref(self.usb_ctx))
     if ret != 0: raise Exception(f"Failed to init libusb: {ret}")
 
+    #libusb.libusb_set_debug(self.usb_ctx, 99)
+
     # Open device
+    self.is_24 = True
     self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2464)
-    if not self.handle: self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
+    if not self.handle:
+      self.is_24 = False
+      self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
     if not self.handle: raise Exception("Failed to open device")
+
+    #time.sleep(0.1)
 
     # Detach kernel driver if needed
     if libusb.libusb_kernel_driver_active(self.handle, 0) == 1:
       ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
+      print("detach kernel driver")
       if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
 
     libusb.libusb_reset_device(self.handle)
 
-    # Claim interface
+    # Claim interface (gives -3 if we reset)
     ret = libusb.libusb_claim_interface(self.handle, 0)
     if ret != 0: raise Exception(f"Failed to claim interface: {ret}")
 
@@ -47,19 +55,32 @@ class USBConnector:
 
   def _send(self, cdb, ret_len=0):
     def __send():
-      ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), None, 1)
-      if ret: return None
+      for i in range(3):
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), None, 10)
+        if ret:
+          print("0x4", ret, len(self.read_cmd))
+          return None
 
-      if ret_len > 0:
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 1)
-        if ret: return None
+        if ret_len > 0:
+          ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 10)
+          if ret:
+            print("0x81", ret, ret_len)
+            #libusb.libusb_clear_halt(self.handle, 0x81)
+            #time.sleep(0.1)
+            continue
+          #if ret: return None
 
-      ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, None, 1)
-      if ret: return None
-      return self.read_data
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, None, 10)
+        if ret:
+          print("0x83", ret)
+          #libusb.libusb_clear_halt(self.handle, 0x83)
+          continue
+        return self.read_data
+      return None
 
     self.read_cmd[16:16+len(cdb)] = cdb
-    for j in range(1000):
+    for j in range(1):
+      #print(j)
       read_data = __send()
       if read_data: return read_data
     raise RuntimeError("USB transfer failed")
@@ -112,7 +133,7 @@ class USBConnector:
       self.write(0xB220, struct.pack('>I', value << (8 * offset)))
 
     self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), byte_enable, masked_address))
- 
+
     if self.is_24:
       self.write(0xB216, bytes([0x20]))
       self.write(0xB296, bytes([0x04]))
@@ -125,6 +146,7 @@ class USBConnector:
     # while self.read(0xB296, 1)[0] & 4 == 0: continue
 
     self.write(0xB296, bytes([0x04]))
+    time.sleep(0.01)
 
     prep_st = time.perf_counter_ns()
 
