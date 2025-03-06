@@ -50,15 +50,15 @@ def retrieve_op_stats(models:dict[str, tuple[Path, Path]]) -> dict:
   return ret
 
 if __name__ == "__main__":
-  do_check = getenv("CHECK_OPS")
-  do_validate = getenv("VALIDATE")
+  do_check = getenv("CHECK_OPS", "")
+  do_validate = getenv("VALIDATE", "")
   debug_model_path = getenv("MODELPATH", "")
   truncate = getenv("TRUNCATE", -1)
   assert do_check or do_validate or debug_model_path, \
     """
     Please provide either environment variable `VALIDATE`, `CHECK_OPS`, or `MODELPATH`:
-    - 'CHECK_OPS=1' (to check ops for repos in "huggingface_repos.yaml" and print out a report)
-    - 'VALIDATE=1' (to validate correctness for repos in "huggingface_repos.yaml")
+    - 'CHECK_OPS=huggingface_repos.yaml' (to check support for a given yaml and print out the report)
+    - 'VALIDATE=huggingface_repos.yaml' (to validate correctness a given yaml)
     - 'MODELPATH=google-bert/bert-base-uncased/model.onnx' (to debug run validation on a single model)
       - optionally use 'TRUNCATE=50' with 'MODELPATH' to validate intermediate results"""
 
