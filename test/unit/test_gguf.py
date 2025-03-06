@@ -102,3 +102,6 @@ class TestGGUF(unittest.TestCase):
       if (get_fn := gguf_val_getters[v_type]) is not None: self.assertEqual(get_fn(gguf_ctx, gguf_key_id), v)
 
     ggml.gguf_free(gguf_ctx)
+
+if __name__ == '__main__':
+  unittest.main()

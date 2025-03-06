@@ -64,9 +64,9 @@ class TestConvSpeed(unittest.TestCase):
       x = x.reshape(shape=(x.shape[0], -1))
       out = x.dot(l1).log_softmax()
       out = out.mean()
+      out.backward()  # NOTE: we have to now compute this here, but it doesn't realize
       out.realize()
       et1 = time.time()
-      out.backward()
       [x.grad.realize() for x in [c1, c2, l1]]
       et2 = time.time()
       if i == 0:
