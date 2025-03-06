@@ -88,12 +88,12 @@ def validate_model(model, tokenizer):
     start_pos += 1
   tok = toks[-1]
   result = ""
+  expected = "How's it going?"
   while True:
     tok = run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).item()
     start_pos += 1
-    if tok in tokenizer.stop_tokens: break
+    if tok in tokenizer.stop_tokens or len(result) > len(expected): break
     result += tokenizer.decode([tok])
-  expected = "How's it going?"
   assert result == expected, f"Model validation failed, expected output: {expected}, actual output: {result}"
 
 if __name__=="__main__":
