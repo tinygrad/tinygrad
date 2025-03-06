@@ -1,4 +1,4 @@
-import onnx, yaml, tempfile, time, collections, gc, pprint
+import onnx, yaml, tempfile, time, collections, pprint
 from pathlib import Path
 from tinygrad.helpers import getenv
 from extra.onnx import OnnxRunner, get_onnx_ops
