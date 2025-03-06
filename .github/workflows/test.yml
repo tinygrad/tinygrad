@@ -664,6 +664,9 @@ jobs:
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+      - name: Run macOS-specific unit test
+        if: matrix.backend == 'cpu'
+        run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
 
 # ****** Windows Tests ******
 
