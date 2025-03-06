@@ -598,9 +598,9 @@ jobs:
       uses: actions/cache@v3
       with:
         path: |
-          ~/Library/Caches/pip
-          venv/
-          .venv/
+          ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
+          /Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages
+          ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
         key: ${{ env.CACHE_KEY }}
     - name: Run test
       env: ${{ matrix.test.env }}
