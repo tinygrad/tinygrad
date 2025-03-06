@@ -252,8 +252,10 @@ def get_whitening_parameters(patches):
     # the most significant features of the inputs each have their own axis. This significantly cleans things up for the
     # rest of the neural network and speeds up training.
     n,c,h,w = patches.shape
-    est_covariance = torch.cov(patches.view(n, c*h*w).t())
-    eigenvalues, eigenvectors = np.linalg.eigh(est_covariance.cpu().numpy(), UPLO='U')
+    x = patches.view(n, c*h*w).t()
+    est_covariance = np.cov(x.cpu().numpy()) # torch.cov does not work
+    # est_covariance = torch.cov(x)
+    eigenvalues, eigenvectors = np.linalg.eigh(est_covariance, UPLO='U')
     # eigenvalues, eigenvectors = torch.linalg.eigh(est_covariance, UPLO='U') # this is the same as saying we want our eigenvectors, with the specification that the matrix be an upper triangular matrix (instead of a lower-triangular matrix)
     eigenvalues = torch.tensor(eigenvalues, device=device, dtype=patches.dtype).flip(0).view(-1, 1, 1, 1)
     eigenvectors = torch.tensor(eigenvectors, device=device, dtype=patches.dtype).t().reshape(c*h*w,c,h,w).flip(0)

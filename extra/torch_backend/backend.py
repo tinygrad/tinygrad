@@ -349,6 +349,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": lambda x, y: x.assign(x | y),
   "aten.multinomial": Tensor.multinomial,
+  # "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
@@ -382,7 +383,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
   "aten.detach": Tensor.detach,
-  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
+  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.unfold": Tensor.unfold,
+  "aten.equal": Tensor.__eq__,
 }}
 
 def wrap_fxn(k,f):

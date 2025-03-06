@@ -658,9 +658,40 @@ class Tensor(SimpleMathTrait):
     Returns a tensor with all slices of size `size` from `self` in the dimension `dimension`.
 
     If sizedim is the size of dimension dimension for self, the size of dimension dimension in the returned tensor will be (sizedim - size) / step + 1.
+
+    take the current dim and change that dim to be of size reshape it to be of (size, d//size + 1). then collect every stepth row/col/tensor along the size dimension
+
+    helpful diagram: https://stackoverflow.com/questions/53972159/how-does-pytorchs-fold-and-unfold-work
+
+    reshape (d0, d1) to be (d0, size, ceildiv(d1, size)).
+    how many time sdo I need to repeat the [2,7]?
+    it is size=2 number of times
+    the first time [2,7] is in spot=1 and the secone time it is in spot=0. it goes in reverse.
+
+    if unfolding along dim=1, duplicate along dim=0 and concats
     """
     dim = self._resolve_dim(dim)
+    if size < 0: raise ValueError(f'size must be >= 0 but got {size=}')
+    if step <= 0: raise ValueError(f'step must be >0 but got {step=}')
     if size > self.shape[dim]: raise ValueError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
+
+    dim_size = self.shape[dim]
+    num_slices = (dim_size - size) // step + 1
+    slices = [self[(slice(None),)*dim + (slice(i*step, i*step+size),)] for i in range(num_slices)]
+    return Tensor.stack(*slices, dim=dim)
+
+    # shape = self.shape
+    # x = Tensor.cat(*[self for _ in range(size)], dim=0)
+    # ic(x.numpy())
+    # x = x.reshape(size, shape[0], -1)
+    # ic(x.numpy())
+
+    # shape = self.shape[:dim] + (ceildiv(self.shape[dim], size), size) + self.shape[dim+1:]
+    # ic(shape)
+    # self = self.reshape(shape).transpose(0, dim)
+    # ic(self.numpy())
+    # return self[::step+1]
+    # return self.transpose(dim, -1).reshape(..., size, ceildiv(self.shape[dim], size))
     indices = Tensor.arange(0, self.shape[dim], step)
     ic(indices.numpy())
     return self[indices]
