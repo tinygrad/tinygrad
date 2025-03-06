@@ -28,6 +28,22 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 
+# in place operations with views
+def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is not None
+def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
+  assert self.device.type == "tiny"
+  b = unwrap(self)
+  b.replace(b.clone().realize())
+  for v in views:
+    v = unwrap(v)
+    ret = b
+    for mo in to_movement_ops(v.lazydata.st): ret = apply_mop(ret, mo)
+    v.replace(ret).realize()
+def maybe_realize_storage(self: torch.Tensor) -> bool:
+  if realize:=is_view(self):
+    realize_with_views(self._base, [self]) # TODO: other views could exist
+  return realize
+
 # *** bad functions on CPU ***
 
 @torch.library.impl("aten::masked_select", "privateuseone")
@@ -57,13 +73,19 @@ def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n,
 
 @torch.library.impl("aten::zero_", "privateuseone")
 def zero_(x):
+  if TORCH_DEBUG: print(f"zero_ {x.shape}")
+  realize = maybe_realize_storage(x) # TODO: wrap all possible out func
   tt = unwrap(x)
-  tt.replace(tt.zeros_like())
+  tt.assign(tt.zeros_like().contiguous()) # TODO: should only be contig when out is contig
+  if realize: tt.realize()
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
 def fill_scalar(x, y):
+  if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
+  realize = maybe_realize_storage(x)
   tt = unwrap(x)
-  tt.replace(tt.full_like(y))
+  tt.assign(tt.full_like(y).contiguous()) # TODO: should only be contig when out is contig
+  if realize: tt.realize()
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
@@ -95,7 +117,7 @@ def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=Fals
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
   if TORCH_DEBUG: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()))
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())).contiguous()
   return wrap(ret)
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
