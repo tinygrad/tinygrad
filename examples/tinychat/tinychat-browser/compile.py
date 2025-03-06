@@ -66,9 +66,13 @@ def prepare_browser_chunks(model):
   # compute hashes, which client app will check to determine whether to update with new weights and/or detect integrity issues
   state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"state_dict": metadata, "state_dict_hash": state_dict_hash, "files": []}
+  hashes = set()
   for i in range(len(files)):
     with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.chunk'), "rb") as reader:
-      metadata["files"].append({"name": f'net_part{i}.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
+      hash = hashlib.sha256(reader.read()).hexdigest()
+      hashes.add(hash)
+      metadata["files"].append({"name": f'net_part{i}.chunk', "hash": hash})
+  if len(hashes) != len(files): print(f"WARNING: {len(files)} files were exported, but only {len(hashes)} are unique: something may have gone wrong")
   metadata_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"metadata": metadata, "metadata_hash": metadata_hash}
 
