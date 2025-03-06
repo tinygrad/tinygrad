@@ -225,14 +225,17 @@ class X86Renderer(Renderer):
           mov_to_stack(u)
       # casting to <= int or src is uint32 (already zero extended) is a noop
       elif u.op is Ops.CAST and dtypes.is_int(u.dtype) and u.src[0].dtype in (dtypes.bool,) + dtypes.ints \
-            and (u.dtype.itemsize <= u.src[0].dtype.itemsize or u.src[0].dtype is dtypes.uint32): r[u] = r[u.src[0]]
+            and (u.dtype.itemsize <= u.src[0].dtype.itemsize or u.src[0].dtype is dtypes.uint32):
+        r[u] = r[u.src[0]]
+        if u.src[0] in mem: mem[u] = mem[u.src[0]]
       # bitcasting between unsigned/signed is a noop
       elif u.op is Ops.BITCAST and dtypes.is_int(u.dtype) and dtypes.is_int(u.src[0].dtype) and u.dtype.itemsize == u.src[0].dtype.itemsize:
         r[u] = r[u.src[0]]
+        if u.src[0] in mem: mem[u] = mem[u.src[0]]
       else:
         for s in u.src: # mov srcs
-          # these can't take imm values
-          if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
+          # these can't take imm values, #NOTE: cmp can take imm as the second operand
+          if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.CMPNE): mov_to_reg(s, assign_reg(i, s.dtype))
           elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
