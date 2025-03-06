@@ -145,7 +145,7 @@ else:
     ## This is effectively instantaneous, and takes us practically straight to where the dataloader-loaded dataset would be. :)
     ## So as long as you run the above loading process once, and keep the file on the disc it's specified by default in the above
     ## hyp dictionary, then we should be good. :)
-    data = torch.load(hyp['misc']['data_location'])
+    data = torch.load(hyp['misc']['data_location'], weights_only=False)
 
 ## As you'll note above and below, one difference is that we don't count loading the raw data to GPU since it's such a variable operation, and can sort of get in the way
 ## of measuring other things. That said, measuring the preprocessing (outside of the padding) is still important to us.
