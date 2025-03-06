@@ -13,6 +13,7 @@ from functools import partial
 import math
 import os
 import copy
+import time
 
 import torch
 import numpy as np
@@ -23,7 +24,8 @@ import torchvision
 from torchvision import transforms
 from tinygrad import getenv
 
-from icecream import ic
+from icecream import ic, install
+install()
 
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("mps")
@@ -447,6 +449,9 @@ def batch_cutmix(inputs, targets, patch_size):
 def batch_crop(inputs, crop_size):
     with torch.no_grad():
         crop_mask_batch = make_random_square_masks(inputs, crop_size)
+        #  inputs.cpu().shape: torch.Size([50000, 3, 36, 36])
+        # crop_mask_batch.cpu().shape: torch.Size([50000, 1, 36, 36])
+        ic(inputs.cpu().shape, crop_mask_batch.cpu().shape)
         cropped_batch = torch.masked_select(inputs, crop_mask_batch).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
         return cropped_batch
 
@@ -511,7 +516,6 @@ def init_split_parameter_dictionaries(network):
     params_bias     = {'params': [], 'lr': hyp['opt']['bias_lr'],     'momentum': .85, 'nesterov': True, 'weight_decay': hyp['opt']['bias_decay'], 'foreach': True}
 
     for name, p in network.named_parameters():
-        ic(name, p.requires_grad)
         if p.requires_grad:
             if 'bias' in name:
                 params_bias['params'].append(p)
@@ -597,7 +601,7 @@ def main():
           # Training Mode #
           #################
         #   torch.cuda.synchronize()
-          starter.record()
+          st = time.monotonic()
           net.train()
 
           loss_train = None
@@ -643,9 +647,9 @@ def main():
                   # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
                   net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
 
-          ender.record()
+          et = time.monotonic()
         #   torch.cuda.synchronize()
-          total_time_seconds += 1e-3 * starter.elapsed_time(ender)
+          total_time_seconds += 1e-3 * (et-st)
 
           ####################
           # Evaluation  Mode #

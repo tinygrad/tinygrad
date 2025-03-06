@@ -33,7 +33,11 @@ torch.utils.generate_methods_for_privateuse1_backend()
 @torch.library.impl("aten::masked_select", "privateuseone")
 def masked_select(self, mask):
   # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
+  import numpy as np
+  t, m = self.cpu().numpy(), mask.cpu().numpy()
+  # need to explicitly broadcast the mask
+  m = np.broadcast_to(m, t.shape)
+  return wrap(Tensor(t[m]))
 
 @torch.library.impl("aten::topk", "privateuseone")
 def topk(self, k, dim=-1, largest=True, sorted=True):
