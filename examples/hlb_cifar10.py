@@ -332,7 +332,7 @@ def train_cifar():
 
   def eval_step(model, X, Y):
     out = model(X, training=False)
-    loss = cross_entropy(out, Y, reduction='mean')
+    loss = Tensor.cross_entropy(out, Y, reduction='mean')
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
     return correct.realize(), loss.realize()
   eval_step_jitted     = TinyJit(eval_step)
