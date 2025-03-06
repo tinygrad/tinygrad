@@ -25,6 +25,7 @@ from torchvision import transforms
 from tinygrad import getenv
 
 from icecream import ic, install
+ic.configureOutput(includeContext=True)
 install()
 
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch

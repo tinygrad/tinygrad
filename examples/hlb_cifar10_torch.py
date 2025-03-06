@@ -13,7 +13,9 @@ from tinygrad.helpers import prod
 from tinygrad.nn.datasets import cifar
 import torch.nn.functional as F
 
-from icecream import ic
+from icecream import ic, install
+ic.configureOutput(includeContext=True)
+install()
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -25,22 +27,25 @@ assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven mu
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
-device = torch.device("tiny" if getenv("TINY_BACKEND") else "mps")
+device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("mps")
 
 def sequential(ll, x):
   return functools.reduce(lambda x,f: f(x), ll, x)
 
-class UnsyncedBatchNorm:
+class UnsyncedBatchNorm(nn.Module):
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
+    super().__init__()
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
     self.num_devices = num_devices
 
-    if affine: self.weight, self.bias = torch.ones(sz, dtype=torch.float32), torch.zeros(sz, dtype=torch.float32)
+    if affine: self.weight, self.bias = nn.Parameter(torch.ones(sz, dtype=torch.float32)), nn.Parameter(torch.zeros(sz, dtype=torch.float32))
     else: self.weight, self.bias = None, None
 
-    self.running_mean = torch.zeros(num_devices, sz, dtype=torch.float32, requires_grad=False)
-    self.running_var = torch.ones(num_devices, sz, dtype=torch.float32, requires_grad=False)
-    self.num_batches_tracked = torch.zeros(1, dtype=torch.int, requires_grad=False)
+    self.register_buffer('running_mean', torch.zeros(num_devices, sz, dtype=torch.float32, requires_grad=False))
+    self.register_buffer('running_var', torch.ones(num_devices, sz, dtype=torch.float32, requires_grad=False))
+    self.register_buffer('num_batches_tracked', torch.zeros(1, dtype=torch.int, requires_grad=False))
+
+    ic(self.weight.requires_grad, self.bias.requires_grad)
 
   def forward(self, x:torch.Tensor):
     xr = x.reshape(self.num_devices, -1, *x.shape[1:]).to(torch.float32)
@@ -78,6 +83,7 @@ class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.requires_grad = False
     self.bias.requires_grad = True
+    ic(self.weight.requires_grad, self.bias.requires_grad)
 
 class QuickGelu(nn.Module):
   def __init__(self): super().__init__()
@@ -202,17 +208,6 @@ def train_cifar():
     W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
     return torch.tensor(W.astype(np.float32), requires_grad=False).to(torch.float) # used to be dtypes.default_float
-
-  # ========== Loss ==========
-  def cross_entropy(x:torch.Tensor, y:torch.Tensor, reduction:str='mean', label_smoothing:float=0.0) -> torch.Tensor:
-    divisor = y.shape[1]
-    assert isinstance(divisor, int), "only supported int divisor"
-    y = (1 - label_smoothing)*y + label_smoothing / divisor
-    ret = -x.log_softmax(axis=1).mul(y).sum(axis=1)
-    if reduction=='none': return ret
-    if reduction=='sum': return ret.sum()
-    if reduction=='mean': return ret.mean()
-    raise NotImplementedError(reduction)
 
   # ========== Preprocessing ==========
   # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
@@ -340,6 +335,10 @@ def train_cifar():
   #       x.to_(GPUS)
   model.to(device)
 
+  nrm = BatchNorm(5)
+  ic(nrm.weight.requires_grad, nrm.bias.requires_grad)
+  ic([(k, v.requires_grad) for k, v in nrm.state_dict().items()])
+
   # parse the training params into bias and non-bias
   params_dict = model.state_dict()
   params_bias = []
@@ -353,6 +352,7 @@ def train_cifar():
         params_non_bias.append(params_dict[params])
 
   ic(params_bias, params_non_bias)
+
 
   opt_bias = optim.SGD(params_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
