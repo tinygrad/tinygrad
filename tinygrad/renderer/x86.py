@@ -226,6 +226,9 @@ class X86Renderer(Renderer):
       # casting to <= int or src is uint32 (already zero extended) is a noop
       elif u.op is Ops.CAST and dtypes.is_int(u.dtype) and u.src[0].dtype in (dtypes.bool,) + dtypes.ints \
             and (u.dtype.itemsize <= u.src[0].dtype.itemsize or u.src[0].dtype is dtypes.uint32): r[u] = r[u.src[0]]
+      # bitcasting between unsigned/signed is a noop
+      elif u.op is Ops.BITCAST and dtypes.is_int(u.dtype) and dtypes.is_int(u.src[0].dtype) and u.dtype.itemsize == u.src[0].dtype.itemsize:
+        r[u] = r[u.src[0]]
       else:
         for s in u.src: # mov srcs
           # these can't take imm values
