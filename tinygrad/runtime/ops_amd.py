@@ -23,8 +23,8 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
-def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
-def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
+def gfxreg(reg): return reg + amd_gpu.GC_BASE__INST0_SEG0 - amd_gpu.PACKET3_SET_SH_REG_START
+def nbioreg(reg): return reg + amd_gpu.NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
   def __init__(self, base_addr:int|None=None, **kwargs):
@@ -149,7 +149,7 @@ class AMDComputeQueue(HWQueue):
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
-    dev.compute_queue.signal_doorbell()
+    dev.compute_queue.signal_doorbell(dev)
 
 class AMDCopyQueue(HWQueue):
   def __init__(self, max_copy_size=0x40000000):
@@ -233,7 +233,7 @@ class AMDCopyQueue(HWQueue):
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
-    dev.sdma_queue.signal_doorbell()
+    dev.sdma_queue.signal_doorbell(dev)
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -294,11 +294,14 @@ class AMDQueueDesc:
   doorbell: memoryview
   put_value: int = 0
 
-  def signal_doorbell(self):
+  def signal_doorbell(self, dev):
     self.write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
     if CPUProgram.atomic_lib is not None: CPUProgram.atomic_lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5)
+
+    # Flush hdp if queue is in dev mem.
+    if dev.driverless and getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1): dev.dev_iface.adev.gmc.flush_hdp()
     self.doorbell[0] = self.put_value
 
 class KFDIface:
@@ -451,7 +454,8 @@ class PCIIface:
       HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
 
     supported_sizes = int(HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDONLY).read(), 16)
-    HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
+    try: HWInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
+    except OSError as e: raise RuntimeError(f"Cannot resize BAR: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     # Try to init vfio. Use it if success.
     if PCIIface.vfio:
@@ -581,7 +585,7 @@ class AMDDevice(HCQCompiled):
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
     vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE) if self.target//10000 != 10 else 0x7000
     debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,

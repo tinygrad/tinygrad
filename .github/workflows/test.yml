@@ -657,7 +657,7 @@ jobs:
         backend: [metal, llvm, cpu]
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

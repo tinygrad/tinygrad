@@ -75,7 +75,7 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
     c = a == b
-    print(c.cpu().numpy())
+    print(c.cpu())
 
   def test_maxpool2d_backward(self):
     x = torch.arange(3*3, device=device).reshape(1, 1, 3, 3).requires_grad_(True)
@@ -86,10 +86,10 @@ class TestTorchBackend(unittest.TestCase):
     x = torch.zeros(4, device=device, dtype=torch.int64)
     y = torch.ones(4, device=device, dtype=torch.float32).to(dtype=torch.int64)
     res1 = x ^ y # an operation that only works on int types
-    print(res1.cpu().numpy())
+    print(res1.cpu())
     y = y.cpu().float().to(device=device, dtype=torch.int64)
     res2 = x ^ y
-    print(res2.cpu().numpy())
+    print(res2.cpu())
 
   @unittest.skip("meh")
   def test_str(self):
