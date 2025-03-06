@@ -62,3 +62,5 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
     tiny_v, onnx_v = tinygrad_out[k], ort_out[k]
     if tiny_v is None: assert onnx_v is None, f"{k}: {tiny_v=}, {onnx_v=}"
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
+
+  del run_onnx, ort_sess
