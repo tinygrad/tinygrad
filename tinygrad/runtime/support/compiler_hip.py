@@ -1,7 +1,6 @@
-import ctypes, subprocess, tempfile
+import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.runtime.ops_llvm import LLVMCompiler
-from tinygrad.runtime.support.llvm import get_lld_path
 from tinygrad.device import Compiler, CompileError
 
 def check(status):
@@ -75,12 +74,4 @@ class AMDLLVMCompiler(AMDCompiler):
     self.llvm_compiler = LLVMCompiler("AMDGPU", arch)
   def __reduce__(self): return (AMDLLVMCompiler,(self.arch,))
   def compile(self, src:str) -> bytes:
-    try:
-      relo = self.llvm_compiler.compile(src, load=False)
-      with tempfile.NamedTemporaryFile(delete=True) as f:
-        f.write(relo)
-        f.flush()
-        args = [f.name, "--no-undefined", "-shared", "-o", "-"]
-        obj = subprocess.check_output([get_lld_path(), *args])
-        return obj
-    except RuntimeError as e: raise CompileError(e) from e
+    return self.llvm_compiler.compile(src, load=False)
