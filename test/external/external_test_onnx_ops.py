@@ -27,6 +27,16 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["out"]
     self.helper_test_single_op("Reshape", inputs, attributes, outputs)
 
+  def test_conv(self):
+    inputs = {
+      "x": np.random.randn(1, 3, 384, 384).astype(np.float32),
+      "w": np.random.randn(1152, 3, 14, 14).astype(np.float32),
+      "b": np.random.randn(1152).astype(np.float32)
+    }
+    attributes = {'auto_pad': 'VALID', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (14, 14), 'strides': (14, 14)}
+    outputs = ["y"]
+    self.helper_test_single_op("Conv", inputs, attributes, outputs)
+
   def test_quantize_linear(self):
     test_cases = [
       {"test_case": "round_half_to_even", "qdtype": np.int8, "qzero_point": 0, "x": [-1.5, -0.5, 0.5, 1.5], "scale": 1.0},

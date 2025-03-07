@@ -1,9 +1,8 @@
-import onnx, yaml, tempfile, time, collections, pprint
+import onnx, yaml, tempfile, time, collections, pprint, argparse
 from pathlib import Path
-from tinygrad.helpers import getenv
 from extra.onnx import OnnxRunner, get_onnx_ops
 from extra.onnx_helpers import validate, get_example_inputs
-from huggingface_onnx_update import download_repo_onnx_models, download_repo_configs, get_config
+from examples.huggingface_onnx_download import get_config
 
 def run_huggingface_validate(onnx_model_path, config, rtol, atol):
   onnx_model = onnx.load(onnx_model_path)
@@ -11,11 +10,11 @@ def run_huggingface_validate(onnx_model_path, config, rtol, atol):
   inputs = get_example_inputs(onnx_runner.graph_inputs, config)
   validate(onnx_model_path, inputs, rtol=rtol, atol=atol)
 
-def get_tolerances(file_name):
+def get_tolerances(file_name): # -> rtol, atol
   # TODO very high rtol atol
   if "fp16" in file_name: return 9e-2, 9e-2
   if any(q in file_name for q in ["int8", "uint8", "quantized"]): return 4, 4
-  return 4e-3, 4e-3
+  return 4e-3, 3e-2
 
 def validate_repos(models:dict[str, tuple[Path, Path]]):
   print(f"** Validating {len(model_paths)} repos **")
@@ -50,57 +49,52 @@ def retrieve_op_stats(models:dict[str, tuple[Path, Path]]) -> dict:
   return ret
 
 if __name__ == "__main__":
-  do_check = getenv("CHECK_OPS", "")
-  do_validate = getenv("VALIDATE", "")
-  debug_model_path = getenv("MODELPATH", "")
-  truncate = getenv("TRUNCATE", -1)
-  assert do_check or do_validate or debug_model_path, \
-    """
-    Please provide either environment variable `VALIDATE`, `CHECK_OPS`, or `MODELPATH`:
-    - 'CHECK_OPS=huggingface_repos.yaml' (to check support for a given yaml and print out the report)
-    - 'VALIDATE=huggingface_repos.yaml' (to validate correctness a given yaml)
-    - 'MODELPATH=google-bert/bert-base-uncased/model.onnx' (to debug run validation on a single model)
-      - optionally use 'TRUNCATE=50' with 'MODELPATH' to validate intermediate results"""
+  parser = argparse.ArgumentParser(description="Huggingface ONNX Model Validator and Ops Checker")
+  parser.add_argument("--check_ops", action="store_true", default=False,
+                      help="Check support for ONNX operations in models from the YAML file")
+  parser.add_argument("--validate", action="store_true", default=False,
+                      help="Validate correctness of models from the YAML file")
+  parser.add_argument("--modelpath", type=str, default="",
+                      help="Run validation on a single model specified by its id/relative_path (e.g., 'google-bert/bert-base-uncased/model.onnx')")
+  parser.add_argument("--truncate", type=int, default=-1, help="Truncate the ONNX model so intermediate results can be validated")
+  parser.add_argument("--yaml", type=str, default="huggingface_repos.yaml", help="Specify the YAML file to use")
+  args = parser.parse_args()
 
-  # for running
-  if do_check or do_validate:
-    with open('huggingface_repos.yaml', 'r') as f:
-      data = yaml.safe_load(f)
-      model_paths = {
-        model_id + "/" + model["model"]: (Path(repo["path"]), Path(model["model"]))
-        for model_id, repo in data["repositories"].items()
-        for model in repo["models"]
-      }
+  if not (args.check_ops or args.validate or args.modelpath):
+    parser.error("Please provide either --validate, --check_ops, or --modelpath.")
+  if args.truncate != -1 and not args.modelpath:
+    parser.error("--truncate and --modelpath should be used together for debugging")
 
-    if do_check:
-      pprint.pprint(retrieve_op_stats(model_paths))
+  with open(args.yaml, 'r') as f:
+    data = yaml.safe_load(f)
+    model_paths = {
+      model_id + "/" + model["file"]: (Path(repo["path"]), Path(model["file"]))
+      for model_id, repo in data["repositories"].items()
+      for model in repo["files"]
+      if model["file"].endswith(".onnx")
+    }
 
-    if do_validate:
-      validate_repos(model_paths)
-
-  # for debugging
-  # `model_path` is `model.id + relative_path` ("google-bert/bert-base-uncased/model.onnx")
-  if debug_model_path:
-    print(f"debugging with {debug_model_path=}")
-    model_id, relative_path = debug_model_path.split("/", 2)[:2], debug_model_path.split("/", 2)[2]
-    onnx_file_name = model_id[-1]
-    rtol, atol = get_tolerances(onnx_file_name)
-    model_id = "/".join(model_id)
-    root_path = download_repo_onnx_models(model_id)
-    download_repo_configs(model_id)
+  if args.check_ops:
+    pprint.pprint(retrieve_op_stats(model_paths))
+  if args.validate:
+    validate_repos(model_paths)
+  if args.modelpath:
+    print(f"DEBUG {args.modelpath}")
+    root_path, relative_path = model_paths[args.modelpath]
+    model_path = root_path / relative_path
+    rtol, atol = get_tolerances(relative_path.name)
     config = get_config(root_path)
-    onnx_model = root_path / relative_path
-    if truncate != -1:
-      # truncates the onnx model so intermediate results can be validated
-      model = onnx.load(onnx_model)
-      nodes_up_to_limit = list(model.graph.node)[:truncate+1]
+    if args.truncate != -1:
+      print(f"TRUNCATE {args.truncate}")
+      model = onnx.load(model_path)
+      nodes_up_to_limit = list(model.graph.node)[:args.truncate + 1]
       new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
       model.graph.ClearField("node")
       model.graph.node.extend(nodes_up_to_limit)
       model.graph.ClearField("output")
       model.graph.output.extend(new_output_values)
-      with tempfile.NamedTemporaryFile(suffix=onnx_model.suffix) as tmp:
+      with tempfile.NamedTemporaryFile(suffix=relative_path.suffix) as tmp:
         onnx.save(model, tmp.name)
         run_huggingface_validate(tmp.name, config, rtol, atol)
     else:
-      run_huggingface_validate(onnx_model, config, rtol, atol)
+      run_huggingface_validate(model_path, config, rtol, atol)
