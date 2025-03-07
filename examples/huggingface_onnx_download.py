@@ -22,18 +22,8 @@ SKIPPED_REPO_PATHS = [
   "stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/sdxl-turbo", 'SimianLuo/LCM_Dreamshaper_v7',
   # TODO: implement NonZero
   "mangoapps/fb_zeroshot_mnli_onnx",
-
-
-
-  # "llava-hf/llava-onevision-qwen2-0.5b-ov-hf",
-  # "distil-whisper/distil-large-v2", "distil-whisper/distil-large-v3", "SimianLuo/LCM_Dreamshaper_v7", "openai-community/gpt2-large",
-
-  # # TODO MOD bug with const folding
-  # # There's a huge concat in here with 1024 shape=(1, 3, 32, 32) Tensors
-  # "briaai/RMBG-2.0",
-
-  # # invalid model index
-  # "NTQAI/pedestrian_gender_recognition"
+  # TODO huge Concat in here with 1024 (1, 3, 32, 32) Tensors, and maybe a MOD bug with const folding
+  "briaai/RMBG-2.0",
 ]
 
 def download_repo_onnx_models(model_id: str, download_dir:str):

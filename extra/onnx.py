@@ -674,7 +674,8 @@ def get_onnx_ops():
       x_sh = list(x.shape)
       ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
       if indices.ndim > 1: indices = indices.flatten()
-      indices = [_cached_to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in _cached_to_python_const(indices)]
+      indices = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
+      indices = [x_sh[axis]+x if x<0 else x for x in indices]
       args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices] # type: ignore
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
     # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot

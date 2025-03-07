@@ -14,9 +14,10 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
         case "width" | "height":
           size = config.get("size", {})
           shape.append(size) if isinstance(size, int) else shape.append(size.get(onnx_dim, 224))
-        case "sequence" | "sequence_length" | "decoder_sequence_length" | "encoder_sequence_length": shape.append(16)
-        case "past_decoder_sequence_length" | "encoder_sequence_length_out": shape.append(16)
-        case "encoder_sequence_length / 2": shape.append(8)
+        case "sequence" | "sequence_length" | "decoder_sequence_length": shape.append(64)
+        case "encoder_sequence_length": shape.append(config.get("nb_max_frames", 64))
+        case "past_decoder_sequence_length" | "encoder_sequence_length_out": shape.append(64)
+        case "encoder_sequence_length / 2": shape.append(32)
         case "batch_size": shape.append(1)
         case "num_channels": shape.append(config.get("in_channels", 3))
         case "num_channels_latent": shape.append(config.get("latent_channels", 4))

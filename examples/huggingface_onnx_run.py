@@ -54,16 +54,16 @@ if __name__ == "__main__":
                       help="Check support for ONNX operations in models from the YAML file")
   parser.add_argument("--validate", action="store_true", default=False,
                       help="Validate correctness of models from the YAML file")
-  parser.add_argument("--modelpath", type=str, default="",
-                      help="Run validation on a single model specified by its id/relative_path (e.g., 'google-bert/bert-base-uncased/model.onnx')")
+  parser.add_argument("--debug", type=str, default="",
+                      help="provide id/relative_path (e.g., 'google-bert/bert-base-uncased/model.onnx') to run validation on a single model")
   parser.add_argument("--truncate", type=int, default=-1, help="Truncate the ONNX model so intermediate results can be validated")
   parser.add_argument("--yaml", type=str, default="huggingface_repos.yaml", help="Specify the YAML file to use")
   args = parser.parse_args()
 
-  if not (args.check_ops or args.validate or args.modelpath):
-    parser.error("Please provide either --validate, --check_ops, or --modelpath.")
-  if args.truncate != -1 and not args.modelpath:
-    parser.error("--truncate and --modelpath should be used together for debugging")
+  if not (args.check_ops or args.validate or args.debug):
+    parser.error("Please provide either --validate, --check_ops, or --debug.")
+  if args.truncate != -1 and not args.debug:
+    parser.error("--truncate and --debug should be used together for debugging")
 
   with open(args.yaml, 'r') as f:
     data = yaml.safe_load(f)
@@ -76,11 +76,13 @@ if __name__ == "__main__":
 
   if args.check_ops:
     pprint.pprint(retrieve_op_stats(model_paths))
+
   if args.validate:
     validate_repos(model_paths)
-  if args.modelpath:
-    print(f"DEBUG {args.modelpath}")
-    root_path, relative_path = model_paths[args.modelpath]
+
+  if args.debug:
+    print(f"DEBUG {args.debug}")
+    root_path, relative_path = model_paths[args.debug]
     model_path = root_path / relative_path
     rtol, atol = get_tolerances(relative_path.name)
     config = get_config(root_path)
