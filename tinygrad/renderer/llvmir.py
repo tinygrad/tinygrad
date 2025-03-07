@@ -116,6 +116,7 @@ class LLVMRenderer(Renderer):
   supports_float4 = True
   has_local = False
   has_shared = False
+  global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite
   if AMX: tensor_cores = ClangRenderer.amx_tc
 
@@ -204,6 +205,7 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_local = True
   has_shared = True
   shared_max = AMDRenderer.shared_max
+  global_max = Renderer.global_max
   abi = "protected amdgpu_kernel"
   string_rewrite = base_rewrite + PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
