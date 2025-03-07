@@ -223,8 +223,8 @@ class AMMemoryManager:
       paddrs = []
       ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
-        # Try to allocate as long as possible
         while seg_cnt > 0:
+          # Try to allocate as long segment (power of 2) as possible
           cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
           while cont_seg_sz >= seg_size:
             try: paddr = self.palloc(cont_seg_sz, zero=True)
@@ -247,7 +247,7 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    if zero and paddr is not None: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
+    if zero: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)

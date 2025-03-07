@@ -88,7 +88,6 @@ class TLSFAllocator:
           if nsize > req_size: self._split_block(start, nsize, req_size)
           self._remove_block(start, req_size) # Mark the block as allocated.
           return start + self.base
-
     raise MemoryError(f"Can't allocate {req_size} bytes")
 
   def free(self, start:int):
