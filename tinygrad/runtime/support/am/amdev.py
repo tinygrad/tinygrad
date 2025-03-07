@@ -175,6 +175,14 @@ class AMMemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
+  def _frag_size(self, va, sz, must_cover=True):
+    """
+    Calculate the tlb fragment size for a given virtual address and size.
+    If must_cover is True, the fragment size must cover the size, otherwise the biggest fragment size that fits the size is returned.
+    """
+    va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
+    return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 13
+
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
     if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
@@ -185,8 +193,8 @@ class AMMemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
           assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
-          frg = min(((vaddr+off) & -(vaddr+off)).bit_length() - 1, (pte_cnt * pte_covers).bit_length() - 1) - 12
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped, frag=frg, valid=True)
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
+                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
@@ -216,7 +224,7 @@ class AMMemoryManager:
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
         # Try to allocate as long as possible
         while seg_cnt > 0:
-          cont_seg_sz, paddr = 1 << min(((va+off) & -(va+off)).bit_length() - 1, (seg_cnt * seg_size).bit_length() - 1), None
+          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
           while cont_seg_sz >= seg_size:
             try: paddr = self.palloc(cont_seg_sz, zero=True)
             except MemoryError: cont_seg_sz //= 2
@@ -226,7 +234,7 @@ class AMMemoryManager:
           else:
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
             raise MemoryError(f"Failed to allocate {cont_seg_sz=:#x} bytes")
-          seg_cnt -= cont_seg_sz // seg_size
+          seg_cnt, off = seg_cnt - cont_seg_sz // seg_size, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
