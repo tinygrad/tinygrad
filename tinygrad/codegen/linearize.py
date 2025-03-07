@@ -6,7 +6,7 @@ from tinygrad.spec import type_verify
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
-DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
+DONT_PLACE_IN_BLOCK = {Ops.NAME, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
 def disp(y:UOp) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
@@ -70,7 +70,8 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(list(old_blocks.values())+new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
+  (UPat(Ops.SINK, name="x"),
+    lambda x: UOp(Ops.BLOCK, src=x.src+((UOp(Ops.NAME, arg=x.arg.name),) if x.arg is not None else ()), arg=BasicBlock((), (x,)))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
@@ -87,6 +88,9 @@ def block_merge(ctx, x:UOp):
         parent_block = parent_blocks[0]
         # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
         early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+        # NOTE: we have to add a barrier at the start if barrier is used in the range
+        if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
+          late_ops = [UOp(Ops.BARRIER)] + late_ops
         return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
                   BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end), tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)))
 
@@ -112,6 +116,17 @@ def block_merge(ctx, x:UOp):
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
+def block_finalize(block:UOp):
+  if len(block.src) == 0: return None
+  _uops = sorted(dedup(block.src), key=lambda x: x.tuplize)
+  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+  _uops += block.arg.lst
+  # strip the SINK
+  assert _uops[-1].op is Ops.SINK, "doesn't end with SINK"
+  return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops[:-1])))
+
+pm_block_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="block"), block_finalize)])
+
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(in_block:UOp):
   in_this_block = set(in_block.arg.lst)
@@ -125,8 +140,11 @@ def block_reorder(in_block:UOp):
       if s in in_this_block:
         local_children[s].append(u)
         in_degree[u] += 1
-    # put loads in the beginning of the block and prevent priority inversion
-    priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
+    # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
+    priority = [0] + [priorities[x] for x in local_children[u]]
+    if u.op is Ops.LOAD: priority.append(-1000)
+    if u.op is Ops.BARRIER: priority.append(-1500)
+    priorities[u] = min(priority)
 
   # placement queue
   queue:list[tuple[int, tuple, UOp]] = []
@@ -212,14 +230,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   # final rewrite to merge all blocks into one
   sink = graph_rewrite(sink, pm_block_merge, ctx=children)
 
-  # there should just be one block left, with a few parents with 0 srcs
-  assert sink.op is Ops.BLOCK
-  _uops = sorted(dedup(sink.src), key=lambda x: x.tuplize)
-  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
-  _uops += sink.arg.lst
+  # there should just be one block left, with a few parents with 0 srcs (now done in a rewriter)
+  sink = graph_rewrite(sink, pm_block_finalize)
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(_uops)
+  if not skip_check: type_verify(sink.arg.lst)
 
-  # strip the SINK
-  return _uops[:-1]
+  # return the list. TODO: refactor to return the UOp
+  return list(sink.arg.lst)

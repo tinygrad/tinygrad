@@ -4,7 +4,7 @@ from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.ops import UOp, Ops
-from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
+from tinygrad.engine.search import bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
@@ -12,15 +12,15 @@ from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from extra.optimization.helpers import time_linearizer
 
 class TestTimeLinearizer(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WebGPU timestamps are low precision, tm is 0")
   def test_reasonable_time(self):
     a = Tensor([1,2,3,4]).realize()
     si = (a+1).schedule()[0]
-    out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
-    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.toposort if x.op is Ops.LOAD}
-    rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
+    # create fresh empty buffers
+    rawbufs = [Buffer(b.device, b.size, b.dtype).allocate() for b in si.bufs]
     tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 

@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_cuda import PTX
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.codegen.rewriter import full_graph_rewrite
+from tinygrad.codegen.devectorizer import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.dtype import DType
 
@@ -247,7 +247,7 @@ class TestTinygrad(unittest.TestCase):
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_rand_like_device(self):
-    a = Tensor.ones(3, 3, device="CLANG")
+    a = Tensor.ones(3, 3, device="CPU")
     b = Tensor.rand_like(a)
     self.assertEqual(b.device, a.device)
 
@@ -326,7 +326,7 @@ class TestTinygrad(unittest.TestCase):
   def test_tensor_from_blob(self):
     x = memoryview(bytearray(16)).cast('I')
 
-    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CLANG")
+    t = Tensor.from_blob(mv_address(x), (4,), dtype=dtypes.int, device="CPU")
     z = (t+1)
     np.testing.assert_equal(z.numpy(), [1, 1, 1, 1])
 
@@ -695,7 +695,7 @@ class TestZeroShapeTensor(unittest.TestCase):
 class TestTensorCreationDevice(unittest.TestCase):
   # test auxiliary tensors are created on the same device
   def test_one_hot(self):
-    y = Tensor([1, 2, 3]).to("CLANG")
+    y = Tensor([1, 2, 3]).to("CPU")
     x = y.one_hot(10)
     x.realize()
 
@@ -746,6 +746,23 @@ class TestInferenceMode(unittest.TestCase):
 
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
+
+  # NOOPs are not included in kernel metadata
+  def test_exclude_noop_metadata(self):
+    a = Tensor.rand(4, 4)*1
+    self.assertEqual(a.lazydata.metadata.name, "__mul__")
+    k = a.schedule()[-1]
+    self.assertEqual([m.name for m in k.metadata], ["rand"])
+
+  # we exclude const from kernel metadata because tensor methods can share the same CONST UOp
+  @unittest.skip("TODO: flaky")
+  def test_exclude_const_metadata(self):
+    a = Tensor.arange(4)
+    b = Tensor.full((4,), -1, dtype=dtypes.int).contiguous()
+    sched = Tensor.schedule(a, b)
+    self.assertEqual([m.name for m in sched[0].metadata], ["arange"])
+    self.assertEqual([m.name for m in sched[1].metadata], ["contiguous"])
+
   def test_matmul(self):
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)
@@ -802,7 +819,7 @@ class TestIdxUpcast(unittest.TestCase):
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         uops = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(s.ast, renderer), renderer))
-        renderer.render("test", uops)
+        renderer.render(uops)
         return uops
 
   def _assert(self, dtype: DType, a: Tensor):

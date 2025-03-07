@@ -59,7 +59,7 @@ class NVDriver(VirtDriver):
     self.root_handle = None
 
     self.gpus = {}
-    self.next_fd = (1 << 30)
+    self.next_fd = (1 << 29)
     self.next_handle = 1
 
     self.object_by_handle = {}

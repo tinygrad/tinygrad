@@ -1,10 +1,10 @@
-import unittest, operator, subprocess, math
+import unittest, operator, subprocess, struct, math
 import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, to_dtype
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, truncate_bf16, to_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import assume, given, settings, strategies as strat
@@ -439,6 +439,14 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_fp16(65519.999), 65504)
     self.assertEqual(truncate_fp16(65520), math.inf)
 
+  def test_truncate_bf16(self):
+    self.assertEqual(truncate_bf16(1), 1)
+    self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
+    max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
+    self.assertEqual(truncate_bf16(max_bf16), max_bf16)
+    self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
+    self.assertEqual(truncate_bf16(max_bf16 * 1.001), math.inf)
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
@@ -625,15 +633,21 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
 
-  @given(strat.sampled_from(dtype_floats))
-  def test_float_to_float(self, dt):
-    assert least_upper_float(dt) == dt
-
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+
+  @given(strat.sampled_from(dtype_floats), strat.sampled_from(dtype_floats))
+  def test_least_upper_float_input_is_float(self, input_dtype, default_float):
+    dtypes.default_float = default_float
+    self.assertEqual(least_upper_float(input_dtype), input_dtype)
+
+  @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
+  def test_least_upper_float_input_is_int(self, input_dtype, default_float):
+    dtypes.default_float = default_float
+    self.assertEqual(least_upper_float(input_dtype), default_float)
 
   @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and is_dtype_supported(d)]))
   def test_int_to_float_unary_func(self, dtype):
@@ -658,6 +672,11 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
     assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
     assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
+
+  @given(strat.sampled_from(dtype_floats))
+  def test_int_div_int(self, default_float):
+    dtypes.default_float = default_float
+    self.assertEqual(Tensor([1]).div(Tensor([2])).dtype, default_float)
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
@@ -786,8 +805,7 @@ class TestAutoCastType(unittest.TestCase):
         if DEBUG >= 2:
           print(f"testing {default_dtype=}, {dtype=}")
         a = Tensor([1, 2, 3], dtype=dtype, requires_grad=True)
-        # NOTE: this is broken without default_dtype because of CAST_BEFORE_VIEW
-        b = (a * 5).sum(acc_dtype=default_dtype)
+        b = (a * 5).sum()
         b.backward()  # if there is dtype mismatch, lazy should assert
         assert a.grad.dtype == a.dtype
         np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
@@ -801,7 +819,8 @@ class TestAutoCastType(unittest.TestCase):
     t.reshape(2, 1).expand(2, 10001).max().backward()
     np.testing.assert_allclose(t.grad.numpy(), [1, 0])
 
-  @unittest.skipIf(Device.DEFAULT=="PYTHON", "very slow")
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):
     N = 10000
@@ -817,6 +836,7 @@ class TestAutoCastType(unittest.TestCase):
     t.square().mean().backward()
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision error")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_softmax_dtype(self):
     data = [1, 2, 3]

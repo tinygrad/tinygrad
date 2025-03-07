@@ -3,7 +3,7 @@ import numpy as np
 from extra.datasets.imagenet import get_imagenet_categories, get_val_files, center_crop
 from examples.benchmark_onnx import load_onnx_model
 from PIL import Image
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, GlobalCounters
 from tinygrad.helpers import fetch, getenv
 
 # works:
@@ -19,6 +19,7 @@ from tinygrad.helpers import fetch, getenv
 
 # QUANT=1 python3 examples/test_onnx_imagenet.py
 #   https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx
+# DONT_REALIZE_EXPAND=1 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
 # VIZ=1 DONT_REALIZE_EXPAND=1 python3 examples/benchmark_onnx.py /tmp/model.quant.onnx
 
 def imagenet_dataloader(cnt=0):
@@ -65,9 +66,13 @@ if __name__ == "__main__":
   assert t_spec.shape[1:] == (3,224,224), f"shape is {t_spec.shape}"
 
   hit = 0
-  for i,(img,y) in enumerate(imagenet_dataloader(cnt=100)):
+  for i,(img,y) in enumerate(imagenet_dataloader(cnt=getenv("CNT", 100))):
+    GlobalCounters.reset()
     p = run_onnx_jit(**{t_name:img})
     assert p.shape == (1,1000)
     t = p.argmax().item()
     hit += y==t
     print(f"target: {y:3d}  pred: {t:3d}  acc: {hit/(i+1)*100:.2f}%")
+
+  import pickle
+  with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)

@@ -563,8 +563,8 @@ class TestNN(unittest.TestCase):
     layer.weight.shard_(devices, 3)
     layer.bias.shard_(devices, None)
     state_dict = {
-      'weight': Tensor.randn(5, 3, 3, 3),
-      'bias': Tensor.randn(5),
+      'weight': Tensor.randn(5, 3, 3, 3).realize(),
+      'bias': Tensor.randn(5).realize(),
     }
     load_state_dict(layer, state_dict)
 
