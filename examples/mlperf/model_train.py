@@ -601,7 +601,7 @@ def train_retinanet():
         safe_save(get_training_state(model, optim, lr_scheduler), fn)
 
       if val_metric >= target_metric:
-        print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}"))
+        print(colored(f"target metric reached: {val_metric:.2f}/{target_metric:.2f}", color="green"))
         if getenv("CKPT", 1): safe_save(get_state_dict(model), fn)
         break
 
