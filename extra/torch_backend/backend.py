@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools
+import torch, pathlib, math, operator, functools, inspect
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -43,6 +43,18 @@ def maybe_realize_storage(self: torch.Tensor) -> bool:
   if realize:=is_view(self):
     realize_with_views(self._base, [self]) # TODO: other views could exist
   return realize
+def inplace_fn(outvars: list[str]):
+  def decorator(fn):
+    sig = inspect.signature(fn)
+    def wrapper(*args, **kwargs):
+      bound = sig.bind(*args, **kwargs)
+      outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
+      realize = any(maybe_realize_storage(o) for o in outs)
+      ret = fn(*args, **kwargs)
+      if realize: Tensor.realize(*(unwrap(o) for o in outs))
+      return ret
+    return wrapper
+  return decorator
 
 # *** bad functions on CPU ***
 
@@ -72,20 +84,18 @@ def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n,
 # *** end bad functions on CPU ***
 
 @torch.library.impl("aten::zero_", "privateuseone")
+@inplace_fn(["x"])
 def zero_(x):
   if TORCH_DEBUG: print(f"zero_ {x.shape}")
-  realize = maybe_realize_storage(x) # TODO: wrap all possible out func
   tt = unwrap(x)
   tt.assign(tt.zeros_like().contiguous()) # TODO: should only be contig when out is contig
-  if realize: tt.realize()
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
+@inplace_fn(["x"])
 def fill_scalar(x, y):
   if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
-  realize = maybe_realize_storage(x)
   tt = unwrap(x)
   tt.assign(tt.full_like(y).contiguous()) # TODO: should only be contig when out is contig
-  if realize: tt.realize()
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
@@ -315,10 +325,9 @@ def wrap_out(f):
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
-    if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
-    return out.replace(assigned)
+    return out.assign(assigned.contiguous()) # TODO: should only be contig when out is contig
   return _wrap_out
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
@@ -417,7 +426,9 @@ def wrap_fxn(k,f):
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
-  return nf
+  def nf2(*args, **kwargs):
+    return inplace_fn(["out"])(nf)(*args, **kwargs) if "out" in kwargs else nf(*args, **kwargs)
+  return nf2
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
