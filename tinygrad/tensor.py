@@ -1110,8 +1110,11 @@ class Tensor(SimpleMathTrait):
       match index:
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
-          if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          if dtypes.is_int(index.dtype):
+                          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          elif index.dtype == dtypes.bool: 
+            if index.shape != (size,): raise IndexError(f"Boolean index has incorrect shape: {index.shape} vs {size}")
+            index = index.nonzero().squeeze(1)
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -2048,6 +2051,39 @@ class Tensor(SimpleMathTrait):
     # sum over all axes that's not in the output, then permute to the output order
     return functools.reduce(lambda a,b:a*b, xs_) \
       .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output], acc_dtype=acc_dtype).permute(rhs_order)
+
+  def nonzero(self):
+    flat_t = self.reshape(-1)
+    mask = (flat_t != 0).cast(dtype='int32')
+
+    indices = Tensor.arange(flat_t.shape[0], device=self.device)
+    masked_indices = Tensor.where(mask == 1, indices, Tensor.full(indices.shape, -1, device=self.device))
+
+    nonzero_count = mask.sum().numpy().item() # counting with sum() is pure-safe
+    if nonzero_count == 0: return Tensor([], device=self.device,dtype=dtypes.int64).reshape(0, self.ndim)
+
+
+    # manually allocate tensor for indices
+    positive_indices = Tensor.zeros(nonzero_count, device=self.device, dtype=dtypes.int64).contiguous()
+
+    idx = 0
+    for i in range(masked_indices.shape[0]):
+        current_index = masked_indices[i].numpy().item()
+        if current_index != -1:
+            #print(positive_indices.numpy())
+            positive_indices[idx] = current_index
+            idx += 1
+
+    # Now convert linear indices into coordinates
+    coords = []
+    shape_reversed = self.shape[::-1]
+
+    for dim_size in shape_reversed:
+        coords.append(positive_indices % dim_size)
+        positive_indices = positive_indices // dim_size
+
+    coords = coords[::-1] # restore original order
+    return Tensor.stack(*coords, dim=1)
 
   # ***** processing ops *****
 
