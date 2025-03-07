@@ -82,7 +82,7 @@ x86_rewrite = PatternMatcher([
   # requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   (UPat(GroupOp.Binary, name="x"),
-   lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
+   lambda ctx,x: f"{f'{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n' if ctx[x] != ctx[x.src[0]] else ''}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   # if
@@ -142,6 +142,7 @@ class X86Renderer(Renderer):
   has_shared = False
   global_max = None
   extra_matcher = x86_matcher
+  code_for_op = {Ops.SQRT:None, Ops.AND:None, Ops.SHL:None, Ops.SHR:None}
 
   def idiv(self, x:UOp, s:UOp) -> str:
     remainder_signex = {1: "cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
@@ -177,7 +178,7 @@ class X86Renderer(Renderer):
     arg_stack_offset: int = 16
     kernel: List[str] = []
     self.uops = uops
-    last_use: Dict[UOp, int] = {var: i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
+    last_use: Dict[UOp, int] = {var:i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
 
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
     def is_mem(u:UOp) -> bool: return u in r and u in mem and r[u] == mem[u]
@@ -239,6 +240,7 @@ class X86Renderer(Renderer):
           elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
+          elif u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]): r[u] = r[u.src[0]] # reuse first operand register
           else: r[u] = assign_reg(i, u.dtype)
         if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
