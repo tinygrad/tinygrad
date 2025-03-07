@@ -42,7 +42,7 @@ class TestMainOnnxOps(TestOnnxOps):
     # test const negative indices
     inputs = {
       "input": np.random.randn(1, 3, 3).astype(np.float32),
-      "indices": np.array(-2, dtype=np.long),
+      "indices": np.array(-2, dtype=np.int64),
     }
     attributes = {'axis': 1}
     outputs = ["y"]
