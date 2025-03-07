@@ -1115,6 +1115,8 @@ class Tensor(SimpleMathTrait):
           elif index.dtype == dtypes.bool: 
             if index.shape != (size,): raise IndexError(f"Boolean index has incorrect shape: {index.shape} vs {size}")
             index = index.nonzero().squeeze(1)
+          else:
+            raise IndexError(f"only int and bool tensor indexing is supported, got {index.dtype}")
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
