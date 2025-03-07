@@ -74,4 +74,7 @@ class AMDLLVMCompiler(AMDCompiler):
     self.llvm_compiler = LLVMCompiler("AMDGPU", arch)
   def __reduce__(self): return (AMDLLVMCompiler,(self.arch,))
   def compile(self, src:str) -> bytes:
-    return self.llvm_compiler.compile(src, load=False)
+    try: return self.llvm_compiler.compile(src, load=False)
+    except RuntimeError as e:
+      if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
+      raise CompileError(e) from e

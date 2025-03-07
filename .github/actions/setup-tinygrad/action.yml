@@ -212,15 +212,13 @@ runs:
       shell: bash
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt update -y || true
-        sudo apt install -y --no-install-recommends llvm-dev
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list  
-        sudo apt update || true        
-        sudo apt install --no-install-recommends --allow-unauthenticated -y libllvm19 lld-19
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends libllvm19
 
     - name: Install LLVM (macOS)
       if: (inputs.llvm == 'true' || inputs.amd == 'true') && runner.os == 'macOS'
       shell: bash
       run: |
-        brew install llvm lld
+        brew install llvm

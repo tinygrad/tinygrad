@@ -243,11 +243,9 @@ class AMDProgram(HCQProgram):
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
-    rodata_entry = text_entry = -1
-    for sh in sections:
-      if str(sh.name) == ".rodata": rodata_entry = sh.header.sh_addr
-      if str(sh.name) == ".text": text_entry = sh.header.sh_addr
-    assert rodata_entry >= 0 and text_entry >= 0
+    rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
+    text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
+    assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
     self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
     self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]

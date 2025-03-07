@@ -9,10 +9,9 @@ from tinygrad.helpers import prod, AMX
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
   if isinstance(dt, PtrDType): return ldt(dt.base) + (" addrspace(3)*" if dt.local else "*")
-  return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
+  return {dtypes.void: "void", dtypes.bool: "i1", dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
-          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1",
-          dtypes.void: "void"}[dt]
+          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
@@ -21,30 +20,17 @@ def lconst(x, dtype:DType):
   return int(x)
 
 def render_cast(ctx, x: UOp) -> str:
-  output_type = x.dtype
-  input_type = x.src[0].dtype
-  if input_type == dtypes.half and output_type == dtypes.bfloat16:
-    return f"  {ctx[x]}_ext = fpext {ldt(input_type)} {ctx[x.src[0]]} to float\n" + \
-      f"  {ctx[x]} = fptrunc float {ctx[x]}_ext to {ldt(output_type)}"
-  if input_type == dtypes.bfloat16 and output_type == dtypes.half:
-    return f"  {ctx[x]}_ext = fpext bfloat {ctx[x.src[0]]} to float\n" + \
-      f"  {ctx[x]} = fptrunc float {ctx[x]}_ext to {ldt(output_type)}"
-  if dtypes.is_bool(input_type) and output_type == dtypes.bfloat16:
-    return f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n" + \
-      f"  {ctx[x]} = uitofp i32 {ctx[x]}_ext to bfloat"
-  cast_op = None
-  if dtypes.is_float(input_type):
-    if dtypes.is_float(output_type): cast_op = 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
-    elif dtypes.is_int(output_type): cast_op = 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
-  elif dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
-    if dtypes.is_float(output_type): cast_op = 'uitofp'
-    elif dtypes.is_int(output_type): cast_op = 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
-  elif dtypes.is_int(input_type):
-    if dtypes.is_float(output_type): cast_op = 'sitofp'
-    elif dtypes.is_int(output_type): cast_op = 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
-  else: raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
-  return f"  {ctx[x]} = {cast_op} {ldt(input_type)} {ctx[x.src[0]]} to {ldt(output_type)}"
-
+  ot, it, cast_op = x.dtype, x.src[0].dtype, ""
+  pre, pre_type = (f"  {ctx[x]}_ext = fpext {ldt(it)} {ctx[x.src[0]]} to float\n", "float") if {it, ot} == {dtypes.half, dtypes.bfloat16} else \
+                  (f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n", "i32") if dtypes.is_bool(it) and ot == dtypes.bfloat16 else ("", "")
+  if dtypes.is_float(it) and dtypes.is_float(ot): cast_op = 'fpext' if ot.itemsize > it.itemsize else 'fptrunc'
+  elif dtypes.is_float(it) and dtypes.is_int(ot): cast_op = 'fptoui' if dtypes.is_unsigned(ot) else 'fptosi'
+  elif dtypes.is_int(it) or dtypes.is_bool(it):
+    cast_op = ('uitofp' if dtypes.is_unsigned(it) or dtypes.is_bool(it) else 'sitofp') if dtypes.is_float(ot) else \
+              ('zext' if dtypes.is_unsigned(it) or dtypes.is_bool(it) else 'sext') if dtypes.is_int(ot) and ot.itemsize >= it.itemsize else \
+               'trunc' if dtypes.is_int(ot) and ot.itemsize < it.itemsize else ""
+  if not cast_op: raise NotImplementedError(f"cast from {it} -> {ot} not implemented")
+  return pre + f"  {ctx[x]} = {cast_op} {pre_type if pre else ldt(it)} {ctx[x] + '_ext' if pre else ctx[x.src[0]]} to {ldt(ot)}"
 
 # https://github.com/corsix/amx
 def render_wmma(ctx, wmma: UOp) -> str:
@@ -66,15 +52,8 @@ signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: 
 flags = " nsz arcp contract "
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
-barrier = """
-fence syncscope("workgroup") release
-tail call void @llvm.amdgcn.s.barrier()
-fence syncscope("workgroup") acquire
-"""
-
 
 base_rewrite = PatternMatcher([
-  (UPat(Ops.BARRIER), lambda ctx: barrier),
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
@@ -84,9 +63,8 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
-  (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
-  (UPat(Ops.LOAD, src=(UPat.var('idx'),UPat.var('idx1')), name="x"), lambda ctx,x,idx,idx1: \
-    f"  {ctx[x]} = load {ldt(x.dtype)}, ptr addrspace(3) {ctx[idx]}"),
+  (UPat(Ops.LOAD, src=(UPat.var('idx'),), allow_any_len=True, name="x"),
+   lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
@@ -218,9 +196,9 @@ define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(ar
 {chr(10).join(end_lines.keys())}
 attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
 '''
-
-code_for_workitem = { "g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
-                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
+code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
+                     "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
@@ -229,4 +207,5 @@ class AMDLLVMRenderer(LLVMRenderer):
   abi = "protected amdgpu_kernel"
   string_rewrite = base_rewrite + PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
+    (UPat(Ops.BARRIER), lambda ctx: barrier),
   ])
