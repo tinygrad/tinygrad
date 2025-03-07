@@ -24,10 +24,6 @@ import torchvision
 from torchvision import transforms
 from tinygrad import getenv
 
-from icecream import ic, install
-ic.configureOutput(includeContext=True)
-install()
-
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("mps")
 
@@ -52,7 +48,7 @@ device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("mps")
 # set global defaults (in this particular file) for convolutions
 default_conv_kwargs = {'kernel_size': 3, 'padding': 'same', 'bias': False}
 
-batchsize = 1024
+batchsize = 1 # 1024
 bias_scaler = 64
 # To replicate the ~95.79%-accuracy-in-110-seconds runs, you can change the base_depth from 64->128, train_epochs from 12.1->90, ['ema'] epochs 10->80, cutmix_size 3->10, and cutmix_epochs 6->80
 hyp = {
@@ -74,7 +70,7 @@ hyp = {
         'cutmix_size': 3,
         'cutmix_epochs': 6,
         'pad_amount': 2,
-        'base_depth': 64 ## This should be a factor of 8 in some way to stay tensor core friendly
+        'base_depth': 8 #64 ## This should be a factor of 8 in some way to stay tensor core friendly
     },
     'misc': {
         'ema': {
@@ -609,7 +605,6 @@ def main():
           epoch_fraction = 1 if epoch + 1 < hyp['misc']['train_epochs'] else hyp['misc']['train_epochs'] % 1 # We need to know if we're running a partial epoch or not.
 
           for epoch_step, (inputs, targets) in enumerate(get_batches(data, key='train', batchsize=batchsize, epoch_fraction=epoch_fraction, cutmix_size=cutmix_size)):
-              ic(epoch_step)
               ## Run everything through the network
               outputs = net(inputs)
 
@@ -617,7 +612,6 @@ def main():
               ## If you want to add other losses or hack around with the loss, you can do that here.
               loss = loss_fn(outputs, targets).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler']) ## Note, as noted in the original blog posts, the summing here does a kind of loss scaling
                                                      ## (and is thus batchsize dependent as a result). This can be somewhat good or bad, depending...
-              ic(loss.cpu())
               # we only take the last-saved accs and losses from train
               if epoch_step % 50 == 0:
                   train_acc = (outputs.detach().argmax(-1) == targets.argmax(-1)).float().mean().item()
@@ -626,8 +620,23 @@ def main():
               loss.backward()
 
               ## Step for each optimizer, in turn.
-              opt.step()
-              opt_bias.step()
+              if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: Before opt.step()")
+              try:
+                start_time = time.monotonic()
+                opt.step()
+                if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: After opt.step(), took {time.monotonic() - start_time:.4f}s")
+              except Exception as e:
+                if getenv("DEBUG")>=1: print(f"Exception in opt.step(): {e}")
+                raise e
+
+              try:
+                if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: Before opt_bias.step()")
+                start_time = time.monotonic()
+                opt_bias.step()
+                if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: After opt_bias.step(), took {time.monotonic() - start_time:.4f}s")
+              except Exception as e:
+                if getenv("DEBUG")>=1: print(f"Exception in opt_bias.step(): {e}")
+                raise e
 
               # We only want to step the lr_schedulers while we have training steps to consume. Otherwise we get a not-so-friendly error from PyTorch
               lr_sched.step()

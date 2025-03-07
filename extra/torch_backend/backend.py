@@ -417,18 +417,59 @@ if TORCH_DEBUG:
       return func(*args, **(kwargs or {}))
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
-# NOTE: patch torch optimizer step to avoid continously growing the computation graph
+# # NOTE: patch torch optimizer step to avoid continously growing the computation graph
+# def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
+#   tinygrad_tensors = []
+#   for param_group in optimizer.param_groups:
+#     for param in param_group["params"]:
+#       if param is None: continue
+#       tinygrad_tensors.append(param.data)
+#   for state_dict in optimizer.state.values():
+#     for _, value in state_dict.items():
+#       if torch.is_tensor(value): tinygrad_tensors.append(value)
+#   real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
+#   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
+
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
+  if getenv("DEBUG")>=2: print("Starting realize_optimizer_step")
   tinygrad_tensors = []
-  for param_group in optimizer.param_groups:
-    for param in param_group["params"]:
+  for i, param_group in enumerate(optimizer.param_groups):
+    if getenv("DEBUG")>=2: print(f"Processing param group {i} with {len(param_group['params'])} params")
+    for j, param in enumerate(param_group["params"]):
       if param is None: continue
+      if getenv("DEBUG")>=2: print(f"  - Adding param {j}: shape {param.shape} to tinygrad_tensors")
       tinygrad_tensors.append(param.data)
-  for state_dict in optimizer.state.values():
-    for _, value in state_dict.items():
-      if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
-  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
+
+  if getenv("DEBUG")>=2: print(f"Collecting optimizer state tensors")
+  for state_key, state_dict in optimizer.state.items():
+    if getenv("DEBUG")>=2: print(f"Processing state for param with id {id(state_key)}")
+    for key, value in state_dict.items():
+      if getenv("DEBUG")>=2: print(f"  - State key: {key}, type: {type(value)}")
+      if torch.is_tensor(value):
+        if getenv("DEBUG")>=2: print(f"    - Adding tensor with shape {value.shape} to tinygrad_tensors")
+        tinygrad_tensors.append(value)
+
+  if getenv("DEBUG")>=2: print(f"Found {len(tinygrad_tensors)} tensors, filtering for device 'tiny'")
+  real_tinygrad_tensors = []
+  for tensor in tinygrad_tensors:
+    try:
+      device_str = str(tensor.device)
+      if getenv("DEBUG")>=2: print(f"  - Tensor device: {device_str}")
+      if device_str == "tiny":
+        real_tinygrad_tensors.append(unwrap(tensor))
+    except Exception as e:
+      if getenv("DEBUG")>=2: print(f"  - Error checking tensor device: {e}")
+
+  if getenv("DEBUG")>=2: print(f"Realizing {len(real_tinygrad_tensors)} tensors on tiny device")
+  try:
+    if len(real_tinygrad_tensors):
+      if getenv("DEBUG")>=2:print("  - About to call Tensor.realize()")
+      Tensor.realize(*real_tinygrad_tensors)
+      if getenv("DEBUG")>=2:print("  - Tensor.realize() completed")
+  except Exception as e:
+    if getenv("DEBUG")>=2:print(f"  - Error in Tensor.realize: {e}")
+
+  if getenv("DEBUG")>=2: print("Finished realize_optimizer_step")
 
 _optimizer_init = torch.optim.Optimizer.__init__
 def _optimizer_patched_init(self, *args, **kwargs):
