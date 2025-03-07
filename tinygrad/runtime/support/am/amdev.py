@@ -179,9 +179,10 @@ class AMMemoryManager:
     """
     Calculate the tlb fragment size for a given virtual address and size.
     If must_cover is True, the fragment size must cover the size, otherwise the biggest fragment size that fits the size is returned.
+    Fragment 0 is 4KB, 1 is 8KB and so on.
     """
     va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
-    return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 13
+    return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
     if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
@@ -233,7 +234,7 @@ class AMMemoryManager:
           if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
           else:
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate {cont_seg_sz=:#x} bytes")
+            raise MemoryError(f"Failed to allocate contigous {cont_seg_sz=:#x} bytes (size={size:#x})")
           seg_cnt, off = seg_cnt - cont_seg_sz // seg_size, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
@@ -243,9 +244,9 @@ class AMMemoryManager:
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
-  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, allow_fail=False) -> int:
+  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
-    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align, allow_fail=allow_fail)
+    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
     if zero and paddr is not None: ctypes.memset(self.adev.paddr2cpu(paddr), 0, size)
     return paddr
 
