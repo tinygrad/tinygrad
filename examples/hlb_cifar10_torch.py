@@ -11,7 +11,7 @@ import numpy as np
 from torch import nn, optim
 from torch.optim.lr_scheduler import OneCycleLR
 from tinygrad import getenv, Device, dtypes
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, colored
 from tinygrad.nn.datasets import cifar
 import torch.nn.functional as F
 
@@ -128,11 +128,28 @@ class Scale(nn.Module):
     self.scale = scale
   def forward(self, x): return x * self.scale
 
+class WhiteningConv(nn.Conv2d):
+  def __init__(self, whitening):
+    shape = whitening.shape
+    super().__init__(shape[1], shape[0], shape[2:])
+    self.weight.values = whitening.values
+    self.weight.requires_grad = False
+
+class Pad(nn.Module):
+  def __init__(self, pad):
+    super().__init__()
+    self.pad = pad
+  def forward(self, x):
+    return F.pad(x, self.pad)
+
 class SpeedyResNet(nn.Module):
   def __init__(self, W):
     super().__init__()
     self.whitening = W
+    ic(W.shape)
     self.net = nn.ModuleList([
+      WhiteningConv(self.whitening),
+      Pad((1,0,0,1)),
       nn.Conv2d(12, 32, kernel_size=1, bias=False),
       nn.GELU(),
       ConvGroup(32, 64),
@@ -146,7 +163,9 @@ class SpeedyResNet(nn.Module):
   def forward(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
+    # forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
+    # Todo: bring back "conv2d(self.whitening).pad((1,0,0,1))"
+    forward = lambda x: sequential(self.net, x)
     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
@@ -218,8 +237,8 @@ def train_cifar():
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
   def make_square_mask(shape, mask_size) -> torch.Tensor:
     BS, _, H, W = shape
-    low_x = torch.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
-    low_y = torch.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
+    low_x = torch.randint(low=0, high=W-mask_size, size=(BS,)).reshape(BS,1,1,1)
+    low_y = torch.randint(low=0, high=H-mask_size, size=(BS,)).reshape(BS,1,1,1)
     idx_x = torch.arange(W, dtype=torch.int32).reshape((1,1,1,W))
     idx_y = torch.arange(H, dtype=torch.int32).reshape((1,1,H,1))
     return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
@@ -227,7 +246,7 @@ def train_cifar():
   def random_crop(X:torch.Tensor, crop_size=32):
     mask = make_square_mask(X.shape, crop_size)
     mask = mask.expand((-1,3,-1,-1))
-    X_cropped = torch.Tensor(X.numpy()[mask.numpy()])
+    X_cropped = X[mask] #torch.Tensor(X.numpy()[mask.numpy()])
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
   def cutmix(X:torch.Tensor, Y:torch.Tensor, mask_size=3):
@@ -235,8 +254,8 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = torch.Tensor(X.numpy()[order], device=X.device, dtype=X.dtype)
-    Y_patch = torch.Tensor(Y.numpy()[order], device=Y.device, dtype=Y.dtype)
+    X_patch = torch.Tensor(X[order], device=X.device, dtype=X.dtype)
+    Y_patch = torch.Tensor(Y[order], device=Y.device, dtype=Y.dtype)
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -253,7 +272,7 @@ def train_cifar():
         if getenv("RANDOM_CROP", 1):
           X = random_crop(X, crop_size=32)
         if getenv("RANDOM_FLIP", 1):
-          X = (torch.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+          X = torch.where(torch.rand(X.shape[0],1,1,1, device=X.device) < 0.5, X.flip(-1), X) # flip LR
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
@@ -331,6 +350,7 @@ def train_cifar():
   #     else:
   #       x.to_(GPUS)
   model.to(device)
+  model.train()
 
   # parse the training params into bias and non-bias
   params_bias = []
@@ -355,18 +375,18 @@ def train_cifar():
 
   train_loss_fn = nn.CrossEntropyLoss(reduction='none', label_smoothing=hyp['opt']['label_smoothing'])
   #@torch.compile
-  def train_step(model, optimizer, lr_scheduler, X, Y):
+  def train_step(model, optimizers, lr_schedulers, X, Y):
     out = model(X)
     loss_batchsize_scaler = 512/BS
     loss = train_loss_fn(out, Y).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
     if not getenv("DISABLE_BACKWARD"):
       # index 0 for bias and 1 for non-bias
-      optimizer.zero_grad()
+      for optimizer in optimizers: optimizer.zero_grad()
       loss.backward()
-      optimizer.step()
-      lr_scheduler[0].step()
-      lr_scheduler[1].step()
+      for optimizer, lr_scheduler in zip(optimizers, lr_schedulers):
+        optimizer.step()
+        lr_scheduler.step()
     return loss
 
   eval_loss_fn = nn.CrossEntropyLoss(reduction='mean')
@@ -382,9 +402,66 @@ def train_cifar():
   i = 0
   eval_acc_pct = 0.0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+  st = time.monotonic()
+  while i <= STEPS:
+    if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
+      # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
+      corrects = []
+      corrects_ema = []
+      losses = []
+      losses_ema = []
+      for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
+        # if len(GPUS) > 1:
+        #   Xt.shard_(GPUS, axis=0)
+        #   Yt.shard_(GPUS, axis=0)
 
-  for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
-    ic(Xt.cpu(), Yt.cpu())
+        with torch.no_grad():
+          correct, loss = eval_step(model, Xt, Yt) # eval_step_jitted
+          losses.append(loss.numpy().tolist())
+          corrects.extend(correct.numpy().tolist())
+          if model_ema:
+            correct_ema, loss_ema = eval_step(model_ema.net_ema, Xt, Yt) # eval_step_ema_jitted
+            losses_ema.append(loss_ema.numpy().tolist())
+            corrects_ema.extend(correct_ema.numpy().tolist())
+
+      # collect accuracy across ranks
+      correct_sum, correct_len = sum(corrects), len(corrects)
+      if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
+
+      eval_acc_pct = correct_sum/correct_len*100.0
+      if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
+      print(f"eval     {correct_sum}/{correct_len} {eval_acc_pct:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+      if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+
+    if STEPS == 0 or i == STEPS: break
+
+    X, Y = next(batcher)
+    # if len(GPUS) > 1:
+    #   X.shard_(GPUS, axis=0)
+    #   Y.shard_(GPUS, axis=0)
+
+    loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
+    et = time.monotonic()
+    loss_cpu = loss.numpy()
+    # EMA for network weights
+    if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
+      if model_ema is None:
+        model_ema = modelEMA(W, model)
+      model_ema.update(model, torch.tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
+    cl = time.monotonic()
+    device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+    #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
+    st = cl
+    i += 1
+
+  # verify eval acc
+  if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
+    if eval_acc_pct >= target:
+      print(colored(f"{eval_acc_pct=} >= {target}", "green"))
+    else:
+      raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
+
 
 if __name__ == "__main__":
   train_cifar()
