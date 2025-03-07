@@ -299,7 +299,6 @@ def train_cifar():
   params_bias = []
   params_non_bias = []
   for params in params_dict:
-    ic(params, params_dict[params].requires_grad)
     if params_dict[params].requires_grad is not False:
       if 'bias' in params:
         params_bias.append(params_dict[params])

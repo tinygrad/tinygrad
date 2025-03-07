@@ -5,9 +5,11 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 
 import random, time, functools
+from typing import Optional
 import torch
 import numpy as np
 from torch import nn, optim
+from torch.optim.lr_scheduler import OneCycleLR
 from tinygrad import getenv, Device, dtypes
 from tinygrad.helpers import prod
 from tinygrad.nn.datasets import cifar
@@ -45,8 +47,6 @@ class UnsyncedBatchNorm(nn.Module):
     self.register_buffer('running_var', torch.ones(num_devices, sz, dtype=torch.float32, requires_grad=False))
     self.register_buffer('num_batches_tracked', torch.zeros(1, dtype=torch.int, requires_grad=False))
 
-    ic(self.weight.requires_grad, self.bias.requires_grad)
-
   def forward(self, x:torch.Tensor):
     xr = x.reshape(self.num_devices, -1, *x.shape[1:]).to(torch.float32)
     batch_mean, batch_invstd = self.calc_stats(xr)
@@ -83,7 +83,6 @@ class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.requires_grad = False
     self.bias.requires_grad = True
-    ic(self.weight.requires_grad, self.bias.requires_grad)
 
 class QuickGelu(nn.Module):
   def __init__(self): super().__init__()
@@ -260,9 +259,7 @@ def train_cifar():
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
         order = list(range(0, X.shape[0]))
         random.shuffle(order)
-        X, Y = X.numpy()[order], Y.numpy()[order]
-      else:
-        X, Y = X.numpy(), Y.numpy()
+        X, Y = X[order], Y[order]
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
@@ -335,28 +332,59 @@ def train_cifar():
   #       x.to_(GPUS)
   model.to(device)
 
-  nrm = BatchNorm(5)
-  ic(nrm.weight.requires_grad, nrm.bias.requires_grad)
-  ic([(k, v.requires_grad) for k, v in nrm.state_dict().items()])
-
   # parse the training params into bias and non-bias
-  params_dict = model.state_dict()
   params_bias = []
   params_non_bias = []
-  for params in params_dict:
-    ic(params, params_dict[params].requires_grad)
-    if params_dict[params].requires_grad is not False:
-      if 'bias' in params:
-        params_bias.append(params_dict[params])
+  for name, param in model.named_parameters():
+    if param.requires_grad is not False:
+      if 'bias' in name:
+        params_bias.append(param)
       else:
-        params_non_bias.append(params_dict[params])
-
-  ic(params_bias, params_non_bias)
-
+        params_non_bias.append(param)
 
   opt_bias = optim.SGD(params_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
 
+  # NOTE taken from the hlb_CIFAR repository, might need to be tuned
+  initial_div_factor = hyp['opt']['initial_div_factor']
+  final_lr_ratio = hyp['opt']['final_lr_ratio']
+  pct_start = hyp['opt']['percent_start']
+  lr_sched_bias     = OneCycleLR(opt_bias, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS, anneal_strategy='linear', cycle_momentum=False)
+  lr_sched_non_bias = OneCycleLR(opt_non_bias,  max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS, anneal_strategy='linear', cycle_momentum=False)
+
+
+  train_loss_fn = nn.CrossEntropyLoss(reduction='none', label_smoothing=hyp['opt']['label_smoothing'])
+  #@torch.compile
+  def train_step(model, optimizer, lr_scheduler, X, Y):
+    out = model(X)
+    loss_batchsize_scaler = 512/BS
+    loss = train_loss_fn(out, Y).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+
+    if not getenv("DISABLE_BACKWARD"):
+      # index 0 for bias and 1 for non-bias
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
+      lr_scheduler[0].step()
+      lr_scheduler[1].step()
+    return loss
+
+  eval_loss_fn = nn.CrossEntropyLoss(reduction='mean')
+  #@torch.compile
+  def eval_step(model, X, Y):
+    out = model(X, training=False)
+    loss = eval_loss_fn(out, Y)
+    correct = out.argmax(axis=1) == Y.argmax(axis=1)
+    return correct, loss
+
+  model_ema: Optional[modelEMA] = None
+  projected_ema_decay_val = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
+  i = 0
+  eval_acc_pct = 0.0
+  batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
+
+  for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
+    ic(Xt.cpu(), Yt.cpu())
 
 if __name__ == "__main__":
   train_cifar()
