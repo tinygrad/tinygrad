@@ -42,7 +42,7 @@ package.json
 package-lock.json
 temp
 *.csv
-huggingface_repos.yaml
+*.yaml
 .coverage
 coverage.xml
 htmlcov
