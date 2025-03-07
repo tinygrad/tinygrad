@@ -327,6 +327,23 @@ class TestJit(unittest.TestCase):
     res = [f().numpy() for _ in range(3)]
     assert res[1] != res[2]
 
+  @unittest.expectedFailure
+  def test_rand_in_jit(self):
+    @TinyJit
+    def f(): return Tensor.rand()
+    Tensor.manual_seed(1234)
+    rands = [f().realize() for _ in range(3)]
+    # TODO: seed is the same for all runs
+    self.assertNotEqual(rands[1].item(), rands[2].item())
+
+  # NOTE: this passes because seed realizes before entering the JIT capture
+  def test_rand_in_jit_copy(self):
+    @TinyJit
+    def f(): return Tensor.rand()
+    Tensor.manual_seed(1234)
+    rands = [f().to("CPU").realize() for _ in range(3)]
+    self.assertNotEqual(rands[1].item(), rands[2].item())
+
   def test_jit_realization_and_sampling(self):
     w = Tensor.eye(5)
 
