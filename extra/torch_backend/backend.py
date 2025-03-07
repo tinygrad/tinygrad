@@ -43,7 +43,8 @@ def maybe_realize_storage(self: torch.Tensor) -> bool:
   if realize:=is_view(self):
     realize_with_views(self._base, [self]) # TODO: other views could exist
   return realize
-def inplace_fn(outvars: list[str]):
+def inplace_fn(outvars: str|list[str]):
+  if type(outvars) is str: outvars = [outvars]
   def decorator(fn):
     sig = inspect.signature(fn)
     def wrapper(*args, **kwargs):
@@ -84,14 +85,14 @@ def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n,
 # *** end bad functions on CPU ***
 
 @torch.library.impl("aten::zero_", "privateuseone")
-@inplace_fn(["x"])
+@inplace_fn("x")
 def zero_(x):
   if TORCH_DEBUG: print(f"zero_ {x.shape}")
   tt = unwrap(x)
   tt.assign(tt.zeros_like().contiguous()) # TODO: should only be contig when out is contig
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
-@inplace_fn(["x"])
+@inplace_fn("x")
 def fill_scalar(x, y):
   if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
   tt = unwrap(x)
@@ -175,7 +176,12 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
+def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+for i in ["upsample_linear1d", "upsample_bilinear2d", "upsample_trilinear3d"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample, mode="linear"))
+
 @torch.library.impl("aten::_copy_from", "privateuseone")
+# TODO: handle if dest is view?
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
@@ -190,8 +196,9 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
 @torch.library.impl("aten::cat.out", "privateuseone")
+@inplace_fn("out")
 def cat_out(tensors, dim=0, out=None):
-  unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
+  unwrap(out).assign(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
 
 # register some decompositions
 from torch._decomp import get_decompositions
@@ -318,6 +325,10 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
+  # NOTE: axis=[] in torch means all, change tinygrad?
+  "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
+    self.sum(axis if axis is None or len(axis) else None, keepdim,
+                         acc_dtype = _from_torch_dtype(dtype) if dtype is not None else None),
 }}
 
 # we add the "out" here
@@ -325,6 +336,7 @@ def wrap_out(f):
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
+    if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
     return out.assign(assigned.contiguous()) # TODO: should only be contig when out is contig
@@ -335,15 +347,15 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
-  "aten.floor_divide_.Tensor": lambda x,y: x.assign(x//y),
+  "aten.floor_divide_.Tensor": inplace_fn("x")(lambda x,y: x.assign(x//y)),
   # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__ilshift__.Scalar": lambda x,y: x.assign(x*(2**y)),
+  "aten.__ilshift__.Scalar": inplace_fn("x")(lambda x,y: x.assign(x*(2**y))),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
-  "aten.__irshift__.Scalar": lambda x,y: x.assign(x//(2**y)),
+  "aten.__irshift__.Scalar": inplace_fn("x")(lambda x,y: x.assign(x//(2**y))),
   # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
-  "aten.relu_": lambda x: x.assign(x.relu()),
+  "aten.relu_": inplace_fn("x")(lambda x: x.assign(x.relu())),
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
@@ -357,30 +369,26 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.std_mean.correction": Tensor.std_mean,
   "aten.var.correction": Tensor.var,
   "aten.var_mean.correction": Tensor.var_mean,
-  # NOTE: axis=[] in torch means all, change tinygrad?
-  "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None,out=None:
-    out.replace(self.sum(axis if axis is None or len(axis) else None, keepdim,
-                         acc_dtype = _from_torch_dtype(dtype) if dtype is not None else None), allow_shape_mismatch=True),
   "aten.scatter.value": Tensor.scatter,
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
-  "aten.random_": lambda self:
-    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
-  "aten.random_.from": lambda self, from_, to:
-    self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype)),
-  "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
-  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std)),
+  "aten.random_": inplace_fn("self")(lambda self:
+    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype))),
+  "aten.random_.from": inplace_fn("self")(lambda self, from_, to:
+    self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype))),
+  "aten.uniform_": inplace_fn("self")(lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high))),
+  "aten.normal_": inplace_fn("self")(lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std))),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": lambda x, y: x.assign(x | y),
+  "aten.logical_or_": inplace_fn("x")(lambda x, y: x.assign(x | y)),
   "aten.multinomial": Tensor.multinomial,
   "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
-  "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
+  "aten.masked_fill_.Scalar": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.all": Tensor.all,
@@ -393,7 +401,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
   "aten.atanh": Tensor.atanh,
-  "aten.fill_.Tensor": Tensor.full,
+  "aten.fill_.Tensor": Tensor.full, # TODO: looks wrong
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
   "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True),
@@ -427,7 +435,7 @@ def wrap_fxn(k,f):
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
   def nf2(*args, **kwargs):
-    return inplace_fn(["out"])(nf)(*args, **kwargs) if "out" in kwargs else nf(*args, **kwargs)
+    return inplace_fn("out")(nf)(*args, **kwargs) if "out" in kwargs else nf(*args, **kwargs)
   return nf2
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))

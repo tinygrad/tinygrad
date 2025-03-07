@@ -175,8 +175,8 @@ jobs:
       run: PYTHONPATH=. DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND (expect failure)
       run: PYTHONPATH=. LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/test_ops.py --durations=20 || true
-    - name: Test in-place operations on views (expect failure)
-      run: PYTHONPATH=. TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py || true
+    - name: Test in-place operations on views
+      run: PYTHONPATH=. TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
 
   torchbackendmore:
     name: Torch Backend Tests More
