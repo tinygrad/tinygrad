@@ -24,8 +24,7 @@ class USBConnector:
       ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
       print("detach kernel driver")
       if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
-
-    libusb.libusb_reset_device(self.handle)
+      libusb.libusb_reset_device(self.handle)
 
     # Claim interface (gives -3 if we reset)
     ret = libusb.libusb_claim_interface(self.handle, 0)
@@ -56,21 +55,21 @@ class USBConnector:
   def _send(self, cdb, ret_len=0):
     def __send():
       for i in range(3):
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), None, 10)
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), None, 1)
         if ret:
           print("0x4", ret, len(self.read_cmd))
           return None
 
         if ret_len > 0:
-          ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 10)
+          ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 1)
           if ret:
-            print("0x81", ret, ret_len)
+            #print("0x81", ret, ret_len)
             #libusb.libusb_clear_halt(self.handle, 0x81)
             #time.sleep(0.1)
             continue
           #if ret: return None
 
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, None, 10)
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, None, 1)
         if ret:
           print("0x83", ret)
           #libusb.libusb_clear_halt(self.handle, 0x83)
@@ -86,6 +85,7 @@ class USBConnector:
     raise RuntimeError("USB transfer failed")
 
   def read(self, start_addr, read_len, stride=255):
+    #print("read", hex(start_addr))
     data = bytearray(read_len)
 
     for i in range(0, read_len, stride):
@@ -102,6 +102,7 @@ class USBConnector:
     return bytes(data[:read_len])
 
   def write(self, start_addr, data):
+    #print("write", hex(start_addr))
     for offset, value in enumerate(data):
       current_addr = start_addr + offset
       if self.is_24:
