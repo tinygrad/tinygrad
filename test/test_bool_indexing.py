@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from tinygrad.tensor import Tensor
 
-from helpers import timeit
+from .helpers import timeit
 
 class TestBooleanIndexing(unittest.TestCase):
     def test_basic_boolean_indexing(self):
