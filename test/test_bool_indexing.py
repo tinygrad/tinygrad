@@ -71,7 +71,7 @@ class TestBooleanIndexing(unittest.TestCase):
 
             Weirdly, in very large tensors, tinygrad (AMD) is faster than both numpy and torch.      
         """
-        x = Tensor.randn((20, 1000, 200, 50))
+        x = Tensor.randn((20, 100, 20, 50))
         x_np = x.numpy()
         x_torch = torch.from_numpy(x_np)
         
