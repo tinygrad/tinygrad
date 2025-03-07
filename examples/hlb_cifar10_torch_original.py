@@ -153,7 +153,6 @@ else:
 # Pad the GPU training dataset
 if hyp['net']['pad_amount'] > 0:
     ## Uncomfortable shorthand, but basically we pad evenly on all _4_ sides with the pad_amount specified in the original dictionary
-    ic(data['train']['images'].device, data['train']['images'].cpu().shape, (hyp['net']['pad_amount'],)*4)
     data['train']['images'] = F.pad(data['train']['images'], (hyp['net']['pad_amount'],)*4, 'reflect')
 
 #############################################
@@ -361,7 +360,6 @@ def make_net():
 
     ## Initialize the whitening convolution
     with torch.no_grad():
-        ic(data['train']['images'].device)
         # Initialize the first layer to be fixed weights that whiten the expected input values of the network be on the unit hypersphere. (i.e. their...average vector length is 1.?, IIRC)
         init_whitening_conv(net.net_dict['initial_block']['whiten'],
                             data['train']['images'].index_select(0, torch.randperm(data['train']['images'].shape[0], device=data['train']['images'].device)),
@@ -452,7 +450,6 @@ def batch_crop(inputs, crop_size):
         crop_mask_batch = make_random_square_masks(inputs, crop_size)
         #  inputs.cpu().shape: torch.Size([50000, 3, 36, 36])
         # crop_mask_batch.cpu().shape: torch.Size([50000, 1, 36, 36])
-        ic(inputs.cpu().shape, crop_mask_batch.cpu().shape)
         cropped_batch = torch.masked_select(inputs, crop_mask_batch).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
         return cropped_batch
 
@@ -612,6 +609,7 @@ def main():
           epoch_fraction = 1 if epoch + 1 < hyp['misc']['train_epochs'] else hyp['misc']['train_epochs'] % 1 # We need to know if we're running a partial epoch or not.
 
           for epoch_step, (inputs, targets) in enumerate(get_batches(data, key='train', batchsize=batchsize, epoch_fraction=epoch_fraction, cutmix_size=cutmix_size)):
+              ic(epoch_step)
               ## Run everything through the network
               outputs = net(inputs)
 
@@ -619,7 +617,7 @@ def main():
               ## If you want to add other losses or hack around with the loss, you can do that here.
               loss = loss_fn(outputs, targets).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler']) ## Note, as noted in the original blog posts, the summing here does a kind of loss scaling
                                                      ## (and is thus batchsize dependent as a result). This can be somewhat good or bad, depending...
-
+              ic(loss.cpu())
               # we only take the last-saved accs and losses from train
               if epoch_step % 50 == 0:
                   train_acc = (outputs.detach().argmax(-1) == targets.argmax(-1)).float().mean().item()
