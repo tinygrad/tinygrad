@@ -71,9 +71,11 @@ def topk(self, k, dim=-1, largest=True, sorted=True):
   return torch.return_types.topk((t1.tiny(), t2.tiny()))
 
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
+@inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
-  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  return wrap(unwrap(self).assign(unwrap(ret)))
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
