@@ -417,8 +417,10 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # if we created a KERNEL for this tensor, map it to the assigned buffer
-    if (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
+    # ASSIGN always becomes the target buffer
+    if v.op is Ops.ASSIGN: becomes_map[k] = v.src[0]
+    # if we created a new buffer for this tensor, map it to the assigned buffer
+    elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if a.src[0].st == v.st else a.src[0].view(unwrap(v.st))
     # tensors can also simplify to an existing buffer/const
     else:
