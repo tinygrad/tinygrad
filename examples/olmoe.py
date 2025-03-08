@@ -2,7 +2,7 @@
 import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
 import functools, collections, json
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
 from extra.models.llama import Transformer, Variable
 
@@ -36,9 +36,9 @@ class MixtureFeedForward:
 
 def fetch_weights() -> dict[str, Tensor]:
   # TODO: make this lazy so the 3 fetches can happen in parallel
-  m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00001-of-00003.safetensors").to('metal')
-  m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00002-of-00003.safetensors").to('metal')
-  m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to('metal')
+  m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00001-of-00003.safetensors").to(Device.DEFAULT)
+  m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00002-of-00003.safetensors").to(Device.DEFAULT)
+  m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to(Device.DEFAULT)
   return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3)}
 
 if __name__ == "__main__":
