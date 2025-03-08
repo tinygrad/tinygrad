@@ -11,6 +11,9 @@ from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
+from icecream import ic, install
+ic.configureOutput(includeContext=True)
+install()
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -173,20 +176,9 @@ def train_cifar():
 
     return Tensor(W.astype(np.float32), requires_grad=False).cast(dtypes.default_float)
 
-  # ========== Loss ==========
-  def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
-    divisor = y.shape[1]
-    assert isinstance(divisor, int), "only supported int divisor"
-    y = (1 - label_smoothing)*y + label_smoothing / divisor
-    ret = -x.log_softmax(axis=1).mul(y).sum(axis=1)
-    if reduction=='none': return ret
-    if reduction=='sum': return ret.sum()
-    if reduction=='mean': return ret.mean()
-    raise NotImplementedError(reduction)
-
   # ========== Preprocessing ==========
   # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
-  def pad_reflect(X, size=2) -> Tensor:
+  def pad_reflect(X:Tensor, size=2) -> Tensor:
     X = X[...,:,1:size+1].flip(-1).cat(X, X[...,:,-(size+1):-1].flip(-1), dim=-1)
     X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
     return X
@@ -326,7 +318,7 @@ def train_cifar():
   def train_step(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
     loss_batchsize_scaler = 512/BS
-    loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
+    loss = Tensor.cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
     if not getenv("DISABLE_BACKWARD"):
       # index 0 for bias and 1 for non-bias
@@ -341,7 +333,7 @@ def train_cifar():
 
   def eval_step(model, X, Y):
     out = model(X, training=False)
-    loss = cross_entropy(out, Y, reduction='mean')
+    loss = Tensor.cross_entropy(out, Y, reduction='mean')
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
     return correct.realize(), loss.realize()
   eval_step_jitted     = TinyJit(eval_step)

@@ -33,7 +33,11 @@ torch.utils.generate_methods_for_privateuse1_backend()
 @torch.library.impl("aten::masked_select", "privateuseone")
 def masked_select(self, mask):
   # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
+  import numpy as np
+  t, m = self.cpu().numpy(), mask.cpu().numpy()
+  # need to explicitly broadcast the mask
+  m = np.broadcast_to(m, t.shape)
+  return wrap(Tensor(t[m]))
 
 @torch.library.impl("aten::topk", "privateuseone")
 def topk(self, k, dim=-1, largest=True, sorted=True):
@@ -286,6 +290,9 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
+  "aten.reflection_pad1d.out": functools.partial(Tensor.pad, mode="reflect"),
+  "aten.replication_pad1d.out": functools.partial(Tensor.pad, mode="replicate"),
+  "aten.amax.out": Tensor.max,
 }}
 
 # we add the "out" here
@@ -340,14 +347,14 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
   "aten.random_.from": lambda self, from_, to:
     self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype)),
-  "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
-  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std)),
+  "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype)),
+  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std, dtype=self.dtype)),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": lambda x, y: x.assign(x | y),
   "aten.multinomial": Tensor.multinomial,
-  "aten.pad": Tensor.pad,
+  # "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
@@ -381,7 +388,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
   "aten.detach": Tensor.detach,
-  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
+  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.unfold": Tensor.unfold,
+  "aten.equal": Tensor.__eq__,
 }}
 
 def wrap_fxn(k,f):
@@ -408,18 +417,59 @@ if TORCH_DEBUG:
       return func(*args, **(kwargs or {}))
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
-# NOTE: patch torch optimizer step to avoid continously growing the computation graph
+# # NOTE: patch torch optimizer step to avoid continously growing the computation graph
+# def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
+#   tinygrad_tensors = []
+#   for param_group in optimizer.param_groups:
+#     for param in param_group["params"]:
+#       if param is None: continue
+#       tinygrad_tensors.append(param.data)
+#   for state_dict in optimizer.state.values():
+#     for _, value in state_dict.items():
+#       if torch.is_tensor(value): tinygrad_tensors.append(value)
+#   real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
+#   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
+
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
+  if getenv("DEBUG")>=2: print("Starting realize_optimizer_step")
   tinygrad_tensors = []
-  for param_group in optimizer.param_groups:
-    for param in param_group["params"]:
+  for i, param_group in enumerate(optimizer.param_groups):
+    if getenv("DEBUG")>=2: print(f"Processing param group {i} with {len(param_group['params'])} params")
+    for j, param in enumerate(param_group["params"]):
       if param is None: continue
+      if getenv("DEBUG")>=2: print(f"  - Adding param {j}: shape {param.shape} to tinygrad_tensors")
       tinygrad_tensors.append(param.data)
-  for state_dict in optimizer.state.values():
-    for _, value in state_dict.items():
-      if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
-  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
+
+  if getenv("DEBUG")>=2: print(f"Collecting optimizer state tensors")
+  for state_key, state_dict in optimizer.state.items():
+    if getenv("DEBUG")>=2: print(f"Processing state for param with id {id(state_key)}")
+    for key, value in state_dict.items():
+      if getenv("DEBUG")>=2: print(f"  - State key: {key}, type: {type(value)}")
+      if torch.is_tensor(value):
+        if getenv("DEBUG")>=2: print(f"    - Adding tensor with shape {value.shape} to tinygrad_tensors")
+        tinygrad_tensors.append(value)
+
+  if getenv("DEBUG")>=2: print(f"Found {len(tinygrad_tensors)} tensors, filtering for device 'tiny'")
+  real_tinygrad_tensors = []
+  for tensor in tinygrad_tensors:
+    try:
+      device_str = str(tensor.device)
+      if getenv("DEBUG")>=2: print(f"  - Tensor device: {device_str}")
+      if device_str == "tiny":
+        real_tinygrad_tensors.append(unwrap(tensor))
+    except Exception as e:
+      if getenv("DEBUG")>=2: print(f"  - Error checking tensor device: {e}")
+
+  if getenv("DEBUG")>=2: print(f"Realizing {len(real_tinygrad_tensors)} tensors on tiny device")
+  try:
+    if len(real_tinygrad_tensors):
+      if getenv("DEBUG")>=2:print("  - About to call Tensor.realize()")
+      Tensor.realize(*real_tinygrad_tensors)
+      if getenv("DEBUG")>=2:print("  - Tensor.realize() completed")
+  except Exception as e:
+    if getenv("DEBUG")>=2:print(f"  - Error in Tensor.realize: {e}")
+
+  if getenv("DEBUG")>=2: print("Finished realize_optimizer_step")
 
 _optimizer_init = torch.optim.Optimizer.__init__
 def _optimizer_patched_init(self, *args, **kwargs):
