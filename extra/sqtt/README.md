@@ -9,6 +9,10 @@ SQTT is implemented on top of normal tinygrad PROFILE=1, `PROFILE=1 SQTT=1` to g
 `SQTT_ITRACE=0` to disable instruction tracing, this will reduce size of generated trace significantly \
 `SQTT_BUFFER_SIZE=X` to change size of SQTT buffer (per shader engine, 6 SEs on 7900xtx) in megabytes, default 256.
 
+Note that instruction tracing might not be available for kernels with small global dims, this is not a bug, but it can be improved with various hacks
+to the point where it can reliably trace a kernel consisting of a single wavefront (am only, not quite reliable under amdgpu due to waves sometimes
+being dispatched starting from different simds). More info in comments in ops_amd.py
+
 ## Converting pickled profile with SQTT data into RGP file
 
 ```bash
