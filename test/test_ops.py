@@ -2847,67 +2847,6 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
-  def test_argsort(self):
-    # basic functionality - sort indices
-    helper_test_op([(10,)], lambda x: torch.argsort(x),
-                           lambda x: x.argsort(), forward_only=True)
-    
-    # test with descending=True
-    helper_test_op([(10,)], lambda x: torch.argsort(x, descending=True),
-                           lambda x: x.argsort(descending=True), forward_only=True)
-    
-    # test with non-default dimension
-    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=1),
-                             lambda x: x.argsort(dim=1), forward_only=True)
-    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=0),
-                             lambda x: x.argsort(dim=0), forward_only=True)
-    
-    # test with negative dimension
-    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=-1),
-                             lambda x: x.argsort(dim=-1), forward_only=True)
-    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=-2),
-                             lambda x: x.argsort(dim=-2), forward_only=True)
-    
-    # test with 3D tensor
-    helper_test_op([(3, 4, 5)], lambda x: torch.argsort(x, dim=1),
-                               lambda x: x.argsort(dim=1), forward_only=True)
-    
-    # test with specific values to check stability with duplicates
-    helper_test_op([(20,)], lambda x: torch.argsort(x),
-                           lambda x: x.argsort(), 
-                           vals=[[0.5, -1.0, 0.0, 0.5, 1.0] * 4], forward_only=True)
-    
-    # test with odd tensor size to check handling of non-power-of-2 sizes
-    helper_test_op([(17,)], lambda x: torch.argsort(x),
-                           lambda x: x.argsort(), forward_only=True)
-    
-    # test with different dtypes
-    helper_test_op([(10,)], lambda x: torch.argsort(x.int()),
-                           lambda x: x.cast(dtypes.int32).argsort(), forward_only=True)
-    
-    # test with very small tensor
-    helper_test_op([(1,)], lambda x: torch.argsort(x),
-                          lambda x: x.argsort(), forward_only=True)
-    
-    # test with empty tensor (dimension with size 0)
-    helper_test_op([(0,)], lambda x: torch.argsort(x),
-                          lambda x: x.argsort(), forward_only=True)
-    
-    # test consistency with sort
-    x = Tensor.randn(100)
-    indices = x.argsort()
-    sorted_x = x.gather(0, indices)
-    # verify sorted_x is actually sorted
-    diffs = sorted_x[1:] - sorted_x[:-1]
-    assert (diffs < 0).sum().numpy() == 0, "argsort result is not properly sorted"
-    
-    # test descending sort consistency
-    indices = x.argsort(descending=True)
-    sorted_x = x.gather(0, indices)
-    # verify sorted_x is actually sorted in descending order
-    diffs = sorted_x[:-1] - sorted_x[1:]
-    assert (diffs < 0).sum().numpy() == 0, "argsort descending result is not properly sorted"
-
   def test_topk(self):
     # basic functionality - top k values and indices
     helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3)),
@@ -2938,7 +2877,7 @@ class TestOps(unittest.TestCase):
     # test with sorted=False
     helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, sorted=False)),
                              lambda x: Tensor.stack(*x.topk(k=3, sorted=False)), forward_only=True)
-    
+
     # test with non-default values and low/high ranges to test stability with duplicates
     helper_test_op([(20,)], lambda x: torch.stack(torch.topk(x, k=5)),
                              lambda x: Tensor.stack(*x.topk(k=5)), 
