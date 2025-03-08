@@ -1053,7 +1053,7 @@ class TestOps(unittest.TestCase):
 
     # test with different k values
     helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=1)), lambda x: x.topk(k=1), forward_only=True)
-    # NOTE: this fails on CI (WEBGPU) but passes locally. RuntimeError: Error creating bind 
+    # NOTE: this fails on CI (WEBGPU) but passes locally. RuntimeError: Error creating bind
     # group layout: The number of storage buffers (11) in the Compute stage exceeds the maximum per-stage limit (10).
     # helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=10)), lambda x: x.topk(k=10), forward_only=True)
 
