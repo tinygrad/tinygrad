@@ -9,7 +9,7 @@ from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROF
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio, sqtt
-from tinygrad.runtime.autogen.am import am
+from tinygrad.runtime.autogen.am import am, gc_11_0_0
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
@@ -27,6 +27,11 @@ COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 def gfxreg(reg): return reg + amd_gpu.GC_BASE__INST0_SEG0 - amd_gpu.PACKET3_SET_SH_REG_START
 def ucfgreg(reg, pkt3_set:bool=True): return reg + amd_gpu.GC_BASE__INST0_SEG1 - (amd_gpu.PACKET3_SET_UCONFIG_REG_START if pkt3_set else 0)
 def nbioreg(reg): return reg + amd_gpu.NBIO_BASE__INST0_SEG2
+
+# This can potentially be shared with AMRegister._parse_kwargs. NOTE: This is hardcoded to gfx11, bitfields might be different in other gfxvers.
+# Currently not a problem because this is only used by sqtt and sqtt is only supported on 7900xtx
+def encode_bitfields(regname: str, **kwargs) -> int:
+  return functools.reduce(lambda x,y: x|y, [v << getattr(gc_11_0_0, f'{regname}__{k.upper()}__SHIFT') for k,v in kwargs.items()], 0)
 
 class AMDSignal(HCQSignal):
   def __init__(self, base_addr:int|None=None, **kwargs):
@@ -81,12 +86,17 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def spi_config(self, tracing:bool):
-    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSPI_CONFIG_CNTL),
-              3 << 30 | int(tracing) << 0x19 | int(tracing) << 0x18 | 3 << 0x15 | 0x2c688)
+    spi_config_cntl = encode_bitfields('SPI_CONFIG_CNTL', ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
+                                       enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
+    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSPI_CONFIG_CNTL), spi_config_cntl)
 
   def sqtt_config(self, tracing:bool):
-    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_CTRL), 1 << 0x1f | amd_gpu.SQ_TT_RT_FREQ_4096_CLK << 0x10 |
-              amd_gpu.SQ_TT_UTIL_TIMER_250_CLK << 0xb | 1 << 0xc | 1 << 0xb | 2 << 0x9 | 1 << 0x6 | int(tracing))
+    sq_thread_trace_ctrl = encode_bitfields('SQ_THREAD_TRACE_CTRL', draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1,
+                                            rt_freq=amd_gpu.SQ_TT_RT_FREQ_4096_CLK, util_timer=amd_gpu.SQ_TT_UTIL_TIMER_250_CLK, mode=int(tracing))
+    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_CTRL), sq_thread_trace_ctrl)
+
+  def grbm_gfx_index(self, **kwargs):
+    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), encode_bitfields('GRBM_GFX_INDEX', **kwargs))
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def start_trace(self, buf0s: list[HCQBuffer]):
@@ -94,11 +104,17 @@ class AMDComputeQueue(HWQueue):
     self.spi_config(tracing=True)
     # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
     for se in range(len(buf0s)):
-      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), 1 << 30 | se << 16) # select se
+      self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
       size_shifted, buf_shifted = buf0s[se].size>>12, buf0s[se].va_addr>>12
       buf0_lo, buf0_hi = data64_le(buf_shifted)
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_SIZE), size_shifted << 8 | buf0_hi)
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_BASE), buf0_lo)
+      # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
+      # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
+      # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
+      # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
+      # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
+      # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_MASK), amd_gpu.SQ_TT_WTYPE_INCLUDE_CS_BIT << 10)
       REG_INCLUDE = amd_gpu.SQ_TT_TOKEN_MASK_SQDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_SHDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
                     amd_gpu.SQ_TT_TOKEN_MASK_COMP_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT
@@ -111,7 +127,7 @@ class AMDComputeQueue(HWQueue):
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_TOKEN_MASK),
                 REG_INCLUDE << 16 | BOP_EVENTS_TOKEN_INCLUDE << 12 | TOKEN_EXCLUDE)
       self.sqtt_config(tracing=True)
-    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), 0b111 << 29) # restore global broadcasting
+    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1) # restore global broadcasting
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_THREAD_TRACE_ENABLE), 1)
     self.memory_barrier()
     return self
@@ -125,7 +141,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(amd_gpu.PACKET3_EVENT_WRITE, amd_gpu.EVENT_TYPE(amd_gpu.THREAD_TRACE_FINISH) | amd_gpu.EVENT_INDEX(0))
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
     for se in range(ses):
-      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), 1 << 30 | se << 16) # select se
+      self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
       self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
                 ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, 0x00000FFF, 4) # finish_pending==0
       self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
@@ -135,7 +151,7 @@ class AMDComputeQueue(HWQueue):
                 ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, 0x02000000, 4) # busy==0
       # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True), ucfgreg with False adds GC_BASE__INST0_SEG1 but not pkt3 reg offset
       self.pkt3(amd_gpu.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_WPTR, False), 0, *data64_le(wptrs.va_addr+(se*4)))
-    self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), 0b111 << 29) # restore global broadcasting
+    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1) # restore global broadcasting
     self.spi_config(tracing=False)
     return self
 
