@@ -2017,7 +2017,8 @@ class Tensor(SimpleMathTrait):
       vals.append(self.gather(dim, i).squeeze(dim))
       idxs.append(i.squeeze(dim))
       x = x.scatter(dim, i, ext)
-    return Tensor.stack(Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim), dim=0)
+    # pylint: disable=no-value-for-parameter
+    return Tensor.stack(Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim), dim=0) # n
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:DTypeLike|None=None) -> Tensor:
