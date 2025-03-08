@@ -81,6 +81,8 @@ x86_rewrite = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}"),
   # requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
+  # requires cl if second operand is a register
+  (UPat(Ops.SHR, name="x"), lambda ctx,x: ctx.shr(x, x.src[1]) if ctx.r[x.src[1]] in ctx.all_regs else None),
   (UPat(GroupOp.Binary, name="x"),
    lambda ctx,x: f"{f'{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n' if ctx[x] != ctx[x.src[0]] else ''}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
@@ -159,6 +161,16 @@ class X86Renderer(Renderer):
     l.append(f"{x86op[x.dtype][x.op]} {self.regt(divisor, s.dtype)}")
     l.append(f"mov {self[x]}, {self.regt('rax' if x.op is Ops.IDIV else 'rdx', x.dtype)}")
     return "\n".join(l + [f"pop {reg}" for reg in reversed(req_regs) if self.r[x] != reg])
+
+  def shr(self, x:UOp, s:UOp) -> str:
+    l = ""
+    dest = "r15" if self.r[x] == "rcx" else self.r[x]
+    if dest == "r15": l += "mov r15, rcx\n"
+    if self.r[s] != "rcx": l += f"push rcx\nmov rcx, {self.r[s]}\n"
+    l += f"{x86op[x.dtype][x.op]} {self.regt(dest, x.dtype)}, cl\n"
+    if self.r[s] != "rcx": f"pop rcx\n"
+    if dest == "r15": l += "mov rcx, r15\n"
+    return l
 
   def regt(self, reg:str, dt:DType) -> str:
     if dt.itemsize == 8 or dtypes.is_float(dt) or isinstance(dt, PtrDType): return reg
@@ -240,7 +252,8 @@ class X86Renderer(Renderer):
           elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
-          elif u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]): r[u] = r[u.src[0]] # reuse first operand register
+          # reuse first operand register when possible
+          elif u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]): r[u] = r[u.src[0]]
           else: r[u] = assign_reg(i, u.dtype)
         if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
