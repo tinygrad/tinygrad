@@ -1,8 +1,7 @@
 import unittest
 import torch
-import extra.torch_backend.backend
-device = "tiny"
-torch.set_default_device(device)
+import tinygrad.frontend.torch
+torch.set_default_device("tiny")
 import numpy as np
 
 class TestTorchBackendInplace(unittest.TestCase):
@@ -53,6 +52,14 @@ class TestTorchBackendInplace(unittest.TestCase):
     b += 1
     c += 1
     np.testing.assert_equal(c.cpu().numpy(), torch.full((48,32),3).cpu().numpy())
+
+  def test_noncontig(self):
+    a = torch.empty_strided((4,4),(1,4), dtype=torch.int64)
+    # self.assertFalse(a.is_contiguous()) # TODO: we are contiguous when it's not required
+    a.zero_()
+    b = a.view((4,4))
+    b[1:3,:] += 1
+    np.testing.assert_equal(a.cpu().numpy(), [[0]*4,[1]*4,[1]*4,[0]*4])
 
 if __name__ == "__main__":
   unittest.main()

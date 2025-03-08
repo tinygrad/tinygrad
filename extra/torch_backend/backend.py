@@ -33,13 +33,14 @@ def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is 
 def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
   assert self.device.type == "tiny"
   self = unwrap(self)
+  if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
   for v in views:
     v = unwrap(v)
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
-    for mo in to_movement_ops(st): ret = apply_mop(ret, mo)
-    v.replace(ret).realize()
+    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
+    v.replace(ret)
 def maybe_realize_storage(self: torch.Tensor) -> bool:
   if realize:=is_view(self): realize_with_views(self._base, [self]) # TODO: other views could exist
   return realize
@@ -91,14 +92,16 @@ def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n,
 def zero_(x):
   if TORCH_DEBUG: print(f"zero_ {x.shape}")
   tt = unwrap(x)
-  tt.assign(tt.zeros_like().contiguous()) # TODO: should only be contig when out is contig
+  # NOTE: unconditional contiguous covers if x is contiguous (match it) or if x is view (realize for inplace)
+  # TODO: consolidate
+  tt.assign(tt.zeros_like().contiguous())
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
 @inplace_fn("x")
 def fill_scalar(x, y):
   if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
   tt = unwrap(x)
-  tt.assign(tt.full_like(y).contiguous()) # TODO: should only be contig when out is contig
+  tt.assign(tt.full_like(y).contiguous())
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
@@ -345,7 +348,8 @@ def wrap_out(f):
     if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
-    return out.assign(assigned.contiguous()) # TODO: should only be contig when out is contig
+    if out.lazydata.is_realized: assigned = assigned.contiguous() # TODO: how does this map to torch's semantics
+    return out.assign(assigned)
   return _wrap_out
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
