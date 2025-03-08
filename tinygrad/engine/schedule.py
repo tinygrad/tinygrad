@@ -271,6 +271,9 @@ add_buffer_ops = PatternMatcher([
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
+  # VALID/CONST
+  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="mask"), lambda x,mask: x.valid(mask.arg)),
+  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),), name="x"), lambda x,st: x.replace(src=(st.arg.to_uop(),))),
 ])
 
 # ** push views to buffer ops
@@ -356,9 +359,8 @@ def check_load_st(glbl:UOp, view:UOp):
 fix_kernel_ops = PatternMatcher([
   # BIND in shapetracker becomes DEFINE_VAR
   (UPat(Ops.VIEW, name="x"), unbind_shapetracker),
-  # remove CONTIGUOUS/DEVICE
+  # remove CONTIGUOUS
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
   # remove unmasked valid
   (UPat.where(UPat(Ops.VALID, name="valid"), UPat.cvar("x"), UPat()), lambda valid,x: x if all(v.mask is None for v in valid.st.views) else None),
   # no ImageDType after load
