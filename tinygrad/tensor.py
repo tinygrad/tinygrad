@@ -2009,14 +2009,13 @@ class Tensor(SimpleMathTrait):
     # with sorted=False: values can be in ANY order
     # NOTE: this way always returns sorted, matches torch.topk behaviour)
     if sorted: pass
-    
+
     x, vals, idxs = self, [], []
     fn, ext =  (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
       i = fn(x, axis=dim, keepdim=True)
-      v = self.gather(dim, i)
-      vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
-      idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
+      vals.append(self.gather(dim, i).squeeze(dim))
+      idxs.append(i.squeeze(dim))
       x = x.scatter(dim, i, ext)
     return Tensor.stack(Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim), dim=0)
 
