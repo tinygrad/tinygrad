@@ -82,7 +82,8 @@ x86_rewrite = PatternMatcher([
   # requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   # requires cl if second operand is a register
-  (UPat((Ops.SHL, Ops.SHR), name="x"), lambda ctx,x: ctx.bitshift(x, x.src[1]) if ctx.r[x.src[1]] in ctx.all_regs else None),
+  (UPat((Ops.SHL, Ops.SHR), name="x"),
+   lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.bitshift(x, x.src[1])}" if ctx.r[x.src[1]] in ctx.all_regs else None),
   (UPat(GroupOp.Binary, name="x"),
    lambda ctx,x: f"{f'{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n' if ctx[x] != ctx[x.src[0]] else ''}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
