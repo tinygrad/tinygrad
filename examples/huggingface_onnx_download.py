@@ -26,11 +26,12 @@ SKIPPED_REPO_PATHS = [
   "briaai/RMBG-2.0",
 ]
 
-def download_repo_onnx_models(model_id: str, download_dir:str):
-  return Path(snapshot_download(repo_id=model_id, allow_patterns=["*.onnx", "*.onnx_data"], ignore_patterns=["*" + n + "*" for n in SKIPPED_FILES],
+def download_repo_onnx_models(model_id: str, ignore_patterns:list[str]|None=None, download_dir:str|None=None, specific_model:str|None=None):
+  allow_patterns = ["*.onnx", "*.onnx_data"] if specific_model is None else [specific_model, "*.onnx_data"]
+  return Path(snapshot_download(repo_id=model_id, allow_patterns=allow_patterns, ignore_patterns=ignore_patterns,
                                 cache_dir=download_dir))
 
-def download_repo_configs(model_id: str, download_dir:str):
+def download_repo_configs(model_id: str, download_dir:str|None=None):
   return Path(snapshot_download(repo_id=model_id, allow_patterns=["*config.json"], cache_dir=download_dir))
 
 def get_config(root_path: Path):
@@ -77,7 +78,7 @@ def download_top_repos(n:int, filter_architecture:bool, sort:str, dry_run:bool, 
         total_size += file_size
     else:
       print(f"Real run: downloading ONNX models for {model.id}...")
-      root_path = download_repo_onnx_models(model.id, download_dir)
+      root_path = download_repo_onnx_models(model.id, ["*" + n + "*" for n in SKIPPED_FILES], download_dir)
       print(f"Models downloaded to: {root_path}")
       files = list(root_path.rglob("*.onnx")) + list(root_path.rglob("*.onnx_data"))
       for fp in files:

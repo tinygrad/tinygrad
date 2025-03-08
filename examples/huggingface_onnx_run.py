@@ -48,6 +48,21 @@ def retrieve_op_stats(models:dict[str, tuple[Path, Path]]) -> dict:
   ret["op_counter"] = op_counter.most_common()
   return ret
 
+def debug_run(model_path, truncate, config, rtol, atol):
+  if truncate != -1:
+    model = onnx.load(model_path)
+    nodes_up_to_limit = list(model.graph.node)[:truncate + 1]
+    new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
+    model.graph.ClearField("node")
+    model.graph.node.extend(nodes_up_to_limit)
+    model.graph.ClearField("output")
+    model.graph.output.extend(new_output_values)
+    with tempfile.NamedTemporaryFile(suffix=model_path.suffix) as tmp:
+      onnx.save(model, tmp.name)
+      run_huggingface_validate(tmp.name, config, rtol, atol)
+  else:
+    run_huggingface_validate(model_path, config, rtol, atol)
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Huggingface ONNX Model Validator and Ops Checker")
   parser.add_argument("--check_ops", action="store_true", default=False,
@@ -65,38 +80,47 @@ if __name__ == "__main__":
   if args.truncate != -1 and not args.debug:
     parser.error("--truncate and --debug should be used together for debugging")
 
-  with open(args.yaml, 'r') as f:
-    data = yaml.safe_load(f)
-    model_paths = {
-      model_id + "/" + model["file"]: (Path(repo["path"]), Path(model["file"]))
-      for model_id, repo in data["repositories"].items()
-      for model in repo["files"]
-      if model["file"].endswith(".onnx")
-    }
+  if args.check_ops or args.validate:
+    with open(args.yaml, 'r') as f:
+      data = yaml.safe_load(f)
+      model_paths = {
+        model_id + "/" + model["file"]: (Path(repo["path"]), Path(model["file"]))
+        for model_id, repo in data["repositories"].items()
+        for model in repo["files"]
+        if model["file"].endswith(".onnx")
+      }
 
-  if args.check_ops:
-    pprint.pprint(retrieve_op_stats(model_paths))
+    if args.check_ops:
+      pprint.pprint(retrieve_op_stats(model_paths))
 
-  if args.validate:
-    validate_repos(model_paths)
+    if args.validate:
+      validate_repos(model_paths)
 
   if args.debug:
+    from examples.huggingface_onnx_download import download_repo_onnx_models, download_repo_configs
     print(f"DEBUG {args.debug}")
-    root_path, relative_path = model_paths[args.debug]
-    model_path = root_path / relative_path
-    rtol, atol = get_tolerances(relative_path.name)
-    config = get_config(root_path)
-    if args.truncate != -1:
-      print(f"TRUNCATE {args.truncate}")
-      model = onnx.load(model_path)
-      nodes_up_to_limit = list(model.graph.node)[:args.truncate + 1]
-      new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
-      model.graph.ClearField("node")
-      model.graph.node.extend(nodes_up_to_limit)
-      model.graph.ClearField("output")
-      model.graph.output.extend(new_output_values)
-      with tempfile.NamedTemporaryFile(suffix=relative_path.suffix) as tmp:
-        onnx.save(model, tmp.name)
-        run_huggingface_validate(tmp.name, config, rtol, atol)
+    print(f"TRUNCATE {args.truncate}")
+    path:list[str] = args.debug.split("/")
+    if len(path) == 2:
+      # repo id
+      # validates all onnx models inside repo
+      repo_id = "/".join(path)
+      root_path = download_repo_onnx_models(repo_id)
+      download_repo_configs(repo_id)
+      config = get_config(root_path)
+      for onnx_model in root_path.rglob("*.onnx"):
+        rtol, atol = get_tolerances(onnx_model.name)
+        print(f"validating {onnx_model.relative_to(root_path)} with truncate={args.truncate}, {rtol=}, {atol=}")
+        debug_run(onnx_model, args.truncate, config, rtol, atol)
     else:
-      run_huggingface_validate(model_path, config, rtol, atol)
+      # model id
+      # only validate the specified onnx model
+      onnx_model = path[-1]
+      assert path[-1].endswith(".onnx")
+      repo_id, relative_path = "/".join(path[:2]), "/".join(path[2:])
+      root_path = download_repo_onnx_models(repo_id, specific_model=onnx_model)
+      download_repo_configs(repo_id)
+      config = get_config(root_path)
+      rtol, atol = get_tolerances(onnx_model)
+      print(f"validating {relative_path} with truncate={args.truncate}, {rtol=}, {atol=}")
+      debug_run(root_path / relative_path, args.truncate, config, rtol, atol)
