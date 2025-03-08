@@ -159,8 +159,7 @@ class RGP:
     loads = [(event.base, struct.unpack('<Q', hashlib.md5(event.lib).digest()[:8])*2) for event in load_events if event.base is not None and event.lib is not None]
     code_objects = list(dict.fromkeys([x.lib for x in load_events if x.lib is not None]).keys())
     if len(loads) == 0: raise RuntimeError('No load events in profile')
-    # TODO: tons of stuff hardcoded for 7900xtx, tons of stuff is wrong, tons of stuff are guesses. The right way is for someone to capture a trace on
-    # windows with 7900xtx and just take those values for what can't be autodetected
+    # TODO: tons of stuff hardcoded for 7900xtx
     file_header = sqtt.struct_sqtt_file_header(
       magic_number=sqtt.SQTT_FILE_MAGIC_NUMBER,
       version_major=sqtt.SQTT_FILE_VERSION_MAJOR,
@@ -188,18 +187,18 @@ class RGP:
           major_version=0, minor_version=5,
         ),
         flags=0,
-        trace_shader_core_clock=1900000000,  # 1.9 GHz (base clock)
-        trace_memory_clock=1250000000,  # 1.25 GHz for GDDR6
-        device_id=0,
-        device_revision_id=0,
-        vgprs_per_simd=1536, # TODO discover
+        trace_shader_core_clock=0x93f05080,
+        trace_memory_clock=0x4a723a40,
+        device_id=0x744c,
+        device_revision_id=0xc8,
+        vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
         shader_engines=6,
         compute_unit_per_shader_engine=16,
-        simd_per_compute_unit=4,
+        simd_per_compute_unit=2,
         wavefronts_per_simd=16,
-        minimum_vgpr_alloc=32,
-        vgpr_alloc_granularity=32,
+        minimum_vgpr_alloc=4,
+        vgpr_alloc_granularity=8,
         minimum_sgpr_alloc=128,
         sgpr_alloc_granularity=128,
         hardware_contexts=8,
@@ -213,26 +212,26 @@ class RGP:
         ce_ram_size_compute=0,
         max_number_of_dedicated_cus=0,
         vram_size=24 * 1024 * 1024 * 1024,  # 24 GB
-        vram_bus_width=384,  # 384-bit
-        l2_cache_size=6 * 1024 * 1024,  # 6 MB
-        l1_cache_size=128 * 1024,  # 128 KB per WGP
-        lds_size=65536,  # 64 KB per CU
-        gpu_name='tiny'.encode(),
+        vram_bus_width=384, # 384-bit
+        l2_cache_size=6 * 1024 * 1024, # 6 MB
+        l1_cache_size=32 * 1024, # 32 KB per SIMD (?)
+        lds_size=65536, # 64 KB per CU
+        gpu_name=b'NAVI31',
         alu_per_clock=0,
         texture_per_clock=0,
-        prims_per_clock=0,
+        prims_per_clock=6,
         pixels_per_clock=0,
-        gpu_timestamp_frequency=1000000000,  # 1.0 GHz
-        max_shader_core_clock=2500000000,  # 2.5 GHz (boost clock)
+        gpu_timestamp_frequency=100000000, # 100 MHz
+        max_shader_core_clock=2500000000, # 2.5 GHz (boost clock)
         max_memory_clock=1250000000,  # 1.25 GHz
         memory_ops_per_clock=16,
         memory_chip_type=sqtt.SQTT_MEMORY_TYPE_GDDR6,
         lds_granularity=512,
-        cu_mask=((1023, 1023),)*6 + ((0,0),)*(32-6),
-        gl1_cache_size=128 * 1024,  # 128 KB
-        instruction_cache_size=32 * 1024,  # 32 KB
-        scalar_cache_size=16 * 1024,  # 16 KB
-        mall_cache_size=0,
+        cu_mask=((255, 255),)*6 + ((0,0),)*(32-6),
+        gl1_cache_size=256 * 1024, # 256 KB
+        instruction_cache_size=32 * 1024, # 32 KB
+        scalar_cache_size=16 * 1024, # 16 KB
+        mall_cache_size=96 * 1024 * 1024, # 96 MB
       )),
       RGPChunk(sqtt.struct_sqtt_file_chunk_api_info(
         header=sqtt.struct_sqtt_file_chunk_header(
