@@ -17,7 +17,7 @@ def get_tolerances(file_name): # -> rtol, atol
   return 4e-3, 3e-2
 
 def validate_repos(models:dict[str, tuple[Path, Path]]):
-  print(f"** Validating {len(model_paths)} repos **")
+  print(f"** Validating {len(model_paths)} models **")
   for model_id, (root_path, relative_path) in models.items():
     print(f"validating model {model_id}")
     model_path = root_path / relative_path
