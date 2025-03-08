@@ -1135,6 +1135,28 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Tensor.einsum('ij,jk->ij', a)
 
+  def test_nonzero(self):
+    # test the Tensor.nonzero() method
+    a = Tensor([[1, 0, 0], [0, 2, 0], [0, 0, 3]],requires_grad=True)
+    b = Tensor([[5,0,0], [0,6,0], [0,0,7]],requires_grad=True)
+    np.testing.assert_equal(a.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+    
+    helper_test_op([(10)], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
+    helper_test_op([(10,20,30)], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
+
+  def test_nonzero_empty(self):
+    # test the Tensor.nonzero() method
+    a = Tensor([],requires_grad=True)
+    np.testing.assert_equal(a.nonzero().numpy(), [])
+    helper_test_op([()], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
+
+  def test_nonzero_2d(self):
+    # test the Tensor.nonzero() method
+    a = Tensor([[1, 0, 0], [0, 2, 0], [0, 0, 3]],requires_grad=True)
+    b = Tensor([[5,0,0], [0,6,0], [0,0,7]],requires_grad=True)
+    np.testing.assert_equal(a.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+    np.testing.assert_equal(b.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
   def test_dot_1d(self):
     helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot)

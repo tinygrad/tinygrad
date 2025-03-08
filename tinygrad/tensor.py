@@ -2055,35 +2055,38 @@ class Tensor(SimpleMathTrait):
       .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output], acc_dtype=acc_dtype).permute(rhs_order)
 
   def nonzero(self):
+    # check if the tensor is empty
+    print(self.shape)
+    if self.numel() == 0:
+        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, )
+    elif self.ndim == 0:
+        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
+
     flat_t = self.reshape(-1)
-    mask = (flat_t != 0).cast(dtype='int32')
-
-    indices = Tensor.arange(flat_t.shape[0], device=self.device)
-    masked_indices = Tensor.where(mask == 1, indices, Tensor.full(indices.shape, -1, device=self.device))
-
-    nonzero_count = mask.sum().item() # counting with sum() is pure-safe
-    if nonzero_count == 0: return Tensor([], device=self.device,dtype=dtypes.int64).reshape(0, self.ndim)
-
-
-    # manually allocate tensor for indices
-    positive_indices = Tensor.zeros(nonzero_count, device=self.device, dtype=dtypes.int32).contiguous()
-
-    idx = 0
-    for i in range(masked_indices.shape[0]):
-        current_index = masked_indices[i].item()
-        if current_index != -1:
-            positive_indices[idx] = current_index
-            idx += 1
-
-    # Now convert linear indices into coordinates
+    # Create a tensor of 1’s for nonzero elements and 0’s otherwise.
+    if flat_t.dtype != dtypes.bool:
+      m = (flat_t != 0).cast(dtype=dtypes.int32)
+    # Compute the cumulative sum along the flattened dimension.
+    cumsum = m.cumsum(0)
+    # The last element of cumsum is the count of nonzero items.
+    nonzero_count = cumsum[-1].item()  
+    if nonzero_count == 0:
+        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
+    # Build targets from 1 to nonzero_count.
+    targets = Tensor.arange(1, nonzero_count + 1, device=self.device, dtype=dtypes.int32)
+    # Expand and compute absolute differences:
+    #   cumsum: shape (n,) -> (n,1)
+    #   targets: shape (nonzero_count,) -> (1, nonzero_count)
+    diff = (cumsum.unsqueeze(1) - targets.unsqueeze(0)).abs()
+    # For each target, find the index where the difference is minimized.
+    indices = diff.argmin(axis=0)  # shape (nonzero_count,)
+    # Convert the linear indices into coordinates.
+    pos = indices
     coords = []
-    shape_reversed = self.shape[::-1]
-
-    for dim_size in shape_reversed:
-        coords.append(positive_indices % dim_size)
-        positive_indices = positive_indices // dim_size
-
-    coords = coords[::-1] # restore original order
+    for dim_size in self.shape[::-1]:
+        coords.append(pos % dim_size)
+        pos = pos // dim_size
+    coords = coords[::-1]  # restore original order
     return Tensor.stack(*coords, dim=1)
 
   # ***** processing ops *****
