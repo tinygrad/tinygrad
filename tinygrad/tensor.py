@@ -2014,11 +2014,11 @@ class Tensor(SimpleMathTrait):
     vals, idxs = [], []
     ext = dtypes.min(self.dtype) if largest else dtypes.max(self.dtype)
     for _ in range(k):
-        i = rem.argmax(axis=dim, keepdim=True) if largest else rem.argmin(axis=dim, keepdim=True)
-        v = self.gather(dim, i)
-        vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
-        idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
-        rem = rem.scatter(dim, i, ext)
+      i = rem.argmax(axis=dim, keepdim=True) if largest else rem.argmin(axis=dim, keepdim=True)
+      v = self.gather(dim, i)
+      vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
+      idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
+      rem = rem.scatter(dim, i, ext)
     return Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim)
 
   @staticmethod
