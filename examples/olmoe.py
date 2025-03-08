@@ -87,7 +87,7 @@ if __name__ == "__main__":
     if '.mlp.experts.' not in k:
       #print(k, rk, state[k].shape, model_state_dict[rk].shape)
       assert state[k].shape == model_state_dict[rk].shape
-      model_state_dict[rk].replace(state[k].to('metal').float())
+      model_state_dict[rk].replace(state[k].float())
       del model_state_dict[rk]
     else:
       _, _, layer, _, _, expert, name, _ = k.split('.')
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
   for k,v in experts.items():
     assert len(v) == 64
-    model_state_dict[k].replace(Tensor.stack(*[v[i].to('metal') for i in range(len(v))]))
+    model_state_dict[k].replace(Tensor.stack(*[v[i] for i in range(len(v))]))
     del model_state_dict[k]
 
   assert len(model_state_dict) == 0, model_state_dict
