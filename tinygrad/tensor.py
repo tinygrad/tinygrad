@@ -4033,6 +4033,161 @@ class Tensor(SimpleMathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+  def argsort(self, dim=-1, descending=False) -> Tensor:
+    # resolve the dimension
+    dim = self._resolve_dim(dim)
+    
+    # special case for 1D tensors
+    if len(self.shape) == 1:
+      # create indices tensor
+      indices = Tensor.arange(self.shape[0], device=self.device, dtype=dtypes.int64)
+      
+      # create a copy of original values for sorting
+      values = self.clone()
+      result_np = []
+      
+      # iterate through to find indices in order
+      for i in range(values.shape[0]):
+        # find the current min/max
+        if descending:
+          pos = values.argmax().item()
+        else:
+          pos = values.argmin().item()
+        
+        # store this position's index
+        result_np.append(indices[pos].item())
+        
+        # mark this value so it's not selected again
+        # handle different data types
+        if self.is_floating_point():
+          extreme_val = float('inf') if not descending else float('-inf')
+        else:
+          # for integers, use the max/min possible values
+          if not descending:
+            if self.dtype == dtypes.bool:
+              extreme_val = True
+            else:
+              extreme_val = 2**31 - 1 if self.dtype == dtypes.int32 else 2**63 - 1
+          else:
+            if self.dtype == dtypes.bool:
+              extreme_val = False
+            else:
+              extreme_val = -2**31 if self.dtype == dtypes.int32 else -2**63
+        
+        values[pos] = extreme_val
+      
+      # create the final result tensor
+      return Tensor(result_np, device=self.device, dtype=dtypes.int64)
+    
+    # for multi-dimensional case
+    import numpy as np
+    result_shape = list(self.shape)
+    result_np = np.zeros(self.shape, dtype=np.int64)
+    
+    # create original indices along the dimension to sort
+    indices = Tensor.arange(self.shape[dim], device=self.device, dtype=dtypes.int64)
+    
+    # helper function to get a slice of the tensor along the dimension
+    def get_slice(tensor, dim, idx_before, idx_after):
+      # create slice indices
+      slice_idx = []
+      for d in range(len(tensor.shape)):
+        if d < dim:
+          slice_idx.append(idx_before)
+        elif d > dim:
+          slice_idx.append(idx_after)
+        else:
+          slice_idx.append(slice(None))  # take all along the dimension
+      return tensor[tuple(slice_idx)]
+    
+    # iterate over all combinations of indices for the other dimensions
+    for idx_before in range(np.prod(self.shape[:dim]) if dim > 0 else 1):
+      for idx_after in range(np.prod(self.shape[dim+1:]) if dim < len(self.shape)-1 else 1):
+        # extract the 1D slice
+        slice_1d = get_slice(self, dim, idx_before, idx_after)
+        
+        # sort this 1D slice
+        values = slice_1d.clone()
+        slice_result = []
+        
+        # iterate through to find indices in order
+        for i in range(values.shape[0]):
+          # find the current min/max
+          if descending:
+            pos = values.argmax().item()
+          else:
+            pos = values.argmin().item()
+          
+          # store this position's index
+          slice_result.append(pos)
+          
+          # mark this value so it's not selected again
+          # handle different data types
+          if self.is_floating_point():
+            extreme_val = float('inf') if not descending else float('-inf')
+          else:
+            # for integers, use the max/min possible values
+            if not descending:
+              if self.dtype == dtypes.bool:
+                extreme_val = True
+              else:
+                extreme_val = 2**31 - 1 if self.dtype == dtypes.int32 else 2**63 - 1
+            else:
+              if self.dtype == dtypes.bool:
+                extreme_val = False
+              else:
+                extreme_val = -2**31 if self.dtype == dtypes.int32 else -2**63
+          
+          values[pos] = extreme_val
+        
+        # update the result array for this slice
+        # map the flat indices back to multi-dimensional indices
+        if dim > 0:
+          # convert idx_before to multi-dim indices
+          before_indices = []
+          temp = idx_before
+          for d in range(dim-1, -1, -1):
+            before_indices.insert(0, temp % self.shape[d])
+            temp //= self.shape[d]
+        else:
+          before_indices = []
+        
+        if dim < len(self.shape)-1:
+          # convert idx_after to multi-dim indices
+          after_indices = []
+          temp = idx_after
+          for d in range(len(self.shape)-1, dim, -1):
+            after_indices.insert(0, temp % self.shape[d])
+            temp //= self.shape[d]
+        else:
+          after_indices = []
+        
+        # now update the result array
+        for i, pos in enumerate(slice_result):
+          # construct the full indices
+          full_indices = before_indices + [i] + after_indices
+          result_idx = tuple(full_indices)
+          # get the position in the dimension
+          result_np[result_idx] = pos
+    
+    # convert the numpy array to a tensor
+    return Tensor(result_np, device=self.device, dtype=dtypes.int64)
+
+  def topk(self, k, dim=-1, largest=True, sorted=True):
+    # more efficient implementation using argsort
+    dim = self._resolve_dim(dim)
+    
+    # get sorted indices along dimension
+    indices = self.argsort(dim, descending=largest)
+    
+    # take only the top k indices
+    indices = indices.shrink(tuple(None if i != dim else (0, k) for i in range(indices.ndim)))
+    
+    # gather the corresponding values
+    values = self.gather(dim, indices)
+    
+    return values, indices
+
 P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
