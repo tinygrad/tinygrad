@@ -6,7 +6,6 @@ Only supported on 7900XTX, requires either AM (`rmmod amdgpu`) or disabling powe
 
 SQTT is implemented on top of normal tinygrad PROFILE=1, `PROFILE=1 SQTT=1` to get profile pickle with sqtt data embedded in it.
 
-`SQTT_ITRACE=0` to disable instruction tracing, this will reduce size of generated trace significantly \
 `SQTT_BUFFER_SIZE=X` to change size of SQTT buffer (per shader engine, 6 SEs on 7900xtx) in megabytes, default 256.
 
 Note that instruction tracing might not be available for kernels with small global dims, this is not a bug, but it can be improved with various hacks

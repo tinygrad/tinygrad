@@ -105,9 +105,9 @@ class AMDComputeQueue(HWQueue):
     # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
     for se in range(len(buf0s)):
       self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
-      size_shifted, buf_shifted = buf0s[se].size>>12, buf0s[se].va_addr>>12
-      buf0_lo, buf0_hi = data64_le(buf_shifted)
-      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_SIZE), size_shifted << 8 | buf0_hi)
+      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr>>12)
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_SIZE),
+                encode_bitfields('SQ_THREAD_TRACE_BUF0_SIZE', base_hi=buf0_hi, size=buf0s[se].size>>12))
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_BUF0_BASE), buf0_lo)
       # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
       # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
@@ -115,26 +115,22 @@ class AMDComputeQueue(HWQueue):
       # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
       # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
       # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
-      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_MASK), amd_gpu.SQ_TT_WTYPE_INCLUDE_CS_BIT << 10)
+      self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_MASK),
+                encode_bitfields('SQ_THREAD_TRACE_MASK', wtype_include=amd_gpu.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0))
       REG_INCLUDE = amd_gpu.SQ_TT_TOKEN_MASK_SQDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_SHDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
                     amd_gpu.SQ_TT_TOKEN_MASK_COMP_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT
-      BOP_EVENTS_TOKEN_INCLUDE = 1
-      TOKEN_EXCLUDE = 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
-      if not getenv("SQTT_ITRACE", 1):
-        TOKEN_EXCLUDE |= 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
-                         1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
-                         1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_TOKEN_MASK),
-                REG_INCLUDE << 16 | BOP_EVENTS_TOKEN_INCLUDE << 12 | TOKEN_EXCLUDE)
+                encode_bitfields('SQ_THREAD_TRACE_TOKEN_MASK', reg_include=REG_INCLUDE, bop_events_token_include=1))
+      # Enable SQTT
       self.sqtt_config(tracing=True)
-    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1) # restore global broadcasting
+    # Restore global broadcasting
+    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_THREAD_TRACE_ENABLE), 1)
     self.memory_barrier()
     return self
 
   # Magic values from src/amd/common/ac_sqtt.c:ac_sqtt_emit_stop and src/amd/common/ac_sqtt.c:ac_sqtt_emit_wait
   def stop_trace(self, ses: int, wptrs: HCQBuffer):
-    # Wait for previous stuff to complete
     self.memory_barrier()
     # Start shutting everything down
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_THREAD_TRACE_ENABLE), 0)
@@ -142,17 +138,23 @@ class AMDComputeQueue(HWQueue):
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
     for se in range(ses):
       self.grbm_gfx_index(se_index=se, instance_broadcast_writes=1) # select se, broadcast to all instances in that se
+      # Wait for FINISH_PENDING==0
       self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, 0x00000FFF, 4) # finish_pending==0
+                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, gc_11_0_0.SQ_THREAD_TRACE_STATUS__FINISH_PENDING_MASK, 4)
+      # Wait for FINISH_DONE!=0
       self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
-                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, 0x00FFF000, 4) # finish_done!=0
+                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, gc_11_0_0.SQ_THREAD_TRACE_STATUS__FINISH_DONE_MASK, 4)
+      # Disable SQTT
       self.sqtt_config(tracing=False)
+      # Wait for BUSY==0
       self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, 0x02000000, 4) # busy==0
+                ucfgreg(amd_gpu.regSQ_THREAD_TRACE_STATUS, False), 0, 0, gc_11_0_0.SQ_THREAD_TRACE_STATUS__BUSY_MASK, 4)
       # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True), ucfgreg with False adds GC_BASE__INST0_SEG1 but not pkt3 reg offset
       self.pkt3(amd_gpu.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_WPTR, False), 0, *data64_le(wptrs.va_addr+(se*4)))
-    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1) # restore global broadcasting
+    # Restore global broadcasting
+    self.grbm_gfx_index(se_broadcast_writes=1, sa_broadcast_writes=1, instance_broadcast_writes=1)
     self.spi_config(tracing=False)
+    self.memory_barrier()
     return self
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
