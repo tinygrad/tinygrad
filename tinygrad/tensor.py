@@ -2006,10 +2006,9 @@ class Tensor(SimpleMathTrait):
 
   def topk(self, k, dim=-1, largest=True, sorted=True):
     if sorted: pass
-    # NOTE: torch topk returns sorted values regardless of sorted flag
     # with sorted=True: values MUST be sorted
-    # with sorted=False: values can be in ANY order (tinygrad returns sorted too?)
-    dim = self._resolve_dim(dim)
+    # with sorted=False: values can be in ANY order
+    # NOTE: this code always sorts regardless, matches torch.topk behaviour)
     x, vals, idxs = self, [], []
     ext = dtypes.min(self.dtype) if largest else dtypes.max(self.dtype)
     for _ in range(k):
@@ -2018,7 +2017,7 @@ class Tensor(SimpleMathTrait):
       vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
       idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
       x = x.scatter(dim, i, ext)
-    return Tensor.stack(*[Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim)], dim=0)
+    return Tensor.stack(Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim), dim=0)
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:DTypeLike|None=None) -> Tensor:
