@@ -2004,7 +2004,7 @@ class Tensor(SimpleMathTrait):
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
-  def topk(self, k, dim=-1, largest=True, sorted=True): # noqa: A002
+  def topk(self, k, dim=-1, largest=True, sorted=True): # noqa: A002, pylint: disable=redefined-builtin
     # with sorted=True: values MUST be sorted
     # with sorted=False: values can be in ANY order
     # NOTE: this way always returns sorted, matches torch.topk behaviour

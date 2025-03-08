@@ -1067,6 +1067,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, largest=False)), lambda x: x.topk(k=3, largest=False), forward_only=True)
 
     # test with sorted=False
+    # NOTE: this fails on CI but passes locally, torch returns a different order
     # helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, sorted=False)), lambda x: x.topk(k=3, sorted=False), forward_only=True)
 
     # test with non-default values and low/high ranges to test stability with duplicates
