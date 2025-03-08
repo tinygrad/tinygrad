@@ -108,11 +108,12 @@ if __name__ == "__main__":
   parser.add_argument("--limit", type=int, required=True, help="Number of top repositories to process (e.g., 100)")
   parser.add_argument("--filter_architecture", action="store_true", default=False, help="Ensure each repository has a unique architecture")
   parser.add_argument("--dry_run", action="store_true", default=False, help="Get metadata without downloading the models")
-  parser.add_argument("--out", type=str, default="huggingface_repos.yaml", help="Output YAML file name to save the report")
+  parser.add_argument("--output_file", type=str, default="huggingface_repos.yaml", help="Output YAML file name to save the report")
   parser.add_argument("--download_dir", type=str, default=str(DOWNLOAD_DIR), help="Directory to download repositories to (default: %(default)s)")
   args = parser.parse_args()
 
   repos = download_top_repos(args.limit, args.filter_architecture, sort, args.dry_run, args.download_dir)
-  with open(args.out, 'w') as f:
+  with open(args.output_file, 'w') as f:
     repos.update({"last_updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     yaml.dump(repos, f, sort_keys=False)
+  print(f"YAML saved to: {args.output_file}")
