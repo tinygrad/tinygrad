@@ -32,12 +32,13 @@ torch.utils.generate_methods_for_privateuse1_backend()
 def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is not None
 def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
   assert self.device.type == "tiny"
-  b = unwrap(self)
-  b.replace(b.clone().realize())
+  self = unwrap(self)
+  self.replace(self.clone().realize())
   for v in views:
     v = unwrap(v)
-    ret = b
-    for mo in to_movement_ops(v.lazydata.st): ret = apply_mop(ret, mo)
+    ret = self
+    st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
+    for mo in to_movement_ops(st): ret = apply_mop(ret, mo)
     v.replace(ret).realize()
 def maybe_realize_storage(self: torch.Tensor) -> bool:
   if realize:=is_view(self): realize_with_views(self._base, [self]) # TODO: other views could exist

@@ -33,8 +33,9 @@ class TestTorchBackendInplace(unittest.TestCase):
 
   def test_slice_mul(self):
     a = torch.ones(4)
+    a[:2] *= 3
     a[2:] *= 2
-    np.testing.assert_equal(a.cpu().numpy(), [1,1,2,2])
+    np.testing.assert_equal(a.cpu().numpy(), [3,3,2,2])
 
   def test_stacked_mul(self):
     a = torch.ones((3,3))
