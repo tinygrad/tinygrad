@@ -6,7 +6,7 @@ from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_vi
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv, pluralize
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, SPLIT_REDUCEOP
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.device import Buffer
@@ -268,7 +268,8 @@ add_buffer_ops = PatternMatcher([
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
   # VALID/CONST
-  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="mask"), lambda x,mask: x.valid(mask.arg)),
+  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="mask"),
+   lambda x,mask: UOp(Ops.VALID, dtypes.bool, (mask.replace(src=()),)).where(mask.const_like(x.arg), 0)),
   (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),), name="x"), lambda x,st: x.replace(src=(st.arg.to_uop(),))),
 ])
 

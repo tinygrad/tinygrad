@@ -9,7 +9,7 @@ from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap, ContextVar
 from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, USE_TC, AMX, CAPTURE_PROCESS_REPLAY
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -580,7 +580,9 @@ class Kernel:
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
         # NOTE: if CONST got masked after applying opts, we create a new VALID
-        if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views): return op.valid(unwrap(st_uop.st))
+        if op.op is Ops.CONST and any(v.mask is not None for v in unwrap(st_uop.st).views):
+          unmasked_st = ShapeTracker.from_shape(()).reshape((1,)*len(st_uop.shape)).expand(st_uop.shape).to_uop()
+          return UOp(Ops.VALID, dtypes.bool, (st_uop,)).where(op.replace(src=(unmasked_st,)), UOp.const(op.dtype, 0).replace(src=(unmasked_st,)))
         # otherwise we just replace the VIEW source
         return ret.replace(src=(st_uop,)) if len(op.src) == 1 else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK:
