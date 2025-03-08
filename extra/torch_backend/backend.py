@@ -27,6 +27,7 @@ class TinyBackend:
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
+aten = torch.ops.aten
 
 # *** bad functions on CPU ***
 
@@ -44,14 +45,59 @@ def topk(self, k, dim=-1, largest=True, sorted=True):
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
-  return aten._index_put_impl_(self.cpu(), [x.cpu() for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  return aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).tiny()
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
   return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
 
+@torch.library.impl("aten::index_put", "privateuseone")
+def index_put(self, indices, values, accumulate=False):
+  return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.cpu(), accumulate).tiny()
+
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None): out.copy_(torch.randperm(n, generator=generator, device="cpu").tiny())
+
+@torch.library.impl("aten::cumprod", "privateuseone")
+# TODO: move to tinygrad
+def cumprod(self, dim, dtype=None): return aten.cumprod(self.cpu(), dim, dtype=dtype).tiny()
+
+@torch.library.impl("aten::cummax", "privateuseone")
+def cummax(self, dim):
+  # TODO: support cummax with indices to match torch
+  cummax, indices = aten.cummax(self.cpu(), dim)
+  return (cummax.tiny(), indices.tiny())
+
+@torch.library.impl("aten::scatter.src", "privateuseone")
+def scatter_src(self, dim, index, src):
+  # TODO: refactor to use Tensor.scatter_reduce, fails for TestOps.test_scatter
+  return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
+
+def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
+  return f(grad_out.cpu(), output_size, input_size, scales).tiny()
+
+def upsample_2d_backward(grad_out, output_size, input_size, scales_h=None, scales_w=None, f=None):
+  return f(grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
+
+def upsample_3d_backward(grad_out, output_size, input_size, scales_d=None, scales_h=None, scales_w=None, f=None):
+  return f(grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
+
+@torch.library.impl("aten::upsample_trilinear3d_backward", "privateuseone")
+def upsample_trilinear3d_backward(grad_output, output_size, input_size,  align_corners, scales_d=None, scales_h=None, scales_w=None):
+  return aten.upsample_trilinear3d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_d, scales_h, scales_w).tiny()
+
+@torch.library.impl("aten::upsample_bilinear2d_backward", "privateuseone")
+def upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners, scales_h=None, scales_w=None):
+  return aten.upsample_bilinear2d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_h, scales_w).tiny()
+
+for i in ["upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_1d_backward, f=getattr(aten, i)))
+
+for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_2d_backward, f=getattr(aten, i)))
+
+for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=getattr(aten, i)))
 
 # *** end bad functions on CPU ***
 
@@ -130,18 +176,97 @@ def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
-    print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+    print(f"convolution {input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+  if not transposed: return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
+                                   groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0])
-  out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  if not transposed: out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  else:
+    bias = Tensor.zeros(weight.shape[1] * groups)
+    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
+
+@torch.library.impl("aten::slice.Tensor", "privateuseone")
+def slice_tensor(self, dim=0, start=None, end=None, step=1):
+  slices = [slice(None)] * unwrap(self).ndim
+  slices[dim] = slice(start, end, step)
+  return wrap(unwrap(self)[slices])
+
+@torch.library.impl("aten::slice_backward", "privateuseone")
+def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = slice(start, end, step)
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
+
+@torch.library.impl("aten::select_backward", "privateuseone")
+def select_backward(grad_out, input_sizes, dim, index):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = index
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
+
+@torch.library.impl("aten::select.int", "privateuseone")
+def select_int(self, dim, index):
+  slices = [slice(None)] * unwrap(self).ndim
+  slices[dim] = index
+  return wrap(unwrap(self)[tuple(slices)])
+
+def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride == []: stride = None
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+
+def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+  if stride == []: stride = None
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+def pad_forward(self, padding, mode=None): return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+
+def pad_backward(grad_out, self, padding, mode):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = Tensor.pad(self, padding, mode=mode)
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+
+for dim in [1, 2, 3]:
+  torch.library.impl(f"aten::replication_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="replicate"))
+  torch.library.impl(f"aten::reflection_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="reflect"))
+  torch.library.impl(f"aten::replication_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="replicate"))
+  torch.library.impl(f"aten::reflection_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="reflect"))
+  torch.library.impl(f"aten::upsample_nearest{dim}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
+  torch.library.impl(f"aten::_upsample_nearest_exact{dim}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
+
+for i in ["upsample_linear1d", "upsample_bilinear2d", "upsample_trilinear3d"]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample, mode="linear"))
+
+for dim in [2, 3]:
+  torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
+  torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
+
+@torch.library.impl("aten::cumsum", "privateuseone")
+def cumsum(self, dim):
+  from tinygrad.ops import Ops
+  if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
+  return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
+
+@torch.library.impl("aten::scatter_add", "privateuseone")
+def scatter_add(self, dim, index, src):
+  if unwrap(self).shape == (): return src
+  out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
+  return wrap(out)
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
@@ -163,7 +288,6 @@ def cat_out(tensors, dim=0, out=None):
 
 # register some decompositions
 from torch._decomp import get_decompositions
-aten = torch.ops.aten
 decomps = [
   aten.native_batch_norm, aten.native_batch_norm_backward,
   aten.native_layer_norm_backward,
@@ -347,8 +471,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": lambda x, y: x.assign(x | y),
   "aten.multinomial": Tensor.multinomial,
-  "aten.pad": Tensor.pad,
-  "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
@@ -399,14 +521,13 @@ def wrap_fxn(k,f):
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
-if TORCH_DEBUG:
-  from torch.utils._python_dispatch import TorchDispatchMode
-  class DispatchLog(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-      #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
+from torch.utils._python_dispatch import TorchDispatchMode
+class DispatchLog(TorchDispatchMode):
+  def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    if TORCH_DEBUG:
       print(f"Dispatch Log: {func}")
-      return func(*args, **(kwargs or {}))
-  (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
+    return func(*args, **(kwargs or {}))
+(_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
