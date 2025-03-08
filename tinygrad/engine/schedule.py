@@ -249,9 +249,12 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
 
 create_kernels = merge_views+PatternMatcher([
-  # always give assign a kernel
+  # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  # otherwise check if need to assign this UOp to a new buffer
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype))),
+  # create a buffer for COPY on the new device
+  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda d,x: create_kernel(x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  # otherwise check the context if we're realizing this UOp
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
    lambda ctx,x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
