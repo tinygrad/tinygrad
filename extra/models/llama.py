@@ -13,12 +13,31 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
 # Copied from transformers.models.llama.modeling_llama.rotate_half
 def rotate_half(x): return Tensor.cat(-x[..., x.shape[-1]//2:], x[..., :x.shape[-1]//2], dim=-1)
 def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
-  """Applies Rotary Position Embedding to the query and key tensors."""
   cos = freqs_cis[..., 0:1].squeeze().repeat(1,1,1,2)
   sin = freqs_cis[..., 1:2].squeeze().repeat(1,1,1,2)
   q_embed = (xq * cos) + (rotate_half(xq) * sin)
   k_embed = (xk * cos) + (rotate_half(xk) * sin)
   return q_embed, k_embed
+
+# matches meta, non hugging face weights
+"""
+# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
+def complex_mult(A, c, d):
+  a,b = A[..., 0:1], A[..., 1:2]
+  ro = a*c - b*d
+  co = a*d + b*c
+  return ro.cat(co, dim=-1)
+
+def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
+  assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
+  xq = xq.reshape(*xq.shape[0:-1], -1, 2)
+  xk = xk.reshape(*xk.shape[0:-1], -1, 2)
+  assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
+  c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+  xq_out = complex_mult(xq, c, d)
+  xk_out = complex_mult(xk, c, d)
+  return xq_out.flatten(3), xk_out.flatten(3)
+"""
 
 def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   bs, seqlen, n_kv_heads, head_dim = x.shape
