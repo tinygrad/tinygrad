@@ -295,14 +295,13 @@ def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u)).view(ShapeTracker.from_shape(r.shape))
 
 def elementwise_view_right(root:UOp) -> UOp|None:
-  if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
-  assert all(x.base.st is not None for x in swizzles), f"found shapeless VIEW src in {root}"
+  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
-  # push the swizzle from src to root
-  output_swizzle = swizzles[0]
-  new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
-  ret = root.replace(src=tuple(x if x.st is None else x.base if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
-  return ret.view(ShapeTracker.from_shape(output_swizzle.shape))
+  # place view after applying the elementwise op
+  new_shape = swizzles[0].base.shape
+  ret = root.replace(src=tuple(x.base if x.base.shape == new_shape else apply_swizzle(x.view(ShapeTracker.from_shape(new_shape))) for x in root.src))
+  # reshape to match downstream shapes
+  return ret.reshape(root.shape)
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -318,10 +317,10 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.VIEW, src=(UPat.var("val"),)))), lambda b,st,val: UOp.store(b, st.view(val.st), val)),
   # push a non contiguous ShapeTracker through reduceop
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
-  # apply reshapes after reduceop
+  # apply view after reduceops
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat.var("src"),), name="v"),), name="r"), reduceop_view_right),
-  # ALU(src.view()) -> ALU(src).view()
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), elementwise_view_right),
+  # apply view after elementwise ops
+  (UPat(GroupOp.All-GroupOp.Buffer, name="root"), elementwise_view_right),
   # double reduce op collapses to a single reduce op
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
