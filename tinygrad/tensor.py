@@ -2064,7 +2064,9 @@ class Tensor(SimpleMathTrait):
 
     flat_t = self.reshape(-1)
     # Create a tensor of 1’s for nonzero elements and 0’s otherwise.
-    if flat_t.dtype != dtypes.bool:
+    if flat_t.dtype == dtypes.bool:
+      m = flat_t.cast(dtype=dtypes.int32)
+    else:
       m = (flat_t != 0).cast(dtype=dtypes.int32)
     # Compute the cumulative sum along the flattened dimension.
     cumsum = m.cumsum(0)
