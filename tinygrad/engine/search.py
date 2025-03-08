@@ -166,7 +166,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         least_compute_ops = min(this_compute_ops:=sym_infer(p.estimates.ops, var_vals), least_compute_ops)
         if least_compute_ops*1000 < this_compute_ops: continue
         seen_libs.add(lib)
-        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0, clear_l2=hasattr(dev, 'invalidate_caches'))
+        early_stop = beam[0][1]*3 if len(beam) and beam[0][1] != float("inf") else 1.0
+        try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=early_stop, clear_l2=hasattr(dev, 'invalidate_caches'))
         except RuntimeError: continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
         if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(list, p.uops)):5d} uops {time_to_str(compile_et, w=12)} compile/{time_to_str(timed_lins[-1][1], w=12)} run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
