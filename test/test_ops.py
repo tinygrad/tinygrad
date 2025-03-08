@@ -1049,35 +1049,35 @@ class TestOps(unittest.TestCase):
 
   def test_topk(self):
     # basic functionality - top k values and indices
-    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)
+    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3)), lambda x: x.topk(k=3), forward_only=True)
 
     # test with different k values
-    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=1)), lambda x: Tensor.stack(*x.topk(k=1)), forward_only=True)
-    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=10)), lambda x: Tensor.stack(*x.topk(k=10)), forward_only=True)
+    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=1)), lambda x: x.topk(k=1), forward_only=True)
+    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=10)), lambda x: x.topk(k=10), forward_only=True)
 
     # test with 2D tensors, using dim parameter
-    helper_test_op([(4, 6)], lambda x: torch.stack(torch.topk(x, k=2, dim=0)), lambda x: Tensor.stack(*x.topk(k=2, dim=0)), forward_only=True)
-    helper_test_op([(4, 6)], lambda x: torch.stack(torch.topk(x, k=2, dim=1)), lambda x: Tensor.stack(*x.topk(k=2, dim=1)), forward_only=True)
-    helper_test_op([(4, 6)], lambda x: torch.stack(torch.topk(x, k=2, dim=-1)), lambda x: Tensor.stack(*x.topk(k=2, dim=-1)), forward_only=True)
+    helper_test_op([(4, 6)], lambda x: torch.stack(torch.topk(x, k=2, dim=0)), lambda x: x.topk(k=2, dim=0), forward_only=True)
+    helper_test_op([(4, 6)], lambda x: torch.stack(torch.topk(x, k=2, dim=1)), lambda x: x.topk(k=2, dim=1), forward_only=True)
+    helper_test_op([(4, 6)], lambda x: torch.stack(torch.topk(x, k=2, dim=-1)), lambda x: x.topk(k=2, dim=-1), forward_only=True)
 
     # test with 3D tensors
-    helper_test_op([(3, 4, 5)], lambda x: torch.stack(torch.topk(x, k=2, dim=1)), lambda x: Tensor.stack(*x.topk(k=2, dim=1)), forward_only=True)
+    helper_test_op([(3, 4, 5)], lambda x: torch.stack(torch.topk(x, k=2, dim=1)), lambda x: x.topk(k=2, dim=1), forward_only=True)
 
     # test with largest=False (get smallest values)
-    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, largest=False)), lambda x: Tensor.stack(*x.topk(k=3, largest=False)), forward_only=True)
+    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, largest=False)), lambda x: x.topk(k=3, largest=False), forward_only=True)
 
     # test with sorted=False
-    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, sorted=False)), lambda x: Tensor.stack(*x.topk(k=3, sorted=False)), forward_only=True)
+    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, sorted=False)), lambda x: x.topk(k=3, sorted=False), forward_only=True)
 
     # test with non-default values and low/high ranges to test stability with duplicates
-    helper_test_op([(20,)], lambda x: torch.stack(torch.topk(x, k=5)), lambda x: Tensor.stack(*x.topk(k=5)), 
+    helper_test_op([(20,)], lambda x: torch.stack(torch.topk(x, k=5)), lambda x: x.topk(k=5),
                              vals=[[-1.0, 0.5, 0.0, 0.5, 1.0] * 4], forward_only=True)
 
     # test with odd tensor size to check handling of non-power-of-2 sizes
-    helper_test_op([(17,)], lambda x: torch.stack(torch.topk(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)
+    helper_test_op([(17,)], lambda x: torch.stack(torch.topk(x, k=3)), lambda x: x.topk(k=3), forward_only=True)
 
     # edge case: test with k equal to dimension size
-    helper_test_op([(5, 10)], lambda x: torch.stack(torch.topk(x, k=10, dim=1)), lambda x: Tensor.stack(*x.topk(k=10, dim=1)), forward_only=True)
+    helper_test_op([(5, 10)], lambda x: torch.stack(torch.topk(x, k=10, dim=1)), lambda x: x.topk(k=10, dim=1), forward_only=True)
 
   def test_einsum(self):
     # matrix transpose

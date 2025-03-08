@@ -2018,7 +2018,7 @@ class Tensor(SimpleMathTrait):
       vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
       idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
       x = x.scatter(dim, i, ext)
-    return Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim)
+    return Tensor.stack(*[Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim)], dim=0)
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:DTypeLike|None=None) -> Tensor:
