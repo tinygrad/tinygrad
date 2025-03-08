@@ -1266,7 +1266,7 @@ class Tensor(SimpleMathTrait):
     Args:
       *args: Variable length list of tensors to concatenate with self
       dim: Dimension along which to concatenate (default: 0)
-      eager: Whether to realize the tensor immediately (default: True)
+      eager: Whether to realize the tensor immediately (default: False)
       
     Returns:
       Tensor: Concatenated tensor
@@ -1276,17 +1276,14 @@ class Tensor(SimpleMathTrait):
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
     
-    def cat_pair(a: Tensor, b: Tensor) -> Tensor:
-      """Concatenate two tensors along the specified axis"""
-      ashift = [(0, b.shape[dim]) if i == dim else None for i in range(a.ndim)]
-      bshift = [(a.shape[dim], 0) if i == dim else None for i in range(b.ndim)]
-      result = a.pad(ashift) + b.pad(bshift)
-      return result.realize() if eager else result
+    padleft  = lambda l, r: l.pad([(0, r.shape[dim]) if i==dim else None for i in range(l.ndim)])
+    padright = lambda l, r: r.pad([(l.shape[dim], 0) if i==dim else None for i in range(r.ndim)])
+    cat_pair = lambda l, r, eager: (padleft(l,r) + padright(l,r)).realize() if eager else padleft(l,r) + padright(l,r)
     
     def partition(tensors: List[Tensor]) -> Tensor:
       if len(tensors) == 1: return tensors[0]
-      if len(tensors) == 2: return cat_pair(tensors[0], tensors[1])
-      return cat_pair(partition(tensors[:len(tensors)//2]), partition(tensors[len(tensors)//2:]))
+      if len(tensors) == 2: return cat_pair(tensors[0], tensors[1], eager)
+      return cat_pair(partition(tensors[:len(tensors)//2]), partition(tensors[len(tensors)//2:]), eager)
     
     return partition(tensors)
 
