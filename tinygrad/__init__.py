@@ -1,7 +1,9 @@
 import os
 if int(os.getenv("TYPED", "0")):
-  from typeguard import install_import_hook
-  install_import_hook(__name__)
+  from typeguard import typechecked
+else:
+  def typechecked(obj): return obj
+
 from tinygrad.tensor import Tensor                                    # noqa: F401
 from tinygrad.engine.jit import TinyJit                               # noqa: F401
 from tinygrad.ops import UOp
