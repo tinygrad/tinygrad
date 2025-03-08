@@ -2005,14 +2005,25 @@ class Tensor(SimpleMathTrait):
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
   def topk(self, k, dim=-1, largest=True, sorted=True):
-    if sorted: pass
     # with sorted=True: values MUST be sorted
     # with sorted=False: values can be in ANY order
     # NOTE: this way always returns sorted, matches torch.topk behaviour)
+    if sorted: pass
+
+    # create bias tensor to break ties in favor of low idx
+    shape = [1] * len(self.shape)
+    shape[dim] = self.shape[dim]
+    idx_tensor = Tensor.arange(self.shape[dim]).reshape(shape)
+    eps = 1e-6 
     x, vals, idxs = self, [], []
     fn, ext =  (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
-      i = fn(x, axis=dim, keepdim=True)
+      # add bias so low idx wins on tie
+      biased_x = (x - eps * idx_tensor) if largest else (x + eps * idx_tensor)
+      # NOTE: this is a hack to ensure that the lowest idx is chosen on tie (patch to match torch.topk)
+      # TODO: remove this once we have a more principled approach
+    
+      i = fn(biased_x, axis=dim, keepdim=True)
       v = self.gather(dim, i)
       vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
       idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
