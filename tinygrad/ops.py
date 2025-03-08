@@ -240,7 +240,8 @@ class UOpMetaClass(type):
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, Metadata] = weakref.WeakKeyDictionary()
 
-def _toposort(u:UOp, cache:set[UOp]):
+def _toposort(u:UOp, cache:None|set[UOp]=None):
+  if cache is None: cache = set()
   if u in cache: return {}
   nodes: dict[UOp, None] = {}
   # NOTE: this is a lot faster than the comprehension in parents
@@ -279,7 +280,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def toposort(self) -> dict[UOp, None]:
-    return _toposort(self, cache=set())
+    return _toposort(self)
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
