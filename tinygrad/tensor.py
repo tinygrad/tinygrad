@@ -1111,8 +1111,8 @@ class Tensor(SimpleMathTrait):
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if dtypes.is_int(index.dtype):
-                          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
-          elif index.dtype == dtypes.bool: 
+            index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          elif index.dtype == dtypes.bool:
             if index.shape != (size,): raise IndexError(f"Boolean index has incorrect shape: {index.shape} vs {size}")
             index = index.nonzero().squeeze(1)
           else:
@@ -2058,9 +2058,9 @@ class Tensor(SimpleMathTrait):
     # check if the tensor is empty
     print(self.shape)
     if self.numel() == 0:
-        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, )
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, )
     elif self.ndim == 0:
-        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
 
     flat_t = self.reshape(-1)
     # Create a tensor of 1’s for nonzero elements and 0’s otherwise.
@@ -2069,9 +2069,9 @@ class Tensor(SimpleMathTrait):
     # Compute the cumulative sum along the flattened dimension.
     cumsum = m.cumsum(0)
     # The last element of cumsum is the count of nonzero items.
-    nonzero_count = cumsum[-1].item()  
+    nonzero_count = cumsum[-1].item()
     if nonzero_count == 0:
-        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
     # Build targets from 1 to nonzero_count.
     targets = Tensor.arange(1, nonzero_count + 1, device=self.device, dtype=dtypes.int32)
     # Expand and compute absolute differences:
@@ -2084,8 +2084,8 @@ class Tensor(SimpleMathTrait):
     pos = indices
     coords = []
     for dim_size in self.shape[::-1]:
-        coords.append(pos % dim_size)
-        pos = pos // dim_size
+      coords.append(pos % dim_size)
+      pos = pos // dim_size
     coords = coords[::-1]  # restore original order
     return Tensor.stack(*coords, dim=1)
 
