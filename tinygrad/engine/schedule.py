@@ -230,6 +230,11 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
+def create_kernel(x:UOp, b:UOp):
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))
+  buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
+  return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
+
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
@@ -245,10 +250,10 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
 
 create_kernels = merge_views+PatternMatcher([
   # always give assign a kernel
-  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
+  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
   # otherwise check if need to assign this UOp to a new buffer
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
-    UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))) if x in ctx.realizes else None),
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
+   lambda ctx,x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove CONST/BIND from SINK
@@ -260,13 +265,9 @@ create_kernels = merge_views+PatternMatcher([
 
 # ** create buffer ops + enumerate buffers
 
-def load_buf(ctx:list[UOp], x:UOp):
-  if x not in ctx: ctx.append(x)
-  return UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), unwrap(x.st).to_uop()))
-
 add_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), load_buf),
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop()))),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
@@ -278,8 +279,9 @@ add_buffer_ops = PatternMatcher([
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
-def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
-  input_st = ShapeTracker.from_shape(unwrap(src.st).shape)
+def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
+  if (st:=unwrap(view.st)).contiguous: return None
+  input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
   prshape = prod(rshape:=tmp.shape[-len(r.axis_arg):])
   strides = strides_for_shape(rshape)
@@ -290,20 +292,18 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   return apply_swizzle(src.view(new_input_st)).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
-def reduceop_view_right(r:UOp, v:UOp, src:UOp) -> UOp:
-  if not (swizzle_st:=unwrap(v.st)).contiguous or v.size != src.size: raise AssertionError(f"can't push {v} down through {src}")
-  output_shape = swizzle_st.reduce(r.axis_arg)
-  return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
+def reduceop_view_right(src:UOp, v:UOp, r:UOp):
+  assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
+  return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u)).view(ShapeTracker.from_shape(r.shape))
 
 def elementwise_view_right(root:UOp) -> UOp|None:
-  if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
-  assert all(x.base.st is not None for x in swizzles), f"found shapeless VIEW src in {root}"
+  if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
-  # push the swizzle from src to root
-  output_swizzle = swizzles[0]
-  new_input_st = ShapeTracker.from_shape(output_swizzle.base.shape)
-  ret = root.replace(src=tuple(x if x.st is None else x.base if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
-  return ret.view(ShapeTracker.from_shape(output_swizzle.shape))
+  # place view after applying the elementwise op
+  new_shape = swizzles[0].base.shape
+  ret = root.replace(src=tuple(x.base if x.base.shape == new_shape else apply_swizzle(x.view(ShapeTracker.from_shape(new_shape))) for x in root.src))
+  # reshape to match downstream shapes
+  return ret.reshape(root.shape)
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -317,12 +317,12 @@ view_right = merge_views+PatternMatcher([
    lambda b,target,st,val: apply_swizzle(UOp.store(b, st, val).view(target.st))),
   # STORE is the last child, so we just merge the ShapeTrackers and store the base
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.VIEW, src=(UPat.var("val"),)))), lambda b,st,val: UOp.store(b, st.view(val.st), val)),
-  # REDUCE(src.view(contiguous=False)) -> REDUCE(src.view(contiguous=True)).view()
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
-  # REDUCE(src.view()) -> REDUCE(src).view()
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), reduceop_view_right),
-  # ALU(src.view()) -> ALU(src).view()
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), elementwise_view_right),
+  # push a non contiguous ShapeTracker through reduceop
+  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
+  # apply view after reduceops
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, src=(UPat.var("src"),), name="v"),), name="r"), reduceop_view_right),
+  # apply view after elementwise ops
+  (UPat(GroupOp.All-GroupOp.Buffer, name="root"), elementwise_view_right),
   # double reduce op collapses to a single reduce op
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
@@ -369,10 +369,10 @@ fix_kernel_ops = PatternMatcher([
 
 def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
-  # substitute kernel sources for the target buffer
-  ast = k.arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in k.src if s.op is Ops.ASSIGN}).sink()
+  # substitute kernel sources for the target buffer + apply reshapes
+  ast = k.arg.ast.substitute({(ast:=s.src[1].arg.ast):s.src[0].view(unwrap(ast.st)) for s in k.src if s.op is Ops.ASSIGN}).sink()
   # add buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[s.buf_uop for s in k.src], bottom_up=True)
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
@@ -417,9 +417,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # if we created a KERNEL for this tensor, map it to the assigned buffer
-    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
-      becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+    # ASSIGN always becomes the target buffer
+    if v.op is Ops.ASSIGN: becomes_map[k] = v.src[0]
+    # if we created a new buffer for this tensor, map it to the assigned buffer
+    elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
+      becomes_map[k] = a.src[0] if a.src[0].st == v.st else a.src[0].view(unwrap(v.st))
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
@@ -463,8 +465,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # TODO: move this to create_kernels
     k = fix_kernel_ast(u.src[1], var_vals)
     schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    # increment the refcount of the target buf (this is required by the JIT and memory planner)
-    u.buf_uop.buffer.ref(1)
+    # increment the refcount of the target buf (this is required by the JIT and memory planner) TODO: this does not belong here
+    k.src[0].buffer.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
