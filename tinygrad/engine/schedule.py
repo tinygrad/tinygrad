@@ -246,7 +246,7 @@ create_kernels = merge_views+PatternMatcher([
   # always give assign a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
   # otherwise check if need to assign this UOp to a new buffer
-  (UPat((Ops.CONTIGUOUS, Ops.COPY), name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
+  (UPat((Ops.CONTIGUOUS, Ops.COPY), name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype),\
     UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))))),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
