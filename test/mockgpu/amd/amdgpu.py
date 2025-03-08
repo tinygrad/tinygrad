@@ -155,8 +155,9 @@ class PM4Executor(AMDQueue):
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
-      if st <= prg_addr <= st+sz: prg_sz = sz - (prg_addr - st)
-
+      if st <= prg_addr <= st+sz:
+        prg_sz = sz - (prg_addr - st)
+        if prg_sz > 0: break
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
