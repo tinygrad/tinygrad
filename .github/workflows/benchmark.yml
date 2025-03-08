@@ -303,7 +303,7 @@ jobs:
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=78 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -496,7 +496,7 @@ jobs:
       run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - name: Run 10 MLPerf Bert training steps (6 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
-      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
+      run: AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=78 GPUS=6 BERT_LAYERS=2 FUSE_ARANGE=1 MODEL=bert python3 examples/mlperf/model_train.py | tee train_bert.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
