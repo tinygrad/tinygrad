@@ -1140,6 +1140,7 @@ class TestOps(unittest.TestCase):
     a = Tensor([[1, 0, 0], [0, 2, 0], [0, 0, 3]],requires_grad=True)
     b = Tensor([[5,0,0], [0,6,0], [0,0,7]],requires_grad=True)
     np.testing.assert_equal(a.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+    np.testing.assert_equal(b.nonzero().numpy(), [[0,0], [1,1], [2,2]])
 
     helper_test_op([(10)], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
     helper_test_op([(10,20,30)], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
