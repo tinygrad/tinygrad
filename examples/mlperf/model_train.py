@@ -391,13 +391,15 @@ def train_retinanet():
     return LambdaLR(optim, _lr_lambda)
 
   @TinyJit
-  def _train_step(model, optim, lr_scheduler, x, **kwargs):
+  def _train_step(model, optim, lr_scheduler, loss_scaler, x, **kwargs):
     optim.zero_grad()
 
     losses = model(normalize(x, GPUS), **kwargs)
-    loss = sum([l for l in losses.values()])
+    loss = (sum([l for l in losses.values()]) * loss_scaler)
 
     loss.backward()
+    for t in optim.params: t.grad = t.grad.contiguous() / loss_scaler
+
     optim.step()
     lr_scheduler.step()
 
@@ -410,7 +412,7 @@ def train_retinanet():
 
   # ** hyperparameters **
   config["seed"] = SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
-  config["bs"] = BS = getenv("BS", 256)
+  config["bs"] = BS = getenv("BS", 12 * len(GPUS) if dtypes.default_float == dtypes.float16 else 12 * len(GPUS)) # TODO: update float16 to use larger BS
   config["eval_bs"] = EVAL_BS = getenv("EVAL_BS", BS)
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
   config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
@@ -418,6 +420,8 @@ def train_retinanet():
   config["lr"] = lr = getenv("LR", 0.0001 * (BS / 256))
   config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
   config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
+  config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 256.0 if dtypes.default_float == dtypes.float16 else 1.0)
+  config["default_float"] = dtypes.default_float.name
 
   if SEED: Tensor.manual_seed(SEED)
 
@@ -426,7 +430,8 @@ def train_retinanet():
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
-  backbone.load_from_pretrained()
+  # TODO: Figure out if casting to float16 should be done
+  # backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
   model = RetinaNet(backbone, num_classes=NUM_CLASSES)
@@ -484,7 +489,7 @@ def train_retinanet():
       GlobalCounters.reset()
 
       x, y_bboxes, y_labels, matches, anchors, proc = proc
-      loss, losses = _train_step(model, optim, lr_scheduler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
+      loss, losses = _train_step(model, optim, lr_scheduler, loss_scaler, x, labels=y_labels, matches=matches, anchors=anchors, bboxes=y_bboxes)
 
       pt = time.perf_counter()
 
