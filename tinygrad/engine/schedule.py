@@ -230,6 +230,11 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
+def create_kernel(x:UOp, b:UOp):
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))
+  buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
+  return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
+
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
@@ -242,11 +247,6 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
       if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
   return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
-
-def create_kernel(x:UOp, b:UOp):
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))
-  buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
-  return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
 create_kernels = merge_views+PatternMatcher([
   # always give assign a kernel
@@ -369,7 +369,7 @@ fix_kernel_ops = PatternMatcher([
 
 def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
-  # substitute kernel sources for the target buffer
+  # substitute kernel sources for the target buffer + apply reshapes
   ast = k.arg.ast.substitute({(ast:=s.src[1].arg.ast):s.src[0].view(unwrap(ast.st)) for s in k.src if s.op is Ops.ASSIGN}).sink()
   # add buffer ops
   ast = graph_rewrite(ast, add_buffer_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
@@ -463,7 +463,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # TODO: move this to create_kernels
     k = fix_kernel_ast(u.src[1], var_vals)
     schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    # increment the refcount of the target buf (this is required by the JIT and memory planner)
+    # increment the refcount of the target buf (this is required by the JIT and memory planner) TODO: this does not belong here
     k.src[0].buffer.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
