@@ -128,15 +128,14 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, cache=dict())) else realize(ctx, src)
 
-do_realize = PatternMatcher([
+insert_contiguous = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=new_src)
+   if (new_src:=tuple(x.contiguous() if x.op not in {Ops.ASSIGN, Ops.BUFFER} else x for x in s.src)) != s.src else None),
   # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}, name="src"),)), realize_before_view),
+  #(UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE}, name="src"),)), realize_before_view),
   # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW}, name="tr"))), realize),
+  #(UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW}, name="tr"))), realize),
 ])
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
@@ -410,13 +409,15 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # map tensor metadata to simplified ops
   ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
   var_vals: dict[Variable, int] = {}
-  # create_kernels + fix_ast
-  kernel_map = graph_rewrite_map(sink, create_kernels+fix_ast_pm, ctx=KernelContext(ops_metadata, var_vals))
+  # create_kernels + insert_contiguous + fix_ast
+  kernel_map = graph_rewrite_map(sink, create_kernels+insert_contiguous+fix_ast_pm, ctx=KernelContext(ops_metadata, var_vals))
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
+  for k,v in zip(big_sink.src, sched_sink.src):
+    if k is not v: becomes_map[k] = v.buf_uop.view(unwrap(k.st))
   for k,v in tensor_map.items():
     # if we created a KERNEL for this tensor, map it to the assigned buffer
     if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
