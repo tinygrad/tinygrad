@@ -2384,6 +2384,31 @@ class Tensor(SimpleMathTrait):
     """
     return self._split_cumalu(axis, Ops.MAX)
 
+  def topk(self, k, dim=-1, largest=True, sorted_=True):
+    """
+    Computes the top-k elements of the tensor along the specified `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    topk_values, topk_indices = t.topk(2, dim=1)
+    print(topk_values.numpy())
+    print(topk_indices.numpy())
+    ```
+    """
+    if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
+    x, dim = self, self._resolve_dim(dim)
+    select_fxn, mask_value = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
+    indices:list[Tensor] = []
+    for _ in range(k):
+      idx = select_fxn(x, dim, keepdim=True)
+      indices.append(idx)
+      x = x.scatter(dim, idx, mask_value)
+    combined_indices = indices[0].cat(*indices[1:], dim=dim)
+    return self.gather(dim, combined_indices), combined_indices
+
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
     assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
