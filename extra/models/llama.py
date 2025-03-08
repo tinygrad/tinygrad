@@ -2,24 +2,20 @@ from typing import Union, Optional, Any
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
 
+# **** copy these *exactly* from transformers. there's so many subtle ways to get them wrong ****
+
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
 
-# **** copy these *exactly* from transformers. there's so many subtle ways to get them wrong ****
-
-def rotate_half(x):
-  """Rotates half the hidden dims of the input."""
-  x1 = x[..., : x.shape[-1] // 2]
-  x2 = x[..., x.shape[-1] // 2 :]
-  return Tensor.cat(-x2, x1, dim=-1)
-
+# Copied from transformers.models.llama.modeling_llama.rotate_half
+def rotate_half(x): return Tensor.cat(-x[..., x.shape[-1]//2:], x[..., :x.shape[-1]//2], dim=-1)
 def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
   """Applies Rotary Position Embedding to the query and key tensors."""
-  cos = freqs_cis[..., 0:1].squeeze().repeat(2).reshape(1, 1, 1, -1)
-  sin = freqs_cis[..., 1:2].squeeze().repeat(2).reshape(1, 1, 1, -1)
+  cos = freqs_cis[..., 0:1].squeeze().repeat(1,1,1,2)
+  sin = freqs_cis[..., 1:2].squeeze().repeat(1,1,1,2)
   q_embed = (xq * cos) + (rotate_half(xq) * sin)
   k_embed = (xk * cos) + (rotate_half(xk) * sin)
   return q_embed, k_embed
