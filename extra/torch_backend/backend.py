@@ -40,8 +40,7 @@ def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
     for mo in to_movement_ops(v.lazydata.st): ret = apply_mop(ret, mo)
     v.replace(ret).realize()
 def maybe_realize_storage(self: torch.Tensor) -> bool:
-  if realize:=is_view(self):
-    realize_with_views(self._base, [self]) # TODO: other views could exist
+  if realize:=is_view(self): realize_with_views(self._base, [self]) # TODO: other views could exist
   return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
@@ -185,17 +184,19 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
-# TODO: handle if dest is view?
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
+  realize = str(dest.device) == "tiny" and maybe_realize_storage(dest)
   cast_dtype = _from_torch_dtype(dest.dtype)
   if str(src.device) == "tiny" and str(dest.device) == "tiny":
-    unwrap(dest).replace(unwrap(src).cast(cast_dtype), allow_shape_mismatch=True)
+    unwrap(dest).assign(unwrap(src).cast(cast_dtype))
+    if realize: Tensor.realize(unwrap(dest))
   elif str(src.device) == "tiny" and str(dest.device) == "cpu":
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif str(src.device) == "cpu" and str(dest.device) == "tiny":
     unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype))
+    if realize: Tensor.realize(unwrap(dest))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
