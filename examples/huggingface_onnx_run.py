@@ -70,7 +70,10 @@ if __name__ == "__main__":
   parser.add_argument("--validate", action="store_true", default=False,
                       help="Validate correctness of models from the YAML file")
   parser.add_argument("--debug", type=str, default="",
-                      help="provide id/relative_path (e.g., 'google-bert/bert-base-uncased/model.onnx') to run validation on a single model")
+                      help="""Validates without explicitly needing a YAML or models pre-installed.
+                      provide repo id (e.g. "minishlab/potion-base-8M") to validate all onnx models inside the repo
+                      provide onnx model path (e.g. "minishlab/potion-base-8M/onnx/model.onnx") to validate only that one model
+                      """)
   parser.add_argument("--truncate", type=int, default=-1, help="Truncate the ONNX model so intermediate results can be validated")
   parser.add_argument("--yaml", type=str, default="huggingface_repos.yaml", help="Specify the YAML file to use")
   args = parser.parse_args()
@@ -98,8 +101,6 @@ if __name__ == "__main__":
 
   if args.debug:
     from examples.huggingface_onnx_download import download_repo_onnx_models, download_repo_configs
-    print(f"DEBUG {args.debug}")
-    print(f"TRUNCATE {args.truncate}")
     path:list[str] = args.debug.split("/")
     if len(path) == 2:
       # repo id
@@ -111,14 +112,14 @@ if __name__ == "__main__":
       for onnx_model in root_path.rglob("*.onnx"):
         rtol, atol = get_tolerances(onnx_model.name)
         print(f"validating {onnx_model.relative_to(root_path)} with truncate={args.truncate}, {rtol=}, {atol=}")
-        debug_run(onnx_model, args.truncate, config, rtol, atol)
+        debug_run(onnx_model, -1, config, rtol, atol)
     else:
       # model id
       # only validate the specified onnx model
       onnx_model = path[-1]
       assert path[-1].endswith(".onnx")
       repo_id, relative_path = "/".join(path[:2]), "/".join(path[2:])
-      root_path = download_repo_onnx_models(repo_id, specific_model=onnx_model)
+      root_path = download_repo_onnx_models(repo_id, specific_model=relative_path)
       download_repo_configs(repo_id)
       config = get_config(root_path)
       rtol, atol = get_tolerances(onnx_model)
