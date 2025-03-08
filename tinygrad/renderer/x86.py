@@ -82,7 +82,7 @@ x86_rewrite = PatternMatcher([
   # requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   # requires cl if second operand is a register
-  (UPat(Ops.SHR, name="x"), lambda ctx,x: ctx.shr(x, x.src[1]) if ctx.r[x.src[1]] in ctx.all_regs else None),
+  (UPat((Ops.SHL, Ops.SHR), name="x"), lambda ctx,x: ctx.bitshift(x, x.src[1]) if ctx.r[x.src[1]] in ctx.all_regs else None),
   (UPat(GroupOp.Binary, name="x"),
    lambda ctx,x: f"{f'{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n' if ctx[x] != ctx[x.src[0]] else ''}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
@@ -162,7 +162,7 @@ class X86Renderer(Renderer):
     l.append(f"mov {self[x]}, {self.regt('rax' if x.op is Ops.IDIV else 'rdx', x.dtype)}")
     return "\n".join(l + [f"pop {reg}" for reg in reversed(req_regs) if self.r[x] != reg])
 
-  def shr(self, x:UOp, s:UOp) -> str:
+  def bitshift(self, x:UOp, s:UOp) -> str:
     l = ""
     dest = "r15" if self.r[x] == "rcx" else self.r[x]
     if dest == "r15": l += "mov r15, rcx\n"
