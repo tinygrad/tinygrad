@@ -2004,6 +2004,20 @@ class Tensor(SimpleMathTrait):
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
+  def topk(self, k, dim=-1, largest=True, sorted=True): # noqa: A002, pylint: disable=redefined-builtin
+    if sorted: pass
+
+    x, dim = self, self._resolve_dim(dim)
+    vals, idxs = [], []
+    fn, ext =  (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
+    for _ in range(k):
+      i = fn(x, axis=dim, keepdim=True)
+      vals.append(self.gather(dim, i).squeeze(dim))
+      idxs.append(i.squeeze(dim))
+      x = x.scatter(dim, i, ext)
+    # pylint: disable=no-value-for-parameter
+    return Tensor.stack(Tensor.stack(*vals, dim=dim), Tensor.stack(*idxs, dim=dim), dim=0)
+
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:DTypeLike|None=None) -> Tensor:
     """
