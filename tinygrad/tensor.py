@@ -2008,11 +2008,11 @@ class Tensor(SimpleMathTrait):
     if sorted: pass
     # with sorted=True: values MUST be sorted
     # with sorted=False: values can be in ANY order
-    # NOTE: this code always sorts regardless, matches torch.topk behaviour)
+    # NOTE: this way always returns sorted, matches torch.topk behaviour)
     x, vals, idxs = self, [], []
-    ext = dtypes.min(self.dtype) if largest else dtypes.max(self.dtype)
+    fn, ext =  (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
-      i = x.argmax(axis=dim, keepdim=True) if largest else x.argmin(axis=dim, keepdim=True)
+      i = fn(x, axis=dim, keepdim=True)
       v = self.gather(dim, i)
       vals.append(v.squeeze(dim) if self.shape[dim] > 1 else v)
       idxs.append(i.squeeze(dim) if self.shape[dim] > 1 else i)
