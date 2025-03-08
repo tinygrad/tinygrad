@@ -169,7 +169,7 @@ class X86Renderer(Renderer):
     if dest == "r15": l += "mov r15, rcx\n"
     if self.r[s] != "rcx": l += f"push rcx\nmov rcx, {self.r[s]}\n"
     l += f"{x86op[x.dtype][x.op]} {self.regt(dest, x.dtype)}, cl\n"
-    if self.r[s] != "rcx": f"pop rcx\n"
+    if self.r[s] != "rcx": l += "pop rcx\n"
     if dest == "r15": l += "mov rcx, r15\n"
     return l
 
@@ -253,8 +253,9 @@ class X86Renderer(Renderer):
           elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
-          # reuse first operand register when possible
-          elif u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]): r[u] = r[u.src[0]]
+          # reuse first operand register when possible, #TODO: why can't we reuse in idiv/shl/shr?
+          elif u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE, Ops.IDIV, Ops.SHL, Ops.SHR) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]):
+            r[u] = r[u.src[0]]
           else: r[u] = assign_reg(i, u.dtype)
         if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
