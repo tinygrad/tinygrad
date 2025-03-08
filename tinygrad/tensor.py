@@ -2397,11 +2397,6 @@ class Tensor(SimpleMathTrait):
     print(topk_values.numpy())
     print(topk_indices.numpy())
     ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    topk_values, topk_indices = t.topk(2, dim=1, sorted_=False)
-    print(topk_values.numpy())
-    print(topk_indices.numpy())
-    ```
     """
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
     x, dim = self, self._resolve_dim(dim)

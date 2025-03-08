@@ -1062,17 +1062,12 @@ class TestOps(unittest.TestCase):
                           lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
     # duplicated values
-    helper_test_op(None, lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True,
-                  vals=[[5, 5, 3, 2]])
-    helper_test_op(None, lambda x: x.topk(3, largest=False).values, lambda x: x.topk(3, largest=False)[0], forward_only=True,
-                  vals=[[5, 5, 3, 2]])
-    # TODO: torch on linux has different behavior for duplicated values
-    # indices: macos returns [0, 1, 2], linux returns [1, 0, 2]
-    # helper_test_op(None, lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True,
-    #               vals=[[5, 5, 3, 2]])
-    # indices: macos returns [1, 0, 2], linux returns [0, 1, 2]
-    # helper_test_op(None, lambda x: x.topk(3, largest=False).indices.type(torch.int32), lambda x: x.topk(3, largest=False)[1], forward_only=True,
-    #               vals=[[5, 5, 3, 2]])
+    value, indices = Tensor([5, 5, 2, 3]).topk(3)
+    np.testing.assert_equal(value.numpy(), [5,5,3])
+    np.testing.assert_equal(indices.numpy(), [0,1,3])
+    value, indices = Tensor([5, 5, 2, 3]).topk(3, largest=False)
+    np.testing.assert_equal(value.numpy(), [2,3,5])
+    np.testing.assert_equal(indices.numpy(), [2,3,0])
 
   def test_einsum(self):
     # matrix transpose
