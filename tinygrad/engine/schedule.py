@@ -227,8 +227,8 @@ class Kernel:
 
 @dataclass(frozen=True)
 class KernelContext:
-  realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
+  var_vals: dict[Variable, int]
 
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
@@ -236,7 +236,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   metadata = dict.fromkeys(x.arg.metadata)
   if (m:=ctx.ops_metadata.get(x.arg.ast)) is not None: metadata[m] = None
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
@@ -247,8 +247,8 @@ create_kernels = merge_views+PatternMatcher([
   # always give assign a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
   # otherwise check if need to assign this UOp to a new buffer
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
-    UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))) if x in ctx.realizes else None),
+  (UPat((Ops.CONTIGUOUS, Ops.COPY), name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
+    UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))))),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove CONST/BIND from SINK
@@ -267,6 +267,7 @@ def load_buf(ctx:list[UOp], x:UOp):
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), load_buf),
+  (UPat(Ops.ASSIGN, src=(UPat.var("x"), UPat())), load_buf),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
@@ -367,20 +368,20 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
+def fix_kernel_ast(ctx:KernelContext, k:UOp) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
-  # substitute kernel sources for the target buffer
-  ast = k.arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in k.src if s.op is Ops.ASSIGN}).sink()
+  if k.arg.ast.op in {Ops.SINK, Ops.COPY}: return None
   # add buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[s.buf_uop for s in k.src], bottom_up=True)
+  ast = graph_rewrite(k.arg.ast.sink(), add_buffer_ops, bufs:=[s.buf_uop for s in k.src], bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # unbind_vars + push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
+  ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=ctx.var_vals), view_right)
   # fix_kernel_ops
-  ast = graph_rewrite(ast, fix_kernel_ops, var_vals)
+  ast = graph_rewrite(ast, fix_kernel_ops, ctx.var_vals)
   # create subbuffer (TODO: this does not belong here)
   if ast.op is Ops.BUFFER_VIEW: buffers[bufs[0]] = (base:=bufs[1].buffer).view(ast.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
   return k.replace(arg=Kernel(ast, k.arg.metadata))
+fix_ast_pm = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -406,11 +407,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # get realizes
   sink = tensor_map[big_sink]
-  realize_map = group_realizes(sink)
   # map tensor metadata to simplified ops
   ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
-  # create_kernels
-  kernel_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
+  var_vals: dict[Variable, int] = {}
+  # create_kernels + fix_ast
+  kernel_map = graph_rewrite_map(sink, create_kernels+fix_ast_pm, ctx=KernelContext(ops_metadata, var_vals))
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
@@ -457,12 +458,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   queue = deque(k for k,v in in_degree.items() if v == 0)
   schedule: list[ScheduleItem] = []
-  var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    # TODO: move this to create_kernels
-    k = fix_kernel_ast(u.src[1], var_vals)
-    schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
+    schedule.append(ScheduleItem((k:=u.src[1]).arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
     # increment the refcount of the target buf (this is required by the JIT and memory planner)
     u.buf_uop.buffer.ref(1)
     for x in children.get(u, []):
