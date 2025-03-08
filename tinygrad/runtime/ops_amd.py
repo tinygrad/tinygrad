@@ -249,7 +249,6 @@ class AMDProgram(HCQProgram):
     self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
     self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
-
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.dev.dev_iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
 
@@ -264,7 +263,6 @@ class AMDProgram(HCQProgram):
     self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
     self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + code.kernel_code_entry_byte_offset
     if code.kernel_code_entry_byte_offset == 0: self.prog_addr = self.lib_gpu.va_addr + text_entry
-
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
     self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR

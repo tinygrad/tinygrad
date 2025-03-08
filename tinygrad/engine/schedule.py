@@ -359,33 +359,28 @@ fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
+  # remove unmasked valid
+  (UPat.where(UPat(Ops.VALID, name="valid"), UPat.cvar("x"), UPat()), lambda valid,x: x if all(v.mask is None for v in valid.st.views) else None),
   # no ImageDType after load
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
-# TODO: replace this with the KERNEL UOp
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: tuple[Buffer, ...]
-  metadata: tuple[Metadata, ...]
-
-def schedule_uop(sink:UOp, var_vals:dict[Variable, int]) -> ScheduleItem:
-  assert sink.op is Ops.ASSIGN and sink.src[1].op is Ops.KERNEL, f"{sink} must be ASSIGN"
+def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
+  assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
   # substitute kernel sources for the target buffer
-  ast = sink.src[1].arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in sink.src[1].src if s.op is Ops.ASSIGN}).sink()
+  ast = k.arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in k.src if s.op is Ops.ASSIGN}).sink()
   # add buffer ops
-  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[sink.buf_uop], bottom_up=True)
+  ast = graph_rewrite(ast, add_buffer_ops, bufs:=[s.buf_uop for s in k.src], bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # unbind_vars + push views to edges
   ast = graph_rewrite(graph_rewrite(ast, unbind_vars+view_left, ctx=var_vals), view_right)
   # fix_kernel_ops
   ast = graph_rewrite(ast, fix_kernel_ops, var_vals)
-  # create subbuffer
+  # create subbuffer (TODO: this does not belong here)
   if ast.op is Ops.BUFFER_VIEW: buffers[bufs[0]] = (base:=bufs[1].buffer).view(ast.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-  return ScheduleItem(ast, tuple(dedup([x.buffer for x in bufs])), sink.src[1].arg.metadata)
+  return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 PROCESS_REPLAY_CAPTURE:dict[str, bytes] = {}
 if CAPTURE_PROCESS_REPLAY:
@@ -394,6 +389,12 @@ if CAPTURE_PROCESS_REPLAY:
     for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
 # **** schedule creation and toposort
+
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: UOp
+  bufs: tuple[Buffer, ...]
+  metadata: tuple[Metadata, ...]
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
@@ -408,7 +409,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   realize_map = group_realizes(sink)
   # map tensor metadata to simplified ops
   ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
-  # create kernels
+  # create_kernels
   kernel_map = graph_rewrite_map(sink, create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
@@ -459,7 +460,9 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   var_vals: dict[Variable, int] = {}
   while queue:
     u = queue.popleft()
-    schedule.append(schedule_uop(u, var_vals))
+    # TODO: move this to create_kernels
+    k = fix_kernel_ast(u.src[1], var_vals)
+    schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
     # increment the refcount of the target buf (this is required by the JIT and memory planner)
     u.buf_uop.buffer.ref(1)
     for x in children.get(u, []):
