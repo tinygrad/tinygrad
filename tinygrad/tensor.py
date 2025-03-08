@@ -1257,7 +1257,7 @@ class Tensor(SimpleMathTrait):
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, acc_dtype=self.dtype)
 
-  def cat(self, *args, dim:int=0, eager:bool=True) -> Tensor:
+  def cat(self, *args, dim:int=0, eager:bool=False) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
     All tensors must have the same shape except in the concatenating dimension.
@@ -1271,6 +1271,7 @@ class Tensor(SimpleMathTrait):
     Returns:
       Tensor: Concatenated tensor
     """
+    if self.ndim == 0: raise IndexError("Dimension out of range for scalar tensor")
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
