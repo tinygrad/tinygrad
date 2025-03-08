@@ -69,6 +69,9 @@ if __name__ == "__main__":
   model_state_dict = nn.state.get_state_dict(model)
   del model_state_dict['freqs_cis']
 
+  def permute(v: Tensor, n_heads: int):
+    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
+
   experts = collections.defaultdict(dict)
   state = fetch_weights()
   for k in (t := tqdm(state, disable=CI)):
@@ -87,7 +90,13 @@ if __name__ == "__main__":
     if '.mlp.experts.' not in k:
       #print(k, rk, state[k].shape, model_state_dict[rk].shape)
       assert state[k].shape == model_state_dict[rk].shape
-      model_state_dict[rk].replace(state[k].float())
+      v = state[k].float()
+      n_heads = 16
+      if 'q_proj' in k or 'k_proj' in k:
+        v = permute(v, n_heads)
+      elif 'q_norm' in k or 'k_norm' in k:
+        v = v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, 1).transpose(1, 2).flatten()
+      model_state_dict[rk].replace(v)
       del model_state_dict[rk]
     else:
       _, _, layer, _, _, expert, name, _ = k.split('.')

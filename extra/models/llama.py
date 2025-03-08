@@ -11,6 +11,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
+"""
 def rotate_half(x): return Tensor.cat(-x[..., x.shape[-1]//2:], x[..., :x.shape[-1]//2], dim=-1)
 def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
   cos = freqs_cis[..., 0:1].squeeze().repeat(1,1,1,2)
@@ -18,9 +19,9 @@ def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Te
   q_embed = (xq * cos) + (rotate_half(xq) * sin)
   k_embed = (xk * cos) + (rotate_half(xk) * sin)
   return q_embed, k_embed
+"""
 
 # matches meta, non hugging face weights
-"""
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
   a,b = A[..., 0:1], A[..., 1:2]
@@ -37,7 +38,6 @@ def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Te
   xq_out = complex_mult(xq, c, d)
   xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
-"""
 
 def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   bs, seqlen, n_kv_heads, head_dim = x.shape
