@@ -1257,25 +1257,35 @@ class Tensor(SimpleMathTrait):
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, acc_dtype=self.dtype)
 
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
+  def cat(self, *args, dim:int=0, eager:bool=False) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
     All tensors must have the same shape except in the concatenating dimension.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-    print(t0.cat(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.cat(t1, t2, dim=1).numpy())
-    ```
+    Uses binary tree partitioning for efficient concatenation.
+    
+    Args:
+      *args: Variable length list of tensors to concatenate with self
+      dim: Dimension along which to concatenate (default: 0)
+      eager: Whether to realize the tensor immediately (default: False)
+      
+    Returns:
+      Tensor: Concatenated tensor
     """
+    if self.ndim == 0: raise IndexError("Dimension out of range for scalar tensor")
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
-    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return functools.reduce(Tensor.add, tensors)
+    
+    padleft  = lambda l, r: l.pad([(0, r.shape[dim]) if i==dim else None for i in range(l.ndim)])
+    padright = lambda l, r: r.pad([(l.shape[dim], 0) if i==dim else None for i in range(r.ndim)])
+    cat_pair = lambda l, r, eager: (padleft(l,r) + padright(l,r)).realize() if eager else padleft(l,r) + padright(l,r)
+    
+    def partition(tensors: List[Tensor]) -> Tensor:
+      if len(tensors) == 1: return tensors[0]
+      if len(tensors) == 2: return cat_pair(tensors[0], tensors[1], eager)
+      return cat_pair(partition(tensors[:len(tensors)//2]), partition(tensors[len(tensors)//2:]), eager)
+    
+    return partition(tensors)
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
