@@ -2061,18 +2061,17 @@ class Tensor(SimpleMathTrait):
     indices = Tensor.arange(flat_t.shape[0], device=self.device)
     masked_indices = Tensor.where(mask == 1, indices, Tensor.full(indices.shape, -1, device=self.device))
 
-    nonzero_count = mask.sum().numpy().item() # counting with sum() is pure-safe
+    nonzero_count = mask.sum().item() # counting with sum() is pure-safe
     if nonzero_count == 0: return Tensor([], device=self.device,dtype=dtypes.int64).reshape(0, self.ndim)
 
 
     # manually allocate tensor for indices
-    positive_indices = Tensor.zeros(nonzero_count, device=self.device, dtype=dtypes.int64).contiguous()
+    positive_indices = Tensor.zeros(nonzero_count, device=self.device, dtype=dtypes.int32).contiguous()
 
     idx = 0
     for i in range(masked_indices.shape[0]):
-        current_index = masked_indices[i].numpy().item()
+        current_index = masked_indices[i].item()
         if current_index != -1:
-            #print(positive_indices.numpy())
             positive_indices[idx] = current_index
             idx += 1
 
