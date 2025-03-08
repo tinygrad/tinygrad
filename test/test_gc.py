@@ -79,5 +79,15 @@ class TestGC(unittest.TestCase):
       print(inspect.getclosurevars(UOp.toposort.fget))
       raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
 
+  def test_toposort_free_objs_alt(self):
+    tensors = [Tensor.ones((4,)).contiguous().realize() for _ in range(5)]
+    prev = len(gc.get_objects())
+    for i,x in enumerate(tensors):
+      _ = x.lazydata.toposort
+      del x
+      count = len(gc.get_objects())
+      if i > 1: assert count-prev == 0, f"objects are growing by {count-prev} objects per iteration"
+      prev = count
+
 if __name__ == '__main__':
   unittest.main()
