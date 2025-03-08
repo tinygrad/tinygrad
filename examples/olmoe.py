@@ -3,7 +3,7 @@ import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
 import functools, collections, json
 from tinygrad import Tensor, nn
-from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch
+from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
 from extra.models.llama import Transformer, Variable
 
 class MixtureFeedForward:
@@ -22,37 +22,52 @@ class MixtureFeedForward:
     choice = g.data().tolist()[0][0]
     top = sorted(enumerate(choice), key=lambda x: -x[1])[:self.activated_experts]
     sel, probs = Tensor([x[0] for x in top]), Tensor([x[1] for x in top])
-    print(sel.numpy(), probs.numpy())
+    #print(sel.numpy(), probs.numpy())
 
     # run MoE
     x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
     x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
+
     # TODO: should we renormalize the probs here? looks like it's norm_topk_prob, which is False
-    return (x_down * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
 
 # model is bf16, 1.3B active, 6.9B total
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
 
 def fetch_weights() -> dict[str, Tensor]:
   # TODO: make this lazy so the 3 fetches can happen in parallel
-  m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct/resolve/main/model-00001-of-00003.safetensors").to('metal')
-  m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct/resolve/main/model-00002-of-00003.safetensors").to('metal')
-  m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct/resolve/main/model-00003-of-00003.safetensors").to('metal')
+  m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00001-of-00003.safetensors").to('metal')
+  m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00002-of-00003.safetensors").to('metal')
+  m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to('metal')
   return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3)}
 
 if __name__ == "__main__":
+  if getenv("TORCH"):
+    from transformers import OlmoeForCausalLM, AutoTokenizer
+    model = OlmoeForCausalLM.from_pretrained("allenai/OLMoE-1B-7B-0924") #.to("mps")
+    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMoE-1B-7B-0924")
+    prompt = "Hello"
+    inputs = tokenizer(prompt, return_tensors="pt")
+    print(inputs)
+    generate_ids = model.generate(inputs.input_ids, max_length=30)
+    print(generate_ids)
+    out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+    print(out)
+    exit(0)
+
   #from transformers import PreTrainedTokenizerFast
   #tokenizer = json.loads(fetch("https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct/resolve/main/tokenizer.json").read_text())
   #print(tokenizer.keys())
 
   with Timing():
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMoE-1B-7B-0924-Instruct")
+    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMoE-1B-7B-0924")
 
   with Timing():
-    model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=4096,
+    model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
                         vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8), jit=False)
   model_state_dict = nn.state.get_state_dict(model)
+  del model_state_dict['freqs_cis']
 
   experts = collections.defaultdict(dict)
   state = fetch_weights()
@@ -73,6 +88,7 @@ if __name__ == "__main__":
       #print(k, rk, state[k].shape, model_state_dict[rk].shape)
       assert state[k].shape == model_state_dict[rk].shape
       model_state_dict[rk].replace(state[k].to('metal').float())
+      del model_state_dict[rk]
     else:
       _, _, layer, _, _, expert, name, _ = k.split('.')
       # TODO: this is broken. it never updates the base tensor if you do this, it's updating a copy
@@ -80,15 +96,20 @@ if __name__ == "__main__":
 
   for k,v in experts.items():
     assert len(v) == 64
-    model_state_dict[k].replace(Tensor.stack(*[v[i].to('metal').float() for i in range(len(v))]))
+    model_state_dict[k].replace(Tensor.stack(*[v[i].to('metal') for i in range(len(v))]))
+    del model_state_dict[k]
 
-  count = 10
+  assert len(model_state_dict) == 0, model_state_dict
+  del state
+
+  count = 30
   temperature = 0
 
-  toks = tokenizer.encode("what")# [tokenizer.bos_token_id]
-  print(toks)
-  #toks = [0]
+  #toks = tokenizer.encode("what")# [tokenizer.bos_token_id]
+  #print(toks)
+  #toks = [1]
   #toks = [tokenizer.bos_token_id]
+  toks = [12092]
   start_pos = 0
   for i in range(count):
     tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), temperature).item()
