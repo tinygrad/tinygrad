@@ -29,6 +29,7 @@
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.cummax
+::: tinygrad.Tensor.topk
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
