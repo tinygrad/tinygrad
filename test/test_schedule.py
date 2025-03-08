@@ -2641,5 +2641,12 @@ class TestUOpBecome(unittest.TestCase):
     assert b.lazydata is c.lazydata
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.lazydata, {})
 
+  def test_setitem_becomes_view_of_base(self):
+    a = Tensor.full((4,), 2.).contiguous().realize()
+    b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
+    b.realize()
+    assert b.lazydata.is_realized
+    assert b.lazydata.base.buffer._base is None
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
