@@ -2006,7 +2006,7 @@ class Tensor(SimpleMathTrait):
 
   def topk(self, k, dim=-1, largest=True, sorted=True): #noqa: A002 # pylint: disable=redefined-builtin
     x, dim = self, self._resolve_dim(dim)
-    idxs = Tensor.empty(self.shape[:dim] + (0,) + self.shape[dim+1:], dtype=dtypes.int64, device=self.device)
+    idxs = Tensor.empty(self.shape[:dim] + (0,) + self.shape[dim+1:], dtype=dtypes.int32, device=self.device)
     op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
       i = op(x, axis=dim, keepdim=True)
