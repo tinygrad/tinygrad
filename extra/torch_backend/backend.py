@@ -155,11 +155,6 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
 def cat_out(tensors, dim=0, out=None):
   unwrap(out).replace(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim), allow_shape_mismatch=True)
 
-@torch.library.impl("aten::topk", "privateuseone")
-def topk(self, k, dim=None, largest=True, sorted=True):
-  val, idx, = unwrap(self).topk(k, -1 if dim is None else dim, largest, sorted)
-  return torch.return_types.topk((wrap(val), wrap(idx)))
-
 # register some decompositions
 from torch._decomp import get_decompositions
 aten = torch.ops.aten
@@ -368,6 +363,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
+  "aten.topk": Tensor.topk,
   "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),

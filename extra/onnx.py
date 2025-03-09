@@ -459,10 +459,6 @@ def get_onnx_ops():
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
     return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
-  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
-    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
-    return val, idx.cast(dtypes.int64)
-
   def Trilu(x:Tensor, k:int=0, upper:int=1): return x.triu(k) if upper else x.tril(k)
 
   def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
@@ -525,6 +521,10 @@ def get_onnx_ops():
     if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
     return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
+
+  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
+    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
+    return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
   def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
