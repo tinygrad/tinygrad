@@ -1103,11 +1103,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 4, 5)], lambda x: torch.stack(torch.topk(x, k=2, dim=1)), lambda x: Tensor.stack(*x.topk(k=2, dim=1)), forward_only=True)
 
     # test with largest=False (get smallest values)
-    helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, largest=False)), lambda x: Tensor.stack(*x.topk(k=3, largest=False)), forward_only=True)
+    helper_test_op([(10,)], 
+                   lambda x: torch.stack(torch.topk(x, k=3, largest=False)), 
+                   lambda x: Tensor.stack(*x.topk(k=3, largest=False)), forward_only=True)
 
     # test with sorted=False
     # NOTE: this fails on CI but passes locally, torch returns a different order
-    # helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3, sorted=False)), lambda x: Tensor.stack(*x.topk(k=3, sorted=False)), forward_only=True)
+    # helper_test_op([(10,)], 
+    #                lambda x: torch.stack(torch.topk(x, k=3, sorted=False)), 
+    #                lambda x: Tensor.stack(*x.topk(k=3, sorted=False)), forward_only=True)
 
     # test with non-default values and low/high ranges to test stability with duplicates
     # NOTE: this fails on CI but passes locally, torch returns a different order

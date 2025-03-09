@@ -2020,7 +2020,7 @@ class Tensor(SimpleMathTrait):
     idx[dim] = slice(start, start + length)
     return self[idx]
 
-  def topk(self, k, dim=-1, largest=True, sorted=True):
+  def topk(self, k, dim=-1, largest=True, sorted=True): #noqa: A002
     x, dim = self, self._resolve_dim(dim)
     idxs = x.argsort(dim, descending=largest).narrow(dim, 0, k)
     return x.gather(dim, idxs), idxs
