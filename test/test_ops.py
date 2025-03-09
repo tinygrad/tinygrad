@@ -1039,8 +1039,8 @@ class TestOps(unittest.TestCase):
 
   def test_topk(self):
     def topk_int32(x, k, dim=-1, largest=True, sorted=True):
-      vals, inds = torch.topk(x, k, dim=dim, largest=largest, sorted=sorted)  # get topk
-      return vals, inds.int() 
+      vals, inds = torch.topk(x, k, dim=dim, largest=largest, sorted=sorted)
+      return vals, inds.int()
     helper_test_op([(10,)], lambda x: torch.stack(topk_int32(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)
     helper_test_op([(10,)], lambda x: torch.stack(topk_int32(x, k=1)), lambda x: Tensor.stack(*x.topk(k=1)), forward_only=True)
     helper_test_op([(10,)], lambda x: torch.stack(topk_int32(x, k=10)), lambda x: Tensor.stack(*x.topk(k=10)), forward_only=True)
@@ -1051,14 +1051,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 4, 5)], lambda x: torch.stack(topk_int32(x, k=2, dim=1)), lambda x: Tensor.stack(*x.topk(k=2, dim=1)), forward_only=True)
 
     # test with largest=False (get smallest values)
-    helper_test_op([(10,)], 
-                   lambda x: torch.stack(topk_int32(x, k=3, largest=False)), 
+    helper_test_op([(10,)],
+                   lambda x: torch.stack(topk_int32(x, k=3, largest=False)),
                    lambda x: Tensor.stack(*x.topk(k=3, largest=False)), forward_only=True)
 
     # test with sorted=False
     # NOTE: this fails on CI but passes locally, torch indices can be unstable
-    # helper_test_op([(10,)], 
-    #                lambda x: torch.stack(topk_int32(x, k=3, sorted=False)), 
+    # helper_test_op([(10,)],
+    #                lambda x: torch.stack(topk_int32(x, k=3, sorted=False)),
     #                lambda x: Tensor.stack(*x.topk(k=3, sorted=False)), forward_only=True)
 
     # test with non-default values and low/high ranges to test stability with duplicates
@@ -1070,10 +1070,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(17,)], lambda x: torch.stack(topk_int32(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)
 
     # edge case: test with k equal to dimension size
-    # NOTE: this fails on CI (WEBGPU) but passes locally. 
-    # CI ERROR: RuntimeError: Error creating bind group layout: The number of 
+    # NOTE: this fails on CI (WEBGPU) but passes locally.
+    # CI ERROR: RuntimeError: Error creating bind group layout: The number of
     # storage buffers (11) in the Compute stage exceeds the maximum per-stage limit (10).
-    
+
     # helper_test_op([(5, 10)], lambda x: torch.stack(topk_int32(x, k=10, dim=1)), lambda x: Tensor.stack(*x.topk(k=10, dim=1)), forward_only=True)
 
   def test_einsum(self):
