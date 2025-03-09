@@ -2004,17 +2004,14 @@ class Tensor(SimpleMathTrait):
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
-  def topk(self, k, dim=-1, largest=True, sorted=True): # noqa: A002, pylint: disable=redefined-builtin
-    if sorted: pass
-
+  def topk(self, k, dim=-1, largest=True, sorted=True):
     x, dim = self, self._resolve_dim(dim)
-    idxs = []
-    fn, ext =  (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
+    idxs = None
+    op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
-      i = fn(x, axis=dim, keepdim=True)
-      idxs.append(i.squeeze(dim))
-      x = x.scatter(dim, i, ext)
-    idxs = Tensor.stack(*idxs, dim=dim)
+        i = op(x, axis=dim, keepdim=True)
+        idxs = i if idxs is None else idxs.cat(i, dim=dim)
+        x = x.scatter(dim, i, ext)
     return self.gather(dim, idxs), idxs
 
   @staticmethod
