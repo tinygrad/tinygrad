@@ -2005,14 +2005,14 @@ class Tensor(SimpleMathTrait):
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
   def argsort(self, dim=-1, descending=False):
-    idxs = None
     x, dim = self, self._resolve_dim(dim)
     op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if descending else (Tensor.argmin, dtypes.max(self.dtype))
+    idxs = Tensor.empty(self.shape[:dim] + (0,) + self.shape[dim+1:], dtype=dtypes.int64, device=self.device)
     for _ in range(self.shape[dim]):
       i = op(x, axis=dim, keepdim=True)
-      idxs = i if idxs is None else idxs.cat(i, dim=dim)
+      idxs = idxs.cat(i, dim=dim)
       x = x.scatter(dim, i, ext)
-    return idxs.cast(dtypes.int64) if self.shape[dim] else Tensor.empty(self.shape, dtype=dtypes.int64)  # cast to int64 to match torch
+    return idxs
 
   def narrow(self, dim: int, start: int, length: int) -> Tensor:
     dim = self._resolve_dim(dim)
