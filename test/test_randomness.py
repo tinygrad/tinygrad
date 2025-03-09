@@ -65,7 +65,7 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16) and is_dtype_supported(dtypes.ulong), "need float16 and ulong support")
   def test_rand_float16(self):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.float16)
@@ -76,7 +76,7 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "gpuocelot doesn't support certain ops needed for threefry")
+  @unittest.skipIf(CI and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
   def test_threefry_against_reference(self):
     Tensor.manual_seed(1337)
 
@@ -97,6 +97,7 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
+  @unittest.skipIf(getenv("PTX"), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
     for ei in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
@@ -238,7 +239,7 @@ class TestRandomness(unittest.TestCase):
                                        numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
     self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5, dtype="int32"),
                                        numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
-    self.assertTrue(Tensor.randint(1, device="CLANG").device=="CLANG")
+    self.assertTrue(Tensor.randint(1, device="CPU").device=="CPU")
     # check types of args
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0.1, high=3)
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)

@@ -1,15 +1,18 @@
 #!/usr/bin/env python
-import gc
+import gc, inspect
 import unittest
 import numpy as np
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
+from tinygrad.ops import UOp
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
+  gc.collect()
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
 def bufs_allocated():
+  gc.collect()
   return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
 class TestGC(unittest.TestCase):
@@ -30,7 +33,7 @@ class TestGC(unittest.TestCase):
     base = tensors_allocated()
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
-    assert (tensors_allocated()-base == 5)
+    assert (tensors_allocated()-base == 4)
     (a*b).mean().backward()
     assert (tensors_allocated()-base == 6)
     del b
@@ -64,6 +67,17 @@ class TestGC(unittest.TestCase):
     self.assertEqual(bufs_allocated()-init, 1)
     del y
     self.assertEqual(bufs_allocated()-init, 0)
+
+  def test_toposort_blocks_gc(self):
+    init = bufs_allocated()
+    x = Tensor.ones(4,4).contiguous().realize()+1
+    self.assertEqual(bufs_allocated()-init, 1)
+    # try commenting this part out, it's green!
+    x.lazydata.toposort
+    del x
+    if bufs_allocated()-init != 0:
+      print(inspect.getclosurevars(UOp.toposort.fget))
+      raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
 
 if __name__ == '__main__':
   unittest.main()

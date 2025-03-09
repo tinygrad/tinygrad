@@ -1,9 +1,10 @@
 import os
 from extra.export_model import compile_net, jit_model, dtype_to_js_type
+from extra.f16_decompress import u32_to_f16
 from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
-from tinygrad import Device
+from tinygrad import Device, dtypes
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
 import requests
@@ -95,7 +96,8 @@ if __name__ == "__main__":
   sub_steps = [
     Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
     Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
-    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode)
+    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode),
+    Step(name = "f16tof32", input = [Tensor.randn(2097120, dtype=dtypes.uint32)], forward = u32_to_f16)
   ]
 
   prg = ""
@@ -130,7 +132,7 @@ if __name__ == "__main__":
 
     return {{
       "setup": async (device, safetensor) => {{
-        const metadata = getTensorMetadata(safetensor[0]);
+        const metadata = safetensor ? getTensorMetadata(safetensor[0]) : null;
 
         {exported_bufs}
 
