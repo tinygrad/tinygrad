@@ -2015,8 +2015,8 @@ class Tensor(SimpleMathTrait):
     return idxs
 
   def narrow(self, dim: int, start: int, length: int) -> Tensor:
-    dim = self._resolve_dim(dim) 
-    idx = [slice(None)] * len(self.shape)  
+    dim = self._resolve_dim(dim)
+    idx = [slice(None)] * len(self.shape)
     idx[dim] = slice(start, start + length)
     return self[idx]
 
