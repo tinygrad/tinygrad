@@ -1038,7 +1038,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
   def test_topk(self):
-    def topk_int32(x, k, dim=-1, largest=True, sorted=True):
+    def topk_int32(x, k, dim=-1, largest=True, sorted=True): # noqa: A002
       vals, inds = torch.topk(x, k, dim=dim, largest=largest, sorted=sorted)
       return vals, inds.int()
     helper_test_op([(10,)], lambda x: torch.stack(topk_int32(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)
