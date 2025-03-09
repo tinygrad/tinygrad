@@ -1871,7 +1871,7 @@ class TestIndexing(unittest.TestCase):
     ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
     r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    r = r + 2
+    r = r + r.const_like(2).replace(src=(unwrap(r.st).to_uop(),))
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
     # this AST first needs to swizzle, but it doesn't have implicit movementops
@@ -2640,6 +2640,13 @@ class TestUOpBecome(unittest.TestCase):
     assert b.lazydata.st == c.lazydata.st
     assert b.lazydata is c.lazydata
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.lazydata, {})
+
+  def test_setitem_becomes_view_of_base(self):
+    a = Tensor.full((4,), 2.).contiguous().realize()
+    b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
+    b.realize()
+    assert b.lazydata.is_realized
+    assert b.lazydata.base.buffer._base is None
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
