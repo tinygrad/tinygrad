@@ -2005,15 +2005,15 @@ class Tensor(SimpleMathTrait):
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
   def topk(self, k, dim=-1, largest=True, sorted=True): #noqa: A002 # pylint: disable=redefined-builtin
-    dim = self._resolve_dim(dim)
+    dim = self, self._resolve_dim(dim)
     x, idxs = self, []
     op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     for _ in range(k):
       i = op(x, axis=dim, keepdim=True)
       idxs.append(i)
       x = x.scatter(dim, i, ext)
-    idxs = idxs[0].cat(*idxs[1:], dim=dim)
-    return self.gather(dim, idxs), idxs
+    indices = idxs[0].cat(*idxs[1:], dim=dim)
+    return self.gather(dim, idxs), indices
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:Optional[DTypeLike]=None) -> Tensor:
