@@ -1057,7 +1057,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 4, 5)], lambda x: torch.argsort(x, dim=1),
                                lambda x: x.argsort(dim=1), forward_only=True)
     # check stability with duplicates
-    helper_test_op([(20,)], lambda x: torch.argsort(x), lambda x: x.argsort(), 
+    helper_test_op([(20,)], lambda x: torch.argsort(x), lambda x: x.argsort(),
                            vals=[[0.5, -1.0, 0.0, 0.5, 1.0] * 4], forward_only=True)
     helper_test_op([(17,)], lambda x: torch.argsort(x), lambda x: x.argsort(), forward_only=True)
     helper_test_op([(10,)], lambda x: torch.argsort(x.int()), lambda x: x.cast(dtypes.int32).argsort(), forward_only=True)
@@ -1071,11 +1071,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,)], lambda x: torch.narrow(x, 0, 3, 4), lambda x: x.narrow(0, 3, 4))
     helper_test_op([(4,6,8)], lambda x: torch.narrow(x, -1, 1, 3), lambda x: x.narrow(-1, 1, 3))
     helper_test_op([(4,6,8)], lambda x: torch.narrow(x, -2, 1, 3), lambda x: x.narrow(-2, 1, 3))
-  
-    helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 0, 0, 4), lambda x: x.narrow(0, 0, 4))  
-    helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 1, 5, 1), lambda x: x.narrow(1, 5, 1))  
-    helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 2, 4, 4), lambda x: x.narrow(2, 4, 4)) 
-    
+
+    helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 0, 0, 4), lambda x: x.narrow(0, 0, 4))
+    helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 1, 5, 1), lambda x: x.narrow(1, 5, 1))
+    helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 2, 4, 4), lambda x: x.narrow(2, 4, 4))
+
     helper_test_op([(1,10,1)], lambda x: torch.narrow(x, 1, 2, 6), lambda x: x.narrow(1, 2, 6))
     helper_test_op([(100,)], lambda x: torch.narrow(x, 0, 10, 50), lambda x: x.narrow(0, 10, 50))
     helper_test_op([(5,5,5)], lambda x: torch.narrow(x, 0, 2, 1), lambda x: x.narrow(0, 2, 1))
@@ -1083,7 +1083,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,6)], lambda x: torch.narrow(x.int(), 1, 1, 3), lambda x: x.int().narrow(1, 1, 3), forward_only=True)
     helper_test_op([(4,0,8)], lambda x: torch.narrow(x, 0, 1, 2), lambda x: x.narrow(0, 1, 2))
     helper_test_op([(4,6,8)], lambda x: torch.narrow(x, 1, 2, 0), lambda x: x.narrow(1, 2, 0))
-  
+
   def test_topk(self):
     # basic functionality - top k values and indices
     helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)
