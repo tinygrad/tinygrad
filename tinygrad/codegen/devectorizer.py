@@ -139,7 +139,7 @@ def fast_idiv(x: UOp, d: int) -> UOp|None:
   m,s = magicgu(x.vmax, abs(d))
   if abs(m * x.vmax) <= dtypes.max(x.dtype): return ((x*m) >> s) if d > 0 else -((x*m) >> s)
   # TODO: most of the time this can be rendered to a mulhi instruction
-  if (next_dtype := promo_lattice[x.dtype][0]).is_int() and is_dtype_supported(next_dtype):
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][0]) and is_dtype_supported(next_dtype):
     return ret.cast(x.dtype) if (ret := fast_idiv(x.cast(next_dtype), d)) is not None else None
   return None
 
