@@ -133,7 +133,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(x: UOp, d: int) -> Optional[UOp]:
+def fast_idiv(x: UOp, d: int) -> UOp|None:
   if not resolve(x>=0,False): return None
   if d == dtypes.min(x.dtype): return None  # for signed ints taking the absolute value can overflow, but its a power of 2 so should use shift
   m,s = magicgu(x.vmax, abs(d))
