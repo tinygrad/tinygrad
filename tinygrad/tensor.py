@@ -2015,9 +2015,10 @@ class Tensor(SimpleMathTrait):
     return idxs
 
   def narrow(self, dim: int, start: int, length: int) -> Tensor:
-    dim = self._resolve_dim(dim)
-    slices = tuple(slice(start, start + length) if i == dim else slice(None) for i in range(len(self.shape)))
-    return self.__getitem__(slices)
+    dim = self._resolve_dim(dim) 
+    idx = [slice(None)] * len(self.shape)  
+    idx[dim] = slice(start, start + length)
+    return self[idx]
 
   def topk(self, k, dim=-1, largest=True, sorted=True):
     x, dim = self, self._resolve_dim(dim)
