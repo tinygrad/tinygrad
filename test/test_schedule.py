@@ -247,20 +247,14 @@ class TestSchedule(unittest.TestCase):
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
     b = Tensor.full((4,), 2.0).contiguous().realize()
-    GlobalCounters.reset()
     expr = (a*b)/b
-    expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 0) # the scheduler can fold divs now!
-    self.assertEqual(GlobalCounters.global_ops, 0)
+    check_schedule(expr, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
 
   def test_div_collapse_const(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
-    GlobalCounters.reset()
     expr = a/a
-    expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 0)
-    self.assertEqual(GlobalCounters.global_ops, 0)
+    check_schedule(expr, 0)
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
 
   def test_div_collapse(self):
@@ -316,7 +310,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_double_unary(self):
     y = Tensor.empty(2)
-    out = y.sum(keepdim=True).sqrt().__neg__()
+    out = y.sum(keepdim=True).sqrt().neg()
     check_schedule(out, 1)
 
   #@unittest.skip("may want to reconsider this")
@@ -1889,68 +1883,49 @@ class TestIndexing(unittest.TestCase):
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
-
 def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0])
-
-# these pattern matchers should move to engine/schedule.py
-
-ops_folding = symbolic_simple+PatternMatcher([
-  (UPat(Ops.DETACH, name="x"), lambda x:x.src[0]),
-])
-
-def _load_buffer(ctx:list[UOp], buf:UOp):
-  glbl = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(size=buf.size), (), len(ctx))
-  ctx.append(buf)
-  return UOp(Ops.LOAD, buf.dtype, (glbl, ShapeTracker.from_shape((buf.size,)).to_uop()))
-load_buffers = PatternMatcher([
-  (UPat(Ops.BUFFER, name="buf"), _load_buffer),
-])
-
-# put the entire schedule of the tensor in a single ScheduleItem
-@track_rewrites(named=True)
-def run_tensor_ast(r:Tensor):
-  output = UOp.new_buffer(r.device, r.lazydata.size, r.dtype)
-  glbl = UOp(Ops.DEFINE_GLOBAL, output.dtype.ptr(size=output.size), (), 0)
-  sink = UOp(Ops.STORE, src=(glbl, ShapeTracker.from_shape(r.lazydata.base.shape).to_uop(), r.lazydata.base)).sink()
-  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+load_buffers+view_left, bufs:=[output])
-  sink = graph_rewrite(sink, remove_movement_ops+ops_folding+view_right)
-  si = ScheduleItem(sink, tuple(x.buffer for x in bufs), ())
-  run_schedule([si])
-  return output.realized.as_buffer().cast(output.dtype.fmt, r.shape).tolist()
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
+    Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
       a = Tensor.randint(32, 32).realize()
-    # double reduce collapses to a single reduce
     r = (a+a).sum(1).sum(0)
-    self.assertEqual(run_tensor_ast(r), (a.numpy()+a.numpy()).sum(1).sum(0))
+    # double reduce collapses to a single reduce
+    with Context(DONT_GROUP_REDUCES=1):
+      run_schedule(check_schedule(r, 1))
+    self.assertEqual(r.numpy(), (a.numpy()+a.numpy()).sum(1).sum(0))
 
   def test_single_swizzle(self):
+    Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
       a = Tensor.randint(4, 1).realize()
       b = Tensor.ones((1, 1), dtype=a.dtype).contiguous().realize()
     # ADD(REDUCE(RESHAPE(LOAD)), LOAD) to ADD(REDUCE(RESHAPE(LOAD))), RESHAPE(LOAD)
     r = a.sum(0)+b
-    self.assertEqual(run_tensor_ast(r), a.numpy().sum(0)+1)
+    run_schedule(check_schedule(r, 1))
+    self.assertEqual(r.numpy(), a.numpy().sum(0)+1)
 
   def test_double_swizzle_possible(self):
+    Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
-      Tensor.manual_seed(0)
       a = Tensor.randint(4,).realize()
       b = Tensor.randint(4,).realize()
     # parallel reduce!
     add = a.sum(0)+b.sum(0)
-    self.assertEqual(run_tensor_ast(add), a.numpy().sum(0)+b.numpy().sum(0))
+    with Context(DONT_GROUP_REDUCES=1):
+      run_schedule(check_schedule(add, 1))
+    self.assertEqual(add.numpy(), a.numpy().sum(0)+b.numpy().sum(0))
 
   # TODO: this is failing because it cannot resolve the final shape of two swizzled sources
-  @unittest.expectedFailure
-  def test_softmax(self):
+  @unittest.skip
+  def test_softmax_one_kernel(self):
+    Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
-      Tensor.manual_seed(0)
       a = Tensor.randn(32, 32).realize()
     t = a.softmax()
-    run_tensor_ast(t)
+    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1):
+      check_schedule(t, 1)
 
   def test_swizzle_rewrite_alt(self):
     swizzle = UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65), strides=(103788, 34596, 3, 558, 1, 9), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62)), contiguous=False), View(shape=(2, 3, 256, 256), strides=(114075, 38025, 195, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64), strides=(0, 196608, 0, 65536, 16384, 256, 64, 1), offset=0, mask=None, contiguous=True))), src=( # noqa: E501
@@ -1973,8 +1948,9 @@ class TestSwizzle(unittest.TestCase):
     y = Tensor.randn(4, 1, 16).realize()
     z = Tensor.randn(4, 4, 1).realize()
     t = (x*y).sum(axis=(0, 2)).reshape(1, 4, 1).permute(0, 2, 1)+z
+    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
     t_np = (x.numpy()*y.numpy()).sum(axis=(0, 2)).reshape(1, 4, 1).transpose(0, 2, 1)+z.numpy()
-    np.testing.assert_allclose(run_tensor_ast(t), t_np, atol=1e-6, rtol=1e-3)
+    np.testing.assert_allclose(t.numpy(), t_np, atol=1e-6, rtol=1e-3)
 
   @unittest.expectedFailure
   def test_fuse_conv2_relu_bw(self):
@@ -2159,7 +2135,7 @@ class TestView(unittest.TestCase):
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
 def tensor_rewrite(t) -> UOp: return graph_rewrite(t.lazydata.base, remove_movement_ops+symbolic_simple)
-class TestBigGraph(unittest.TestCase):
+class TestSimplifier(unittest.TestCase):
   def test_sink_childless_const(self):
     x = Tensor(0)
     check_schedule(x, 0)
@@ -2242,12 +2218,11 @@ class TestConst(unittest.TestCase):
     a = Tensor.ones((4,)).pad((1, 1)).contiguous()
     sched = a.schedule()
     print(sched[0].ast)
-    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0)))),))
+    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat.where(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0))),))
     self.assertEqual(len(const_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [0, 1, 1, 1, 1, 0])
 
-  # TOOD: currently even unmasked constants are VALID until codegen
   def test_unmasked_const_ast(self):
     a = Tensor.ones((4,)).contiguous()
     sched = a.schedule()
