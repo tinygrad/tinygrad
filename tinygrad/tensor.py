@@ -2057,9 +2057,10 @@ class Tensor(SimpleMathTrait):
   def nonzero(self):
     # check if the tensor is empty
     print(self.shape)
+    # Torch compatibility for empty tensors
     if self.numel() == 0:
       return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, )
-    elif self.ndim == 0:
+    if self.ndim == 0:
       return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
 
     flat_t = self.reshape(-1)
