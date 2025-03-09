@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, merge_views, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same, temp
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, all_same, temp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
@@ -177,6 +177,13 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10,10,1)
     c = a.sum(axis=0, keepdim=True).permute(2,1,0) + b
     with self.assertRaises(KernelCountException): check_schedule(c, 1)
+
+  def test_allow_push_permutes(self):
+    a = Tensor.randn(10,10,10).realize()
+    b = Tensor.randn(10,10,1).realize()
+    c = a.sum(axis=0, keepdim=True).permute(2,1,0) + b
+    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(c, 1))
+    np.testing.assert_allclose(c.numpy(), np.sum(a.numpy(), axis=0, keepdims=True).transpose(2,1,0)+b.numpy())
 
   def test_binop_early_reshape_reduce_fusion(self):
     a = Tensor.empty(100)
@@ -1986,20 +1993,6 @@ class TestSwizzle(unittest.TestCase):
                       UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(65, 45, 90), strides=(1, 0, 65), offset=0, mask=((0, 65), (0, 45), (0, 45)), contiguous=False), View(shape=(65, 4094), strides=(4050, 1), offset=0, mask=((0, 65), (0, 4050)), contiguous=False), View(shape=(1, 65, 46, 89), strides=(0, 4094, 89, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),)),)),)),))
     ret = swizzle_rewrite(sink)
     self.assertEqual(swizzle_cnt(ret), 0)
-
-  def test_late_fusion_post_permute_simpler(self):
-    base = ShapeTracker.from_shape((32, 16, 1))
-    start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
-    r = start.expand((32, 16, 16)).r(Ops.ADD, (2,))
-    add = r.reshape((16, 32, 1)) + UOp.const(r.dtype, 0)
-    self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
-    to_store = add.permute((1, 0, 2)).contiguous()
-    to_store = graph_rewrite(to_store, remove_movement_ops)
-    self.assertEqual(to_store.st, ShapeTracker.from_shape((32, 16, 1)))
-    self.assertEqual(to_store.src[0].st, add.st.permute((1, 0, 2)))
-    self.assertIs(to_store.src[0].op, Ops.VIEW)
-    ret = graph_rewrite(to_store, view_left)
-    self.assertEqual(swizzle_cnt(ret), 1)
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
