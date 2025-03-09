@@ -13,7 +13,7 @@ def dtype_parse(onnx_dtype: int) -> DType:
   supported: dict[int, DType] = {
     TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
     TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
-    TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
+    TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float16, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
     TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16,
   }
   unsupported = {
@@ -302,7 +302,7 @@ def get_onnx_ops():
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
 
   # ***** Unary Ops (broadcasted) *****
-  def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
+  def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y if isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
   def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
   def Less(x:Tensor,y:Tensor): return x < y
