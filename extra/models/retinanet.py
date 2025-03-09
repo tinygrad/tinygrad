@@ -2,10 +2,12 @@ import math
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 from examples.mlperf.helpers import generate_anchors, BoxCoder
-from examples.mlperf.initializers import Conv2dNormal, Conv2dKaimingUniform
 from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
 from extra.models.resnet import ResNet
+import tinygrad.nn as nn
 import numpy as np
+
+ConvFPN = ConvHead = ConvClassificationHeadLogits = nn.Conv2d
 
 def nms(boxes, scores, thresh=0.5):
   x1, y1, x2, y2 = np.rollaxis(boxes, 1)
@@ -130,10 +132,10 @@ class RetinaNet:
     return detections
 
 class ClassificationHead:
-  def __init__(self, in_channels:int, num_anchors:int, num_classes:int, prior_prob:float=0.01):
+  def __init__(self, in_channels:int, num_anchors:int, num_classes:int):
     self.num_classes = num_classes
-    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.cls_logits = Conv2dNormal(in_channels, num_anchors * num_classes, kernel_size=3, padding=1, prior_prob=prior_prob)
+    self.conv = flatten([(ConvHead(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.cls_logits = ConvClassificationHeadLogits(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
 
   def __call__(self, x:Tensor, labels:Tensor|None=None, matches:Tensor|None=None):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
@@ -154,8 +156,8 @@ class ClassificationHead:
 
 class RegressionHead:
   def __init__(self, in_channels:int, num_anchors:int, box_coder:BoxCoder|None=None):
-    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+    self.conv = flatten([(ConvHead(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.bbox_reg = ConvHead(in_channels, num_anchors * 4, kernel_size=3, padding=1)
 
     if box_coder is None:
       box_coder = BoxCoder((1.0, 1.0, 1.0, 1.0), apply_to_remove=False)
@@ -217,8 +219,8 @@ class ResNetFPN:
 
 class ExtraFPNBlock:
   def __init__(self, in_channels:int, out_channels:int):
-    self.p6 = Conv2dKaimingUniform(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
-    self.p7 = Conv2dKaimingUniform(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p6 = ConvFPN(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+    self.p7 = ConvFPN(out_channels, out_channels, kernel_size=3, stride=2, padding=1)
     self.use_P5 = in_channels == out_channels
 
   def __call__(self, p:Tensor, c:Tensor):
@@ -233,8 +235,8 @@ class FPN:
   def __init__(self, in_channels_list:list[int], out_channels:int, extra_blocks:ExtraFPNBlock|None=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
-      self.inner_blocks.append(Conv2dKaimingUniform(in_channels, out_channels, kernel_size=1))
-      self.layer_blocks.append(Conv2dKaimingUniform(out_channels, out_channels, kernel_size=3, padding=1))
+      self.inner_blocks.append(ConvFPN(in_channels, out_channels, kernel_size=1))
+      self.layer_blocks.append(ConvFPN(out_channels, out_channels, kernel_size=3, padding=1))
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 
   def __call__(self, x:Tensor):

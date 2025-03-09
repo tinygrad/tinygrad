@@ -345,9 +345,8 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
-  from examples.mlperf.initializers import FrozenBatchNorm2d
+  from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
-  from extra.models.retinanet import RetinaNet
   from extra.models import resnet
   from extra.lr_scheduler import LambdaLR
   from pycocotools.coco import COCO
@@ -355,6 +354,7 @@ def train_retinanet():
   from tinygrad.helpers import colored
   from tinygrad.nn.optim import Optimizer
   from typing import Iterator
+  import extra.models.retinanet as retinanet
   
   import numpy as np
 
@@ -427,6 +427,9 @@ def train_retinanet():
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
+  retinanet.ConvHead = Conv2dNormal
+  retinanet.ConvClassificationHeadLogits = functools.partial(Conv2dNormal, prior_prob=0.01)
+  retinanet.ConvFPN = Conv2dKaimingUniform
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
@@ -434,7 +437,7 @@ def train_retinanet():
   # backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
-  model = RetinaNet(backbone, num_classes=NUM_CLASSES)
+  model = retinanet.RetinaNet(backbone, num_classes=NUM_CLASSES)
   params = get_parameters(model)
 
   for p in params: p.to_(GPUS)
