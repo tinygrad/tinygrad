@@ -2581,7 +2581,7 @@ class Tensor(SimpleMathTrait):
     if k > self.shape[dim]: raise ValueError(f"selected index {k=} is out of range")
     x, dim = self, self._resolve_dim(dim)
     select_fxn, mask_value = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
-    indices:list[Tensor] = []
+    indices: list[Tensor] = []
     for _ in range(k):
       idx = select_fxn(x, dim, keepdim=True)
       indices.append(idx)
