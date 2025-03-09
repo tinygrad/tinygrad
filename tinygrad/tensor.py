@@ -2014,16 +2014,20 @@ class Tensor(SimpleMathTrait):
       x = x.scatter(dim, i, ext)
     return idxs
 
-  def narrow(self, dim: int, start: int, length: int) -> Tensor:
-    dim = self._resolve_dim(dim)
-    idx = [slice(None)] * len(self.shape)
-    idx[dim] = slice(start, start + length)
-    return self[idx]
-
   def topk(self, k, dim=-1, largest=True, sorted=True): #noqa: A002
     x, dim = self, self._resolve_dim(dim)
-    idxs = x.argsort(dim, descending=largest).narrow(dim, 0, k)
-    return x.gather(dim, idxs), idxs
+    idxs = Tensor.empty(self.shape[:dim] + (0,) + self.shape[dim+1:], dtype=dtypes.int64, device=self.device)
+    op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
+    for _ in range(k):
+      i = op(x, axis=dim, keepdim=True)
+      idxs = idxs.cat(i, dim=dim)
+      x = x.scatter(dim, i, ext)
+    out = self.gather(dim, idxs)
+    if not sorted:
+        order = idxs.argsort(dim=dim, descending=largest)  # reorder based on original input order
+        out = out.gather(dim, order)
+        idxs = idxs.gather(dim, order)
+    return out, idxs
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:DTypeLike|None=None) -> Tensor:
