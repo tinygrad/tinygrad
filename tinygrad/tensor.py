@@ -2014,12 +2014,15 @@ class Tensor(SimpleMathTrait):
           x = x.scatter(dim, i, ext)
       return idxs.cast(dtypes.int64) if self.shape[dim] else Tensor.empty(self.shape, dtype=dtypes.int64)  # cast to int64 to match torch
 
+  def narrow(self, dim: int, start: int, length: int) -> Tensor:
+    dim = self._resolve_dim(dim)
+    slices = tuple(slice(start, start + length) if i == dim else slice(None) for i in range(len(self.shape)))
+    return self.__getitem__(slices)
+
   def topk(self, k, dim=-1, largest=True, sorted=True):
     x, dim = self, self._resolve_dim(dim)
-    idxs = x.argsort(dim, descending=largest)
-    slices = [slice(None)] * len(idxs.shape)  # build full slice for each dim
-    slices[dim] = slice(0, k)  # slice along the specified dim
-    idxs = idxs[tuple(slices)]
+    idxs = x.argsort(dim, descending=largest) 
+    idxs = idxs.narrow(dim, 0, k)
     return x.gather(dim, idxs), idxs
 
   @staticmethod
