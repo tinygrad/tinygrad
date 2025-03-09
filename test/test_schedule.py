@@ -17,9 +17,10 @@ from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_re
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, prod, all_same, temp
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, remove_movement_ops, sym
+from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
+remove_movement_ops = merge_views
 
 def verify_ast(sink:UOp): return type_verify(list(sink.toposort), shape_spec)
 class KernelCountException(Exception): pass
@@ -78,6 +79,13 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10, device="CPU")
     c = a+b
     with self.assertRaises(RuntimeError): check_schedule(c, 1)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
+  def test_expand_buffer_before_cast(self):
+    a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
+    b = a.cast(dtypes.half).expand((2, 4, 4))+2
+    run_schedule(check_schedule(b, 1))
+    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
@@ -1863,7 +1871,7 @@ class TestIndexing(unittest.TestCase):
     ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
     r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
     r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    r = r + 2
+    r = r + r.const_like(2).replace(src=(unwrap(r.st).to_uop(),))
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
     # this AST first needs to swizzle, but it doesn't have implicit movementops
@@ -2061,7 +2069,7 @@ class TestSwizzle(unittest.TestCase):
     reswizzle = a.reshape((64, 16)).reshape((32, 32))
     self.assertEqual(swizzle_cnt(reswizzle), 0) # instant rule
     ret = swizzle_rewrite(reswizzle)
-    self.assertIs(ret, reswizzle)
+    self.assertEqual(ret.st, reswizzle.st)
 
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))
@@ -2632,6 +2640,13 @@ class TestUOpBecome(unittest.TestCase):
     assert b.lazydata.st == c.lazydata.st
     assert b.lazydata is c.lazydata
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.lazydata, {})
+
+  def test_setitem_becomes_view_of_base(self):
+    a = Tensor.full((4,), 2.).contiguous().realize()
+    b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
+    b.realize()
+    assert b.lazydata.is_realized
+    assert b.lazydata.base.buffer._base is None
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

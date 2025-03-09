@@ -33,7 +33,7 @@ class SimpleMathTrait:
   def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
   def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
   def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
-  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
+  def bitwise_xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
@@ -49,7 +49,7 @@ class SimpleMathTrait:
   def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
-  def __xor__(self, x): return self.xor(x)
+  def __xor__(self, x): return self.bitwise_xor(x)
 
   def __radd__(self, x): return self.add(x, True)
   def __rsub__(self, x): return self.sub(x, True)
@@ -58,7 +58,7 @@ class SimpleMathTrait:
   def __rfloordiv__(self, x): return self.idiv(x, True)
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
-  def __rxor__(self, x): return self.xor(x, True)
+  def __rxor__(self, x): return self.bitwise_xor(x, True)
   def __rmod__(self, x): return self.mod(x, True)
 
   def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
@@ -130,8 +130,8 @@ class Ops(FastEnum):
   WMMA = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); IDIV = auto(); MOD = auto(); MAX = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
+  MUL = auto(); SHL = auto(); SHR = auto(); IDIV = auto(); ADD = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto() # noqa: E702
+  XOR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # UnaryOps
   EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
@@ -152,7 +152,9 @@ class Ops(FastEnum):
   # device
   DEVICE = auto()
   MULTI = auto()
-  CUSTOM = auto()
+
+  # CUSTOMI is inline
+  CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -299,7 +301,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return ShapeTracker.from_shape(
         tuple(sum(y.shape[a] for y in self.real_lbs) if a == self.axis else s for a,s in enumerate(self.real_lbs[0].shape)))
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
-    if self.op is Ops.KERNEL: return ShapeTracker.from_shape(self.arg.ast.shape)
+    if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
     # these ops define a ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -520,6 +522,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
+    if self.op is Ops.BUFFER: return self
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
@@ -958,13 +961,18 @@ ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
 # *** UOp merge views and swizzling ***
 
 merge_views = PatternMatcher([
-  # VIEW(VIEW) merges to a single VIEW
-  (UPat(Ops.VIEW, name="vm1", src=(UPat(Ops.VIEW, name="vm2"),)), lambda vm1,vm2: vm2.replace(arg=vm2.st+vm1.st)),
-  # remove VIEW if it's contiguous and same as the base shape
-  (UPat(Ops.VIEW, name="vm", src=(UPat(GroupOp.All-{Ops.DEVICE}, name="x"),)), lambda vm,x: x if vm.st.contiguous and x.shape == vm.shape else None),
+  # merge adjacent views
+  (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v2"),), name="v1"), lambda v1,v2: v2.replace(arg=v2.arg+v1.arg)),
   # merge unmasked const views
-  (UPat(Ops.VIEW, name="view", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="const", src=(UPat(Ops.VIEW, name="st"),) ),)),
-   lambda st,const,view: const.replace(src=(st.replace(arg=st.st+view.st),)) if all(v.mask is None for v in (st.st+view.st).views) else None),
+  (UPat(Ops.VIEW, name="v", src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="const"),)),
+   lambda v,const: const.replace(src=(const.src[0].replace(arg=const.st+v.st),)) if all(x.mask is None for x in (const.st+v.st).views) else None),
+  # remove view if it's a contiguous and the shapes match
+  (UPat(Ops.VIEW, name="v", src=(UPat(GroupOp.All-{Ops.DEVICE}, name="x"),)), lambda v,x: x if v.arg.contiguous and x.shape == v.shape else None),
+  # remove mask if there's a zero in the masked dim
+  (UPat(Ops.VIEW, name="v", src=(UPat(),)),
+   lambda v: v.const_like(0) if (mask:=v.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
+  # movement ops apply a new view on the base
+  (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.view(mop.st)),
 ])
 
 # push VIEW to parents

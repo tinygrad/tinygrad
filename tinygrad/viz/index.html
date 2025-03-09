@@ -34,6 +34,7 @@
     font-variation-settings: "wdth" 100;
     font-size: 14px;
     overflow: hidden;
+    background-color: #08090e;
   }
   a {
     color: #4a90e2;
@@ -87,7 +88,6 @@
     margin-top: 12px;
   }
   .graph {
-    background-color: #08090e;
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -280,6 +280,8 @@
   svg.call(zoom);
   // zoom to fit into view
   const observer = new IntersectionObserver((e) => {
+    const { width, height } = render.getBBox();
+    if (width*height === 0) return;
     const btn = document.getElementById("zoom-to-fit-btn");
     btn.style.display = e[0].isIntersecting ? "none" : "block";
   });

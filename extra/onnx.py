@@ -195,6 +195,7 @@ def get_onnx_ops():
     return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
   def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
+    if auto_pad == "VALID": return [0]*(len(k_)*2)
     i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
@@ -295,7 +296,7 @@ def get_onnx_ops():
   def PRelu(X:Tensor, slope:Tensor):
     slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
     return (X > 0).where(X, X * slope)
-  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leakyrelu(alpha)
+  def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
@@ -311,12 +312,13 @@ def get_onnx_ops():
   def Equal(x:Tensor,y:Tensor): return x == y
   def And(x:Tensor,y:Tensor): return (x==y).where(x, False)
   def Or(x:Tensor,y:Tensor): return (x==y).where(x, True)
+  def Xor(x:Tensor,y:Tensor): return x.bool().bitwise_xor(y.bool())
   def BitwiseAnd(x:Tensor,y:Tensor): return x & y
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
   def BitwiseNot(x:Tensor): return ~x
   def Mod(x:Tensor,y:Tensor,fmod=0):
-    if fmod != 0: raise NotImplementedError("float mod is not supported")
+    if fmod: return x - x.div(y, rounding_mode="trunc") * y
     return x % y
 
   # ***** Casting Ops *****
@@ -672,7 +674,8 @@ def get_onnx_ops():
       x_sh = list(x.shape)
       ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
       if indices.ndim > 1: indices = indices.flatten()
-      indices = [_cached_to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in _cached_to_python_const(indices)]
+      indices = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
+      indices = [x_sh[axis]+x if x<0 else x for x in indices]
       args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices] # type: ignore
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
     # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
@@ -723,6 +726,14 @@ def get_onnx_ops():
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
 
+  def DynamicQuantizeLinear(x: Tensor):
+    # only support uint8
+    qmin, qmax = dtypes.min(dtypes.uint8), dtypes.max(dtypes.uint8)
+    scale = (x.max().maximum(0) + ((-x).max()).maximum(0)) / (qmax - qmin)
+    zero_point = _clamp_cast((qmin - x.min() / scale).round(), dtypes.uint8)
+    y = _clamp_cast((x / scale).round() + zero_point, dtypes.uint8)
+    return y, scale, zero_point
+
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
@@ -737,6 +748,9 @@ def get_onnx_ops():
 
   def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
     return _qlinearop_float(Tensor.add, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
+
+  def QLinearMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+    return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
   def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
     assert channels_last == 0, "unsure what this does"
@@ -799,7 +813,7 @@ def get_onnx_ops():
     # Tensor ops
     **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
-    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")},
+    "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops
     **{name:obj for name,obj in locals().items() if isinstance(obj, types.FunctionType) and not name.startswith("_") and name[0].isupper()},
     # Version ops
