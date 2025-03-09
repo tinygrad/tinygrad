@@ -2012,7 +2012,7 @@ class Tensor(SimpleMathTrait):
       i = op(x, axis=dim, keepdim=True)
       idxs.append(i)
       x = x.scatter(dim, i, ext)
-    topk_i = idxs[0].cat(*idxs[1:], dim=dim)
+    topk_i = Tensor.cat(*idxs, dim=dim) # pylint: disable=no-value-for-parameter
     return self.gather(dim, topk_i), topk_i
 
   @staticmethod
