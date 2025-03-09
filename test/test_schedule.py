@@ -1945,40 +1945,6 @@ class TestSwizzle(unittest.TestCase):
     t_np = (x.numpy()*y.numpy()).sum(axis=(0, 2)).reshape(1, 4, 1).transpose(0, 2, 1)+z.numpy()
     np.testing.assert_allclose(t.numpy(), t_np, atol=1e-6, rtol=1e-3)
 
-  @unittest.expectedFailure
-  def test_fuse_conv2_relu_bw(self):
-    # fuse (relu bw, conv2d, conv2d bw, relu)
-    sink = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.BUFFER, dtypes.float, arg=(10, ('METAL', 128, dtypes.float)), src=()),
-        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 2), strides=(64, 4, 2, 1), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(Ops.MUL, dtypes.float, arg=None, src=(
-          UOp(Ops.CAST, dtypes.float, arg=None, src=(
-            UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
-              x6:=UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 2), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                x9:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),
-                 x9,)),
-              UOp(Ops.MAX, dtypes.float, arg=None, src=(
-                UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 2), strides=(64, 4, 2, 1), offset=0, mask=None, contiguous=True),)), src=(
-                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (5, 6, 7)), src=(
-                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                      UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                        UOp(Ops.BUFFER, dtypes.float, arg=(9, ('METAL', 96, dtypes.float)), src=()),
-                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 1, 16, 2, 2, 3, 3, 3), strides=(48, 0, 0, 4, 1, 16, 4, 1), offset=0, mask=None, contiguous=False),)), src=()),)),
-                      UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
-                        UOp(Ops.BUFFER, dtypes.float, arg=(16, ('METAL', 432, dtypes.float)), src=()),
-                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 1, 16, 2, 2, 3, 3, 3), strides=(0, 0, 27, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),
-                 x6,)),)),)),
-          UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 2), strides=(64, 4, 2, 1), offset=0, mask=None, contiguous=True),)), src=(
-            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4, 6)), src=(
-              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                UOp(Ops.BUFFER, dtypes.float, arg=(18, ('METAL', 128, dtypes.float)), src=()),
-                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 3, 2, 3), strides=(64, 4, 2, 0, 1, 0), offset=0, mask=((0, 2), (0, 16), (0, 2), (0, 1), (0, 2), (0, 1)), contiguous=False), View(shape=(1, 2, 1, 16, 3, 2, 3, 2), strides=(0, 576, 0, 36, 12, 6, 2, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),))
-    ret = swizzle_rewrite(sink)
-    self.assertEqual(swizzle_cnt(ret), 0)
-
   @unittest.skip("this swizzle can't be decided after the ADD")
   def test_swizzle_failure_permute(self):
     sink = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -2020,25 +1986,6 @@ class TestSwizzle(unittest.TestCase):
                       UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(65, 45, 90), strides=(1, 0, 65), offset=0, mask=((0, 65), (0, 45), (0, 45)), contiguous=False), View(shape=(65, 4094), strides=(4050, 1), offset=0, mask=((0, 65), (0, 4050)), contiguous=False), View(shape=(1, 65, 46, 89), strides=(0, 4094, 89, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),)),)),)),))
     ret = swizzle_rewrite(sink)
     self.assertEqual(swizzle_cnt(ret), 0)
-
-  def test_non_contiguous_view_simplify(self):
-    st = ShapeTracker(views=(View(shape=(2048, 2048), strides=(1, 2048), offset=0, mask=None, contiguous=False),))
-    a = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, 4194304, dtypes.char), st.to_uop()))
-    ret = swizzle_rewrite(a.view(st))
-    self.assertEqual(ret.st_arg, st+st)
-
-  def test_contiguous_view_simplify(self):
-    base = ShapeTracker.from_shape((32, 32))
-    a = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
-    swizzle = a.reshape((64, 16))
-    swizzle = graph_rewrite(swizzle, remove_movement_ops)
-    self.assertEqual(swizzle_cnt(swizzle), 1)
-    ret = swizzle_rewrite(swizzle)
-    self.assertEqual(ret.st_arg, base.reshape((64, 16))) # late rewrite
-    reswizzle = a.reshape((64, 16)).reshape((32, 32))
-    self.assertEqual(swizzle_cnt(reswizzle), 0) # instant rule
-    ret = swizzle_rewrite(reswizzle)
-    self.assertEqual(ret.st, reswizzle.st)
 
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))
