@@ -1050,8 +1050,6 @@ class TestOps(unittest.TestCase):
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
     helper_test_op([(10)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
-    helper_test_op([(10)], lambda x: x.topk(1).values, lambda x: x.topk(1)[0], forward_only=True)
-    helper_test_op([(10)], lambda x: x.topk(1).indices.type(torch.int32), lambda x: x.topk(1)[1], forward_only=True)
     for dim in [0, 1, -1]:
       for largest in [True, False]:
         for sorted_ in [True]: # TODO support False
@@ -1061,13 +1059,14 @@ class TestOps(unittest.TestCase):
           helper_test_op([(10,20,30)],
                           lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
-    # duplicated values
+    # repeated values
     value, indices = Tensor([5, 5, 2, 3]).topk(3)
     np.testing.assert_equal(value.numpy(), [5,5,3])
     np.testing.assert_equal(indices.numpy(), [0,1,3])
     value, indices = Tensor([5, 5, 2, 3]).topk(3, largest=False)
     np.testing.assert_equal(value.numpy(), [2,3,5])
     np.testing.assert_equal(indices.numpy(), [2,3,0])
+    self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
 
   def test_einsum(self):
     # matrix transpose

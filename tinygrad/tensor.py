@@ -2399,6 +2399,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
+    if k > self.shape[dim]: raise ValueError(f"selected index {k=} is out of range")
     x, dim = self, self._resolve_dim(dim)
     select_fxn, mask_value = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
     indices:list[Tensor] = []

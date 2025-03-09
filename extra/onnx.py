@@ -458,8 +458,8 @@ def get_onnx_ops():
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
     return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
-  def TopK(X:Tensor, K:list[int], axis:int=-1, largest:int=1, sorted:int=1):
-    val, idx = X.topk(K[0], axis, largest, sorted)
+  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
+    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
     return val, idx.cast(dtypes.int64)
 
   def Trilu(x:Tensor, k:int=0, upper:int=1): return x.triu(k) if upper else x.tril(k)
