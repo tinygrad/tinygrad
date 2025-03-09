@@ -1924,8 +1924,7 @@ class TestSwizzle(unittest.TestCase):
       run_schedule(check_schedule(add, 1))
     self.assertEqual(add.numpy(), a.numpy().sum(0)+b.numpy().sum(0))
 
-  # TODO: this is failing because it cannot resolve the final shape of two swizzled sources
-  @unittest.skip
+  @unittest.skip("TODO: how do we express the norm")
   def test_softmax_one_kernel(self):
     Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
@@ -1933,6 +1932,13 @@ class TestSwizzle(unittest.TestCase):
     t = a.softmax()
     with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1):
       check_schedule(t, 1)
+
+  def test_argmax_one_kernel(self):
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0):
+      a = Tensor.randn(10, 20).realize()
+    t = a.argmax(0)
+    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): t.realize()
 
   def test_swizzle_reduceop(self):
     Tensor.manual_seed(0)
