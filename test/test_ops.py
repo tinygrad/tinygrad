@@ -1047,6 +1047,53 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
+  def test_argsort(self):
+    # basic functionality - sort indices
+    helper_test_op([(10,)], lambda x: torch.argsort(x),
+                           lambda x: x.argsort(), forward_only=True)
+    
+    # test with descending=True
+    helper_test_op([(10,)], lambda x: torch.argsort(x, descending=True),
+                           lambda x: x.argsort(descending=True), forward_only=True)
+    
+    # test with non-default dimension
+    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=1),
+                             lambda x: x.argsort(dim=1), forward_only=True)
+    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=0),
+                             lambda x: x.argsort(dim=0), forward_only=True)
+    
+    # test with negative dimension
+    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=-1),
+                             lambda x: x.argsort(dim=-1), forward_only=True)
+    helper_test_op([(5, 10)], lambda x: torch.argsort(x, dim=-2),
+                             lambda x: x.argsort(dim=-2), forward_only=True)
+    
+    # test with 3D tensor
+    helper_test_op([(3, 4, 5)], lambda x: torch.argsort(x, dim=1),
+                               lambda x: x.argsort(dim=1), forward_only=True)
+    
+    # test with specific values to check stability with duplicates
+    helper_test_op([(20,)], lambda x: torch.argsort(x),
+                           lambda x: x.argsort(), 
+                           vals=[[0.5, -1.0, 0.0, 0.5, 1.0] * 4], forward_only=True)
+    
+    # test with odd tensor size to check handling of non-power-of-2 sizes
+    helper_test_op([(17,)], lambda x: torch.argsort(x),
+                           lambda x: x.argsort(), forward_only=True)
+    
+    # test with different dtypes
+    helper_test_op([(10,)], lambda x: torch.argsort(x.int()),
+                           lambda x: x.cast(dtypes.int32).argsort(), forward_only=True)
+    
+    # test with very small tensor
+    helper_test_op([(1,)], lambda x: torch.argsort(x),
+                          lambda x: x.argsort(), forward_only=True)
+    
+    # test with empty tensor (dimension with size 0)
+    helper_test_op([(0,)], lambda x: torch.argsort(x),
+                          lambda x: x.argsort(), forward_only=True)
+    
+
   def test_topk(self):
     # basic functionality - top k values and indices
     helper_test_op([(10,)], lambda x: torch.stack(torch.topk(x, k=3)), lambda x: Tensor.stack(*x.topk(k=3)), forward_only=True)

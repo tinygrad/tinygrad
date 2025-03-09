@@ -2004,15 +2004,23 @@ class Tensor(SimpleMathTrait):
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
+  def argsort(self, dim=-1, descending=False):
+      idxs = None
+      x, dim = self, self._resolve_dim(dim)
+      op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if descending else (Tensor.argmin, dtypes.max(self.dtype))
+      for _ in range(self.shape[dim]):
+          i = op(x, axis=dim, keepdim=True)
+          idxs = i if idxs is None else idxs.cat(i, dim=dim)
+          x = x.scatter(dim, i, ext)
+      return idxs.cast(dtypes.int64) if self.shape[dim] else Tensor.empty(self.shape, dtype=dtypes.int64)  # cast to int64 to match torch
+
   def topk(self, k, dim=-1, largest=True, sorted=True):
     x, dim = self, self._resolve_dim(dim)
-    idxs = None
-    op, ext = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
-    for _ in range(k):
-        i = op(x, axis=dim, keepdim=True)
-        idxs = i if idxs is None else idxs.cat(i, dim=dim)
-        x = x.scatter(dim, i, ext)
-    return self.gather(dim, idxs), idxs
+    idxs = x.argsort(dim, descending=largest)
+    slices = [slice(None)] * len(idxs.shape)  # build full slice for each dim
+    slices[dim] = slice(0, k)  # slice along the specified dim
+    idxs = idxs[tuple(slices)]
+    return x.gather(dim, idxs), idxs
 
   @staticmethod
   def einsum(formula:str, *operands:Tensor|Sequence[Tensor], acc_dtype:DTypeLike|None=None) -> Tensor:
