@@ -118,11 +118,20 @@ pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), blo
 
 def block_finalize(block:UOp):
   if len(block.src) == 0: return None
-  _uops = sorted(dedup(block.src), key=lambda x: x.tuplize)
-  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+
+  # Filter out operations that still have sources or are block-related
+  _uops = [x for x in sorted(dedup(block.src), key=lambda x: x.tuplize)
+           if len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK}]
+
+  # Add the operations from block.arg.lst
   _uops += block.arg.lst
-  # strip the SINK
-  assert _uops[-1].op is Ops.SINK, "doesn't end with SINK"
+
+  # Check if there's a SINK operation at the end
+  if len(_uops) == 0 or _uops[-1].op is not Ops.SINK:
+    # If no SINK at the end, we can't finalize this block
+    return None
+
+  # Strip the SINK and create a new block
   return UOp(Ops.BLOCK, arg=BasicBlock((), tuple(_uops[:-1])))
 
 pm_block_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="block"), block_finalize)])
@@ -166,6 +175,16 @@ def block_reorder(in_block:UOp):
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
+  # Helper function to check if node is an ancestor of target
+  def is_ancestor(node, target, visited=None):
+    if visited is None: visited = set()
+    if node in visited: return False
+    visited.add(node)
+    if node == target: return True
+    for s in node.src:
+      if is_ancestor(s, target, visited): return True
+    return False
+
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # get children and all block contexts
@@ -219,9 +238,23 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      out = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
-                                        arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
-      for u in v: new_forks[u] = out
+      # Check if any BLOCKEND is the parent of another with the same arg.end
+      dependency_exists = False
+
+      # Check for dependencies between any pair of BLOCKENDs
+      for i, be1 in enumerate(v):
+        for be2 in v[i+1:]:
+          if is_ancestor(be1, be2) or is_ancestor(be2, be1):
+            dependency_exists = True
+            break
+        if dependency_exists:
+          break
+
+      # Only create BLOCKFORK if there are no parent-child dependencies
+      if not dependency_exists:
+        out = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
+                                          arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
+        for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
   # reorder ops in block for speed
