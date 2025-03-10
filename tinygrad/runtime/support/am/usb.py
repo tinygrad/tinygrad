@@ -53,29 +53,37 @@ class USBConnector:
 
   def _send(self, cdb, ret_len=0):
     def __send():
+      actual_length = ctypes.c_int(0)
       for i in range(3):
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), None, 1)
+        #assert len(self.read_cmd) == 31
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1)
+        assert actual_length.value == len(self.read_cmd)
         if ret:
           print(i, "0x4", ret, len(self.read_cmd))
           return None
 
         if ret_len > 0:
-          ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 1)
+          ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1)
           if ret:
             if DEBUG >= 2 or i > 0: print(i, "0x81", ret, ret_len)
-            #libusb.libusb_clear_halt(self.handle, 0x81)
-            #time.sleep(0.1)
             continue
+          assert actual_length.value == ret_len, f"only sent {actual_length.value}, wanted {ret_len}"
           #if ret: return None
 
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, None, 1)
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
+        #print(actual_length.value)
+        #from hexdump import hexdump
+        #hexdump(bytes(self.read_status[0:actual_length.value]))
+        #assert actual_length.value == 16, f"got length {actual_length}"
         if ret:
           print(i, "0x83", ret)
-          #libusb.libusb_clear_halt(self.handle, 0x83)
           continue
-        return self.read_data
+        return bytes(self.read_data[:])
       return None
 
+    self.read_cmd[8:12] = ret_len.to_bytes(4, 'little')
+    self.read_cmd[12] = 0x80 if ret_len >0 else 0
+    self.read_cmd[14] = len(cdb)
     self.read_cmd[16:16+len(cdb)] = cdb
     for j in range(1):
       #print(j)
