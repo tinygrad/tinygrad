@@ -60,9 +60,10 @@ def append_to_block(ctx:tuple[dict[UOp, tuple[UOp, ...]], dict[UOp, list[UOp]]],
       srcs.extend(old_block.src)
       lst.extend(old_block.arg.lst)
     new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(srcs)), BasicBlock(rng, tuple(lst)))
-    lrng = list(rng)
+    lrng = list(filter(lambda r: r.op is not Ops.BLOCKSTART, rng))
     for r in rng[::-1]:
-      if r not in x.arg.ctx and r.op is not Ops.BLOCKSTART:
+      if r.op is Ops.BLOCKSTART: continue
+      if r not in x.arg.ctx:
         lrng.remove(r)
         new_block = UOp(Ops.BLOCKEND, src=(new_block,),
                         arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
@@ -78,14 +79,15 @@ make_basic_blocks = PatternMatcher([
 def block_merge(ctx, x:UOp):
   # ctx is children here
   if x.op is Ops.BLOCKEND:
-    # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
-    in_this_block = set(x.arg.lst)
-    if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
-      # find the parent block that has the BLOCKSTART in the ctx
-      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
-      assert len(parent_blocks) <= 1, "should never have two parent blocks"
-      if len(parent_blocks) == 1:
-        parent_block = parent_blocks[0]
+    # find the parent block that has the BLOCKSTART in the ctx  
+    parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
+    assert len(parent_blocks) <= 1, "should never have two parent blocks"
+    
+    if len(parent_blocks) == 1:
+      parent_block = parent_blocks[0]
+      to_be_block_lst = set(parent_block.arg.lst) | set(x.arg.lst)
+      # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
+      if len([x for x in ctx[x.arg.end] if x not in to_be_block_lst]) == 0:
         # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
         early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
         # NOTE: we have to add a barrier at the start if barrier is used in the range
@@ -99,7 +101,8 @@ def block_merge(ctx, x:UOp):
   new_ctx = x.arg.ctx
   placed = set()
   for u in x.src:
-    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
+    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or ((x.arg.end is not None and x.arg.end in u.arg.ctx)) and \
+        UOp(Ops.BLOCKSTART, src=(x.arg.end,)) not in u.arg.ctx):
       # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
       new_ctx += tuple(y for y in u.arg.ctx if y not in x.arg.ctx)
       new_srcs.extend(u.src)
@@ -112,7 +115,7 @@ def block_merge(ctx, x:UOp):
       # keep it in srcs
       new_srcs.append(u)
   if len(to_append) == 0 and len(placed) == 0: return None
-  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(sorted(new_ctx, key=lambda x: x.tuplize)), tuple(to_append)+x.arg.lst, x.arg.end))
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(sorted(dedup(new_ctx), key=lambda x: x.tuplize)), tuple(to_append)+x.arg.lst, x.arg.end))
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
@@ -177,7 +180,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
       # save children
       children.setdefault(s, []).append(u)
       # compute block ctx
-      if s.op in {Ops.RANGE, Ops.IF}: this_block_ctx.append(s)
+      if s.op in {Ops.RANGE, Ops.IF}: this_block_ctx.extend([s] + temp_block_ctxs[s])
       # don't flow (fully) through assign and store
       elif s.op is Ops.STORE:
         # ugh, deal with non-reduce locals. probably wrong
@@ -214,13 +217,13 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
   # combine matching BLOCKENDS
   blockends_to_arg: dict[UOp, list[UOp]] = {}
   for be in sink.toposort:
-    if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
+    if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg, []).append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
       out = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
-                                        arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
+                                        arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k.end)),), arg=len(v))
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
