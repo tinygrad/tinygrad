@@ -40,7 +40,9 @@ print_cfg(1, 0)
 
 rescan_bus(0, gpu_bus=4)
 rescan_bus(1, gpu_bus=4)
-#time.sleep(0.2)
+
+# sleep after we rescan the bus
+time.sleep(0.1)
 
 print_cfg(2, 0)
 #try

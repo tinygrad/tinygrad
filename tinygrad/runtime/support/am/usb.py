@@ -17,7 +17,7 @@ class USBConnector:
       ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
       print("detach kernel driver")
       if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
-    libusb.libusb_reset_device(self.handle)
+      libusb.libusb_reset_device(self.handle)
 
     # Claim interface (gives -3 if we reset)
     ret = libusb.libusb_claim_interface(self.handle, 0)
@@ -125,7 +125,7 @@ class USBConnector:
     if DEBUG >= 1: print("pcie_request", hex(fmt_type), hex(address), value, size, cnt)
 
     # TODO: why is this needed?
-    time.sleep(0.005)
+    #time.sleep(0.005)
 
     # TODO: why is this needed? (the write doesn't matter, just that it's using USB)
     #self.write(0xB210, bytes([0]))
@@ -171,7 +171,7 @@ class USBConnector:
     #print("stat out", stat)
 
     # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
-    #self.write(0xB296, bytes([0x04]))
+    self.write(0xB296, bytes([0x04]))
 
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000):
       assert False, "not supported"
@@ -182,10 +182,10 @@ class USBConnector:
         self.write(0xB296, bytes([0x01]))
         print("pci redo")
         if cnt > 0: self.pcie_request(fmt_type, address, value, size, cnt=cnt-1)
-    assert stat == 6, f"stat read 2 was {stat}"
+    assert stat == 2, f"stat read 2 was {stat}"
 
     # Acknowledge PCIe completion (PCIE_STATUS_REGISTER: 0xB296)
-    #self.write(0xB296, bytes([0x02]))
+    self.write(0xB296, bytes([0x02]))
 
     b284 = self.read(0xB284, 1)[0]
     b284_bit_0 = b284 & 0x01
