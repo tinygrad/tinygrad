@@ -50,14 +50,20 @@ class UnsyncedBatchNorm(nn.Module):
   def forward(self, x:torch.Tensor):
     xr = x.reshape(self.num_devices, -1, *x.shape[1:]).to(torch.float32)
     batch_mean, batch_invstd = self.calc_stats(xr)
-    ret = xr.batchnorm(
-      self.weight.reshape(1, -1).expand((self.num_devices, -1)),
-      self.bias.reshape(1, -1).expand((self.num_devices, -1)),
-      batch_mean, batch_invstd, axis=(0, 2))
+    weight = self.weight.reshape(1, -1).expand((self.num_devices, -1))
+    bias = self.bias.reshape(1, -1).expand((self.num_devices, -1))
+    axis_ = (0,2)
+    # compute batchnorm
+    # previously: ret = xr.batchnorm(weight, bias, batch_mean, batch_invstd, axis=(0, 2))
+    shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(xr.shape))
+    x_norm = xr - batch_mean.reshape(shape)
+    x_norm = x_norm * weight.reshape(shape)
+    ret = x_norm.mul(batch_invstd.reshape(shape) if len(batch_invstd.shape) == len(axis_) else batch_invstd)
+    ret = (ret + bias.reshape(shape))
     return ret.reshape(x.shape).to(x.dtype)
 
   def calc_stats(self, x:torch.Tensor):
-    if Tensor.training:
+    if self.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -85,8 +91,10 @@ class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
     self.bias.requires_grad = True
 
 class QuickGelu(nn.Module):
-  def __init__(self): super().__init__()
-  def forward(self, x): return x * nn.Sigmoid(x * 1.702)
+  def __init__(self):
+    super().__init__()
+    self.sigmoid = nn.Sigmoid()
+  def forward(self, x): return x * self.sigmoid(x * 1.702)
 
 class ConvGroup(nn.Module):
   def __init__(self, channels_in, channels_out):
@@ -442,7 +450,7 @@ def train_cifar():
 
     loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
     et = time.monotonic()
-    loss_cpu = loss.numpy()
+    loss_cpu = loss.cpu().numpy()
     # EMA for network weights
     if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:
