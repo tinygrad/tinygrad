@@ -7,14 +7,8 @@ class USBConnector:
     ret = libusb.libusb_init(ctypes.byref(self.usb_ctx))
     if ret != 0: raise Exception(f"Failed to init libusb: {ret}")
 
-    #libusb.libusb_set_debug(self.usb_ctx, 99)
-
     # Open device
-    self.is_24 = True
-    self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2464)
-    if not self.handle:
-      self.is_24 = False
-      self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
+    self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
     if not self.handle: raise Exception("Failed to open device")
 
     # Detach kernel driver if needed
@@ -43,13 +37,13 @@ class USBConnector:
     self.read_data = (ctypes.c_uint8 * 112)()
 
     print("USB device initialized successfully")
+
     # TODO: why do i need this?
     for _ in range(2): self._detect_version()
 
   def _detect_version(self):
-    self.is_24 = False
     try: self.read(0x07f0, 6)
-    except Exception: self.is_24 = True
+    except Exception: pass
 
   def _send(self, cdb, ret_len=0):
     def __send():
@@ -91,12 +85,10 @@ class USBConnector:
       remaining = read_len - i
       buf_len = min(stride, remaining)
       current_addr = (start_addr + i)
-      if self.is_24:
-        assert current_addr >> 17 == 0
-        current_addr &= 0x01ffff
-        current_addr |= 0x500000
-        cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
-      else: cdb = struct.pack('>BBBHB', 0xe4, buf_len, 0x00, current_addr, 0x00)
+      assert current_addr >> 17 == 0
+      current_addr &= 0x01ffff
+      current_addr |= 0x500000
+      cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
       data[i:i+buf_len] = self._send(cdb, buf_len)
     return bytes(data[:read_len])
 
@@ -104,12 +96,10 @@ class USBConnector:
     #print("write", hex(start_addr))
     for offset, value in enumerate(data):
       current_addr = start_addr + offset
-      if self.is_24:
-        assert current_addr >> 17 == 0
-        current_addr &= 0x01ffff
-        current_addr |= 0x500000
-        cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
-      else: cdb = struct.pack('>BBBHB', 0xe5, value, 0x00, current_addr, 0x00)
+      assert current_addr >> 17 == 0
+      current_addr &= 0x01ffff
+      current_addr |= 0x500000
+      cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
       self._send(cdb)
 
   def pcie_write_request_fw(self, address, value):
@@ -119,6 +109,12 @@ class USBConnector:
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
     assert size > 0 and size <= 4
+    #print("pcie_request", fmt_type, hex(address), value, size, cnt)
+
+    # TODO: why is this needed?
+    time.sleep(0.005)
+
+    #print(self.read(0xB296, 1)[0])
 
     masked_address = address & 0xfffffffc
     offset = address & 0x00000003
@@ -136,36 +132,35 @@ class USBConnector:
     # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
     self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), byte_enable, masked_address))
 
-    if self.is_24:
-      # Trigger PCIe request using PCIE_REQUEST_TRIGGER (0xB216)
-      self.write(0xB216, bytes([0x20]))
-      # Set PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
-      self.write(0xB296, bytes([0x04]))
-    else:
-      # Clear timeout bit in PCIe status register
-      self.write(0xB296, bytes([0x01]))
+    # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
+    self.write(0xB296, bytes([0x07]))
+
+    # Trigger PCIe request using PCIE_REQUEST_TRIGGER (0xB216)
+    self.write(0xB216, bytes([0x20]))
 
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
     self.write(0xB254, bytes([0x0f]))
 
     # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
-    while self.read(0xB296, 1)[0] & 4 == 0: continue
+    while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
+      #print("stat early poll", stat)
+      continue
+    #print("stat out", stat)
 
-    # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB296)
+    # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
     self.write(0xB296, bytes([0x04]))
-
-    # NOTE: this is what fixes flakiness
-    time.sleep(0.01)
 
     prep_st = time.perf_counter_ns()
 
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000): return
 
-    while self.read(0xB296, 1)[0] & 2 == 0:
-      if self.read(0xB296, 1)[0] & 1:
+    while (stat:=self.read(0xB296, 1)[0]) & 2 == 0:
+      #print("stat poll", stat)
+      if stat & 1:
         self.write(0xB296, bytes([0x01]))
         print("pci redo")
         if cnt > 0: self.pcie_request(fmt_type, address, value, size, cnt=cnt-1)
+    #print("stat poll out", stat)
 
     # Acknowledge PCIe completion (PCIE_STATUS_REGISTER: 0xB296)
     self.write(0xB296, bytes([0x02]))
