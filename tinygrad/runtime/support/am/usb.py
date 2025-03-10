@@ -17,7 +17,7 @@ class USBConnector:
       ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
       print("detach kernel driver")
       if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
-      libusb.libusb_reset_device(self.handle)
+    libusb.libusb_reset_device(self.handle)
 
     # Claim interface (gives -3 if we reset)
     ret = libusb.libusb_claim_interface(self.handle, 0)
@@ -131,7 +131,12 @@ class USBConnector:
       self.write(0xB220, struct.pack('>I', value << (8 * offset)))
 
     # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
-    self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), byte_enable, masked_address))
+    self.write(0xB210, bytes([fmt_type]))
+    assert size <= 4
+    self.write(0xB214, struct.pack('>II', byte_enable, masked_address))
+
+    # trigger
+    #self.write(0xB213, bytes([0x01]))
 
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
     self.write(0xB296, bytes([0x07]))
