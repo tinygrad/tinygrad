@@ -59,7 +59,8 @@ if __name__ == "__main__":
   with Timing("fetch and load weights: "):
     state = fetch_weights()
     nhf_state = convert_from_huggingface(state, model, 16, 16)
-    for needs_float32 in ['output.weight', 'tok_embeddings.weight', 'norm.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
+    # NOTE: i'm not sure this actually needs float32, it may just change the type of things downstream from it. but doesn't match torch w/o this
+    for needs_float32 in ['tok_embeddings.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
     nn.state.load_state_dict(model, nhf_state, verbose=False, strict=False, consume=True, realize=False)
     assert len(nhf_state) == 0
 
