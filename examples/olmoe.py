@@ -6,38 +6,6 @@ from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
 from extra.models.llama import Transformer, Variable, convert_from_huggingface
 
-# NOTE works! but slower.
-# import sys
-# sys.setrecursionlimit(100000)
-# def conditional_swap(t: Tensor, idx: Tensor, cond: Tensor, i: int, j: int) -> Tensor:
-#   assert t.ndim == 1, "only works on 1d tensors"
-#   t_with_holes = t - t[i].unsqueeze(0).pad(((i, t.numel() - i - 1),)) - t[j].unsqueeze(0).pad(((j, t.numel() - j - 1),))
-#   ic = t[j].unsqueeze(0).pad(((i, t.numel() - i - 1),))
-#   jc = t[i].unsqueeze(0).pad(((j, t.numel() - j - 1),))
-#   idx_with_holes = idx - idx[i].unsqueeze(0).pad(((i, idx.numel() - i - 1),)) - idx[j].unsqueeze(0).pad(((j, idx.numel() - j - 1),))
-#   idx_ic = idx[j].unsqueeze(0).pad(((i, idx.numel() - i - 1),))
-#   idx_jc = idx[i].unsqueeze(0).pad(((j, idx.numel() - j - 1),))
-#   return cond.where(t_with_holes + ic + jc, t).contiguous(), cond.where(idx_with_holes + idx_ic + idx_jc, idx).contiguous()
-# def sort(t: Tensor, largest=True) -> Tensor:
-#   k, numel = 2, t.numel()
-#   idx = Tensor.arange(numel)
-#   assert isinstance(numel, int), "symbolic shape not supported"
-#   assert numel & (numel - 1) == 0, "numel must be a power of 2"
-#   while k <= numel:
-#     j = k // 2
-#     while j > 0:
-#       for i in range(numel):
-#         if (ixj := i ^ j) > i:
-#           if (i & k) == 0: t, idx = conditional_swap(t, idx, t[i] < t[ixj] if largest else t[i] > t[ixj], i, ixj)
-#           if (i & k) != 0: t, idx = conditional_swap(t, idx, t[i] > t[ixj] if largest else t[i] < t[ixj], i, ixj)
-#       j //= 2
-#     k *= 2
-#   return t, idx
-
-    # probs, sel = sort(g)
-    # probs = probs[:self.activated_experts]
-    # sel = sel[:self.activated_experts]
-
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
@@ -48,15 +16,14 @@ class MixtureFeedForward:
   def __call__(self, x:Tensor) -> Tensor:
     assert x.shape[0] == 1, "only BS=1"
     assert x.shape[1] == 1, "only length=1"
-    g = self.gate(x).float().softmax(-1)
+    g = self.gate(x).softmax(-1)
 
-    g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
     # run MoE
-    x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
-    x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
-    return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    x_up_gate = x.dot(self.gate_proj[sel].transpose(-1,-2)).silu() * x.dot(self.up_proj[sel].transpose(-1,-2))
+    x_down = x_up_gate.dot(self.down_proj[sel].transpose(-1,-2)).squeeze(-2)
+    return (x_down * probs.unsqueeze(-1)).sum(axis=2)
 
 # model is bf16, 1.3B active, 6.9B total
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
@@ -112,4 +79,3 @@ if __name__ == "__main__":
   # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
   assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
                   247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
-
