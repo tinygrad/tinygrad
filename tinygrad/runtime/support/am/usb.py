@@ -120,6 +120,12 @@ class USBConnector:
     # TODO: why is this needed?
     time.sleep(0.005)
 
+    # TODO: why is this needed? (the write doesn't matter, just that it's using USB)
+    self.write(0xB210, bytes([0]))
+    self.write(0xB210, bytes([0]))
+    self.write(0xB210, bytes([0]))
+    self.write(0xB210, bytes([0]))
+
     #print(self.read(0xB296, 1)[0])
 
     masked_address = address & 0xfffffffc
@@ -135,43 +141,34 @@ class USBConnector:
       # Store write data in PCIE_CONFIG_DATA register (0xB220)
       self.write(0xB220, struct.pack('>I', value << (8 * offset)))
 
-    # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
-    self.write(0xB210, bytes([fmt_type]))
-    # WHY DO I HAVE TO WRITE THIS MANY TIMES?
-    self.write(0xB214, bytes([0]))
-    self.write(0xB214, bytes([0]))
-    self.write(0xB214, bytes([0]))
-    self.write(0xB214, bytes([0]))
+    # setup address + length
+    self.write(0xB218, struct.pack('>I', masked_address))
     assert byte_enable < 0x100
     self.write(0xB217, bytes([byte_enable]))
 
-    # setup address
-    self.write(0xB218, struct.pack('>I', masked_address))
+    # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
+    self.write(0xB210, bytes([fmt_type]))
 
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
-    self.write(0xB296, bytes([0x07]))
-
-    #time.sleep(0.005)
+    self.write(0xB296, bytes([0x04]))
 
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
-    # is this the trigger?
+    # this appears to be the trigger
     self.write(0xB254, bytes([0x0f]))
-
-    #print(self.read(0xB284, 1))
 
     # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
     while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
       print("stat early poll", stat)
       continue
-    assert stat == 6
+    assert stat == 6, f"stat was {stat}"
     #print("stat out", stat)
 
     # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
     self.write(0xB296, bytes([0x04]))
 
-    prep_st = time.perf_counter_ns()
-
-    if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000): return
+    if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000):
+      print("here")
+      return
 
     while (stat:=self.read(0xB296, 1)[0]) & 2 == 0:
       print("stat poll", stat)
