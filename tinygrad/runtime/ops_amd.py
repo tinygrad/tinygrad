@@ -99,7 +99,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regGRBM_GFX_INDEX), encode_bitfields('GRBM_GFX_INDEX', **kwargs))
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
-  def start_trace(self, buf0s: list[HCQBuffer]):
+  def start_trace(self, buf0s:list[HCQBuffer], se_mask:int):
     self.memory_barrier()
     self.spi_config(tracing=True)
     # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
@@ -119,8 +119,13 @@ class AMDComputeQueue(HWQueue):
                 encode_bitfields('SQ_THREAD_TRACE_MASK', wtype_include=amd_gpu.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0))
       REG_INCLUDE = amd_gpu.SQ_TT_TOKEN_MASK_SQDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_SHDEC_BIT | amd_gpu.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
                     amd_gpu.SQ_TT_TOKEN_MASK_COMP_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT | amd_gpu.SQ_TT_TOKEN_MASK_CONTEXT_BIT
+      TOKEN_EXCLUDE = 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
+      if not (se_mask >> se) & 0b1:
+        TOKEN_EXCLUDE |= 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
+                         1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
+                         1 << amd_gpu.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
       self.pkt3(amd_gpu.PACKET3_SET_UCONFIG_REG, ucfgreg(amd_gpu.regSQ_THREAD_TRACE_TOKEN_MASK),
-                encode_bitfields('SQ_THREAD_TRACE_TOKEN_MASK', reg_include=REG_INCLUDE, bop_events_token_include=1))
+                encode_bitfields('SQ_THREAD_TRACE_TOKEN_MASK', reg_include=REG_INCLUDE, token_exclude=TOKEN_EXCLUDE, bop_events_token_include=1))
       # Enable SQTT
       self.sqtt_config(tracing=True)
     # Restore global broadcasting
@@ -389,7 +394,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 MAP_FIXED, MAP_NORESERVE, MAP_LOCKED = 0x10, 0x400, 0 if OSX else 0x2000
 
 @dataclass(frozen=True)
-class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes # noqa: E702
+class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass
 class AMDQueueDesc:
@@ -717,8 +722,9 @@ class AMDDevice(HCQCompiled):
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       SQTT_NUM = self.dev_iface.props['array_count'] // self.dev_iface.props['simd_arrays_per_engine']
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(SQTT_NUM)]
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.cmd_id = 0
-      AMDComputeQueue().start_trace(self.sqtt_buffers).submit(self)
+      AMDComputeQueue().start_trace(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
@@ -764,7 +770,7 @@ class AMDDevice(HCQCompiled):
         # When sqtt buffer overflows, wptr stops at the last dword
         if wptr >= buf0.size-32: print(f"WARNING: SQTT BUFFER IS FULL (SE {i})! INCREASE SQTT BUFFER SIZE WITH SQTT_BUFFER_SIZE=X (in MB)")
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
-        Compiled.profile_events += [ProfileSQTTEvent(self.device, i, bytes(sqtt_buf))]
+        Compiled.profile_events += [ProfileSQTTEvent(self.device, i, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
 
   def finalize(self):

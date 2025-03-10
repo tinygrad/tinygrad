@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, ctypes, struct, hashlib, pickle, code, typing
+import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-from tinygrad.helpers import round_up, flatten
+from tinygrad.helpers import round_up, flatten, all_same
 from dataclasses import dataclass
 
 CHUNK_CLASSES = {
@@ -155,6 +155,9 @@ class RGP:
       device_event = device_events[device]
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
+    sqtt_itrace_enabled = any([event.itrace for event in sqtt_events])
+    sqtt_itrace_masked = not all_same([event.itrace for event in sqtt_events])
+    sqtt_itrace_se_mask = functools.reduce(lambda a,b: a|b, [int(event.itrace) << event.se for event in sqtt_events], 0) if sqtt_itrace_masked else 0
     load_events = [x for x in profile if isinstance(x, ProfileProgramEvent) and x.device == device_event.device]
     loads = [(event.base, struct.unpack('<Q', hashlib.md5(event.lib).digest()[:8])*2) for event in load_events if event.base is not None and event.lib is not None]
     code_objects = list(dict.fromkeys([x.lib for x in load_events if x.lib is not None]).keys())
@@ -242,7 +245,10 @@ class RGP:
         api_type=5, # HIP, not in enum
         major_version=12, minor_version=0,
         profiling_mode=sqtt.SQTT_PROFILING_MODE_PRESENT,
-        instruction_trace_mode=sqtt.SQTT_INSTRUCTION_TRACE_FULL_FRAME,
+        instruction_trace_mode=sqtt.SQTT_INSTRUCTION_TRACE_FULL_FRAME if sqtt_itrace_enabled else sqtt.SQTT_INSTRUCTION_TRACE_DISABLED,
+        instruction_trace_data=sqtt.union_sqtt_instruction_trace_data(
+          shader_engine_filter=sqtt.struct_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
+        ),
       )),
       *flatten([(
         RGPChunk(sqtt.struct_sqtt_file_chunk_sqtt_desc(
