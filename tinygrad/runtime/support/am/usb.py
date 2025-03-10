@@ -45,7 +45,7 @@ class USBConnector:
     # required to be set, but not a trigger
     self.write(0xB213, bytes([0x01]))
     self.write(0xB214, bytes([0, 0]))
-    self.write(0xB216, bytes([0x20]))
+    self.write(0xB216, bytes([0x20])) # Enable PCIe interface features (bus master, etc.)
 
   def _detect_version(self):
     try: self.read(0x07f0, 6)
@@ -137,7 +137,8 @@ class USBConnector:
 
     # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
     self.write(0xB210, bytes([fmt_type]))
-    #print(self.read(0xb214, 4))
+    # WHY DO I HAVE TO WRITE THIS MANY TIMES?
+    self.write(0xB214, bytes([0]))
     self.write(0xB214, bytes([0]))
     self.write(0xB214, bytes([0]))
     self.write(0xB214, bytes([0]))
@@ -147,9 +148,10 @@ class USBConnector:
     # setup address
     self.write(0xB218, struct.pack('>I', masked_address))
 
-    #time.sleep(0.005)
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
     self.write(0xB296, bytes([0x07]))
+
+    #time.sleep(0.005)
 
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
     # is this the trigger?
@@ -159,8 +161,9 @@ class USBConnector:
 
     # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
     while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
-      #print("stat early poll", stat)
+      print("stat early poll", stat)
       continue
+    assert stat == 6
     #print("stat out", stat)
 
     # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
@@ -171,7 +174,7 @@ class USBConnector:
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000): return
 
     while (stat:=self.read(0xB296, 1)[0]) & 2 == 0:
-      #print("stat poll", stat)
+      print("stat poll", stat)
       if stat & 1:
         self.write(0xB296, bytes([0x01]))
         print("pci redo")
@@ -182,9 +185,10 @@ class USBConnector:
     self.write(0xB296, bytes([0x02]))
     b284 = self.read(0xB284, 1)[0]
     b284_bit_0 = b284 & 0x01
+    #assert b284_bit_0 == (value is None)
 
-    # Retrieve completion data from PCIE_COMPLETION_DATA (0xB228)
-    completion = struct.unpack('>I', self.read(0xB228, 4))
+    # Retrieve completion data from Link Status (0xB22A, 0xB22B)
+    completion = struct.unpack('>H', self.read(0xB22A, 2))
 
     # Validate completion status based on PCIe request typ
     if (fmt_type & 0xbe == 0x04):
