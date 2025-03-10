@@ -140,7 +140,6 @@ x86_matcher = PatternMatcher([
 
 class X86Renderer(Renderer):
   device = "X86"
-  supports_float4 = False
   has_local = False
   has_shared = False
   global_max = None
@@ -187,7 +186,7 @@ class X86Renderer(Renderer):
     r: Dict[UOp, str] = {}
     self.r = r
     mem: Dict[UOp, str] = {}
-    stack_size: int = 8
+    stack_size: int = 16
     arg_stack_offset: int = 16
     kernel: List[str] = []
     self.uops = uops
@@ -207,7 +206,7 @@ class X86Renderer(Renderer):
       nonlocal stack_size
       if u not in mem:
         mem[u] = f"[rbp - {stack_size}]"
-        stack_size += 8
+        stack_size += 16
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or r[u] == "r15" else u.dtype
       kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}")
       r[u] = mem[u]
