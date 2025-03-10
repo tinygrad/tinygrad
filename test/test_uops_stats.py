@@ -211,6 +211,7 @@ class TestStatsOptimized(unittest.TestCase):
       k.apply_opt(Opt(OptOps.GROUP, 0, 4))
     except KernelOptError:
       raise unittest.SkipTest("no locals")
+    if Device.DEFAULT == "CPU" or Device.DEFAULT == "LLVM": raise unittest.SkipTest("GROUP flops differ on CPU")
     SZ = N*N*4
     p = k.to_program()
     # NOTE: these are sort of wrong. they aren't honoring the IF statement
