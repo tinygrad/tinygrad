@@ -12,7 +12,9 @@ def print_cfg(bus, dev):
     cfg.append(usb.pcie_cfg_req(i, bus=bus, dev=dev, fn=0, value=None, size=4))
 
   print("bus={}, dev={}".format(bus, dev))
-  hexdump(bytearray(array.array('I', cfg)))
+  dmp = bytearray(array.array('I', cfg))
+  hexdump(dmp)
+  return dmp
 
 def rescan_bus(bus, gpu_bus):
   print("set PCI_SUBORDINATE_BUS bus={} to {}".format(bus, gpu_bus))
@@ -67,6 +69,8 @@ print_cfg(3, 0)
 #except: print("bus=3, dev=0 failed")
 
 setup_bus(3, gpu_bus=4)
-print_cfg(4, 0)
+dmp = print_cfg(4, 0)
+print(dmp[0:4])
+assert dmp[0:4] == b"\x02\x10\x80\x74", "GPU NOT FOUND!"
 #try:
 #except: print("bus=4, dev=0 failed")
