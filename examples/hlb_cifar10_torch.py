@@ -142,6 +142,11 @@ class WhiteningConv(nn.Conv2d):
     super().__init__(shape[1], shape[0], shape[2:])
     self.weight.values = whitening.values
     self.weight.requires_grad = False
+  def forward(self, x):
+    ic(x.detach().cpu().numpy())
+    ret = super().forward(x)
+    ic(ret.detach().cpu().numpy())
+    return ret
 
 class Pad(nn.Module):
   def __init__(self, pad):
@@ -150,30 +155,69 @@ class Pad(nn.Module):
   def forward(self, x):
     return F.pad(x, self.pad)
 
+# class SpeedyResNet(nn.Module):
+#   def __init__(self, W):
+#     super().__init__()
+#     self.whitening = W
+#     self.net = nn.ModuleList([
+#       WhiteningConv(self.whitening),
+#       Pad((1,0,0,1)),
+#       nn.Conv2d(12, 32, kernel_size=1, bias=False),
+#       nn.GELU(),
+#       ConvGroup(32, 64),
+#       ConvGroup(64, 256),
+#       ConvGroup(256, 512),
+#       Max((2,3)),
+#       nn.Linear(512, 10, bias=False),
+#       Scale(1/9.),
+#     ])
+
+#   def forward(self, x, training=True):
+#     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
+#     # TODO: remove the pad but instead let the kernel optimize itself
+#     # forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
+#     # Todo: bring back "conv2d(self.whitening).pad((1,0,0,1))"
+#     forward = lambda x: sequential(self.net, x)
+#     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
+
+
 class SpeedyResNet(nn.Module):
   def __init__(self, W):
     super().__init__()
     self.whitening = W
-    self.net = nn.ModuleList([
-      WhiteningConv(self.whitening),
-      Pad((1,0,0,1)),
-      nn.Conv2d(12, 32, kernel_size=1, bias=False),
-      nn.GELU(),
-      ConvGroup(32, 64),
-      ConvGroup(64, 256),
-      ConvGroup(256, 512),
-      Max((2,3)),
-      nn.Linear(512, 10, bias=False),
-      Scale(1/9.),
-    ])
+    self.whitening_conv = WhiteningConv(self.whitening)
+    self.conv2d = nn.Conv2d(12, 32, kernel_size=1, bias=False)
+    self.gelu = nn.GELU()
+    self.conv_group_1 = ConvGroup(32, 64)
+    self.conv_group_2 = ConvGroup(64, 256)
+    self.conv_group_3 = ConvGroup(256, 512)
+    self.linear = nn.Linear(512, 10, bias=False)
+
+  def _forward(self, x):
+    ic(x.detach().cpu().numpy())
+    x = self.whitening_conv(x)
+    ic(x.detach().cpu().numpy())
+    1 / 0
+    x = F.pad(x, (1,0,0,1))
+    ic(x.detach().cpu().numpy())
+    x = self.conv2d(x)
+    ic(x.detach().cpu().numpy())
+    x = self.gelu(x)
+    ic(x.detach().cpu().numpy())
+    x = self.conv_group_1(x)
+    x = self.conv_group_2(x)
+    x = self.conv_group_3(x)
+    x = torch.amax(x, (2,3))
+    x = self.linear(x)
+    x = x * 1/9.
+    return x
 
   def forward(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
     # forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
     # Todo: bring back "conv2d(self.whitening).pad((1,0,0,1))"
-    forward = lambda x: sequential(self.net, x)
-    return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
+    return self._forward(x) if training else (self._forward(x) + self._forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
@@ -209,6 +253,8 @@ def train_cifar():
 
   def set_seed(seed):
     torch.manual_seed(seed)
+    from tinygrad import Tensor
+    Tensor.manual_seed(seed)
     random.seed(seed)
 
   # ========== Model ==========
@@ -291,6 +337,7 @@ def train_cifar():
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
+        # X[batch_end-BS:batch_end].clone().detach().requires_grad_(True)
         x = torch.tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
         y = torch.tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
         step += 1
@@ -384,6 +431,8 @@ def train_cifar():
   #@torch.compile
   def train_step(model, optimizers, lr_schedulers, X, Y):
     out = model(X)
+    ic(out.detach().cpu().numpy())
+    1 / 0
     loss_batchsize_scaler = 512/BS
     loss = train_loss_fn(out, Y).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
@@ -448,6 +497,8 @@ def train_cifar():
     #   Y.shard_(GPUS, axis=0)
 
     loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
+    ic(X.cpu().numpy(), Y.cpu().numpy(), loss.detach().cpu().numpy())
+    1 / 0
     et = time.monotonic()
     # EMA for network weights
     if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
@@ -455,7 +506,7 @@ def train_cifar():
         model_ema = modelEMA(W, model)
       model_ema.update(model, torch.tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
     cl = time.monotonic()
-    device_str, loss_cpu, non_bias_lr = str(loss.device),loss.detach().cpu().numpy(), opt_non_bias.param_groups[0]['lr']
+    device_str, loss_cpu, non_bias_lr = str(loss.device), loss.detach().cpu().numpy(), opt_non_bias.param_groups[0]['lr']
     #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {non_bias_lr:.6f} LR")
     st = cl
