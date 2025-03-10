@@ -404,20 +404,9 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
-  tinygrad_tensors = []
-  for param_group in optimizer.param_groups:
-    for param in param_group["params"]:
-      if param is None: continue
-      tinygrad_tensors.append(param.data)
-  for state_dict in optimizer.state.values():
-    for _, value in state_dict.items():
-      if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
-  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
-
 _optimizer_init = torch.optim.Optimizer.__init__
 def _optimizer_patched_init(self, *args, **kwargs):
   _optimizer_init(self, *args, **kwargs)
-  self.register_step_post_hook(realize_optimizer_step)
+  from tinygrad.tensor import all_tensors
+  self.register_step_post_hook(lambda *_: Tensor.realize(*[t for r in all_tensors if (t:=r()) is not None]))
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
