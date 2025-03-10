@@ -11,6 +11,7 @@ from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, load_state_dict, torch_load
 from icecream import ic, install
 ic.configureOutput(includeContext=True)
 install()
@@ -127,28 +128,11 @@ class SpeedyResNet:
     self.conv_group_3 = ConvGroup(256, 512)
     self.linear = nn.Linear(512, 10, bias=False)
 
-    self.net = [
-      nn.Conv2d(12, 32, kernel_size=1, bias=False),
-      lambda x: x.quick_gelu(),
-      ConvGroup(32, 64),
-      ConvGroup(64, 256),
-      ConvGroup(256, 512),
-      lambda x: x.max((2,3)),
-      nn.Linear(512, 10, bias=False),
-      lambda x: x / 9.,
-    ]
-
   def _forward(self, x):
-    ic(x.numpy())
     x = x.conv2d(self.whitening)
-    ic(x.numpy())
-    1 / 0
     x = x.pad((1,0,0,1))
-    ic(x.numpy())
     x = self.conv2d(x)
-    ic(x.numpy())
     x = x.quick_gelu()
-    ic(x.numpy())
     x = self.conv_group_1(x)
     x = self.conv_group_2(x)
     x = self.conv_group_3(x)
@@ -234,8 +218,6 @@ def train_cifar():
   def make_square_mask(shape, mask_size) -> Tensor:
     BS, _, H, W = shape
     low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
-    ic(low_x.squeeze().numpy())
-    1 / 0
     low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
     idx_x = Tensor.arange(W, dtype=dtypes.int32).reshape((1,1,1,W))
     idx_y = Tensor.arange(H, dtype=dtypes.int32).reshape((1,1,H,1))
@@ -328,6 +310,8 @@ def train_cifar():
 
   # initialize model weights
   model = SpeedyResNet(W)
+  state_dict = torch_load("cifar.safetensor")
+  load_state_dict(model, state_dict, strict=False)
 
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
@@ -366,8 +350,6 @@ def train_cifar():
 
   def train_step(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
-    ic(out.numpy())
-    1 / 0
     loss_batchsize_scaler = 512/BS
     loss = Tensor.cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
@@ -445,8 +427,6 @@ def train_cifar():
 
       with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
         loss = train_step_jitted(model, optim.OptimizerGroup(opt_bias, opt_non_bias), [lr_sched_bias, lr_sched_non_bias], X, Y)
-        ic(X.numpy(), Y.numpy(), loss.numpy())
-        1 / 0
         et = time.monotonic()
         loss_cpu = loss.numpy()
       # EMA for network weights

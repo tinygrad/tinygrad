@@ -53,8 +53,7 @@ class UnsyncedBatchNorm(nn.Module):
     weight = self.weight.reshape(1, -1).expand((self.num_devices, -1))
     bias = self.bias.reshape(1, -1).expand((self.num_devices, -1))
     axis_ = (0,2)
-    # compute batchnorm
-    # previously: ret = xr.batchnorm(weight, bias, batch_mean, batch_invstd, axis=(0, 2))
+    # compute batchnorm ret = xr.batchnorm(weight, bias, batch_mean, batch_invstd, axis=(0, 2))
     shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(xr.shape))
     x_norm = xr - batch_mean.reshape(shape)
     x_norm = x_norm * weight.reshape(shape)
@@ -122,38 +121,38 @@ class ConvGroup(nn.Module):
 
     return x + residual
 
-# replaces lambda x: x.max((2,3)), in SpeedyResNet.net
-class Max(nn.Module):
-  def __init__(self, dims):
-    super().__init__()
-    self.dims = dims
-  def forward(self, x): return torch.amax(x, self.dims)
+# # replaces lambda x: x.max((2,3)), in SpeedyResNet.net
+# class Max(nn.Module):
+#   def __init__(self, dims):
+#     super().__init__()
+#     self.dims = dims
+#   def forward(self, x): return torch.amax(x, self.dims)
 
-# replaces lambda x: x / 9., in SpeedyResNet.net
-class Scale(nn.Module):
-  def __init__(self, scale):
-    super().__init__()
-    self.scale = scale
-  def forward(self, x): return x * self.scale
+# # replaces lambda x: x / 9., in SpeedyResNet.net
+# class Scale(nn.Module):
+#   def __init__(self, scale):
+#     super().__init__()
+#     self.scale = scale
+#   def forward(self, x): return x * self.scale
 
 class WhiteningConv(nn.Conv2d):
   def __init__(self, whitening):
     shape = whitening.shape
-    super().__init__(shape[1], shape[0], shape[2:])
-    self.weight.values = whitening.values
-    self.weight.requires_grad = False
+    super().__init__(shape[1], shape[0], shape[2:], bias=False)
+    self.weight = nn.Parameter(whitening, requires_grad=False)
   def forward(self, x):
-    ic(x.detach().cpu().numpy())
     ret = super().forward(x)
-    ic(ret.detach().cpu().numpy())
     return ret
 
-class Pad(nn.Module):
-  def __init__(self, pad):
-    super().__init__()
-    self.pad = pad
-  def forward(self, x):
-    return F.pad(x, self.pad)
+def quick_gelu(x):
+  return x * F.sigmoid(x * 1.702)
+
+# class Pad(nn.Module):
+#   def __init__(self, pad):
+#     super().__init__()
+#     self.pad = pad
+#   def forward(self, x):
+#     return F.pad(x, self.pad)
 
 # class SpeedyResNet(nn.Module):
 #   def __init__(self, W):
@@ -180,43 +179,33 @@ class Pad(nn.Module):
 #     forward = lambda x: sequential(self.net, x)
 #     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
-
 class SpeedyResNet(nn.Module):
   def __init__(self, W):
     super().__init__()
     self.whitening = W
     self.whitening_conv = WhiteningConv(self.whitening)
-    self.conv2d = nn.Conv2d(12, 32, kernel_size=1, bias=False)
-    self.gelu = nn.GELU()
+    self.conv2d = nn.Conv2d(12, 32, kernel_size=1, stride=1, padding=0, dilation=1, groups=1, bias=False)
     self.conv_group_1 = ConvGroup(32, 64)
     self.conv_group_2 = ConvGroup(64, 256)
     self.conv_group_3 = ConvGroup(256, 512)
     self.linear = nn.Linear(512, 10, bias=False)
 
   def _forward(self, x):
-    ic(x.detach().cpu().numpy())
     x = self.whitening_conv(x)
-    ic(x.detach().cpu().numpy())
-    1 / 0
     x = F.pad(x, (1,0,0,1))
-    ic(x.detach().cpu().numpy())
     x = self.conv2d(x)
-    ic(x.detach().cpu().numpy())
-    x = self.gelu(x)
-    ic(x.detach().cpu().numpy())
+    x = quick_gelu(x)
     x = self.conv_group_1(x)
     x = self.conv_group_2(x)
     x = self.conv_group_3(x)
     x = torch.amax(x, (2,3))
     x = self.linear(x)
-    x = x * 1/9.
+    x = x / 9.
     return x
 
   def forward(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    # forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
-    # Todo: bring back "conv2d(self.whitening).pad((1,0,0,1))"
     return self._forward(x) if training else (self._forward(x) + self._forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
@@ -389,6 +378,11 @@ def train_cifar():
   # initialize model weights
   model = SpeedyResNet(W)
 
+  # with open("cifar.safetensor", "w") as f:
+  # torch.save(model.state_dict(), "cifar.safetensor")
+  state_dict = torch.load("cifar.safetensor", weights_only=False)
+  model.load_state_dict(state_dict)
+
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
 
@@ -431,8 +425,6 @@ def train_cifar():
   #@torch.compile
   def train_step(model, optimizers, lr_schedulers, X, Y):
     out = model(X)
-    ic(out.detach().cpu().numpy())
-    1 / 0
     loss_batchsize_scaler = 512/BS
     loss = train_loss_fn(out, Y).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
@@ -497,8 +489,6 @@ def train_cifar():
     #   Y.shard_(GPUS, axis=0)
 
     loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
-    ic(X.cpu().numpy(), Y.cpu().numpy(), loss.detach().cpu().numpy())
-    1 / 0
     et = time.monotonic()
     # EMA for network weights
     if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
