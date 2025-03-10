@@ -326,9 +326,7 @@ def train_cifar():
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        # X[batch_end-BS:batch_end].clone().detach().requires_grad_(True)
-        x = torch.tensor(X[batch_end-BS:batch_end], device=X_in.device, dtype=X_in.dtype)
-        y = torch.tensor(Y[batch_end-BS:batch_end], device=Y_in.device, dtype=Y_in.dtype)
+        x, y = X[batch_end-BS:batch_end], Y[batch_end-BS:batch_end]
         step += 1
         yield x, y
       epoch += 1
