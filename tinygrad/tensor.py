@@ -1259,24 +1259,45 @@ class Tensor(SimpleMathTrait):
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, acc_dtype=self.dtype)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
-    All tensors must have the same shape except in the concatenating dimension.
 
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-    print(t0.cat(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.cat(t1, t2, dim=1).numpy())
-    ```
+    def _cat_recursive(tensors: list[Tensor], dim: int, start_offset: int, total: int) -> Tensor:
+      """
+      Recursively groups a list of tensors.
+      In the single-tensor base case the tensor is padded on the concatenating axis so that
+      it aligns at the proper offset within the final output.
+      In the recursive case two padded subgroups are added together.
+      """
+      if len(tensors) == 1:
+          # Build the pad specification:
+          # For dimension `dim` we have (left_pad, right_pad). All other dims are left untouched.
+          pad_spec = []
+          for j in range(tensors[0].ndim):
+              if j == dim:
+                  left_pad = start_offset
+                  right_pad = total - (start_offset + tensors[0].shape[dim])
+                  pad_spec.append((left_pad, right_pad))
+              else:
+                  pad_spec.append(None)
+          return tensors[0].pad(pad_spec)
+      else:
+          mid = len(tensors) // 2
+          # Compute total length for left group
+          left_total = sum(t.shape[dim] for t in tensors[:mid])
+          left_group = _cat_recursive(tensors[:mid], dim, start_offset, total)
+          right_group = _cat_recursive(tensors[mid:], dim, start_offset + left_total, total)
+          return Tensor.add(left_group, right_group)
+
+    """
+    Optimized concatenation that groups tensors before padding.
+    All tensors must have the same shape except in the concatenating dimension.
     """
     dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    for arg in args:
+        assert arg.ndim == self.ndim and all(ti==ai for i, (ti,ai) in enumerate(zip(self.shape, arg.shape)) if i != dim)
     tensors = [self, *args]
-    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return functools.reduce(Tensor.add, tensors)
+    total = sum(t.shape[dim] for t in tensors)
+    return _cat_recursive(tensors, dim, 0, total)
+  
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
