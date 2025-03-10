@@ -224,7 +224,8 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
 class Kernel:
   ast: UOp
   metadata: tuple[Metadata, ...] = ()
-  def __repr__(self): return f"<Kernel {len(list(self.ast.toposort))} {self.ast.op} {self.metadata}>"
+  def __repr__(self):
+    return f"<Kernel {len(list(self.ast.toposort))} {[s.op for s in self.ast.src] if self.ast.op is Ops.SINK else self.ast.op} {self.metadata}>"
 
 @dataclass(frozen=True)
 class KernelContext:
@@ -232,7 +233,7 @@ class KernelContext:
   ops_metadata: dict[UOp, Metadata]
 
 def create_kernel(x:UOp, b:UOp):
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
@@ -374,7 +375,11 @@ fix_kernel_ops = PatternMatcher([
 def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
   # substitute kernel sources for the target buffer + apply reshapes
-  ast = k.arg.ast.substitute({(ast:=s.src[1].arg.ast):s.src[0].view(unwrap(ast.st)) for s in k.src if s.op is Ops.ASSIGN}).sink()
+  parents_rep: dict[UOp, UOp] = {}
+  for s in k.src:
+    if s.op is Ops.ASSIGN:
+      for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
+  ast = k.arg.ast.substitute(parents_rep)
   # add buffer ops
   ast = graph_rewrite(ast, add_buffer_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
