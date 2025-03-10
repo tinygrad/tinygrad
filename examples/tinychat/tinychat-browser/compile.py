@@ -1,8 +1,8 @@
 import os, json, hashlib, math
 from extra.export_model import export_model
-from examples.llama3 import build_transformer
+from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
-from tinygrad import Device, Variable, Tensor, dtypes
+from tinygrad import Device, Variable, Tensor, dtypes, TinyJit
 from tinygrad.helpers import fetch, Context
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 
@@ -66,14 +66,39 @@ def prepare_browser_chunks(model):
   # compute hashes, which client app will check to determine whether to update with new weights and/or detect integrity issues
   state_dict_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"state_dict": metadata, "state_dict_hash": state_dict_hash, "files": []}
+  hashes = set()
   for i in range(len(files)):
     with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.chunk'), "rb") as reader:
-      metadata["files"].append({"name": f'net_part{i}.chunk', "hash": hashlib.sha256(reader.read()).hexdigest()})
+      hash = hashlib.sha256(reader.read()).hexdigest()
+      hashes.add(hash)
+      metadata["files"].append({"name": f'net_part{i}.chunk', "hash": hash})
+  if len(hashes) != len(files): print(f"WARNING: {len(files)} files were exported, but only {len(hashes)} are unique: something may have gone wrong")
   metadata_hash = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()
   metadata = {"metadata": metadata, "metadata_hash": metadata_hash}
 
   with open(os.path.join(os.path.dirname(__file__), f'./net_metadata.json'), "w") as writer: json.dump(metadata, writer, indent=4)
   return metadata
+
+def validate_model(model, tokenizer):
+  prompt = "yo"
+  toks = [tokenizer.bos_id]
+  toks += [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode("user") + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
+  toks += tokenizer.encode(prompt) + [tokenizer.special_tokens["<|eot_id|>"]]
+  toks += [tokenizer.special_tokens["<|start_header_id|>"]] + tokenizer.encode("assistant") + [tokenizer.special_tokens["<|end_header_id|>"]] + tokenizer.encode("\n\n")
+  start_pos = 0
+  run = TinyJit(model.forward)
+  for tok in toks[:-1]:
+    run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).realize()
+    start_pos += 1
+  tok = toks[-1]
+  result = ""
+  expected = "How's it going?"
+  while True:
+    tok = run(Tensor([[tok]]), Variable("start_pos", 0, model.max_context).bind(start_pos), 0.0, 0, 0.0, 0.0, 0.0).item()
+    start_pos += 1
+    if tok in tokenizer.stop_tokens or len(result) > len(expected): break
+    result += tokenizer.decode([tok])
+  assert result == expected, f"Model validation failed, expected output: {expected}, actual output: {result}"
 
 if __name__=="__main__":
   # Export BPE data for use with tiktoken.js
@@ -81,6 +106,7 @@ if __name__=="__main__":
   mergeable_ranks = load_tiktoken_bpe(str(tokenizer_path))
   bpe_path = os.path.join(os.path.dirname(__file__), "llama3-2.tiktoken")
   dump_tiktoken_bpe(mergeable_ranks, bpe_path)
+  tokenizer = Tokenizer(str(tokenizer_path))
 
   model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
   Tensor.no_grad = True
@@ -93,7 +119,7 @@ if __name__=="__main__":
   Device.DEFAULT="CPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
-  out = model.forward(*model_input())
+  validate_model(model, tokenizer)
   model_name = "transformer"
 
   with Context(BEAM=3):
@@ -112,7 +138,7 @@ if __name__=="__main__":
   # these were the same before load_state_dict
   model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
 
-  out = model.forward(*model_input())
+  validate_model(model, tokenizer)
   metadata = prepare_browser_chunks(model) # export weights to disk
 
   with Context(BEAM=3):
