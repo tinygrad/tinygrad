@@ -66,3 +66,29 @@ class LayerNormBert:
     xn = x.cast(dtypes.float32).layernorm(eps=self.eps, axis=self.axis).cast(x.dtype)
     if not self.elementwise_affine: return xn
     return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
+
+class FrozenBatchNorm2d(nn.BatchNorm2d):
+  def __init__(self, num_features:int):
+    super().__init__(num_features)
+    self.weight.requires_grad = False
+    self.bias.requires_grad = False
+
+class Conv2dNormal(nn.Conv2d):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
+               stride:int=1, padding:int|tuple[int, ...]|str=0, dilation:int=1, groups:int=1,
+               bias:bool=True, prior_prob:float|None=None):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.weight = Tensor.normal(*self.weight.shape, std=0.01)
+    if bias:
+      if prior_prob:
+        prior_prob = Tensor(prior_prob, device=self.bias.device, dtype=self.bias.dtype).expand(*self.bias.shape)
+        self.bias = -(((1 - prior_prob) / prior_prob).log())
+      else: self.bias = Tensor.zeros_like(self.bias)
+
+class Conv2dKaimingUniform(nn.Conv2d):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
+               stride:int=1, padding:int|tuple[int, ...]|str=0, dilation:int=1, groups:int=1,
+               bias:bool=True):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    self.weight = Tensor.kaiming_uniform(*self.weight.shape, a=1)
+    if bias: self.bias = Tensor.zeros_like(self.bias)
