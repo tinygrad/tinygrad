@@ -2090,7 +2090,7 @@ class Tensor(SimpleMathTrait):
       coords.append(pos % dim_size)
       pos = pos // dim_size
     coords = coords[::-1]  # restore original order
-    return Tensor.stack(*coords, dim=1)
+    return coords[0].stack(*coords[1:])
 
   # ***** processing ops *****
 
