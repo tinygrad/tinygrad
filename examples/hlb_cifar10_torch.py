@@ -326,6 +326,7 @@ def train_cifar():
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
+        # Todo: confirm we don't need to clone X,Y here
         x, y = X[batch_end-BS:batch_end], Y[batch_end-BS:batch_end]
         step += 1
         yield x, y
