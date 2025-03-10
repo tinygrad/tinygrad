@@ -331,7 +331,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
     self.sum(axis if axis is None or len(axis) else None, keepdim,
-                         acc_dtype = _from_torch_dtype(dtype) if dtype is not None else None),
+                         dtype = _from_torch_dtype(dtype) if dtype is not None else None),
 }}
 
 # we add the "out" here
