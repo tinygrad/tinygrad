@@ -17,8 +17,6 @@ class USBConnector:
       self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
     if not self.handle: raise Exception("Failed to open device")
 
-    #time.sleep(0.1)
-
     # Detach kernel driver if needed
     if libusb.libusb_kernel_driver_active(self.handle, 0) == 1:
       ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
@@ -45,7 +43,8 @@ class USBConnector:
     self.read_data = (ctypes.c_uint8 * 112)()
 
     print("USB device initialized successfully")
-    self._detect_version()
+    # TODO: why do i need this?
+    for _ in range(2): self._detect_version()
 
   def _detect_version(self):
     self.is_24 = False
@@ -57,13 +56,13 @@ class USBConnector:
       for i in range(3):
         ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), None, 1)
         if ret:
-          print("0x4", ret, len(self.read_cmd))
+          print(i, "0x4", ret, len(self.read_cmd))
           return None
 
         if ret_len > 0:
           ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 1)
           if ret:
-            #print("0x81", ret, ret_len)
+            if i != 0: print(i, "0x81", ret, ret_len)
             #libusb.libusb_clear_halt(self.handle, 0x81)
             #time.sleep(0.1)
             continue
@@ -71,7 +70,7 @@ class USBConnector:
 
         ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, None, 1)
         if ret:
-          print("0x83", ret)
+          print(i, "0x83", ret)
           #libusb.libusb_clear_halt(self.handle, 0x83)
           continue
         return self.read_data
@@ -131,22 +130,31 @@ class USBConnector:
     if value is not None:
       assert value >> (8 * size) == 0, f"{value}"
       shifted_value = value << (8 * offset)
+      # Store write data in PCIE_CONFIG_DATA register (0xB220)
       self.write(0xB220, struct.pack('>I', value << (8 * offset)))
 
+    # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
     self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), byte_enable, masked_address))
 
     if self.is_24:
+      # Trigger PCIe request using PCIE_REQUEST_TRIGGER (0xB216)
       self.write(0xB216, bytes([0x20]))
+      # Set PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
       self.write(0xB296, bytes([0x04]))
     else:
-      # Clear timeout bit.
+      # Clear timeout bit in PCIe status register
       self.write(0xB296, bytes([0x01]))
 
+    # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
     self.write(0xB254, bytes([0x0f]))
 
-    # while self.read(0xB296, 1)[0] & 4 == 0: continue
+    # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
+    while self.read(0xB296, 1)[0] & 4 == 0: continue
 
+    # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB296)
     self.write(0xB296, bytes([0x04]))
+
+    # NOTE: this is what fixes flakiness
     time.sleep(0.01)
 
     prep_st = time.perf_counter_ns()
@@ -159,13 +167,15 @@ class USBConnector:
         print("pci redo")
         if cnt > 0: self.pcie_request(fmt_type, address, value, size, cnt=cnt-1)
 
+    # Acknowledge PCIe completion (PCIE_STATUS_REGISTER: 0xB296)
     self.write(0xB296, bytes([0x02]))
-
     b284 = self.read(0xB284, 1)[0]
     b284_bit_0 = b284 & 0x01
 
+    # Retrieve completion data from PCIE_COMPLETION_DATA (0xB228)
     completion = struct.unpack('>I', self.read(0xB228, 4))
 
+    # Validate completion status based on PCIe request typ
     if (fmt_type & 0xbe == 0x04):
       # Completion TLPs for configuration requests always have a byte count of 4.
       assert completion[0] & 0xfff == 4
@@ -179,12 +189,16 @@ class USBConnector:
       0b100: "Completer Abort (CA)",
     }
 
+    # Extract completion status field
     status = (completion[0] >> 13) & 0x7
+
+    # Handle completion errors or inconsistencies
     if status or ((fmt_type & 0xbe == 0x04) and (((value is None) and (not b284_bit_0)) or ((value is not None) and b284_bit_0))):
       raise Exception("Completion status: {}, 0xB284 bit 0: {}".format(
         status_map.get(status, "Reserved (0b{:03b})".format(status)), b284_bit_0))
 
     if value is None:
+      # Read from PCIE_CONFIG_DATA (0xB220)
       full_value = struct.unpack('>I', self.read(0xB220, 4))[0]
       shifted_value = full_value >> (8 * offset)
       masked_value = shifted_value & ((1 << (8 * size)) - 1)
