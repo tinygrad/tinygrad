@@ -4,7 +4,7 @@ np.set_printoptions(suppress=True, linewidth=1000)
 import functools, collections, json
 from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
-from extra.models.llama import Transformer, Variable
+from extra.models.llama import Transformer, Variable, convert_from_huggingface
 
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
@@ -27,8 +27,6 @@ class MixtureFeedForward:
     # run MoE
     x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
     x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
-
-    # TODO: should we renormalize the probs here? looks like it's norm_topk_prob, which is False
     return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
 
 # model is bf16, 1.3B active, 6.9B total
@@ -44,87 +42,44 @@ def fetch_weights() -> dict[str, Tensor]:
 if __name__ == "__main__":
   if getenv("TORCH"):
     from transformers import OlmoeForCausalLM, AutoTokenizer
-    model = OlmoeForCausalLM.from_pretrained("allenai/OLMoE-1B-7B-0924") #.to("mps")
+    model = OlmoeForCausalLM.from_pretrained("allenai/OLMoE-1B-7B-0924")
     tokenizer = AutoTokenizer.from_pretrained("allenai/OLMoE-1B-7B-0924")
-    prompt = "Hello"
-    inputs = tokenizer(prompt, return_tensors="pt")
-    print(inputs)
+    inputs = tokenizer("Hello", return_tensors="pt")
     generate_ids = model.generate(inputs.input_ids, max_length=30)
-    print(generate_ids)
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
     exit(0)
 
-  #from transformers import PreTrainedTokenizerFast
-  #tokenizer = json.loads(fetch("https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct/resolve/main/tokenizer.json").read_text())
-  #print(tokenizer.keys())
-
-  with Timing():
-    from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMoE-1B-7B-0924")
-
-  with Timing():
+  with Timing("create model: "):
     model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
                         vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8), jit=False)
-  model_state_dict = nn.state.get_state_dict(model)
-  del model_state_dict['freqs_cis']
+    model_state_dict = nn.state.get_state_dict(model)
+    del model_state_dict['freqs_cis']
 
-  def permute(v: Tensor, n_heads: int):
-    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
-
-  experts = collections.defaultdict(dict)
-  state = fetch_weights()
-  for k in (t := tqdm(state, disable=CI)):
-    rk = k.replace("model.", "")
-    rk = rk.replace("mlp.gate.weight", "feed_forward.gate.weight")
-    rk = rk.replace("input_layernorm.weight", "attention_norm.weight")
-    rk = rk.replace("post_attention_layernorm.weight", "ffn_norm.weight")
-    rk = rk.replace("self_attn.k_norm.weight", "attention.k_norm.weight")
-    rk = rk.replace("self_attn.q_norm.weight", "attention.q_norm.weight")
-    rk = rk.replace("self_attn.q_proj.weight", "attention.wq.weight")
-    rk = rk.replace("self_attn.k_proj.weight", "attention.wk.weight")
-    rk = rk.replace("self_attn.v_proj.weight", "attention.wv.weight")
-    rk = rk.replace("self_attn.o_proj.weight", "attention.wo.weight")
-    rk = rk.replace("embed_tokens.weight", "tok_embeddings.weight")
-    rk = rk.replace("lm_head.weight", "output.weight") # is this right?
-    if '.mlp.experts.' not in k:
-      #print(k, rk, state[k].shape, model_state_dict[rk].shape)
-      assert state[k].shape == model_state_dict[rk].shape
-      v = state[k].float()
-      n_heads = 16
-      if 'q_proj' in k or 'k_proj' in k:
-        v = permute(v, n_heads)
-      elif 'q_norm' in k or 'k_norm' in k:
-        v = v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, 1).transpose(1, 2).flatten()
-      model_state_dict[rk].replace(v)
-      del model_state_dict[rk]
-    else:
-      _, _, layer, _, _, expert, name, _ = k.split('.')
-      # TODO: this is broken. it never updates the base tensor if you do this, it's updating a copy
-      experts[f'layers.{layer}.feed_forward.{name}'][int(expert)] = state[k]
-
-  for k,v in experts.items():
-    assert len(v) == 64
-    model_state_dict[k].replace(Tensor.stack(*[v[i] for i in range(len(v))]))
-    del model_state_dict[k]
-
-  assert len(model_state_dict) == 0, model_state_dict
-  del state
+  with Timing("fetch and load weights: "):
+    state = fetch_weights()
+    nhf_state = convert_from_huggingface(state, model, 16, 16)
+    for needs_float32 in ['output.weight', 'tok_embeddings.weight', 'norm.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
+    nn.state.load_state_dict(model, nhf_state, verbose=False, strict=False, consume=True, realize=False)
+    assert len(nhf_state) == 0
 
   count = 30
   temperature = 0
 
-  #toks = tokenizer.encode("what")# [tokenizer.bos_token_id]
-  #print(toks)
-  #toks = [1]
-  #toks = [tokenizer.bos_token_id]
+  with Timing("load tokenizer: "):
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("allenai/OLMoE-1B-7B-0924")
+
   toks = [12092]
   start_pos = 0
   for i in range(count):
     tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), temperature).item()
-    #tok = model(Tensor([toks]), 0, temperature).flatten()[-1].item()
     toks.append(tok)
     start_pos += 1
     print(toks)
     print(tokenizer.decode(toks))
+
+  # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
+  assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
+                  247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
 

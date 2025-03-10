@@ -1,25 +1,13 @@
 from typing import Union, Optional, Any
+import collections
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
-from tinygrad.helpers import getenv
-
-# **** copy these *exactly* from transformers. there's so many subtle ways to get them wrong ****
+from tinygrad.helpers import getenv, DEBUG
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
-
-# Copied from transformers.models.llama.modeling_llama.rotate_half
-"""
-def rotate_half(x): return Tensor.cat(-x[..., x.shape[-1]//2:], x[..., :x.shape[-1]//2], dim=-1)
-def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
-  cos = freqs_cis[..., 0:1].squeeze().repeat(1,1,1,2)
-  sin = freqs_cis[..., 1:2].squeeze().repeat(1,1,1,2)
-  q_embed = (xq * cos) + (rotate_half(xq) * sin)
-  k_embed = (xk * cos) + (rotate_half(xk) * sin)
-  return q_embed, k_embed
-"""
 
 # matches meta, non hugging face weights
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
@@ -193,6 +181,7 @@ class Transformer:
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()[:, -1, :]
+
     return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p).realize()
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
@@ -203,30 +192,39 @@ class Transformer:
 
 # *** helpers ***
 
-def convert_from_huggingface(weights:dict[str, Tensor], model: Transformer, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
+# TODO: model shouldn't be an input here, and n_kv_heads should support None
+def convert_from_huggingface(weights:dict[str, Tensor], model: Transformer, n_heads: int, n_kv_heads: int, permute_layers: bool=True):
+  # huggingface stores Q and K permuted! it is mostly correct without this, but without it makes RoPE different, so it will diverge after 10+ toks.
   def permute(v: Tensor, n_heads: int):
-    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
+    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
 
   keymap = {
     "model.embed_tokens.weight": "tok_embeddings.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attention_norm.weight" for l in range(len(model.layers))},
+    **{f"model.layers.{l}.self_attn.{x}_norm.weight": f"layers.{l}.attention.{x}_norm.weight" for x in ["q", "k"] for l in range(len(model.layers))},
     **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attention.w{x}.weight" for x in ["q", "k", "v", "o"] for l in range(len(model.layers))},
     **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"layers.{l}.attention.w{x}.bias" for x in ["q", "k", "v", "o"] for l in range(len(model.layers))},
     **{f"model.layers.{l}.post_attention_layernorm.weight": f"layers.{l}.ffn_norm.weight" for l in range(len(model.layers))},
     **{f"model.layers.{l}.mlp.{x}_proj.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(len(model.layers))},
+    **{f"model.layers.{l}.mlp.gate.weight": f"layers.{l}.feed_forward.gate.weight" for l in range(len(model.layers))},
     "model.norm.weight": "norm.weight",
     "lm_head.weight": "output.weight",
   }
   sd = {}
+  experts = collections.defaultdict(dict)
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
     if "model.layers" in k:
-      if "q_proj" in k and permute_layers:
-        v = permute(v, n_heads)
-      elif "k_proj" in k and permute_layers:
-        v = permute(v, n_kv_heads)
+      if ("q_proj" in k or "q_norm" in k) and permute_layers: v = permute(v, n_heads)
+      elif ("k_proj" in k or "k_norm" in k) and permute_layers: v = permute(v, n_kv_heads)
+    if '.mlp.experts.' in k:
+      # support MoE models
+      _, _, layer, _, _, expert, name, _ = k.split('.')
+      experts[f'layers.{layer}.feed_forward.{name}'][int(expert)] = v
+      continue
     sd[keymap[k]] = v
+  for k,v in experts.items(): sd[k] = Tensor.stack(*[v[i] for i in range(len(v))])
   return sd
 
 def convert_from_gguf(weights:dict[str, Tensor], model: Transformer):
