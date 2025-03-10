@@ -35,9 +35,12 @@ if __name__ == "__main__":
 
     # warmup
     try:
-      clang_prg(bufs, {}, wait=True)
+      runtime = clang_prg(bufs, {}, wait=True)
     except RuntimeError:
       print("clang failed ast:", num)
+      continue
+    if runtime > 5:
+      print("kernel timeout")
       continue
     x86_prg(bufs, {}, wait=True)
 
