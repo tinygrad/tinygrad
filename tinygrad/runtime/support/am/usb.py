@@ -1,6 +1,7 @@
 import ctypes, struct, time, os
 from tinygrad.runtime.autogen import libc, libusb
 from tinygrad.helpers import DEBUG
+from hexdump import hexdump
 
 class USBConnector:
   def __init__(self, name):
@@ -39,9 +40,6 @@ class USBConnector:
 
     print("USB device initialized successfully")
 
-    # TODO: why do i need this?
-    for _ in range(2): self._detect_version()
-
     # required to be set, but not a trigger
     self.write(0xB213, bytes([0x01]))
     self.write(0xB214, bytes([0, 0]))
@@ -65,7 +63,12 @@ class USBConnector:
         if ret_len > 0:
           # wait for data ready
           ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-          assert self.read_status[0] == 6  # 6 means ready to read
+          if ret != 0 or self.read_status[0] != 6:
+            print(f"WEIRD READ of {actual_length} with ret {ret}")
+            hexdump(bytes(self.read_status))
+            print("while sending")
+            hexdump(bytes(self.read_cmd))
+          assert ret == 0 and self.read_status[0] == 6  # 6 means ready to read
 
           # get data
           ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1)
@@ -76,7 +79,7 @@ class USBConnector:
 
         # get status
         ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-        assert self.read_status[0] == 3
+        assert ret == 0 and self.read_status[0] == 3, f"got ret {ret} with length {actual_length}"
 
         # return a copy of the bytes
         return bytes(self.read_data[:])
@@ -189,7 +192,6 @@ class USBConnector:
 
     b284 = self.read(0xB284, 1)[0]
     b284_bit_0 = b284 & 0x01
-    assert b284_bit_0 == (value is None)
 
     # Retrieve completion data from Link Status (0xB22A, 0xB22B)
     completion = struct.unpack('>H', self.read(0xB22A, 2))

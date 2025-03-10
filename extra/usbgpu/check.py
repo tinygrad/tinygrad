@@ -24,6 +24,7 @@ def rescan_bus(bus, gpu_bus):
 
   print("rescan bus={}".format(bus))
   usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
+  time.sleep(0.1)
   usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)
 
   usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
@@ -34,11 +35,12 @@ def rescan_bus(bus, gpu_bus):
 print_cfg(0, 0)
 #exit(0)
 
+rescan_bus(0, gpu_bus=4)
+
 print_cfg(1, 0)
 #try:
 #except: print("bus=1, dev=0 failed")
 
-rescan_bus(0, gpu_bus=4)
 rescan_bus(1, gpu_bus=4)
 
 # sleep after we rescan the bus
