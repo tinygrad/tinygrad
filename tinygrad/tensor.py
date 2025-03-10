@@ -20,6 +20,7 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
 all_tensors: set[weakref.ref[Tensor]] = set()
 
+
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp]) -> None:
   # get all children of keys in applied_map
   all_uops: set[UOp] = set()
@@ -1257,30 +1258,56 @@ class Tensor(SimpleMathTrait):
     index = index.to(self.device)
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, acc_dtype=self.dtype)
+  
+  def cat(self: Tensor, *args: Tensor, dim: int = 0) -> Tensor:
+    """
+    Optimized concatenation that uses a binary tree of tensor operations.
+    All tensors must have the same shape except in the concatenating dimension.
+    """
+    dim = self._resolve_dim(dim)
+    tensors = [self, *args]
 
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-      """
-      Optimized concatenation that groups tensors before padding.
-      All tensors must have the same shape except in the concatenating dimension.
-      """
-      dim = self._resolve_dim(dim)
-      for arg in args:
-          assert arg.ndim == self.ndim and all(ti==ai for i, (ti, ai) in enumerate(zip(self.shape, arg.shape)) if i != dim)
-      tensors = [self, *args]
-      total = sum(t.shape[dim] for t in tensors)
-      
-      cat_rec = lambda ts, offset: (
-          ts[0].pad([
-              (offset, total - (offset + ts[0].shape[dim]))
-              if j == dim else None for j in range(ts[0].ndim)
-          ])
-          if len(ts) == 1 else
-          Tensor.add(
-              cat_rec(ts[:len(ts)//2], offset),
-              cat_rec(ts[len(ts)//2:], offset + sum(t.shape[dim] for t in ts[:len(ts)//2]))
-          )
-      )
-      return cat_rec(tensors, 0)
+    # Validate shapes
+    for arg in args:
+        assert arg.ndim == self.ndim and all(ti == ai for i, (ti, ai) in enumerate(zip(self.shape, arg.shape)) if i != dim)
+
+    # Calculate total size along dim
+    total = sum(t.shape[dim] for t in tensors)
+
+    # Cache offsets in the concatenating dimension.
+    def get_positions(ts):
+      sizes = [t.shape[dim] for t in ts]
+      positions = [0]
+      for size in sizes[:-1]:
+          positions.append(positions[-1] + size)
+      return positions
+
+    offsets = get_positions(tensors)
+
+    # Pre-pad each tensor once so that its data lands in its proper offset.
+    padded = []
+    for pos, t in zip(offsets, tensors):
+      after_pad = total - (pos + t.shape[dim])
+      pad = []
+      for j in range(t.ndim):
+        if j == dim:
+          pad.append((pos, after_pad))
+        else:
+          pad.append(None)
+      padded.append(t.pad(pad))
+
+    # Iterative binary tree reduction (pairwise addition) to combine the padded tensors.
+    while len(padded) > 1:
+      new_list = []
+      for i in range(0, len(padded), 2):
+        if i + 1 < len(padded):
+          new_list.append(padded[i] + padded[i + 1])
+        else:
+          new_list.append(padded[i])
+      padded = new_list
+
+    return padded[0]
+
   
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
