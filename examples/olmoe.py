@@ -6,6 +6,38 @@ from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
 from extra.models.llama import Transformer, Variable, convert_from_huggingface
 
+# NOTE works! but slower.
+# import sys
+# sys.setrecursionlimit(100000)
+# def conditional_swap(t: Tensor, idx: Tensor, cond: Tensor, i: int, j: int) -> Tensor:
+#   assert t.ndim == 1, "only works on 1d tensors"
+#   t_with_holes = t - t[i].unsqueeze(0).pad(((i, t.numel() - i - 1),)) - t[j].unsqueeze(0).pad(((j, t.numel() - j - 1),))
+#   ic = t[j].unsqueeze(0).pad(((i, t.numel() - i - 1),))
+#   jc = t[i].unsqueeze(0).pad(((j, t.numel() - j - 1),))
+#   idx_with_holes = idx - idx[i].unsqueeze(0).pad(((i, idx.numel() - i - 1),)) - idx[j].unsqueeze(0).pad(((j, idx.numel() - j - 1),))
+#   idx_ic = idx[j].unsqueeze(0).pad(((i, idx.numel() - i - 1),))
+#   idx_jc = idx[i].unsqueeze(0).pad(((j, idx.numel() - j - 1),))
+#   return cond.where(t_with_holes + ic + jc, t).contiguous(), cond.where(idx_with_holes + idx_ic + idx_jc, idx).contiguous()
+# def sort(t: Tensor, largest=True) -> Tensor:
+#   k, numel = 2, t.numel()
+#   idx = Tensor.arange(numel)
+#   assert isinstance(numel, int), "symbolic shape not supported"
+#   assert numel & (numel - 1) == 0, "numel must be a power of 2"
+#   while k <= numel:
+#     j = k // 2
+#     while j > 0:
+#       for i in range(numel):
+#         if (ixj := i ^ j) > i:
+#           if (i & k) == 0: t, idx = conditional_swap(t, idx, t[i] < t[ixj] if largest else t[i] > t[ixj], i, ixj)
+#           if (i & k) != 0: t, idx = conditional_swap(t, idx, t[i] > t[ixj] if largest else t[i] < t[ixj], i, ixj)
+#       j //= 2
+#     k *= 2
+#   return t, idx
+
+    # probs, sel = sort(g)
+    # probs = probs[:self.activated_experts]
+    # sel = sel[:self.activated_experts]
+
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
