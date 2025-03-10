@@ -62,7 +62,7 @@ class TestTorchBackend(unittest.TestCase):
     a += b
     np.testing.assert_equal(a.cpu().numpy(), [3,3,3,3])
 
-  def test_exp2(qself):
+  def test_exp2(self):
     a = torch.ones(4, device=device)
     b = a.exp2()
     np.testing.assert_equal(b.cpu().numpy(), [2,2,2,2])
@@ -90,6 +90,13 @@ class TestTorchBackend(unittest.TestCase):
     y = y.cpu().float().to(device=device, dtype=torch.int64)
     res2 = x ^ y
     print(res2.cpu())
+
+  def test_topk(self):
+    # test topk return_types
+    a = torch.tensor([1, 3, 2, 4], device=device)
+    out = torch.topk(a, k=2)
+    np.testing.assert_equal(out.values.cpu().numpy(), [4, 3])
+    np.testing.assert_equal(out.indices.cpu().numpy(), [3, 1])
 
   @unittest.skip("meh")
   def test_str(self):
