@@ -70,20 +70,21 @@ class USBConnector:
           assert actual_length.value == ret_len, f"only sent {actual_length.value}, wanted {ret_len}"
           #if ret: return None
 
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-        #print(actual_length.value)
-        #from hexdump import hexdump
-        #hexdump(bytes(self.read_status[0:actual_length.value]))
-        #assert actual_length.value == 16, f"got length {actual_length}"
-        if ret:
-          print(i, "0x83", ret)
-          continue
+        while 1:
+          ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
+          if ret:
+            print(i, "0x83", ret)
+            continue
+          #from hexdump import hexdump
+          #hexdump(bytes(self.read_status[0:actual_length.value]))
+          if self.read_status[0] == 3:
+            #ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
+            #assert ret
+            break
         return bytes(self.read_data[:])
       return None
 
-    self.read_cmd[8:12] = ret_len.to_bytes(4, 'little')
-    self.read_cmd[12] = 0x80 if ret_len >0 else 0
-    self.read_cmd[14] = len(cdb)
+    self.read_cmd[4:6] = len(cdb).to_bytes(2, 'big')
     self.read_cmd[16:16+len(cdb)] = cdb
     for j in range(1):
       #print(j)
@@ -126,13 +127,13 @@ class USBConnector:
     if DEBUG >= 1: print("pcie_request", hex(fmt_type), hex(address), value, size, cnt)
 
     # TODO: why is this needed?
-    #time.sleep(0.005)
+    time.sleep(0.005)
 
     # TODO: why is this needed? (the write doesn't matter, just that it's using USB)
-    self.write(0xB210, bytes([0]))
-    self.write(0xB210, bytes([0]))
-    self.write(0xB210, bytes([0]))
-    self.write(0xB210, bytes([0]))
+    #self.write(0xB210, bytes([0]))
+    #self.write(0xB210, bytes([0]))
+    #self.write(0xB210, bytes([0]))
+    #self.write(0xB210, bytes([0]))
 
     #print(self.read(0xB296, 1)[0])
 
