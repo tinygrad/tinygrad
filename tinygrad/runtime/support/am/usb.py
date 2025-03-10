@@ -115,10 +115,10 @@ class USBConnector:
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
     assert size > 0 and size <= 4
-    if DEBUG >= 1: print("pcie_request", fmt_type, hex(address), value, size, cnt)
+    if DEBUG >= 1: print("pcie_request", hex(fmt_type), hex(address), value, size, cnt)
 
     # TODO: why is this needed?
-    time.sleep(0.005)
+    #time.sleep(0.005)
 
     # TODO: why is this needed? (the write doesn't matter, just that it's using USB)
     self.write(0xB210, bytes([0]))
@@ -164,11 +164,10 @@ class USBConnector:
     #print("stat out", stat)
 
     # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
-    self.write(0xB296, bytes([0x04]))
+    #self.write(0xB296, bytes([0x04]))
 
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000):
-      print("here")
-      return
+      assert False, "not supported"
 
     while (stat:=self.read(0xB296, 1)[0]) & 2 == 0:
       print("stat poll", stat)
@@ -176,13 +175,14 @@ class USBConnector:
         self.write(0xB296, bytes([0x01]))
         print("pci redo")
         if cnt > 0: self.pcie_request(fmt_type, address, value, size, cnt=cnt-1)
-    #print("stat poll out", stat)
+    assert stat == 6, f"stat read 2 was {stat}"
 
     # Acknowledge PCIe completion (PCIE_STATUS_REGISTER: 0xB296)
-    self.write(0xB296, bytes([0x02]))
+    #self.write(0xB296, bytes([0x02]))
+
     b284 = self.read(0xB284, 1)[0]
     b284_bit_0 = b284 & 0x01
-    #assert b284_bit_0 == (value is None)
+    assert b284_bit_0 == (value is None)
 
     # Retrieve completion data from Link Status (0xB22A, 0xB22B)
     completion = struct.unpack('>H', self.read(0xB22A, 2))
