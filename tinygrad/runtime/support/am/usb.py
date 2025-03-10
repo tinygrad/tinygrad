@@ -1,5 +1,6 @@
 import ctypes, struct, time, os
 from tinygrad.runtime.autogen import libc, libusb
+from tinygrad.helpers import DEBUG
 
 class USBConnector:
   def __init__(self, name):
@@ -56,7 +57,7 @@ class USBConnector:
         if ret_len > 0:
           ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, None, 1)
           if ret:
-            if i != 0: print(i, "0x81", ret, ret_len)
+            if DEBUG >= 2 or i > 0: print(i, "0x81", ret, ret_len)
             #libusb.libusb_clear_halt(self.handle, 0x81)
             #time.sleep(0.1)
             continue
@@ -109,7 +110,7 @@ class USBConnector:
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
     assert size > 0 and size <= 4
-    #print("pcie_request", fmt_type, hex(address), value, size, cnt)
+    if DEBUG >= 1: print("pcie_request", fmt_type, hex(address), value, size, cnt)
 
     # TODO: why is this needed?
     time.sleep(0.005)
