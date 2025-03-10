@@ -17,7 +17,7 @@ class USBConnector:
       ret = libusb.libusb_detach_kernel_driver(self.handle, 0)
       print("detach kernel driver")
       if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
-      libusb.libusb_reset_device(self.handle)
+    libusb.libusb_reset_device(self.handle)
 
     # Claim interface (gives -3 if we reset)
     ret = libusb.libusb_claim_interface(self.handle, 0)
@@ -112,17 +112,12 @@ class USBConnector:
     assert size > 0 and size <= 4
     if DEBUG >= 1: print("pcie_request", fmt_type, hex(address), value, size, cnt)
 
-    # TODO: why is this needed?
-    time.sleep(0.005)
-
     #print(self.read(0xB296, 1)[0])
 
     masked_address = address & 0xfffffffc
     offset = address & 0x00000003
 
     assert size + offset <= 4
-
-    #byte_enable = ((1 << size) - 1) << offset
 
     if value is not None:
       assert value >> (8 * size) == 0, f"{value}"
@@ -134,14 +129,11 @@ class USBConnector:
 
     # setup address and length
     self.write(0xB218, struct.pack('>I', masked_address))
-    self.write(0xB217, bytes([0x01]))
+    self.write(0xB217, bytes([0x01]))  # this is the length
 
     # go
     self.write(0xB210, bytes([fmt_type])) # set operation type
     self.write(0xB213, bytes([0x01]))     # trigger operation
-
-    #print(byte_enable)
-    #self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), 1, masked_address))
 
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
     self.write(0xB296, bytes([0x07]))
