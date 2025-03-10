@@ -154,7 +154,6 @@ class SpeedyResNet(nn.Module):
   def __init__(self, W):
     super().__init__()
     self.whitening = W
-    ic(W.shape)
     self.net = nn.ModuleList([
       WhiteningConv(self.whitening),
       Pad((1,0,0,1)),
@@ -450,16 +449,15 @@ def train_cifar():
 
     loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
     et = time.monotonic()
-    loss_cpu = loss.cpu().numpy()
     # EMA for network weights
     if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:
         model_ema = modelEMA(W, model)
       model_ema.update(model, torch.tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
     cl = time.monotonic()
-    device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+    device_str, loss_cpu, non_bias_lr = str(loss.device),loss.detach().cpu().numpy(), opt_non_bias.param_groups[0]['lr']
     #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {non_bias_lr:.6f} LR")
     st = cl
     i += 1
 
