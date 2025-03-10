@@ -122,7 +122,7 @@ class USBConnector:
 
     assert size + offset <= 4
 
-    #byte_enable = ((1 << size) - 1) << offset
+    byte_enable = ((1 << size) - 1) << offset
 
     if value is not None:
       assert value >> (8 * size) == 0, f"{value}"
@@ -131,17 +131,7 @@ class USBConnector:
       self.write(0xB220, struct.pack('>I', value << (8 * offset)))
 
     # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
-
-    # setup address and length
-    self.write(0xB218, struct.pack('>I', masked_address))
-    self.write(0xB217, bytes([0x01]))
-
-    # go
-    self.write(0xB210, bytes([fmt_type])) # set operation type
-    self.write(0xB213, bytes([0x01]))     # trigger operation
-
-    #print(byte_enable)
-    #self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), 1, masked_address))
+    self.write(0xB210, struct.pack('>III', 0x00000001 | (fmt_type << 24), byte_enable, masked_address))
 
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
     self.write(0xB296, bytes([0x07]))
@@ -151,8 +141,6 @@ class USBConnector:
 
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
     self.write(0xB254, bytes([0x0f]))
-
-    #while (bstat:=self.read(0xB284, 1)[0]) & 1 == 0: print("busy", bstat)
 
     # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
     while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
