@@ -140,6 +140,7 @@ x86_matcher = PatternMatcher([
 
 class X86Renderer(Renderer):
   device = "X86"
+  supports_float4 = False
   has_local = False
   has_shared = False
   global_max = None
@@ -248,7 +249,7 @@ class X86Renderer(Renderer):
       else:
         for s in u.src: # mov srcs
           # these can't take imm values, #NOTE: cmp can take imm as the second operand
-          if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.CMPNE): mov_to_reg(s, assign_reg(i, s.dtype))
+          if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.CMPNE, Ops.CMPLT): mov_to_reg(s, assign_reg(i, s.dtype))
           elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
