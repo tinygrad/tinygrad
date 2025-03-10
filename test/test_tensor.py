@@ -876,5 +876,22 @@ class TestIdxUpcast(unittest.TestCase):
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
 
+class TestExpand(unittest.TestCase):
+    # Note sure whether it is the right place for these tests or not.
+    def test_expand_dtype_float16(self):
+        t = Tensor.full((1, 2, 0), 12, dtype=dtypes.float16).expand((6, 2, 0))
+        assert t.dtype == dtypes.float16
+        np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12, dtype=np.float16))
+
+    def test_expand_dtype_int8(self):
+        t = Tensor.full((1, 2, 0), 12, dtype=dtypes.int8).expand((6, 2, 0))
+        assert t.dtype == dtypes.int8
+        np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12, dtype=np.int8))
+
+    def test_expand_dtype_uint8(self):
+        t = Tensor.full((1, 2, 0), 12, dtype=dtypes.uint8).expand((6, 2, 0))
+        assert t.dtype == dtypes.uint8
+        np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12, dtype=np.uint8))
+
 if __name__ == '__main__':
   unittest.main()

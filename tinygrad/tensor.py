@@ -966,7 +966,8 @@ class Tensor(SimpleMathTrait):
     ```
     """
     new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
-    return self._broadcast_to(new_shape)
+    # return self._broadcast_to(new_shape)
+    return self.cast(sum_acc_dtype(self.dtype))._broadcast_to(new_shape).cast(self.dtype)
 
   def permute(self, order, *args) -> Tensor:
     """
