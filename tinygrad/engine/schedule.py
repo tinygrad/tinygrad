@@ -232,8 +232,8 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
-def create_kernel(x:UOp, b:UOp):
-  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink()))
+def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), (m,) if (m:=ctx.ops_metadata.get(x)) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
 
@@ -241,24 +241,22 @@ DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
-  if (m:=ctx.ops_metadata.get(x.arg.ast)) is not None: metadata[m] = None
   for s in x.src:
     if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
-  return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
 
 create_kernels = merge_views+PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype))),
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
   # create a buffer for COPY on the new device
-  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda d,x: create_kernel(x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
   # otherwise check the context if we're realizing this UOp
   (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
-   lambda ctx,x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
+   lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove CONST/BIND from SINK
