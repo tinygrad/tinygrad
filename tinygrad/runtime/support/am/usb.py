@@ -20,6 +20,9 @@ class USBConnector:
       if ret != 0: raise Exception(f"Failed to detach kernel driver: {ret}")
       libusb.libusb_reset_device(self.handle)
 
+    ret = libusb.libusb_set_configuration(self.handle, 1)
+    if ret != 0: raise Exception(f"Failed to set configuration: {ret}")
+
     # Claim interface (gives -3 if we reset)
     ret = libusb.libusb_claim_interface(self.handle, 0)
     if ret != 0: raise Exception(f"Failed to claim interface: {ret}")
@@ -63,12 +66,7 @@ class USBConnector:
         if ret_len > 0:
           # wait for data ready
           ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-          if ret != 0 or self.read_status[0] != 6:
-            print(f"WEIRD READ of {actual_length} with ret {ret}")
-            hexdump(bytes(self.read_status))
-            print("while sending")
-            hexdump(bytes(self.read_cmd))
-          assert ret == 0 and self.read_status[0] == 6  # 6 means ready to read
+          assert ret == 0 and self.read_status[0] == 6, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
 
           # get data
           ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1)
@@ -79,7 +77,7 @@ class USBConnector:
 
         # get status
         ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-        assert ret == 0 and self.read_status[0] == 3, f"got ret {ret} with length {actual_length}"
+        assert ret == 0 and self.read_status[0] == 3, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
 
         # return a copy of the bytes
         return bytes(self.read_data[:])
