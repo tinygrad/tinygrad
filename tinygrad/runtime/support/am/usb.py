@@ -135,8 +135,8 @@ class USBConnector:
     assert size <= 4
     self.write(0xB214, struct.pack('>II', byte_enable, masked_address))
 
-    # trigger
-    #self.write(0xB213, bytes([0x01]))
+    # required to be set
+    self.write(0xB213, bytes([0x01]))
 
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
     self.write(0xB296, bytes([0x07]))
