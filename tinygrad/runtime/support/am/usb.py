@@ -42,6 +42,11 @@ class USBConnector:
     # TODO: why do i need this?
     for _ in range(2): self._detect_version()
 
+    # required to be set, but not a trigger
+    self.write(0xB213, bytes([0x01]))
+    self.write(0xB214, bytes([0, 0]))
+    self.write(0xB216, bytes([0x20]))
+
   def _detect_version(self):
     try: self.read(0x07f0, 6)
     except Exception: pass
@@ -79,7 +84,7 @@ class USBConnector:
     raise RuntimeError("USB transfer failed")
 
   def read(self, start_addr, read_len, stride=255):
-    #print("read", hex(start_addr))
+    if DEBUG >= 2: print("read", hex(start_addr))
     data = bytearray(read_len)
 
     for i in range(0, read_len, stride):
@@ -94,7 +99,7 @@ class USBConnector:
     return bytes(data[:read_len])
 
   def write(self, start_addr, data):
-    #print("write", hex(start_addr))
+    if DEBUG >= 2: print("write", hex(start_addr))
     for offset, value in enumerate(data):
       current_addr = start_addr + offset
       assert current_addr >> 17 == 0
@@ -132,20 +137,25 @@ class USBConnector:
 
     # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
     self.write(0xB210, bytes([fmt_type]))
-    assert size <= 4
-    self.write(0xB214, struct.pack('>II', byte_enable, masked_address))
+    #print(self.read(0xb214, 4))
+    self.write(0xB214, bytes([0]))
+    self.write(0xB214, bytes([0]))
+    self.write(0xB214, bytes([0]))
+    assert byte_enable < 0x100
+    self.write(0xB217, bytes([byte_enable]))
 
-    # required to be set
-    self.write(0xB213, bytes([0x01]))
+    # setup address
+    self.write(0xB218, struct.pack('>I', masked_address))
 
+    #time.sleep(0.005)
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
     self.write(0xB296, bytes([0x07]))
 
-    # Trigger PCIe request using PCIE_REQUEST_TRIGGER (0xB216)
-    self.write(0xB216, bytes([0x20]))
-
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
+    # is this the trigger?
     self.write(0xB254, bytes([0x0f]))
+
+    #print(self.read(0xB284, 1))
 
     # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
     while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
