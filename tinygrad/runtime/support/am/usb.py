@@ -63,24 +63,22 @@ class USBConnector:
           return None
 
         if ret_len > 0:
+          # wait for data ready
+          ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
+          assert self.read_status[0] == 6  # 6 means ready to read
+
+          # get data
           ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1)
           if ret:
-            if DEBUG >= 2 or i > 0: print(i, "0x81", ret, ret_len)
+            print(i, "0x81", ret, ret_len)
             continue
           assert actual_length.value == ret_len, f"only sent {actual_length.value}, wanted {ret_len}"
-          #if ret: return None
 
-        while 1:
-          ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-          if ret:
-            print(i, "0x83", ret)
-            continue
-          #from hexdump import hexdump
-          #hexdump(bytes(self.read_status[0:actual_length.value]))
-          if self.read_status[0] == 3:
-            #ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
-            #assert ret
-            break
+        # get status
+        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1)
+        assert self.read_status[0] == 3
+
+        # return a copy of the bytes
         return bytes(self.read_data[:])
       return None
 
