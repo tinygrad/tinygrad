@@ -5,7 +5,7 @@ from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, grap
 from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv, pluralize
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, SPLIT_REDUCEOP
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -165,6 +165,7 @@ create_ctx = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}, name="u"), 
 def group_realizes(sink:UOp) -> dict[UOp, None]:
   # start by adding uops that always realize
   sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext({}, {}, defaultdict(dict)))
+  if DONT_GROUP_REDUCES: return ctx.realizes
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: dict[UOp, UOp] = {}
   double_reduces: list[UOp] = []
@@ -230,6 +231,11 @@ class KernelContext:
   realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
+def create_kernel(x:UOp, b:UOp):
+  kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x))
+  buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
+  return UOp(Ops.ASSIGN, x.dtype, (buffer, kernel)).reshape(x.shape)
+
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER}
 def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
@@ -244,11 +250,14 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   return x.replace(arg=Kernel(x.arg.ast, new_metadata)) if (new_metadata:=tuple(metadata)) != x.arg.metadata else None
 
 create_kernels = merge_views+PatternMatcher([
-  # always give assign a kernel
-  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), lambda x,b: b.assign(UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))),
-  # otherwise check if need to assign this UOp to a new buffer
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"), lambda ctx,x: UOp(Ops.ASSIGN, x.dtype, (b:=UOp.new_buffer(x.device, x.size, x.dtype).view(x.st),\
-    UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x)))) if x in ctx.realizes else None),
+  # always give assign/contiguous a kernel
+  (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype))),
+  # create a buffer for COPY on the new device
+  (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda d,x: create_kernel(x, UOp.new_buffer(d.arg, x.size, x.dtype))),
+  # otherwise check the context if we're realizing this UOp
+  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
+   lambda ctx,x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove CONST/BIND from SINK
@@ -364,8 +373,8 @@ fix_kernel_ops = PatternMatcher([
 
 def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
-  # substitute kernel sources for the target buffer
-  ast = k.arg.ast.substitute({s.src[1].arg.ast:s.src[0] for s in k.src if s.op is Ops.ASSIGN}).sink()
+  # substitute kernel sources for the target buffer + apply reshapes
+  ast = k.arg.ast.substitute({(ast:=s.src[1].arg.ast):s.src[0].view(unwrap(ast.st)) for s in k.src if s.op is Ops.ASSIGN}).sink()
   # add buffer ops
   ast = graph_rewrite(ast, add_buffer_ops, bufs:=tuple(s.buf_uop for s in k.src), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
@@ -412,9 +421,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # map tensors to buffer/const, optionally apply a VIEW on top
   becomes_map: dict[UOp, UOp] = {}
   for k,v in tensor_map.items():
-    # if we created a KERNEL for this tensor, map it to the assigned buffer
-    if (a:=kernel_map.get(v.base)) is not None and a.op is Ops.ASSIGN:
-      becomes_map[k] = a.src[0] if v is v.base else a.src[0].view(unwrap(v.st))
+    # ASSIGN always becomes the target buffer
+    if v.op is Ops.ASSIGN: becomes_map[k] = v.src[0]
+    # if we created a new buffer for this tensor, map it to the assigned buffer
+    elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
+      becomes_map[k] = a.src[0] if a.src[0].st == v.st else a.src[0].view(unwrap(v.st))
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
@@ -458,8 +469,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # TODO: move this to create_kernels
     k = fix_kernel_ast(u.src[1], var_vals)
     schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    # increment the refcount of the target buf (this is required by the JIT and memory planner)
-    u.buf_uop.buffer.ref(1)
+    # increment the refcount of the target buf (this is required by the JIT and memory planner) TODO: this does not belong here
+    k.src[0].buffer.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

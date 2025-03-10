@@ -35,12 +35,6 @@ def masked_select(self, mask):
   # err, bad
   return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
 
-@torch.library.impl("aten::topk", "privateuseone")
-def topk(self, k, dim=-1, largest=True, sorted=True):
-  # TODO: move to tinygrad
-  t1, t2 = torch.topk(self.cpu(), k, dim, largest, sorted)
-  return torch.return_types.topk((t1.tiny(), t2.tiny()))
-
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
@@ -369,6 +363,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
+  "aten.topk": Tensor.topk,
   "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
