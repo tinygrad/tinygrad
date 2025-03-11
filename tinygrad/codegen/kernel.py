@@ -605,6 +605,7 @@ class Kernel:
             permaxis = list(range(wd)) \
               + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
               + [wd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(tcd + len(upcast_perm), len(shape)))
+            print(tuple(permaxis))
             return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -613,16 +614,11 @@ class Kernel:
             if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
 
             # if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-            #   # # local_shape = tuple(s if i >= self.global_dims else 1 for i, s in enumerate(self.full_shape))
-            #   # st = store_st = ShapeTracker.from_shape((1,1,2,2,2,2,2,1,1,1,1,2))
-            #   # local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
-            #   # if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
-            #   # local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-            #   # srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
-            # # if self.use_tensor_cores == 3:
-            # # srcs[i] = UOp(Ops.CONTRACT, dtype=srcs[i].dtype.vec(tc.elements_per_thread[i]), src=(srcs[i],), arg=tc_upcast_axes[i])
-            # # if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
-            store_st = ShapeTracker.from_shape((2,2,2,2,2,1,1,1,2)).permute((4,2,1,3,0,5,6,7,8)).expand((2,2,2,2,2,2,2,2,2))
+            local_shape = tuple(
+              s if (x >= self.global_dims and x < self.first_reduce) or (x >= (len(self.full_shape) - len(tc_upcast_axes[i]))) else 1
+              for x, s in enumerate(self.full_shape)
+            )
+            store_st = ShapeTracker.from_shape(local_shape)
             local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=store_st.real_size(), local=True), (), f"temp{i}")
             local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
             srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, store_st.to_uop(), local_store))
