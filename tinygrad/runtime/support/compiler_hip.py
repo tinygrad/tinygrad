@@ -1,7 +1,7 @@
-import ctypes, subprocess
+import ctypes
 import tinygrad.runtime.autogen.comgr as comgr
-from tinygrad.runtime.ops_llvm import LLVMCompiler
 from tinygrad.device import Compiler, CompileError
+from tinygrad.helpers import amdgpu_disassemble
 
 def check(status):
   if status != 0:
@@ -64,17 +64,4 @@ class AMDCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text')
     except RuntimeError as e: raise CompileError(e) from e
-  def disassemble(self, lib:bytes):
-    asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-    print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
-
-class AMDLLVMCompiler(AMDCompiler):
-  def __init__(self, arch:str):
-    super().__init__(arch)
-    self.llvm_compiler = LLVMCompiler("AMDGPU", arch)
-  def __reduce__(self): return (AMDLLVMCompiler,(self.arch,))
-  def compile(self, src:str) -> bytes:
-    try: return self.llvm_compiler.compile(src, load=False)
-    except RuntimeError as e:
-      if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
-      raise CompileError(e) from e
+  def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
