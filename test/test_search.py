@@ -116,7 +116,7 @@ class TestBEAM(unittest.TestCase):
     for (dtype_in, dtype_out) in multi_shape_dtype_pairs:
       a = Tensor.rand(16, 16, dtype=dtype_in)
       b = Tensor.rand(16, 16, dtype=dtype_in)
-      realized_ast, _ = helper_realized_ast(a.matmul(b, acc_dtype=dtype_out))
+      realized_ast, _ = helper_realized_ast(a.matmul(b, dtype=dtype_out))
 
       lins = get_kernel_actions(Kernel(realized_ast)).values()
       assert len(set(lin.tensor_core.dims for lin in lins if lin.tensor_core is not None)) > 1
