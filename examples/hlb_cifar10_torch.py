@@ -10,7 +10,7 @@ import torch
 import numpy as np
 from torch import nn, optim
 from torch.optim.lr_scheduler import OneCycleLR
-from tinygrad import getenv, Device, dtypes
+from tinygrad import getenv, Device, dtypes, GlobalCounters
 from tinygrad.helpers import prod, colored
 from tinygrad.nn.datasets import cifar
 import torch.nn.functional as F
@@ -471,6 +471,7 @@ def train_cifar():
 
     if STEPS == 0 or i == STEPS: break
 
+    GlobalCounters.reset()
     X, Y = next(batcher)
     loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
     et = time.monotonic()
@@ -483,7 +484,7 @@ def train_cifar():
     cl = time.monotonic()
     device_str, loss_cpu, non_bias_lr = str(loss.device), loss.detach().cpu().numpy(), opt_non_bias.param_groups[0]['lr']
     #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {non_bias_lr:.6f} LR")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {non_bias_lr:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
     st = cl
     i += 1
 
