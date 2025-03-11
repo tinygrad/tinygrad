@@ -639,8 +639,8 @@ def main():
         if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:
           ## Initialize the ema from the network at this point in time if it does not already exist.... :D
           if net_ema is None: # don't snapshot the network yet if so!
-              net_ema = NetworkEMA(net)
-              continue
+            net_ema = NetworkEMA(net)
+            continue
           # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
           net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
 
