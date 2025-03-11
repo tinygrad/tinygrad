@@ -106,7 +106,6 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
     this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorage>());
     TensorImpl::storage_access_should_throw_ = false;
   }
-  //const c10::Storage& storage() const override { return this->storage_; }
 };
 }
 
@@ -204,25 +203,6 @@ public:
   }
 
   c10::intrusive_ptr<c10d::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
-    py::gil_scoped_acquire gil;
-    py::object py_result = py_backend_.attr("allgather")(outputTensors, inputTensors, opts);
-    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
-    fut->markCompleted(c10::IValue(outputTensors));
-    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
-  }
-
-  c10::intrusive_ptr<c10d::Work> _allgather_base(at::Tensor& output, at::Tensor& input, const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
-    py::gil_scoped_acquire gil;
-    py::object py_result = py_backend_.attr("allgather")(output, input, opts);
-    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::TensorType::get());
-    fut->markCompleted(c10::IValue(output));
-    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
-  }
-
-  c10::intrusive_ptr<c10d::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {

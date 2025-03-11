@@ -33,14 +33,16 @@ if __name__ == "__main__":
     device = torch.device("mps")
 
   GPUS = getenv("GPUS", 1)
-  if getenv("DDP"):
-    import os
+  DDP = getenv("DDP", 0)
+  RANK = getenv("LOCAL_RANK", 0)
+  if DDP:
+    import os, atexit
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "29500"
-    rank = int(getenv("LOCAL_RANK", 0))
-    device = torch.device(device.type, index=rank)
+    device = torch.device(device.type, index=RANK)
     backend = "cpu:gloo,cuda:nccl" + ",tiny:tiny" if device.type == "tiny" else ""
-    torch.distributed.init_process_group(backend=backend, rank=rank, world_size=GPUS)
+    torch.distributed.init_process_group(backend=backend, rank=RANK, world_size=GPUS)
+    atexit.register(torch.distributed.destroy_process_group)
 
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
@@ -50,11 +52,11 @@ if __name__ == "__main__":
 
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
+  BS = getenv("BS", 512) // GPUS
 
   if GPUS > 1:
-    if getenv("DDP"):
-      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-      model.use_side_stream_for_tensor_copies = False # TODO:
+    if DDP:
+      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[RANK])
     else:
       model = torch.nn.DataParallel(model, range(GPUS))
 
@@ -71,7 +73,7 @@ if __name__ == "__main__":
 
   test_acc = float('nan')
   for i in (t:=trange(70)):
-    samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
+    samples = torch.randint(0, X_train.shape[0], (BS,))  # putting this in JIT didn't work well
     loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
