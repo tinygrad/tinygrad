@@ -67,8 +67,6 @@ class TestBooleanIndexing(unittest.TestCase):
   def test_large_tensor_boolean_indexing(self):
     """
         Test the boolean indexing on a large tensor.
-
-        Weirdly, in very large tensors, tinygrad (AMD) is faster than both numpy and torch.
     """
     x = Tensor.randn((20, 100, 20, 50))
     x_np = x.numpy()
