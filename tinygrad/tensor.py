@@ -651,7 +651,6 @@ class Tensor(SimpleMathTrait):
     if steps == 1: return Tensor([start], dtype=dtype, **kwargs)
     return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
 
-  @staticmethod
   def unfold(self, dim:int, size:int, step:int):
     """
     Returns a tensor with all slices of size `size` from `self` in the dimension `dimension`.
