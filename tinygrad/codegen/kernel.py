@@ -655,11 +655,12 @@ class Kernel:
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self, name_override:Optional[str]=None) -> Kernel:
+  def linearize(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> Kernel:
     # display the AST
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
       print(self.name)
@@ -676,8 +677,8 @@ class Kernel:
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
-  def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
-    self.linearize(name_override)
+  def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
+    self.linearize(name_override, ast_transform)
     assert self.uops[0].op is Ops.NAME, "first uop must be name"
     src = self.opts.render(self.uops)
 

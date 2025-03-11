@@ -10,6 +10,7 @@ notebooks
 *.so
 *.txt
 build
+!examples/tinychat/assets/cdn.jsdelivr.net/npm/purecss@3.0.0/build/
 /dist
 *.egg-info
 /env
