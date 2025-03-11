@@ -32,6 +32,9 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
     if mask is not None: root_src = (mask.gep(i), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
+  # the buf.dtype is always a pointer
+  ptrdtype = cast(PtrDType, buf.dtype)
+
   # then rewrite everything we can
   ret = []
   idxs: list[int|None] = [None]*vec.dtype.count
@@ -48,7 +51,6 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
           lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
           # if we are folding, we set the dtype correctly
           if fold_length > 1:
-            ptrdtype = cast(PtrDType, buf.dtype)
             lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
           # set the idxs of the output
           for i in range(fold_length):
@@ -58,9 +60,8 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
           ret.append(lidx)
           global_offset += fold_length
   assert None not in idxs, f"some idxs are missing {idxs}"
-  # this base thing is for image
-  return UOp(Ops.CAT, buf.dtype.base.ptr(size=buf.dtype.size, local=buf.dtype.local).vec(vec.dtype.count),
-             tuple(ret)).gep(tuple(cast(list[int], idxs)))
+  # this base thing is for image, we want the CAT to be a normal pointer
+  return UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
   # TODO: this is written in many places
@@ -80,24 +81,24 @@ def gep_on_store(gep:UOp, st:UOp):
   return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
 
 def image_fixup(ls:UOp):
-  if ls.src[0].op is Ops.CAST and isinstance(ls.src[0].src[0].dtype, ImageDType):
-    # normal image load or store
+  # normal image load or store, with the CAST from expand_index
+  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
     idx = ls.src[0].src[0]
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % idx.src[0].dtype.shape[1], (idx.src[1] // (4*idx.src[0].dtype.shape[1]))))
+    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
     idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
     return ls.replace(src=(idx,)+ls.src[1:])
-  elif isinstance(ls.src[0].dtype, ImageDType):
-    idx = ls.src[0]
-    # we already processed this image
-    if idx.src[1].dtype == dtypes.int.vec(2): return None
-    # unfoldable image load
+
+  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
+  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
+    idx = ls.src[0]
     id4 = idx.src[1] % 4
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % idx.src[0].dtype.shape[1], (idx.src[1] // (4*idx.src[0].dtype.shape[1]))))
+    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
     idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
     return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
+
   return None
 
 load_store_folding = PatternMatcher([
