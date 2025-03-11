@@ -10,7 +10,7 @@ from tinygrad.runtime.ops_x86 import X86Renderer
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
   # no bfloat16 for ptx at the moment
-  ast_strs = [x for x in ast_strs if "dtypes.bfloat16" not in x]
+  ast_strs = [x for x in ast_strs if "dtypes.bfloat16" not in x and "dtypes.half" not in x]
   dev = Device["CPU"]
   x86 = X86Renderer()
 
