@@ -453,13 +453,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if original_metadata is not None: all_metadata[shard] = original_metadata
         lbs.append(shard)
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    if original_metadata is not None:
-      for lb in sharded_lbs: all_metadata[lb] = original_metadata
     contiguous_lbs = [lb.contiguous() for lb in sharded_lbs]
-    if original_metadata is not None:
-      for lb in contiguous_lbs: all_metadata[lb] = original_metadata
     ret = UOp.multi(*contiguous_lbs, axis=axis)
-    if original_metadata is not None: all_metadata[ret] = original_metadata
+    if original_metadata is not None:
+      for lb in sharded_lbs + contiguous_lbs + [ret]: all_metadata[lb] = original_metadata
     return ret
 
   # *** from LazyBuffer ***
