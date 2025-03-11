@@ -68,8 +68,8 @@ class TestPTXFailures(unittest.TestCase):
   def test_gated_define_acc_with_half_dtype(self):
     a = Tensor.randn(32, 32, dtype=dtypes.half).realize()
     b = Tensor.randn(34, 32, dtype=dtypes.half).realize()
-    result = a.pad((1,1)).matmul(b, acc_dtype=dtypes.half).numpy()
-    reference = a.pad((1,1)).matmul(b, acc_dtype=dtypes.float).numpy()
+    result = a.pad((1,1)).matmul(b, dtype=dtypes.half).numpy()
+    reference = a.pad((1,1)).matmul(b, dtype=dtypes.float).numpy()
     np.testing.assert_allclose(result, reference)
 
 if __name__ == '__main__':
