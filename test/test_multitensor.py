@@ -396,14 +396,18 @@ class TestMultiTensor(unittest.TestCase):
     if m.conv1.weight.grad.lazydata.metadata is not None: sharded_metadata = m.conv1.weight.grad.lazydata.metadata.name
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
-    if single_metadata is not None: self.assertIsNotNone(sharded_metadata, "Metadata lost after sharding"), self.assertEqual(single_metadata, sharded_metadata, "Metadata name changed after sharding")
+    if single_metadata is not None:
+      self.assertIsNotNone(sharded_metadata, "Metadata lost after sharding")
+      self.assertEqual(single_metadata, sharded_metadata, "Metadata name changed after sharding")
 
   def test_metadata_with_sharded_tensors(self):
     if TRACEMETA < 1: self.skipTest("Test requires TRACEMETA >= 1")
     c = (Tensor.ones(10, 10) + Tensor.ones(10, 10)).relu()
     orig_meta = c.lazydata.metadata.name
     c_sharded = c.shard(devices_2, axis=0)
-    if getenv("DEBUG", 0) >= 2: print(f"Original metadata: {orig_meta}, Sharded metadata: {c_sharded.lazydata.metadata.name if c_sharded.lazydata.metadata else 'None'}")
+    if getenv("DEBUG", 0) >= 2:
+      sharded_meta = c_sharded.lazydata.metadata.name if c_sharded.lazydata.metadata else 'None'
+      print(f"Original metadata: {orig_meta}, Sharded metadata: {sharded_meta}")
     self.assertIsNotNone(c_sharded.lazydata.metadata, "Metadata lost after sharding")
     self.assertEqual(orig_meta, c_sharded.lazydata.metadata.name)
     for i, shard in enumerate(c_sharded.lazydata.src):
