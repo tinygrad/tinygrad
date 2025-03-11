@@ -281,6 +281,12 @@ for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
   torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
+def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+for i,pre in enumerate(["", "bi", "tri"]):
+  torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
+  torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
+  torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
+
 @torch.library.impl("aten::cumsum", "privateuseone")
 def cumsum(self, dim):
   from tinygrad.ops import Ops
