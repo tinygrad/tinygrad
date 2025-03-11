@@ -1110,8 +1110,13 @@ class Tensor(SimpleMathTrait):
       match index:
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
-          if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          if dtypes.is_int(index.dtype):
+            index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          elif index.dtype == dtypes.bool:
+            if index.shape != (size,): raise IndexError(f"Boolean index has incorrect shape: {index.shape} vs {size}")
+            index = index.nonzero().squeeze(1)
+          else:
+            raise IndexError(f"only int and bool tensor indexing is supported, got {index.dtype}")
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -2588,6 +2593,42 @@ class Tensor(SimpleMathTrait):
       x = x.scatter(dim, idx, mask_value)
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
+
+  def nonzero(self):
+    # Torch compatibility for empty tensors
+    if self.numel() == 0:
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, )
+    if self.ndim == 0:
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
+
+    flat_t = self.reshape(-1)
+    # Create a tensor of 1’s for nonzero elements and 0’s otherwise.
+    if flat_t.dtype == dtypes.bool:
+      m = flat_t.cast(dtype=dtypes.int32)
+    else:
+      m = (flat_t != 0).cast(dtype=dtypes.int32)
+    # Compute the cumulative sum along the flattened dimension.
+    cumsum = m.cumsum(0)
+    # The last element of cumsum is the count of nonzero items.
+    nonzero_count = cumsum[-1].item()
+    if nonzero_count == 0:
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
+    # Build targets from 1 to nonzero_count.
+    targets = Tensor.arange(1, nonzero_count + 1, device=self.device, dtype=dtypes.int32)
+    # Expand and compute absolute differences:
+    #   cumsum: shape (n,) -> (n,1)
+    #   targets: shape (nonzero_count,) -> (1, nonzero_count)
+    diff = (cumsum.unsqueeze(1) - targets.unsqueeze(0)).abs()
+    # For each target, find the index where the difference is minimized.
+    indices = diff.argmin(axis=0)  # shape (nonzero_count,)
+    # Convert the linear indices into coordinates.
+    pos = indices
+    coords = []
+    for dim_size in self.shape[::-1]:
+      coords.append(pos % dim_size)
+      pos = pos // dim_size
+    coords = coords[::-1]  # restore original order
+    return coords[0].stack(*coords[1:],dim=-1)
 
   # ***** unary ops *****
 
