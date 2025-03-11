@@ -16,7 +16,7 @@ from tinygrad.nn.datasets import cifar
 import torch.nn.functional as F
 
 from icecream import ic, install
-ic.configureOutput(includeContext=True)
+# ic.configureOutput(includeContext=True)
 install()
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
@@ -29,7 +29,7 @@ assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven mu
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
-device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("mps")
+device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("cpu")
 
 def sequential(ll, x):
   return functools.reduce(lambda x,f: f(x), ll, x)
@@ -279,28 +279,30 @@ def train_cifar():
     return X
 
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
-  def make_square_mask(shape, mask_size) -> torch.Tensor:
+  def make_square_mask(shape, mask_size, device) -> torch.Tensor:
     BS, _, H, W = shape
     low_x = torch.randint(low=0, high=W-mask_size, size=(BS,)).reshape(BS,1,1,1)
     low_y = torch.randint(low=0, high=H-mask_size, size=(BS,)).reshape(BS,1,1,1)
     idx_x = torch.arange(W, dtype=torch.int32).reshape((1,1,1,W))
     idx_y = torch.arange(H, dtype=torch.int32).reshape((1,1,H,1))
-    return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
+    mask = (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
+    ret = mask.to(device)
+    return ret
 
   def random_crop(X:torch.Tensor, crop_size=32):
-    mask = make_square_mask(X.shape, crop_size)
+    mask = make_square_mask(X.shape, crop_size, X.device)
     mask = mask.expand((-1,3,-1,-1))
     X_cropped = X[mask] #torch.Tensor(X.numpy()[mask.numpy()])
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
   def cutmix(X:torch.Tensor, Y:torch.Tensor, mask_size=3):
     # fill the square with randomly selected images from the same batch
-    mask = make_square_mask(X.shape, mask_size)
+    mask = make_square_mask(X.shape, mask_size, X.device)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = X[order] #torch.Tensor(X[order], device=X.device, dtype=X.dtype)
-    Y_patch = Y[order] # torch.Tensor(Y[order], device=Y.device, dtype=Y.dtype)
-    X_cutmix = mask.where(X_patch, X)
+    X_patch = X[order].to(device=X.device, dtype=X.dtype)
+    Y_patch = Y[order].to(device=Y.device, dtype=Y.dtype)
+    X_cutmix = torch.where(mask, X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
