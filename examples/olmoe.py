@@ -6,6 +6,29 @@ from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
 from extra.models.llama import Transformer, Variable, convert_from_huggingface
 
+# working vectorized bitonic sorter
+# def vectorized_cond_swap(t:Tensor, idx:Tensor, cond:Tensor, i:Tensor, j:Tensor):
+#   new_perm = (i < j).where(cond.where(j, i), cond[j].where(j, i))
+#   return t[new_perm], idx[new_perm]
+#
+# def bitonic_sort(t: Tensor) -> Tensor:
+#   k, numel = 2, t.numel()
+#   idx = Tensor.arange(numel)
+#   indices = Tensor.arange(numel)
+#   # TODO must be power of 2
+#   while k <= numel:
+#     j = k // 2
+#     while j > 0:
+#       ixj = indices ^ j
+#       valid = indices < ixj
+#       cond_up = ((indices & k) == 0) & (t < t[ixj])
+#       cond_down = ((indices & k) != 0) & (t > t[ixj])
+#       swap_cond = valid & (cond_up | cond_down)
+#       t, idx = vectorized_cond_swap(t, idx, swap_cond, indices, ixj)
+#       j //= 2
+#     k *= 2
+#   return t, idx
+
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
