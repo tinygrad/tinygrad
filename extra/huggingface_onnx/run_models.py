@@ -93,6 +93,7 @@ if __name__ == "__main__":
   if args.check_ops or args.validate:
     with open(args.input, 'r') as f:
       data = yaml.safe_load(f)
+      assert all(repo["download_path"] is not None for repo in data["repositories"].values()), "please run `download_models.py` for this yaml"
       model_paths = {
         model_id + "/" + model["file"]: (Path(repo["download_path"]), Path(model["file"]))
         for model_id, repo in data["repositories"].items()
