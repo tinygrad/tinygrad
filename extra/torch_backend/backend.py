@@ -471,6 +471,18 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
+import weakref
+_torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
+def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
+def get_real_tinygrad_buffers():
+  res = set()
+  for mod in _torch_modules_with_buffers:
+    for _,b in mod.named_buffers(recurse=False):
+      if b is not None and str(b.device) == "tiny":
+        res.add(unwrap(b))
+  return res
+torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
+
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
   tinygrad_tensors = []
   for param_group in optimizer.param_groups:
@@ -481,6 +493,7 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
     for _, value in state_dict.items():
       if torch.is_tensor(value): tinygrad_tensors.append(value)
   real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device).startswith("tiny")]
+  real_tinygrad_tensors += get_real_tinygrad_buffers()
   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
 _optimizer_init = torch.optim.Optimizer.__init__
