@@ -7,11 +7,13 @@ class AM_IP:
   def __init__(self, adev): self.adev = adev
   def init(self): raise NotImplementedError("IP block init must be implemeted")
   def fini(self): pass
+  def set_clockgating_state(self): pass
 
 class AM_SOC21(AM_IP):
   def init(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
+  def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
 
 class AM_GMC(AM_IP):
   def __init__(self, adev):
@@ -34,7 +36,7 @@ class AM_GMC(AM_IP):
 
   def init(self): self.init_hub("MM")
 
-  def flush_hdp(self): self.adev.regBIF_BX_PF0_GPU_HDP_FLUSH_REQ.write(0xffffffff)
+  def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 

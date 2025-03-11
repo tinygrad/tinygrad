@@ -50,6 +50,10 @@ backend_test.exclude('test_qlinearmatmul_3D_int8_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
 backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 
+# BUG: we don't match ORT here due to some div inaccuracy with floats
+backend_test.exclude('test_dynamicquantizelinear_cpu')
+backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
+
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
   backend_test.exclude('float64')
@@ -108,9 +112,6 @@ backend_test.exclude('string')
 backend_test.exclude('test_strnorm_*')
 backend_test.exclude('test_regex_*')
 
-# no quantize
-backend_test.exclude('test_dynamicquantizelinear_*')
-
 # no rnn
 backend_test.exclude('test_gru_*')
 backend_test.exclude('test_rnn_*')
@@ -145,7 +146,6 @@ backend_test.exclude('test_sequence_*')
 backend_test.exclude('test_nonmaxsuppression_*')
 backend_test.exclude('test_reversesequence_*')
 backend_test.exclude('test_roialign_*')
-backend_test.exclude('test_top_k_*')
 backend_test.exclude('test_tfidfvectorizer_*')
 backend_test.exclude('test_stft_*')
 backend_test.exclude('test_melweightmatrix_*')

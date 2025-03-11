@@ -171,6 +171,7 @@ generate_amd() {
     extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
     extra/hip_gpu_driver/gc_11_0_0_offset.h \
     extra/hip_gpu_driver/gc_10_3_0_offset.h \
+    extra/hip_gpu_driver/sienna_cichlid_ip_offset.h \
     --clang-args="-I/opt/rocm/include -x c++" \
     -o $BASE/amd_gpu.py
 
@@ -353,6 +354,12 @@ generate_am() {
     extra/amdpci/headers/amdgpu_smu.h \
     -o $BASE/am/smu_v13_0_0.py
   fixup $BASE/am/smu_v13_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/hdp_6_0_0_offset.h \
+    extra/amdpci/headers/hdp_6_0_0_sh_mask.h \
+    -o $BASE/am/hdp_6_0_0.py
+  fixup $BASE/am/hdp_6_0_0.py
 }
 
 generate_webgpu() {

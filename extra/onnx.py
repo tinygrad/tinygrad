@@ -82,7 +82,7 @@ class OnnxNode:
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
   "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
-  "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+  "CumSum": (1,), "TopK": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
   "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
@@ -195,6 +195,7 @@ def get_onnx_ops():
     return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
   def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
+    if auto_pad == "VALID": return [0]*(len(k_)*2)
     i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
@@ -521,6 +522,10 @@ def get_onnx_ops():
     return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
+  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
+    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
+    return val, idx.cast(dtypes.int64)
+
   # ***** Neural Network Ops *****
   def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
                         training_mode:int=0, spatial=1, is_test=0):
@@ -673,7 +678,8 @@ def get_onnx_ops():
       x_sh = list(x.shape)
       ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
       if indices.ndim > 1: indices = indices.flatten()
-      indices = [_cached_to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in _cached_to_python_const(indices)]
+      indices = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
+      indices = [x_sh[axis]+x if x<0 else x for x in indices]
       args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices] # type: ignore
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
     # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
@@ -724,6 +730,14 @@ def get_onnx_ops():
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
 
+  def DynamicQuantizeLinear(x: Tensor):
+    # only support uint8
+    qmin, qmax = dtypes.min(dtypes.uint8), dtypes.max(dtypes.uint8)
+    scale = (x.max().maximum(0) + ((-x).max()).maximum(0)) / (qmax - qmin)
+    zero_point = _clamp_cast((qmin - x.min() / scale).round(), dtypes.uint8)
+    y = _clamp_cast((x / scale).round() + zero_point, dtypes.uint8)
+    return y, scale, zero_point
+
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
@@ -738,6 +752,9 @@ def get_onnx_ops():
 
   def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
     return _qlinearop_float(Tensor.add, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
+
+  def QLinearMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+    return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
   def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
     assert channels_last == 0, "unsure what this does"

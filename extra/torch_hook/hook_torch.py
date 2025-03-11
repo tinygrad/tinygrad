@@ -15,7 +15,7 @@ import extra.torch_hook.hook_cuda as hook_cuda
 TINY_MIRROR = getenv("TINY_MIRROR", 1) # should mirror aten ops to tiny backend
 RUN_ONLY = getenv("RUN_ONLY", -1) # run only a specific aten call
 REALIZE = getenv("REALIZE", 1) # realize and wait each aten call
-WRAP_TINY = getenv("WRAP_TINY", 1) # reuse cuda tensors
+WRAP_TINY = getenv("WRAP_TINY", TINY_MIRROR) # reuse cuda tensors
 FULL_KERN_NAME = getenv("FULL_KERN_NAME", 0) # print full kernel name
 
 print("importing torch...")
@@ -110,8 +110,9 @@ class DispatchLog(TorchDispatchMode):
       # TODO: this is a hack, any way to do this better?
       if REALIZE:
         out_addr = 0x0
-        if torch.is_tensor(tiny_x):
-          tt = tiny_torch.unwrap(tiny_x).realize()
+        _ = tiny_x.cpu().numpy()
+        if torch.is_tensor(tiny_x) and tiny_x.device.type == "tiny":
+          tt = tiny_torch.unwrap(tiny_x)
           try: out_addr = tt.lazydata.buffer._buf.value
           except Exception: pass
         tiny_events = hook_cuda.collect_events(clear=True)
