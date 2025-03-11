@@ -56,6 +56,7 @@ if __name__ == "__main__":
 
   if GPUS > 1:
     if DDP:
+      # TODO: model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
       model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[RANK])
     else:
       model = torch.nn.DataParallel(model, range(GPUS))
