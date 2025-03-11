@@ -1068,6 +1068,36 @@ class TestOps(unittest.TestCase):
     np.testing.assert_equal(indices.numpy(), [2, 4, 6])
     self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
 
+  def test_nonzero(self):
+    # test the Tensor.nonzero() method
+    a = Tensor([[1, 0, 0], [0, 2, 0], [0, 0, 3]],requires_grad=True)
+    b = Tensor([[5,0,0], [0,6,0], [0,0,7]],requires_grad=True)
+    np.testing.assert_equal(a.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+    np.testing.assert_equal(b.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+
+    helper_test_op([(10)], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
+    helper_test_op([(10,20,30)], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
+
+    # test with float values
+    a = Tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 3.0]],requires_grad=True)
+    b = Tensor([[5.0,0.0,0.0], [0.0,6.0,0.0], [0.0,0.0,7.0]],requires_grad=True)
+
+    np.testing.assert_equal(a.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+    np.testing.assert_equal(b.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+
+  def test_nonzero_empty(self):
+    # test the Tensor.nonzero() method
+    a = Tensor([],requires_grad=True)
+    np.testing.assert_equal(a.nonzero().numpy(), [])
+    helper_test_op([()], lambda x: x.nonzero().type(torch.int32), lambda x: x.nonzero(), forward_only=True)
+
+  def test_nonzero_2d(self):
+    # test the Tensor.nonzero() method
+    a = Tensor([[1, 0, 0], [0, 2, 0], [0, 0, 3]],requires_grad=True)
+    b = Tensor([[5,0,0], [0,6,0], [0,0,7]],requires_grad=True)
+    np.testing.assert_equal(a.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+    np.testing.assert_equal(b.nonzero().numpy(), [[0,0], [1,1], [2,2]])
+
   def test_einsum(self):
     # matrix transpose
     helper_test_op([(150,150)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
