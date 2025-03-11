@@ -20,7 +20,6 @@ def download_models(yaml_file: Path, download_dir: Path):
   with open(yaml_file, 'w') as f: yaml.dump(metadata, f, sort_keys=False)
   print("Download completed according to YAML file.")
 
-
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Download top Huggingface ONNX repositories")
   parser.add_argument("input", type=str, help="Input YAML file")

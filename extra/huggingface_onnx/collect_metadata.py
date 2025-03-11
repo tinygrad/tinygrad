@@ -67,7 +67,6 @@ def get_metadata(repos:list[str]) -> dict:
   repos_metadata['created_at'] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
   return repos_metadata
 
-
 if __name__ == "__main__":
   sort = "downloads" # recent 30 days downloads
   huggingface_onnx_dir = Path(__file__).parent
