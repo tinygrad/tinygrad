@@ -2618,15 +2618,13 @@ class Tensor(SimpleMathTrait):
     # Expand and compute absolute differences:
     #   cumsum: shape (n,) -> (n,1)
     #   targets: shape (nonzero_count,) -> (1, nonzero_count)
-    diff = (cumsum.unsqueeze(1) - targets.unsqueeze(0)).abs()
     # For each target, find the index where the difference is minimized.
-    indices = diff.argmin(axis=0)  # shape (nonzero_count,)
+    idxs = (cumsum.unsqueeze(1) - targets.unsqueeze(0)).abs().argmin(axis=0)
     # Convert the linear indices into coordinates.
-    pos = indices
     coords = []
     for dim_size in self.shape[::-1]:
-      coords.append(pos % dim_size)
-      pos = pos // dim_size
+      coords.append(idxs % dim_size)
+      idxs = idxs // dim_size
     coords = coords[::-1]  # restore original order
     return coords[0].stack(*coords[1:],dim=-1)
 
