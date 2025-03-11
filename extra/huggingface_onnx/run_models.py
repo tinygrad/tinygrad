@@ -1,8 +1,15 @@
-import onnx, yaml, tempfile, time, collections, pprint, argparse
+import onnx, yaml, tempfile, time, collections, pprint, argparse, json
 from pathlib import Path
 from extra.onnx import OnnxRunner, get_onnx_ops
 from extra.onnx_helpers import validate, get_example_inputs
-from examples.huggingface_onnx_download import get_config
+
+def get_config(root_path: Path):
+  ret = {}
+  for path in root_path.rglob("*config.json"):
+    config = json.load(path.open())
+    if isinstance(config, dict):
+      ret.update(config)
+  return ret
 
 def run_huggingface_validate(onnx_model_path, config, rtol, atol):
   onnx_model = onnx.load(onnx_model_path)
@@ -65,6 +72,7 @@ def debug_run(model_path, truncate, config, rtol, atol):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Huggingface ONNX Model Validator and Ops Checker")
+  parser.add_argument("input", type=str, required=True, help="Input YAML file")
   parser.add_argument("--check_ops", action="store_true", default=False,
                       help="Check support for ONNX operations in models from the YAML file")
   parser.add_argument("--validate", action="store_true", default=False,
@@ -75,7 +83,6 @@ if __name__ == "__main__":
                       provide onnx model path (e.g. "minishlab/potion-base-8M/onnx/model.onnx") to validate only that one model
                       """)
   parser.add_argument("--truncate", type=int, default=-1, help="Truncate the ONNX model so intermediate results can be validated")
-  parser.add_argument("--yaml", type=str, default="huggingface_repos.yaml", help="Specify the YAML file to use")
   args = parser.parse_args()
 
   if not (args.check_ops or args.validate or args.debug):
@@ -84,10 +91,10 @@ if __name__ == "__main__":
     parser.error("--truncate and --debug should be used together for debugging")
 
   if args.check_ops or args.validate:
-    with open(args.yaml, 'r') as f:
+    with open(args.input, 'r') as f:
       data = yaml.safe_load(f)
       model_paths = {
-        model_id + "/" + model["file"]: (Path(repo["path"]), Path(model["file"]))
+        model_id + "/" + model["file"]: (Path(repo["download_path"]), Path(model["file"]))
         for model_id, repo in data["repositories"].items()
         for model in repo["files"]
         if model["file"].endswith(".onnx")
@@ -100,14 +107,15 @@ if __name__ == "__main__":
       validate_repos(model_paths)
 
   if args.debug:
-    from examples.huggingface_onnx_download import download_repo_onnx_models, download_repo_configs
+    from huggingface_hub import snapshot_download
+    download_dir = Path(__file__).parent / "models"
     path:list[str] = args.debug.split("/")
     if len(path) == 2:
       # repo id
       # validates all onnx models inside repo
       repo_id = "/".join(path)
-      root_path = download_repo_onnx_models(repo_id)
-      download_repo_configs(repo_id)
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", ".onnx_data"], cache_dir=download_dir))
+      snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
       config = get_config(root_path)
       for onnx_model in root_path.rglob("*.onnx"):
         rtol, atol = get_tolerances(onnx_model.name)
@@ -119,8 +127,8 @@ if __name__ == "__main__":
       onnx_model = path[-1]
       assert path[-1].endswith(".onnx")
       repo_id, relative_path = "/".join(path[:2]), "/".join(path[2:])
-      root_path = download_repo_onnx_models(repo_id, specific_model=relative_path)
-      download_repo_configs(repo_id)
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=[relative_path], cache_dir=download_dir))
+      snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
       config = get_config(root_path)
       rtol, atol = get_tolerances(onnx_model)
       print(f"validating {relative_path} with truncate={args.truncate}, {rtol=}, {atol=}")

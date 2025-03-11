@@ -34,6 +34,8 @@ extra/datasets/open-images-v6-mlperf
 extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
+extra/huggingface_onnx/models/*
+extra/huggingface_onnx/*.yaml
 extra/weights
 venv
 examples/**/net.*[js,json]
@@ -43,7 +45,6 @@ package.json
 package-lock.json
 temp
 *.csv
-huggingface_repos.yaml
 .coverage
 coverage.xml
 htmlcov
