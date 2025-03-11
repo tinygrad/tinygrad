@@ -298,8 +298,8 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = torch.Tensor(X[order], device=X.device, dtype=X.dtype)
-    Y_patch = torch.Tensor(Y[order], device=Y.device, dtype=Y.dtype)
+    X_patch = X[order] #torch.Tensor(X[order], device=X.device, dtype=X.dtype)
+    Y_patch = Y[order] # torch.Tensor(Y[order], device=Y.device, dtype=Y.dtype)
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -349,7 +349,6 @@ def train_cifar():
         net_ema_param.requires_grad = False
         net_ema_param.assign(net_param.numpy())
 
-    # @TinyJit
     def update(self, net, decay):
       # TODO with Tensor.no_grad()
       Tensor.no_grad = True
@@ -391,13 +390,6 @@ def train_cifar():
   X_train, Y_train = X_train.to(torch.float), Y_train.to(torch.float) # used to be default_float
   X_test, Y_test = X_test.to(torch.float), Y_test.to(torch.float)
 
-  # # does not work on torch!
-  # if len(GPUS) > 1:
-  #   for k, x in model.state_dict().items():
-  #     if not getenv('SYNCBN') and ('running_mean' in k or 'running_var' in k):
-  #       x.shard_(GPUS, axis=0)
-  #     else:
-  #       x.to_(GPUS)
   model.to(device)
   model.train()
 
@@ -420,7 +412,6 @@ def train_cifar():
   pct_start = hyp['opt']['percent_start']
   lr_sched_bias     = OneCycleLR(opt_bias, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS, anneal_strategy='linear', cycle_momentum=False)
   lr_sched_non_bias = OneCycleLR(opt_non_bias,  max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS, anneal_strategy='linear', cycle_momentum=False)
-
 
   train_loss_fn = nn.CrossEntropyLoss(reduction='none', label_smoothing=hyp['opt']['label_smoothing'])
   #@torch.compile
@@ -460,10 +451,6 @@ def train_cifar():
       losses = []
       losses_ema = []
       for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
-        # if len(GPUS) > 1:
-        #   Xt.shard_(GPUS, axis=0)
-        #   Yt.shard_(GPUS, axis=0)
-
         with torch.no_grad():
           correct, loss = eval_step(model, Xt, Yt) # eval_step_jitted
           losses.append(loss.detach().cpu().numpy().tolist())
@@ -485,12 +472,9 @@ def train_cifar():
     if STEPS == 0 or i == STEPS: break
 
     X, Y = next(batcher)
-    # if len(GPUS) > 1:
-    #   X.shard_(GPUS, axis=0)
-    #   Y.shard_(GPUS, axis=0)
-
     loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y) # train_step_jitted
     et = time.monotonic()
+
     # EMA for network weights
     if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
       if model_ema is None:

@@ -477,13 +477,10 @@ def get_real_tinygrad_buffers():
 torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
 
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
-  if getenv("DEBUG")>=2: print("Starting realize_optimizer_step")
   tinygrad_tensors = []
-  for i, param_group in enumerate(optimizer.param_groups):
-    if getenv("DEBUG")>=2: print(f"Processing param group {i} with {len(param_group['params'])} params")
-    for j, param in enumerate(param_group["params"]):
+  for param_group in optimizer.param_groups:
+    for param in param_group["params"]:
       if param is None: continue
-      if getenv("DEBUG")>=2: print(f"  - Adding param {j}: shape {param.shape} to tinygrad_tensors")
       tinygrad_tensors.append(param.data)
   for state_dict in optimizer.state.values():
     for _, value in state_dict.items():
