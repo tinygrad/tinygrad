@@ -206,7 +206,9 @@ class SpeedyResNet(nn.Module):
   def forward(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    return self._forward(x) if training else (self._forward(x) + self._forward(x[..., ::-1])) / 2.
+    # TODO: remove flip because it returns a new copy of the tensor
+    # WE are using flip becuase negative indexing is only supported in tingrad, not pytorch
+    return self._forward(x) if training else (self._forward(x) + self._forward(torch.flip(x, (-1,)))) / 2.
 
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
@@ -464,12 +466,12 @@ def train_cifar():
 
         with torch.no_grad():
           correct, loss = eval_step(model, Xt, Yt) # eval_step_jitted
-          losses.append(loss.numpy().tolist())
-          corrects.extend(correct.numpy().tolist())
+          losses.append(loss.detach().cpu().numpy().tolist())
+          corrects.extend(correct.detach().cpu().numpy().tolist())
           if model_ema:
             correct_ema, loss_ema = eval_step(model_ema.net_ema, Xt, Yt) # eval_step_ema_jitted
-            losses_ema.append(loss_ema.numpy().tolist())
-            corrects_ema.extend(correct_ema.numpy().tolist())
+            losses_ema.append(loss_ema.detach().cpu().numpy().tolist())
+            corrects_ema.extend(correct_ema.detach().cpu().numpy().tolist())
 
       # collect accuracy across ranks
       correct_sum, correct_len = sum(corrects), len(corrects)
