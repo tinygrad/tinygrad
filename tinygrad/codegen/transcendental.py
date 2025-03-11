@@ -78,10 +78,10 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   intermediate_dtype = dtypes.float32.vec(d.dtype.count) if d.dtype.base == dtypes.float16 else d.dtype
 
   f, e = frexp(d)
-  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint64.vec(d.dtype.count))
+  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast_vec(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
-  i = shr(e.cast(dtypes.uint64.vec(d.dtype.count)), 5)
-  e = e.cast(dtypes.int32.vec(d.dtype.count)) & 31
+  i = shr(e.cast_vec(dtypes.uint64), 5)
+  e = e.cast_vec(dtypes.int32) & 31
   offset = 32 - e
 
   def _take(an:UOp, offset:int, count:int=0) -> UOp:
@@ -104,7 +104,7 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
 
   # round quotient to nearest
-  q = shr(p, 62).cast(dtypes.int32.vec(p.dtype.count))
+  q = shr(p, 62).cast_vec(dtypes.int32)
   p = p & 0x3fffffffffffffff
   r = (p.cast(intermediate_dtype) * (3.4061215800865545e-19)).cast(d.dtype)
 
