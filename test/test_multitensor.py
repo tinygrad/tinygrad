@@ -400,27 +400,20 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_metadata_with_sharded_tensors(self):
     if TRACEMETA < 1: self.skipTest("Test requires TRACEMETA >= 1")
-    a = Tensor.ones(10, 10)
-    b = Tensor.ones(10, 10)
-    c = (a + b).relu()
-    self.assertIsNotNone(c.lazydata.metadata, "Metadata should be tracked for operations")
+    c = (Tensor.ones(10, 10) + Tensor.ones(10, 10)).relu()
     orig_meta = c.lazydata.metadata.name
     c_sharded = c.shard(devices_2, axis=0)
-    if getenv("DEBUG", 0) >= 2:
-      print(f"Original metadata: {orig_meta}")
-      print(f"Sharded metadata: {c_sharded.lazydata.metadata.name if c_sharded.lazydata.metadata else 'None'}")
+    if getenv("DEBUG", 0) >= 2: print(f"Original metadata: {orig_meta}, Sharded metadata: {c_sharded.lazydata.metadata.name if c_sharded.lazydata.metadata else 'None'}")
     self.assertIsNotNone(c_sharded.lazydata.metadata, "Metadata lost after sharding")
-    sharded_metadata_name = c_sharded.lazydata.metadata.name
-    self.assertEqual(orig_meta, sharded_metadata_name, f"Metadata changed from {orig_meta} to {sharded_metadata_name} after sharding")
-    d_sharded = c_sharded * 2
-    d = d_sharded.realize()
+    self.assertEqual(orig_meta, c_sharded.lazydata.metadata.name)
+    for i, shard in enumerate(c_sharded.lazydata.src):
+      self.assertIsNotNone(shard.metadata, f"Metadata lost on individual shard {i}")
+      self.assertEqual(orig_meta, shard.metadata.name)
+    d = (c_sharded * 2).realize()
     self.assertIsNotNone(d.lazydata.metadata, "Metadata lost after operation on sharded tensor")
-    if getenv("DEBUG", 0) >= 2: print(f"Final tensor metadata: {d.lazydata.metadata.name}")
-    schedule = d.schedule()
-    if getenv("DEBUG", 0) >= 2: print(f"Schedule length: {len(schedule)}")
+    if getenv("DEBUG", 0) >= 2: print(f"Final tensor metadata: {d.lazydata.metadata.name}, Schedule length: {len(d.schedule())}")
     e = Tensor.ones(10, 10).relu()
-    e_sharded = e.shard(devices_2, axis=0)
-    self.assertEqual(e.lazydata.metadata.name, e_sharded.lazydata.metadata.name, "Metadata not preserved in non-realized tensor")
+    self.assertEqual(e.lazydata.metadata.name, e.shard(devices_2, axis=0).lazydata.metadata.name)
 
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8

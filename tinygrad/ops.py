@@ -440,6 +440,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def real_lbs(self): return [lb for lb,r in zip(self.src, self.real) if r]
 
   def shard(self, devices:tuple[str, ...], axis:Optional[int]=None) -> UOp:
+    original_metadata = all_metadata.get(self, None)
     if axis is None: lbs = [self] * len(devices)
     else:
       if self.shape[axis] % len(devices) != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {len(devices)=}")
@@ -448,12 +449,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       sizes = [max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))]
       lbs = []
       for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
-        lbs.append(self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape))))
+        shard = self.shrink(tuple((0,s) if i != axis else (off,off+sz) for i,s in enumerate(self.shape)))
+        if original_metadata is not None: all_metadata[shard] = original_metadata
+        lbs.append(shard)
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(lbs, devices)]
-    original_metadata = all_metadata.get(self, None)
-    multi_op = UOp.multi(*[lb.contiguous() for lb in sharded_lbs], axis=axis)
-    if original_metadata is not None: all_metadata[multi_op] = original_metadata
-    return multi_op
+    if original_metadata is not None:
+      for lb in sharded_lbs: all_metadata[lb] = original_metadata
+    contiguous_lbs = [lb.contiguous() for lb in sharded_lbs]
+    if original_metadata is not None:
+      for lb in contiguous_lbs: all_metadata[lb] = original_metadata
+    ret = UOp.multi(*contiguous_lbs, axis=axis)
+    if original_metadata is not None: all_metadata[ret] = original_metadata
+    return ret
 
   # *** from LazyBuffer ***
 
