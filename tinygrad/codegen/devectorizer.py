@@ -84,7 +84,13 @@ def gep_on_store(gep:UOp, st:UOp):
   new_arg = tuple(x[1] for x in sorted(a.items()))
   return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
 
-def fix_unfoldable_image_load(load:UOp, idx:UOp):
+def fix_unfoldable_image_load(buf: UOp, vec:UOp, load:UOp, idx:UOp):
+  if not isinstance(buf.dtype, ImageDType): return None
+  if vec.dtype != dtypes.int.vec(3):
+    if load.dtype.count != 1: return None  # already good
+    # if it's a single load that didn't go through expand_index, this hits
+    vec = UOp(Ops.VECTORIZE, dtypes.int.vec(3), ((vec // 4) % buf.dtype.shape[1], (vec // (4*buf.dtype.shape[1])), vec%4))
+    idx = idx.replace(dtype=buf.dtype.base, src=(idx.src[0], vec)+idx.src[2:])
   idx_replace = idx.replace(dtype=idx.dtype.vec(4), src=(idx.src[0], idx.src[1].gep((0,1)))+idx.src[2:])
   vec_load = load.replace(dtype=load.dtype.vec(4), src=(idx_replace,)+load.src[1:])
   id4 = idx.src[1].gep(2)
@@ -105,7 +111,7 @@ load_store_folding = PatternMatcher([
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
   # fixup unfoldable image loads
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(dtype=dtypes.int.vec(3))), allow_any_len=True, name="idx"),),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(name="buf"), UPat(name="vec")), allow_any_len=True, name="idx"),),
         allow_any_len=True, name="load"), fix_unfoldable_image_load),
 ])
 
