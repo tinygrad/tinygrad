@@ -423,7 +423,7 @@ def batch_cutmix(inputs, targets, patch_size):
     batch_permuted = torch.randperm(inputs.shape[0], device=device)
     cutmix_batch_mask = make_random_square_masks(inputs, patch_size)
     if cutmix_batch_mask is None:
-        return inputs, targets # if the mask is None, then that's because the patch size was set to 0 and we will not be using cutmix today.
+      return inputs, targets # if the mask is None, then that's because the patch size was set to 0 and we will not be using cutmix today.
     # We draw other samples from inside of the same batch
     cutmix_batch = torch.where(cutmix_batch_mask, torch.index_select(inputs, 0, batch_permuted), inputs)
     cutmix_targets = torch.index_select(targets, 0, batch_permuted)
@@ -501,10 +501,10 @@ def init_split_parameter_dictionaries(network):
 
   for name, p in network.named_parameters():
     if p.requires_grad:
-        if 'bias' in name:
-          params_bias['params'].append(p)
-        else:
-          params_non_bias['params'].append(p)
+      if 'bias' in name:
+        params_bias['params'].append(p)
+      else:
+        params_non_bias['params'].append(p)
   return params_non_bias, params_bias
 
 ## Hey look, it's the soft-targets/label-smoothed loss! Native to PyTorch. Now, _that_ is pretty cool, and simplifies things a lot, to boot! :D :)
@@ -536,155 +536,155 @@ print_training_details(logging_columns_list, column_heads_only=True) ## print ou
 ########################################
 
 def main():
-    # Initializing constants for the whole run.
-    net_ema = None ## Reset any existing network emas, we want to have _something_ to check for existence so we can initialize the EMA right from where the network is during training
-                   ## (as opposed to initializing the network_ema from the randomly-initialized starter network, then forcing it to play catch-up all of a sudden in the last several epochs)
+  # Initializing constants for the whole run.
+  net_ema = None ## Reset any existing network emas, we want to have _something_ to check for existence so we can initialize the EMA right from where the network is during training
+                  ## (as opposed to initializing the network_ema from the randomly-initialized starter network, then forcing it to play catch-up all of a sudden in the last several epochs)
 
-    total_time_seconds = 0.
-    current_steps = 0.
+  total_time_seconds = 0.
+  current_steps = 0.
 
-    # TODO: Doesn't currently account for partial epochs really (since we're not doing "real" epochs across the whole batchsize)....
-    num_steps_per_epoch      = len(data['train']['images']) // batchsize
-    total_train_steps        = math.ceil(num_steps_per_epoch * hyp['misc']['train_epochs'])
-    ema_epoch_start          = math.floor(hyp['misc']['train_epochs']) - hyp['misc']['ema']['epochs']
+  # TODO: Doesn't currently account for partial epochs really (since we're not doing "real" epochs across the whole batchsize)....
+  num_steps_per_epoch      = len(data['train']['images']) // batchsize
+  total_train_steps        = math.ceil(num_steps_per_epoch * hyp['misc']['train_epochs'])
+  ema_epoch_start          = math.floor(hyp['misc']['train_epochs']) - hyp['misc']['ema']['epochs']
 
-    ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
-    ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
-    ## are intaking fewer samples of our distribution-over-time, with a higher individual weight each. This can be good or bad depending upon what we want.
-    projected_ema_decay_val  = hyp['misc']['ema']['decay_base'] ** hyp['misc']['ema']['every_n_steps']
+  ## I believe this wasn't logged, but the EMA update power is adjusted by being raised to the power of the number of "every n" steps
+  ## to somewhat accomodate for whatever the expected information intake rate is. The tradeoff I believe, though, is that this is to some degree noisier as we
+  ## are intaking fewer samples of our distribution-over-time, with a higher individual weight each. This can be good or bad depending upon what we want.
+  projected_ema_decay_val  = hyp['misc']['ema']['decay_base'] ** hyp['misc']['ema']['every_n_steps']
 
-    # Adjust pct_start based upon how many epochs we need to finetune the ema at a low lr for
-    pct_start = hyp['opt']['percent_start'] #* (total_train_steps/(total_train_steps - num_low_lr_steps_for_ema))
+  # Adjust pct_start based upon how many epochs we need to finetune the ema at a low lr for
+  pct_start = hyp['opt']['percent_start'] #* (total_train_steps/(total_train_steps - num_low_lr_steps_for_ema))
 
-    # Get network
-    net = make_net()
+  # Get network
+  net = make_net()
 
-    ## Stowing the creation of these into a helper function to make things a bit more readable....
-    non_bias_params, bias_params = init_split_parameter_dictionaries(net)
+  ## Stowing the creation of these into a helper function to make things a bit more readable....
+  non_bias_params, bias_params = init_split_parameter_dictionaries(net)
 
-    # One optimizer for the regular network, and one for the biases. This allows us to use the superconvergence onecycle training policy for our networks....
-    opt = torch.optim.SGD(**non_bias_params)
-    opt_bias = torch.optim.SGD(**bias_params)
+  # One optimizer for the regular network, and one for the biases. This allows us to use the superconvergence onecycle training policy for our networks....
+  opt = torch.optim.SGD(**non_bias_params)
+  opt_bias = torch.optim.SGD(**bias_params)
 
-    ## Not the most intuitive, but this basically takes us from ~0 to max_lr at the point pct_start, then down to .1 * max_lr at the end (since 1e16 * 1e-15 = .1 --
-    ##   This quirk is because the final lr value is calculated from the starting lr value and not from the maximum lr value set during training)
-    initial_div_factor = 1e16 # basically to make the initial lr ~0 or so :D
-    final_lr_ratio = .07 # Actually pretty important, apparently!
-    lr_sched      = torch.optim.lr_scheduler.OneCycleLR(opt,  max_lr=non_bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
-    lr_sched_bias = torch.optim.lr_scheduler.OneCycleLR(opt_bias, max_lr=bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
+  ## Not the most intuitive, but this basically takes us from ~0 to max_lr at the point pct_start, then down to .1 * max_lr at the end (since 1e16 * 1e-15 = .1 --
+  ##   This quirk is because the final lr value is calculated from the starting lr value and not from the maximum lr value set during training)
+  initial_div_factor = 1e16 # basically to make the initial lr ~0 or so :D
+  final_lr_ratio = .07 # Actually pretty important, apparently!
+  lr_sched      = torch.optim.lr_scheduler.OneCycleLR(opt,  max_lr=non_bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
+  lr_sched_bias = torch.optim.lr_scheduler.OneCycleLR(opt_bias, max_lr=bias_params['lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=total_train_steps, anneal_strategy='linear', cycle_momentum=False)
 
-    # ## For accurately timing GPU code
-    # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    # torch.cuda.synchronize() ## clean up any pre-net setup operations
+  # ## For accurately timing GPU code
+  # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+  # torch.cuda.synchronize() ## clean up any pre-net setup operations
 
 
-    if True: ## Sometimes we need a conditional/for loop here, this is placed to save the trouble of needing to indent
-        for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
-          #################
-          # Training Mode #
-          #################
-        #   torch.cuda.synchronize()
-          st = time.monotonic()
-          net.train()
+  if True: ## Sometimes we need a conditional/for loop here, this is placed to save the trouble of needing to indent
+    for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
+      #################
+      # Training Mode #
+      #################
+      #   torch.cuda.synchronize()
+      st = time.monotonic()
+      net.train()
 
-          loss_train = None
-          accuracy_train = None
+      loss_train = None
+      accuracy_train = None
 
-          cutmix_size = hyp['net']['cutmix_size'] if epoch >= hyp['misc']['train_epochs'] - hyp['net']['cutmix_epochs'] else 0
-          epoch_fraction = 1 if epoch + 1 < hyp['misc']['train_epochs'] else hyp['misc']['train_epochs'] % 1 # We need to know if we're running a partial epoch or not.
+      cutmix_size = hyp['net']['cutmix_size'] if epoch >= hyp['misc']['train_epochs'] - hyp['net']['cutmix_epochs'] else 0
+      epoch_fraction = 1 if epoch + 1 < hyp['misc']['train_epochs'] else hyp['misc']['train_epochs'] % 1 # We need to know if we're running a partial epoch or not.
 
-          for epoch_step, (inputs, targets) in enumerate(get_batches(data, key='train', batchsize=batchsize, epoch_fraction=epoch_fraction, cutmix_size=cutmix_size)):
-              ## Run everything through the network
-              outputs = net(inputs)
+      for epoch_step, (inputs, targets) in enumerate(get_batches(data, key='train', batchsize=batchsize, epoch_fraction=epoch_fraction, cutmix_size=cutmix_size)):
+        ## Run everything through the network
+        outputs = net(inputs)
 
-              loss_batchsize_scaler = 512/batchsize # to scale to keep things at a relatively similar amount of regularization when we change our batchsize since we're summing over the whole batch
-              ## If you want to add other losses or hack around with the loss, you can do that here.
-              loss = loss_fn(outputs, targets).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler']) ## Note, as noted in the original blog posts, the summing here does a kind of loss scaling
-                                                     ## (and is thus batchsize dependent as a result). This can be somewhat good or bad, depending...
-              # we only take the last-saved accs and losses from train
-              if epoch_step % 50 == 0:
-                  train_acc = (outputs.detach().argmax(-1) == targets.argmax(-1)).float().mean().item()
-                  train_loss = loss.detach().cpu().item()/(batchsize*loss_batchsize_scaler)
+        loss_batchsize_scaler = 512/batchsize # to scale to keep things at a relatively similar amount of regularization when we change our batchsize since we're summing over the whole batch
+        ## If you want to add other losses or hack around with the loss, you can do that here.
+        loss = loss_fn(outputs, targets).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler']) ## Note, as noted in the original blog posts, the summing here does a kind of loss scaling
+                                                ## (and is thus batchsize dependent as a result). This can be somewhat good or bad, depending...
+        # we only take the last-saved accs and losses from train
+        if epoch_step % 50 == 0:
+          train_acc = (outputs.detach().argmax(-1) == targets.argmax(-1)).float().mean().item()
+          train_loss = loss.detach().cpu().item()/(batchsize*loss_batchsize_scaler)
 
-              loss.backward()
+        loss.backward()
 
-              ## Step for each optimizer, in turn.
-              if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: Before opt.step()")
-              try:
-                start_time = time.monotonic()
-                opt.step()
-                if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: After opt.step(), took {time.monotonic() - start_time:.4f}s")
-              except Exception as e:
-                if getenv("DEBUG")>=1: print(f"Exception in opt.step(): {e}")
-                raise e
+        ## Step for each optimizer, in turn.
+        if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: Before opt.step()")
+        try:
+          start_time = time.monotonic()
+          opt.step()
+          if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: After opt.step(), took {time.monotonic() - start_time:.4f}s")
+        except Exception as e:
+          if getenv("DEBUG")>=1: print(f"Exception in opt.step(): {e}")
+          raise e
 
-              try:
-                if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: Before opt_bias.step()")
-                start_time = time.monotonic()
-                opt_bias.step()
-                if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: After opt_bias.step(), took {time.monotonic() - start_time:.4f}s")
-              except Exception as e:
-                if getenv("DEBUG")>=1: print(f"Exception in opt_bias.step(): {e}")
-                raise e
+        try:
+          if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: Before opt_bias.step()")
+          start_time = time.monotonic()
+          opt_bias.step()
+          if getenv("DEBUG")>=1: print(f"Epoch {epoch}, Step {epoch_step}: After opt_bias.step(), took {time.monotonic() - start_time:.4f}s")
+        except Exception as e:
+          if getenv("DEBUG")>=1: print(f"Exception in opt_bias.step(): {e}")
+          raise e
 
-              # We only want to step the lr_schedulers while we have training steps to consume. Otherwise we get a not-so-friendly error from PyTorch
-              lr_sched.step()
-              lr_sched_bias.step()
+        # We only want to step the lr_schedulers while we have training steps to consume. Otherwise we get a not-so-friendly error from PyTorch
+        lr_sched.step()
+        lr_sched_bias.step()
 
-              ## Using 'set_to_none' I believe is slightly faster (albeit riskier w/ funky gradient update workflows) than under the default 'set to zero' method
-              opt.zero_grad(set_to_none=True)
-              opt_bias.zero_grad(set_to_none=True)
-              current_steps += 1
+        ## Using 'set_to_none' I believe is slightly faster (albeit riskier w/ funky gradient update workflows) than under the default 'set to zero' method
+        opt.zero_grad(set_to_none=True)
+        opt_bias.zero_grad(set_to_none=True)
+        current_steps += 1
 
-              if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:
-                  ## Initialize the ema from the network at this point in time if it does not already exist.... :D
-                  if net_ema is None: # don't snapshot the network yet if so!
-                      net_ema = NetworkEMA(net)
-                      continue
-                  # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
-                  net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
+        if epoch >= ema_epoch_start and current_steps % hyp['misc']['ema']['every_n_steps'] == 0:
+          ## Initialize the ema from the network at this point in time if it does not already exist.... :D
+          if net_ema is None: # don't snapshot the network yet if so!
+              net_ema = NetworkEMA(net)
+              continue
+          # We warm up our ema's decay/momentum value over training exponentially according to the hyp config dictionary (this lets us move fast, then average strongly at the end).
+          net_ema.update(net, decay=projected_ema_decay_val*(current_steps/total_train_steps)**hyp['misc']['ema']['decay_pow'])
 
-          et = time.monotonic()
-        #   torch.cuda.synchronize()
-          total_time_seconds += 1e-3 * (et-st)
+    et = time.monotonic()
+    #   torch.cuda.synchronize()
+    total_time_seconds += 1e-3 * (et-st)
 
-          ####################
-          # Evaluation  Mode #
-          ####################
-          net.eval()
+    ####################
+    # Evaluation  Mode #
+    ####################
+    net.eval()
 
-          eval_batchsize = 2500
-          assert data['eval']['images'].shape[0] % eval_batchsize == 0, "Error: The eval batchsize must evenly divide the eval dataset (for now, we don't have drop_remainder implemented yet)."
-          loss_list_val, acc_list, acc_list_ema = [], [], []
+    eval_batchsize = 2500
+    assert data['eval']['images'].shape[0] % eval_batchsize == 0, "Error: The eval batchsize must evenly divide the eval dataset (for now, we don't have drop_remainder implemented yet)."
+    loss_list_val, acc_list, acc_list_ema = [], [], []
 
-          with torch.no_grad():
-              for inputs, targets in get_batches(data, key='eval', batchsize=eval_batchsize):
-                  if epoch >= ema_epoch_start:
-                      outputs = net_ema(inputs)
-                      acc_list_ema.append((outputs.argmax(-1) == targets.argmax(-1)).float().mean())
-                  outputs = net(inputs)
-                  loss_list_val.append(loss_fn(outputs, targets).float().mean())
-                  acc_list.append((outputs.argmax(-1) == targets.argmax(-1)).float().mean())
+    with torch.no_grad():
+      for inputs, targets in get_batches(data, key='eval', batchsize=eval_batchsize):
+        if epoch >= ema_epoch_start:
+          outputs = net_ema(inputs)
+          acc_list_ema.append((outputs.argmax(-1) == targets.argmax(-1)).float().mean())
+        outputs = net(inputs)
+        loss_list_val.append(loss_fn(outputs, targets).float().mean())
+        acc_list.append((outputs.argmax(-1) == targets.argmax(-1)).float().mean())
 
-              val_acc = torch.stack(acc_list).mean().item()
-              ema_val_acc = None
-              # TODO: We can fuse these two operations (just above and below) all-together like :D :))))
-              if epoch >= ema_epoch_start:
-                  ema_val_acc = torch.stack(acc_list_ema).mean().item()
+      val_acc = torch.stack(acc_list).mean().item()
+      ema_val_acc = None
+      # TODO: We can fuse these two operations (just above and below) all-together like :D :))))
+      if epoch >= ema_epoch_start:
+        ema_val_acc = torch.stack(acc_list_ema).mean().item()
 
-              val_loss = torch.stack(loss_list_val).mean().item()
-          # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
-          ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
-          ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
-          format_for_table = lambda x, locals: (f"{locals[x]}".rjust(len(x))) \
-                                                    if type(locals[x]) == int else "{:0.4f}".format(locals[x]).rjust(len(x)) \
-                                                if locals[x] is not None \
-                                                else " "*len(x)
+      val_loss = torch.stack(loss_list_val).mean().item()
+    # We basically need to look up local variables by name so we can have the names, so we can pad to the proper column width.
+    ## Printing stuff in the terminal can get tricky and this used to use an outside library, but some of the required stuff seemed even
+    ## more heinous than this, unfortunately. So we switched to the "more simple" version of this!
+    format_for_table = lambda x, locals: (f"{locals[x]}".rjust(len(x))) \
+                                              if type(locals[x]) == int else "{:0.4f}".format(locals[x]).rjust(len(x)) \
+                                          if locals[x] is not None \
+                                          else " "*len(x)
 
-          # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
-          ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
-          print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)), is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
-    return ema_val_acc # Return the final ema accuracy achieved (not using the 'best accuracy' selection strategy, which I think is okay here....)
+    # Print out our training details (sorry for the complexity, the whole logging business here is a bit of a hot mess once the columns need to be aligned and such....)
+    ## We also check to see if we're in our final epoch so we can print the 'bottom' of the table for each round.
+    print_training_details(list(map(partial(format_for_table, locals=locals()), logging_columns_list)), is_final_entry=(epoch >= math.ceil(hyp['misc']['train_epochs'] - 1)))
+  return ema_val_acc # Return the final ema accuracy achieved (not using the 'best accuracy' selection strategy, which I think is okay here....)
 
 if __name__ == "__main__":
   acc_list = []
