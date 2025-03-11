@@ -9,6 +9,7 @@ from tinygrad.engine.multi import all_reduce
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import TRACEMETA
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -383,14 +384,43 @@ class TestMultiTensor(unittest.TestCase):
     output.backward()
     grad = m.conv1.weight.grad.numpy()
 
+    single_metadata = None
+    if m.conv1.weight.grad.lazydata.metadata is not None: single_metadata = m.conv1.weight.grad.lazydata.metadata.name
     for p in get_parameters(m): p.shard_(devices_2).realize()
     GlobalCounters.reset()
     optimizer.zero_grad()
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
+    sharded_metadata = None
+    if m.conv1.weight.grad.lazydata.metadata is not None: sharded_metadata = m.conv1.weight.grad.lazydata.metadata.name
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
+    if single_metadata is not None: self.assertIsNotNone(sharded_metadata, "Metadata lost after sharding"), self.assertEqual(single_metadata, sharded_metadata, "Metadata name changed after sharding")
+
+  def test_metadata_with_sharded_tensors(self):
+    if TRACEMETA < 1: self.skipTest("Test requires TRACEMETA >= 1")
+    a = Tensor.ones(10, 10)
+    b = Tensor.ones(10, 10)
+    c = (a + b).relu()
+    self.assertIsNotNone(c.lazydata.metadata, "Metadata should be tracked for operations")
+    orig_meta = c.lazydata.metadata.name
+    c_sharded = c.shard(devices_2, axis=0)
+    if getenv("DEBUG", 0) >= 2:
+      print(f"Original metadata: {orig_meta}")
+      print(f"Sharded metadata: {c_sharded.lazydata.metadata.name if c_sharded.lazydata.metadata else 'None'}")
+    self.assertIsNotNone(c_sharded.lazydata.metadata, "Metadata lost after sharding")
+    sharded_metadata_name = c_sharded.lazydata.metadata.name
+    self.assertEqual(orig_meta, sharded_metadata_name, f"Metadata changed from {orig_meta} to {sharded_metadata_name} after sharding")
+    d_sharded = c_sharded * 2
+    d = d_sharded.realize()
+    self.assertIsNotNone(d.lazydata.metadata, "Metadata lost after operation on sharded tensor")
+    if getenv("DEBUG", 0) >= 2: print(f"Final tensor metadata: {d.lazydata.metadata.name}")
+    schedule = d.schedule()
+    if getenv("DEBUG", 0) >= 2: print(f"Schedule length: {len(schedule)}")
+    e = Tensor.ones(10, 10).relu()
+    e_sharded = e.shard(devices_2, axis=0)
+    self.assertEqual(e.lazydata.metadata.name, e_sharded.lazydata.metadata.name, "Metadata not preserved in non-realized tensor")
 
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8
