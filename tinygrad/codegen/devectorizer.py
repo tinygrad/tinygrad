@@ -186,12 +186,13 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   ret = []
   while global_offset < sz:
     for fold_length in lengths:
+      if global_offset+fold_length > sz: continue
       oidx = idx.src[1] + global_offset
       if oidx.divides(fold_length) is None: continue
       lidx = buf.index(oidx)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
-      else: ret.append(ls.replace(src=(lidx,)+ls.src[1:]))
+      else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
       global_offset += fold_length
       break
   if len(ret) == 1: return None
