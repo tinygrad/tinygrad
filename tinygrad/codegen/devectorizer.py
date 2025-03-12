@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym
-from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
@@ -19,9 +19,10 @@ def fancy_gep(vec:UOp, i:int):
   return vec.gep(i)
 
 def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
+  mask = None
   lengths = []
   if ctx is not None and ctx.device == "DSP":
-    lengths = [128]
+    lengths = [128, 64, 32, 16, 8, 4]
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
@@ -55,7 +56,7 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           # get the index offset for this element. using [0] is okay, because they are the same
           oidx = fancy_gep(vec, offsets[o][0])
-          if oidx.divides(fold_length) is None: continue
+          #if oidx.divides(fold_length) is None: continue
           # on images, the index dtype is the load dtype
           lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
           # if we are folding, we set the dtype correctly
@@ -110,13 +111,15 @@ def image_fixup(ls:UOp):
 
   return None
 
+def gep_after_load(gep:UOp, ld:UOp):
+  return ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)
+
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
                         UPat.var("mask"))), expand_index),
   # GEP after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
-   lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True), gep_after_load),
   # GEP on data of STORE
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
   # put CAT after LOAD

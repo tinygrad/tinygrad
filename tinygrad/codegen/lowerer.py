@@ -212,7 +212,7 @@ pm_quant = symbolic+PatternMatcher([
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
-  if opts.device in {"CLANG", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
+  if opts.device in {"CPU", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
   sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
   # expand_rewrite turns this into a vectorized program
   return expand_rewrite(sink)
