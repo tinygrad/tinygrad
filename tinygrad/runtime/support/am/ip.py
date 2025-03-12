@@ -163,6 +163,9 @@ class AM_GFX(AM_IP):
     self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
     self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1)
 
+    self.adev.regS2A_DOORBELL_ENTRY_0_CTRL.write(s2a_doorbell_port0_enable=1, s2a_doorbell_port0_awid=0x3, s2a_doorbell_port0_awaddr_31_28_value=0x3)
+    self.adev.regS2A_DOORBELL_ENTRY_3_CTRL.write(s2a_doorbell_port3_enable=1, s2a_doorbell_port3_awid=0x6, s2a_doorbell_port3_awaddr_31_28_value=0x3)
+
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
     for i in range(0, 16):
       self._grbm_select(vmid=i)
@@ -297,6 +300,9 @@ class AM_IH(AM_IP):
     for _, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
+    self.adev.regS2A_DOORBELL_ENTRY_1_CTRL.update(s2a_doorbell_port1_enable=1, s2a_doorbell_port1_awid=0x0, s2a_doorbell_port1_awaddr_31_28_value=0x0,
+      s2a_doorbell_port1_range_offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, s2a_doorbell_port1_range_size=2)
+
 class AM_SDMA(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Setup the ring
@@ -320,6 +326,8 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
       self.adev.reg(f"regSDMA{pipe}_F32_CNTL").update(halt=0, th1_reset=0)
       self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
+    self.adev.regS2A_DOORBELL_ENTRY_2_CTRL.update(s2a_doorbell_port2_enable=1, s2a_doorbell_port2_awid=0xe, s2a_doorbell_port2_awaddr_31_28_value=0x3,
+      s2a_doorbell_port2_range_offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, s2a_doorbell_port2_range_size=4)
 
   def fini(self):
     self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
