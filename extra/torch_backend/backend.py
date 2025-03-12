@@ -12,12 +12,8 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
-def _from_torch_device(device: torch.device):
-  assert device.type == "tiny"
-  return f"{Device.DEFAULT}:{device.index or 0}"
-def _to_torch_device(device: str):
-  assert (d:=device.partition(":"))[0] == Device.DEFAULT
-  return torch.device("tiny", int(d[2] or 0))
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
