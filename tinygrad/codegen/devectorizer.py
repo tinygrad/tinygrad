@@ -17,6 +17,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   for i in range(vec.dtype.count):
     idx = vec.gep(i).simplify()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+    elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     if mask is not None: root_src = (mask.gep(i).simplify(), root_src)
