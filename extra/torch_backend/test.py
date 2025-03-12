@@ -62,7 +62,7 @@ class TestTorchBackend(unittest.TestCase):
     a += b
     np.testing.assert_equal(a.cpu().numpy(), [3,3,3,3])
 
-  def test_exp2(qself):
+  def test_exp2(self):
     a = torch.ones(4, device=device)
     b = a.exp2()
     np.testing.assert_equal(b.cpu().numpy(), [2,2,2,2])
@@ -75,12 +75,40 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
     c = a == b
-    print(c.cpu().numpy())
+    print(c.cpu())
+
+  def test_maxpool2d_backward(self):
+    x = torch.arange(3*3, device=device).reshape(1, 1, 3, 3).requires_grad_(True)
+    torch.nn.functional.max_pool2d(x, kernel_size=2, stride=1).sum().backward()
+    np.testing.assert_equal(x.grad.squeeze().cpu().numpy(), [[0, 0, 0], [0, 1, 1], [0, 1, 1]])
+
+  def test_copy_cast(self):
+    x = torch.zeros(4, device=device, dtype=torch.int64)
+    y = torch.ones(4, device=device, dtype=torch.float32).to(dtype=torch.int64)
+    res1 = x ^ y # an operation that only works on int types
+    print(res1.cpu())
+    y = y.cpu().float().to(device=device, dtype=torch.int64)
+    res2 = x ^ y
+    print(res2.cpu())
+
+  def test_topk(self):
+    # test topk return_types
+    a = torch.tensor([1, 3, 2, 4], device=device)
+    out = torch.topk(a, k=2)
+    np.testing.assert_equal(out.values.cpu().numpy(), [4, 3])
+    np.testing.assert_equal(out.indices.cpu().numpy(), [3, 1])
 
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
     print(str(a))
+
+  @unittest.skip("failed")
+  def test_floor_div(self):
+    a = torch.tensor([10., 7., 5.], device=device)
+    b = torch.tensor([3., 2., 2.], device=device)
+    result = a // b
+    np.testing.assert_equal(result.cpu().numpy(), [3., 3., 2.])
 
 if __name__ == "__main__":
   unittest.main()

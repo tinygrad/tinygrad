@@ -782,6 +782,15 @@ class TestMultiTensor(unittest.TestCase):
     run_schedule(sched)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
+  @unittest.expectedFailure
+  def test_dont_realize_intermediate_expand(self):
+    a = Tensor.empty(16, 1).shard_(devices_2, axis=0)
+    b = Tensor.empty(16, 16).to_(devices_2)
+    c = Tensor.empty(16, 16).shard_(devices_2, axis=1)
+    d = a+b
+    (d*c).realize()
+    assert not d.lazydata.is_realized
+
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):

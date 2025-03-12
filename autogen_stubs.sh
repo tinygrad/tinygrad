@@ -171,6 +171,7 @@ generate_amd() {
     extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
     extra/hip_gpu_driver/gc_11_0_0_offset.h \
     extra/hip_gpu_driver/gc_10_3_0_offset.h \
+    extra/hip_gpu_driver/sienna_cichlid_ip_offset.h \
     --clang-args="-I/opt/rocm/include -x c++" \
     -o $BASE/amd_gpu.py
 
@@ -353,6 +354,22 @@ generate_am() {
     extra/amdpci/headers/amdgpu_smu.h \
     -o $BASE/am/smu_v13_0_0.py
   fixup $BASE/am/smu_v13_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/hdp_6_0_0_offset.h \
+    extra/amdpci/headers/hdp_6_0_0_sh_mask.h \
+    -o $BASE/am/hdp_6_0_0.py
+  fixup $BASE/am/hdp_6_0_0.py
+}
+
+generate_sqtt() {
+  clang2py -k cdefstum \
+    extra/sqtt/sqtt.h \
+    -o $BASE/sqtt.py
+
+  fixup $BASE/sqtt.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/sqtt.py
+  python3 -c "import tinygrad.runtime.autogen.sqtt"
 }
 
 generate_webgpu() {
@@ -373,6 +390,7 @@ elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
+elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc

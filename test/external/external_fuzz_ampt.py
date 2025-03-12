@@ -72,7 +72,7 @@ class AMPTFuzzer:
 
     pattern = self.generate_pattern(ptr, size)
     pages = self.fill_memory(ptr, size, pattern)
-    self.allocations[ptr] = (size, pattern, pages)
+    self.allocations[ptr.va_addr] = (size, pattern, pages, ptr)
     self.alloc_payload += size
     print(f"Allocated {size} bytes at {ptr.va_addr:x}, pattern: {pattern:02x}")
     return ptr
@@ -81,15 +81,15 @@ class AMPTFuzzer:
     if not self.allocations: return False
 
     ptr = random.choice(list(self.allocations.keys()))
-    size, pattern, pages = self.allocations[ptr]
+    size, pattern, pages, vm = self.allocations[ptr]
 
     # Verify pattern before freeing
     if not self.verify_memory(pages, pattern):
-      raise RuntimeError(f"Memory corruption detected at {ptr.va_addr:x}!")
+      raise RuntimeError(f"Memory corruption detected at {vm.va_addr:x}!")
 
-    print(f"Freeing {size} bytes at {ptr.va_addr:x}, pattern verified: {pattern:02x}")
+    print(f"Freeing {size} bytes at {vm.va_addr:x}, pattern verified: {pattern:02x}")
     self.alloc_payload -= size
-    self.d.mm.vfree(ptr)
+    self.d.mm.vfree(vm)
     del self.allocations[ptr]
     return True
 

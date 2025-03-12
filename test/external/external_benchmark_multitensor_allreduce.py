@@ -30,7 +30,9 @@ def run(sz, n_gpus=6, iters=10, use_ring=False):
   with Context(RING=(2 if use_ring else 0), DEBUG=max(DEBUG.value, 2)): return test(devs, N, iters=iters)
 
 def main():
+  ONLY_RING = getenv("ONLY_RING", 0)
   n_gpus = getenv("GPUS", 6)
+  iters = getenv("ITERS", 10)
 
   if getenv("BENCHMARK_SPLIT"):
     l, r = 0, 512
@@ -44,10 +46,10 @@ def main():
   else:
     sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
     print(f"Using {sz/10**9:.2f} GB of numbers on each of {n_gpus} GPUs, {n_gpus*sz/10**9:.2f} GB total.")
-    (ring_gflops, ring_gbs, ring_secs) = run(sz, use_ring=True, n_gpus=n_gpus)
-    (naive_gflops, naive_gbs, naive_secs) = run(sz, use_ring=False, n_gpus=n_gpus)
+    (ring_gflops, ring_gbs, ring_secs) = run(sz, use_ring=True, n_gpus=n_gpus, iters=iters)
+    if not ONLY_RING: (naive_gflops, naive_gbs, naive_secs) = run(sz, use_ring=False, n_gpus=n_gpus, iters=iters)
     print(f"Ring:\n  {ring_secs:.6f} seconds/iter\n  {ring_gflops:.2f} GFLOP/s\n  {ring_gbs:.2f} GB/s")
-    print(f"Naive:\n  {naive_secs:.6f} seconds/iter\n  {naive_gflops:.2f} GFLOP/s\n  {naive_gbs:.2f} GB/s")
+    if not ONLY_RING: print(f"Naive:\n  {naive_secs:.6f} seconds/iter\n  {naive_gflops:.2f} GFLOP/s\n  {naive_gbs:.2f} GB/s")
 
 if __name__ == "__main__":
   main()
