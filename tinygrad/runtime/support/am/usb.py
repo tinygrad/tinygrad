@@ -50,9 +50,10 @@ class USBConnector:
     libusb.libusb_clear_halt(self.handle, 0x04)
     libusb.libusb_clear_halt(self.handle, 0x02)
 
-    streams = (ctypes.c_uint8*3)(0x2, 0x81, 0x83)
+    endpoints = [0x81, 0x83]
+    streams = (ctypes.c_uint8*len(endpoints))(*endpoints)
     # print(hex(streams[0]))
-    x = libusb.libusb_alloc_streams(self.handle, 3, streams, 3)
+    x = libusb.libusb_alloc_streams(self.handle, len(endpoints), streams, len(endpoints))
     assert x >= 0, f"got {x}"
     # print("hm", x)
 
@@ -94,9 +95,9 @@ class USBConnector:
           all_complete = False
       if all_complete: return True
 
-  def _send_with_stream(self, cdb, ret_len=0):
-    pass
-  
+  # def _send_with_stream(self, cdb, ret_len=0):
+  #   pass
+
   def _send(self, cdb, ret_len=0):
     def __send():
       actual_length = ctypes.c_int(0)
