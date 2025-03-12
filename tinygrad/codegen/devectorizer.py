@@ -18,7 +18,7 @@ def fancy_gep(vec:UOp, i:int):
     if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) + vec.src[0].gep(i)
   return vec.gep(i)
 
-def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
+def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
@@ -91,18 +91,6 @@ def image_fixup(ls:UOp):
 
   return None
 
-def split_load_store(ctx:Renderer|None, ls:UOp):
-  buf = ls.src[0].src[0] if ls.src[0].op is Ops.INDEX else ls.src[0].src[0].src[0]
-  lengths = []
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
-    pass
-  elif isinstance(buf.dtype, ImageDType):
-    lengths = [4]
-  elif ctx is not None and ctx.supports_float4:
-    # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
-  lengths.append(1)  # worst case, it's not folded
-
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
@@ -117,8 +105,6 @@ load_store_folding = PatternMatcher([
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
-  # split LOAD/STORE
-  #(UPat((Ops.LOAD, Ops.STORE), name="ls"), split_load_store),
   # image indexing, including unfoldable images
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
 ])
@@ -183,6 +169,34 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
 
 # *** uop expander ***
 
+def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
+  if (sz:=ls.src[0].dtype.count) == 1: return None
+  lengths = []
+  buf = idx.src[0]
+  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+    pass
+  elif isinstance(buf.dtype, ImageDType):
+    lengths = [4]
+  elif ctx is not None and ctx.supports_float4:
+    # TODO: a better way to get this than ctx
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+  lengths.append(1)  # worst case, it's not folded
+  ptrdtype = cast(PtrDType, buf.dtype)
+  global_offset = 0
+  ret = []
+  while global_offset < sz:
+    for fold_length in lengths:
+      oidx = idx.src[1] + global_offset
+      if oidx.divides(fold_length) is None: continue
+      lidx = buf.index(oidx)
+      if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
+      else: ret.append(ls.replace(src=(lidx,)+ls.src[1:]))
+      global_offset += fold_length
+      break
+  if len(ret) == 1: return None
+  return UOp(Ops.CAT, ls.dtype, tuple(ret))
+
 # TODO: there's a lot shared with gep_through_wmma here
 def no_vectorized_wmma(wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -211,6 +225,8 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
+  # split LOAD/STORE
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),), name="ls", allow_any_len=True), split_load_store),
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
