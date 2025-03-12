@@ -2565,11 +2565,9 @@ class Tensor(SimpleMathTrait):
 
   def sort(self, dim=-1, descending=False):
     t = self
-    # descending?
-    # TODO CANT GATHER WITH INF OR IT NANs WHAT DO I DO
     if dtypes.is_float(t.dtype): p_val = -65504.0 if descending else 65504.0
     else: p_val = dtypes.min(t.dtype) if descending else dtypes.max(t.dtype)
-    cmp_up, cmp_down = (Tensor.__lt__, Tensor.__gt__) if descending else (Tensor.__gt__, Tensor.__lt__)
+    cmp_down, cmp_up = (Tensor.__lt__, Tensor.__gt__) if descending else (Tensor.__gt__, Tensor.__lt__)
 
     # pad to power of 2
     dim = t._resolve_dim(dim)
@@ -2588,8 +2586,8 @@ class Tensor(SimpleMathTrait):
         # TODO: this part can be optimized I think. It follows the example code right now
         l = i ^ j
         valid = l > i
-        cond_up = ((i & k) == 0) & (cmp_up(t, t.gather(dim, l)))
-        cond_down = ((i & k) != 0) & (cmp_down(t, t.gather(dim, l)))
+        cond_up = ((i & k) != 0) & (cmp_up(t, t.gather(dim, l)))
+        cond_down = ((i & k) == 0) & (cmp_down(t, t.gather(dim, l)))
         swap_cond = valid & (cond_up | cond_down)
         # swap
         new_perm = valid.where(swap_cond.where(l, i), swap_cond.gather(dim,l).where(l, i))
