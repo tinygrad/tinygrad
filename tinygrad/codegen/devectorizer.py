@@ -70,27 +70,6 @@ def gep_on_store(gep:UOp, st:UOp):
   new_arg = tuple(x[1] for x in sorted(a.items()))
   return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
 
-def image_fixup(ls:UOp):
-  # normal image load or store, with the CAST from expand_index
-  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
-    assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    idx = ls.src[0].src[0]
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
-    return ls.replace(src=(idx,)+ls.src[1:])
-
-  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
-    assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
-    idx = ls.src[0]
-    id4 = idx.src[1] % 4
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
-    vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
-
-  return None
-
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
@@ -105,8 +84,6 @@ load_store_folding = PatternMatcher([
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
-  # image indexing, including unfoldable images
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
 ])
 
 # ***** image load valid simplification *****
@@ -166,8 +143,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
 
-
-# *** uop expander ***
+# *** correct load/store ***
 
 def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if (sz:=ls.src[0].dtype.count) == 1: return None
@@ -189,7 +165,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
       if global_offset+fold_length > sz: continue
       oidx = idx.src[1] + global_offset
       if oidx.divides(fold_length) is None: continue
-      lidx = buf.index(oidx)
+      lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
@@ -197,6 +173,36 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
       break
   if len(ret) == 1: return None
   return UOp(Ops.CAT, ls.dtype, tuple(ret))
+
+def image_fixup(ls:UOp):
+  # normal image load or store, with the CAST from expand_index
+  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
+    assert ls.src[0].dtype.count == 4, "image must be casted to 4"
+    idx = ls.src[0].src[0]
+    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    return ls.replace(src=(idx,)+ls.src[1:])
+
+  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
+  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
+    assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
+    idx = ls.src[0]
+    id4 = idx.src[1] % 4
+    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
+    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
+
+  return None
+
+correct_load_store = PatternMatcher([
+  # split LOAD/STORE
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),), name="ls", allow_any_len=True), split_load_store),
+  # image indexing, including unfoldable images
+  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
+])
+
+# *** uop expander ***
 
 # TODO: there's a lot shared with gep_through_wmma here
 def no_vectorized_wmma(wmma:UOp):
@@ -226,8 +232,6 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  # split LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),), name="ls", allow_any_len=True), split_load_store),
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
@@ -273,7 +277,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
   # devectorize is optional
-  if DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+load_store_indexing, ctx=opts)
+  if DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
   else: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
 
   # optional pre matcher
