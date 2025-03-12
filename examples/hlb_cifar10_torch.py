@@ -15,10 +15,6 @@ from tinygrad.helpers import prod, colored
 from tinygrad.nn.datasets import cifar
 import torch.nn.functional as F
 
-from icecream import ic, install
-# ic.configureOutput(includeContext=True)
-install()
-
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
@@ -31,8 +27,9 @@ assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=},
 if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
 device = torch.device("tiny") if getenv("TINY_BACKEND") else torch.device("cpu")
 
-def sequential(ll, x):
-  return functools.reduce(lambda x,f: f(x), ll, x)
+def sequential(ll, x): return functools.reduce(lambda x,f: f(x), ll, x)
+
+def quick_gelu(x): return x * F.sigmoid(x * 1.702)
 
 class UnsyncedBatchNorm(nn.Module):
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
@@ -53,7 +50,7 @@ class UnsyncedBatchNorm(nn.Module):
     weight = self.weight.reshape(1, -1).expand((self.num_devices, -1))
     bias = self.bias.reshape(1, -1).expand((self.num_devices, -1))
     axis_ = (0,2)
-    # compute batchnorm ret = xr.batchnorm(weight, bias, batch_mean, batch_invstd, axis=(0, 2))
+    # compute batchnorm (in tinygrad: ret = xr.batchnorm(weight, bias, batch_mean, batch_invstd, axis=(0, 2)))
     shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(xr.shape))
     x_norm = xr - batch_mean.reshape(shape)
     x_norm = x_norm * weight.reshape(shape)
@@ -110,74 +107,21 @@ class ConvGroup(nn.Module):
     x = self.max_pool2d(x)
     x = x.float()
     x = self.norm1(x)
-    x = x.to(torch.float) # used to be float dtypes.default_float
+    x = x.to(torch.float)
     x = self.quick_gelu(x)
     residual = x
     x = self.conv2(x)
     x = x.float()
     x = self.norm2(x)
-    x = x.to(torch.float) # used to be float dtypes.default_float
+    x = x.to(torch.float)
     x = self.quick_gelu(x)
-
     return x + residual
-
-# # replaces lambda x: x.max((2,3)), in SpeedyResNet.net
-# class Max(nn.Module):
-#   def __init__(self, dims):
-#     super().__init__()
-#     self.dims = dims
-#   def forward(self, x): return torch.amax(x, self.dims)
-
-# # replaces lambda x: x / 9., in SpeedyResNet.net
-# class Scale(nn.Module):
-#   def __init__(self, scale):
-#     super().__init__()
-#     self.scale = scale
-#   def forward(self, x): return x * self.scale
 
 class WhiteningConv(nn.Conv2d):
   def __init__(self, whitening):
     shape = whitening.shape
     super().__init__(shape[1], shape[0], shape[2:], bias=False)
     self.weight = nn.Parameter(whitening, requires_grad=False)
-  def forward(self, x):
-    ret = super().forward(x)
-    return ret
-
-def quick_gelu(x):
-  return x * F.sigmoid(x * 1.702)
-
-# class Pad(nn.Module):
-#   def __init__(self, pad):
-#     super().__init__()
-#     self.pad = pad
-#   def forward(self, x):
-#     return F.pad(x, self.pad)
-
-# class SpeedyResNet(nn.Module):
-#   def __init__(self, W):
-#     super().__init__()
-#     self.whitening = W
-#     self.net = nn.ModuleList([
-#       WhiteningConv(self.whitening),
-#       Pad((1,0,0,1)),
-#       nn.Conv2d(12, 32, kernel_size=1, bias=False),
-#       nn.GELU(),
-#       ConvGroup(32, 64),
-#       ConvGroup(64, 256),
-#       ConvGroup(256, 512),
-#       Max((2,3)),
-#       nn.Linear(512, 10, bias=False),
-#       Scale(1/9.),
-#     ])
-
-#   def forward(self, x, training=True):
-#     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
-#     # TODO: remove the pad but instead let the kernel optimize itself
-#     # forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
-#     # Todo: bring back "conv2d(self.whitening).pad((1,0,0,1))"
-#     forward = lambda x: sequential(self.net, x)
-#     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
 class SpeedyResNet(nn.Module):
   def __init__(self, W):
@@ -206,8 +150,7 @@ class SpeedyResNet(nn.Module):
   def forward(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    # TODO: remove flip because it returns a new copy of the tensor
-    # WE are using flip becuase negative indexing is only supported in tingrad, not pytorch
+    # torch does not support negative indexing so must use flip
     return self._forward(x) if training else (self._forward(x) + self._forward(torch.flip(x, (-1,)))) / 2.
 
 # hyper-parameters were exactly the same as the original repo
