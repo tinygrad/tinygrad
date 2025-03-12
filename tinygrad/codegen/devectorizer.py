@@ -11,6 +11,13 @@ from tinygrad.renderer import Renderer
 
 # ***** load/store grouping *****
 
+def fancy_gep(vec:UOp, i:int):
+  # if there's a vectorized ADD here, expand through it
+  if vec.op is Ops.ADD:
+    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) + vec.src[1].gep(i)
+    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) + vec.src[0].gep(i)
+  return vec.gep(i)
+
 def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
   lengths = []
   if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
@@ -25,11 +32,11 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx = vec.gep(i)
+    idx = fancy_gep(vec, i)
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (mask.gep(i), root_src)
+    if mask is not None: root_src = (fancy_gep(mask, i), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
@@ -45,7 +52,7 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
       for fold_length in lengths:
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           # get the index offset for this element. using [0] is okay, because they are the same
-          oidx = vec.gep(offsets[o][0])
+          oidx = fancy_gep(vec, offsets[o][0])
           if oidx.divides(fold_length) is None: continue
           # on images, the index dtype is the load dtype
           lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
