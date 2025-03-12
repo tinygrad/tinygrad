@@ -11,26 +11,17 @@ from tinygrad.renderer import Renderer
 
 # ***** load/store grouping *****
 
-def fancy_gep(vec:UOp, i:int):
-  # if there's a vectorized ADD here, expand through it
-  if vec.op is Ops.ADD:
-    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) + vec.src[1].gep(i)
-    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) + vec.src[0].gep(i)
-  # if there's a vectorized AND here, expand through it
-  if vec.op is Ops.AND:
-    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) & vec.src[1].gep(i)
-    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) & vec.src[0].gep(i)
-  return vec.gep(i)
-
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
+  if vec.dtype.count == 128: mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx = fancy_gep(vec, i)
+    idx = vec.gep(i).simplify()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+    elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (fancy_gep(mask, i), root_src)
+    if mask is not None: root_src = (mask.gep(i).simplify(), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
@@ -42,9 +33,10 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   global_offset = 0
   for rootsrc, offsets in offsets_rootsrc.items():
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
+    #print(grouped_offsets, rootsrc[0] if mask is not None else None)
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
-      oidx = fancy_gep(vec, offsets[grp[0]][0])
+      oidx = vec.gep(offsets[grp[0]][0])
       lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
       if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
       # set the idxs of the output
@@ -79,7 +71,8 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
                         UPat.var("mask"))), expand_index),
   # GEP after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True), gep_after_load),
+  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
+   lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
   # GEP on data of STORE
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
   # put CAT after LOAD
