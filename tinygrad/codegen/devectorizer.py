@@ -1,5 +1,5 @@
 from typing import Optional, Any, Callable, cast
-import functools, operator
+import functools, operator, itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
@@ -11,54 +11,48 @@ from tinygrad.renderer import Renderer
 
 # ***** load/store grouping *****
 
-def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
-  lengths = []
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
-    pass
-  elif isinstance(buf.dtype, ImageDType):
-    lengths = [4]
-  elif ctx is not None and ctx.supports_float4:
-    # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
-  lengths.append(1)  # worst case, it's not folded
+def fancy_gep(vec:UOp, i:int):
+  # if there's a vectorized ADD here, expand through it
+  if vec.op is Ops.ADD:
+    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) + vec.src[1].gep(i)
+    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) + vec.src[0].gep(i)
+  # if there's a vectorized AND here, expand through it
+  if vec.op is Ops.AND:
+    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) & vec.src[1].gep(i)
+    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) & vec.src[0].gep(i)
+  return vec.gep(i)
 
+def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx = vec.gep(i)
+    idx = fancy_gep(vec, i)
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (mask.gep(i), root_src)
+    if mask is not None: root_src = (fancy_gep(mask, i), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
   ptrdtype = cast(PtrDType, buf.dtype)
 
-  # then rewrite everything we can
+  # then rewrite everything we can into groups
   ret = []
   idxs: list[int|None] = [None]*vec.dtype.count
-  used: set[tuple[Any, int]] = set()
   global_offset = 0
   for rootsrc, offsets in offsets_rootsrc.items():
-    for o in offsets:
-      for fold_length in lengths:
-        if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
-          # get the index offset for this element. using [0] is okay, because they are the same
-          oidx = vec.gep(offsets[o][0])
-          if oidx.divides(fold_length) is None: continue
-          # on images, the index dtype is the load dtype
-          lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
-          # if we are folding, we set the dtype correctly
-          if fold_length > 1:
-            lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
-          # set the idxs of the output
-          for i in range(fold_length):
-            used.add((rootsrc,o+i))
-            for oo in offsets[o+i]: idxs[oo] = global_offset+i
-          # add this lidx to the CAT
-          ret.append(lidx)
-          global_offset += fold_length
+    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
+    for grp in grouped_offsets:
+      # get the index offset for this element. using [0] is okay, because they are the same
+      oidx = fancy_gep(vec, offsets[grp[0]][0])
+      lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
+      if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      # set the idxs of the output
+      for i,g in enumerate(grp):
+        for oo in offsets[g]: idxs[oo] = global_offset+i
+      # add this lidx to the CAT
+      ret.append(lidx)
+      global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
   return UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
@@ -80,27 +74,6 @@ def gep_on_store(gep:UOp, st:UOp):
   new_arg = tuple(x[1] for x in sorted(a.items()))
   return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
 
-def image_fixup(ls:UOp):
-  # normal image load or store, with the CAST from expand_index
-  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
-    assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    idx = ls.src[0].src[0]
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
-    return ls.replace(src=(idx,)+ls.src[1:])
-
-  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
-    assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
-    idx = ls.src[0]
-    id4 = idx.src[1] % 4
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
-    vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
-
-  return None
-
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
@@ -115,8 +88,6 @@ load_store_folding = PatternMatcher([
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
-  # image indexing, including unfoldable images
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
 ])
 
 # ***** image load valid simplification *****
@@ -176,6 +147,64 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
 
+# *** correct load/store ***
+
+def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
+  if (sz:=ls.src[0].dtype.count) == 1: return None
+  lengths = []
+  buf = idx.src[0]
+  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+    pass
+  elif isinstance(buf.dtype, ImageDType):
+    lengths = [4]
+  elif ctx is not None and ctx.supports_float4:
+    # TODO: a better way to get this than ctx
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+  lengths.append(1)  # worst case, it's not folded
+  ptrdtype = cast(PtrDType, buf.dtype)
+  global_offset = 0
+  ret = []
+  while global_offset < sz:
+    for fold_length in lengths:
+      if global_offset+fold_length > sz: continue
+      oidx = idx.src[1] + global_offset
+      if oidx.simplify().divides(fold_length) is None: continue
+      lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
+      if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
+      else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
+      global_offset += fold_length
+      break
+  if len(ret) == 1: return None
+  return UOp(Ops.CAT, ls.dtype, tuple(ret))
+
+def image_fixup(ls:UOp):
+  # normal image load or store, with the CAST from expand_index
+  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
+    assert ls.src[0].dtype.count == 4, "image must be casted to 4"
+    idx = ls.src[0].src[0]
+    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    return ls.replace(src=(idx,)+ls.src[1:])
+
+  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
+  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
+    assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
+    idx = ls.src[0]
+    id4 = idx.src[1] % 4
+    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
+    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
+
+  return None
+
+correct_load_store = PatternMatcher([
+  # split LOAD/STORE
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),), name="ls", allow_any_len=True), split_load_store),
+  # image indexing, including unfoldable images
+  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
+])
 
 # *** uop expander ***
 
@@ -252,8 +281,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
   # devectorize is optional
-  if DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+load_store_indexing, ctx=opts)
-  else: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
+  if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
+  elif DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
+  else: sink = graph_rewrite(sink, sym+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
 
   # optional pre matcher
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)

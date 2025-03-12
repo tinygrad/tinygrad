@@ -58,5 +58,5 @@ weights
 comgr_*
 *.pkl
 site/
-master_schedule.py
 profile_stats
+*.log
