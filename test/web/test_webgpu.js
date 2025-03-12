@@ -1,6 +1,6 @@
 const puppeteer = require("puppeteer");
 const { spawn } = require("child_process");
-const res = spawn("python", ["-m", "http.server", "8000"], { shell: true });
+const child = spawn("python", ["-m", "http.server", "8000"], { shell: true, detached: true });
 
 async function timeout(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
@@ -8,7 +8,11 @@ async function timeout(time) {
 
 function cleanup(err) {
   console.log("cleaning up");
-  res.kill();
+  try {
+    process.kill(-child.pid);
+  } catch (error) {
+    console.error("Error while killing process group:", error);
+  }
   if (err != null) {
     console.error(err);
     process.exit(1);
