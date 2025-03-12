@@ -100,7 +100,9 @@ def cummax(self, dim):
 
 @torch.library.impl("aten::scatter.src", "privateuseone")
 def scatter_src(self, dim, index, src):
+  if TORCH_DEBUG: print(f"scatter.src {self.shape=} {dim} {index.shape=} {src.shape=}")
   # TODO: refactor to use Tensor.scatter_reduce, fails for TestOps.test_scatter
+  # return wrap(unwrap(self).scatter_reduce(dim, unwrap(index), unwrap(src), reduce='sum'))
   return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
 
 def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
@@ -451,7 +453,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
-  "aten.scatter.src_out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
+  # "aten.scatter.src_out": functools.partial(Tensor.scatter_reduce, reduce='sum'), # TODO: This might be wrong
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
     self.sum(axis if axis is None or len(axis) else None, keepdim,
