@@ -9,6 +9,8 @@ class USBConnector:
     ret = libusb.libusb_init(ctypes.byref(self.usb_ctx))
     if ret != 0: raise Exception(f"Failed to init libusb: {ret}")
 
+    # libusb.libusb_set_option(self.usb_ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
+    
     # Open device
     self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
     if not self.handle: raise Exception("Failed to open device")
@@ -32,7 +34,7 @@ class USBConnector:
     if ret != 0: raise Exception(f"Failed to set alternate setting: {ret}")
 
     usb_cmd = [
-      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
       0xe4, 0x24, 0x00, 0xb2, 0x1a, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
@@ -43,8 +45,21 @@ class USBConnector:
 
     print("USB device initialized successfully")
 
+    libusb.libusb_clear_halt(self.handle, 0x81)
+    libusb.libusb_clear_halt(self.handle, 0x83)
+    libusb.libusb_clear_halt(self.handle, 0x04)
+    libusb.libusb_clear_halt(self.handle, 0x02)
+
+    streams = (ctypes.c_uint8*3)(0x81, 0x83, 0x2)
+    print(hex(streams[0]))
+    x = libusb.libusb_alloc_streams(self.handle, 3, streams, 3)
+    print("hm", x)
+
     # required to be set, but not a trigger
     self.write(0xB213, bytes([0x01]))
+    # print(self.read(0xB213, 1))
+    # exit(0)
+
     self.write(0xB214, bytes([0, 0]))
     self.write(0xB216, bytes([0x20])) # Enable PCIe interface features (bus master, etc.)
 
@@ -52,34 +67,87 @@ class USBConnector:
     try: self.read(0x07f0, 6)
     except Exception: pass
 
+  def setup_transfer(self, transfer, endpoint, stream_id, data, length):
+    transfer.contents.dev_handle = self.handle
+    transfer.contents.status = 0xff
+    transfer.contents.flags = 0
+    transfer.contents.endpoint = endpoint
+    transfer.contents.type = libusb.LIBUSB_TRANSFER_TYPE_BULK_STREAM
+    transfer.contents.timeout = 1000
+    transfer.contents.length = length
+    # transfer.contents.callback = None
+    transfer.contents.user_data = None
+    transfer.contents.buffer = data
+    transfer.contents.num_iso_packets = 0
+    libusb.libusb_transfer_set_stream_id(transfer, stream_id)
+  
+  def _send_ops_and_wait(self, *cmds):
+    for x in cmds: libusb.libusb_submit_transfer(x)
+
+    while True:
+      libusb.libusb_handle_events(self.usb_ctx)
+
+      all_complete = True
+      for transfer in cmds:
+        if transfer.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED:
+          continue
+        elif transfer.contents.status != libusb.LIBUSB_TRANSFER_COMPLETED:
+          if transfer.contents.status != 0xff: return False
+          all_complete = False
+      if all_complete: return True
+
+  def _send_with_stream(self, cdb, ret_len=0):
+    pass
+  
   def _send(self, cdb, ret_len=0):
     def __send():
       actual_length = ctypes.c_int(0)
       for i in range(3):
         #assert len(self.read_cmd) == 31
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1000)
-        assert actual_length.value == len(self.read_cmd)
-        if ret:
-          print(i, "0x4", ret, len(self.read_cmd))
-          return None
+        if ret_len > 0:
+          res_transfer = libusb.libusb_alloc_transfer(0)
+          self.setup_transfer(res_transfer, 0x81, 0x1, self.read_data, ret_len)
+
+        stat_transfer = libusb.libusb_alloc_transfer(0)
+        self.setup_transfer(stat_transfer, 0x83, 0x1, self.read_status, 64)
+
+        cmd_transfer = libusb.libusb_alloc_transfer(0)
+        self.setup_transfer(cmd_transfer, 0x04, 0x1, self.read_cmd, len(self.read_cmd))
+
+        # ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1000)
+        # assert actual_length.value == len(self.read_cmd)
 
         if ret_len > 0:
-          # wait for data ready
-          ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1000)
-          assert ret == 0 and self.read_status[0] == 6, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
+          self._send_ops_and_wait(res_transfer, stat_transfer, cmd_transfer)
+        else:
+          self._send_ops_and_wait(stat_transfer, cmd_transfer)
 
-          # get data
-          ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1000)
-          if ret:
-            print(i, "0x81", ret, ret_len)
-            continue
-          assert actual_length.value == ret_len, f"only sent {actual_length.value}, wanted {ret_len}"
+        # if ret:
+        #   print(i, "0x4", ret, len(self.read_cmd))
+        #   return None
 
-        # get status
-        ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1000)
-        assert ret == 0 and self.read_status[0] == 3, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
+        # if ret_len > 0:
+        #   # wait for data ready
+        #   ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1000)
+        #   assert ret == 0 and self.read_status[0] == 6, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
 
-        # return a copy of the bytes
+        #   # get data
+        #   ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1000)
+        #   if ret:
+        #     print(i, "0x81", ret, ret_len)
+        #     continue
+        #   assert actual_length.value == ret_len, f"only sent {actual_length.value}, wanted {ret_len}"
+
+        # # get status
+        # ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1000)
+        # assert ret == 0 and self.read_status[0] == 3, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
+
+        # # return a copy of the bytes
+        # libusb.libusb_clear_halt(self.handle, 0x81)
+        # libusb.libusb_clear_halt(self.handle, 0x83)
+        # libusb.libusb_clear_halt(self.handle, 0x04)
+        # libusb.libusb_clear_halt(self.handle, 0x02)
+
         return bytes(self.read_data[:])
       return None
 
