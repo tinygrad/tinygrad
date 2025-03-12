@@ -104,7 +104,7 @@ canvas {  display: none; }
 			resultText.innerHTML = "loading..."
 			labels = await getLabels();
 			const device = await getDevice();
-			net = await timer(() => model.load(device, '../../net.safetensors'), "(compilation)");
+			net = await timer(() => model.load(device, '../../net.js.safetensors'), "(compilation)");
 			resultText.innerHTML = "ready"
 		} catch (e) {
 			error(e)
