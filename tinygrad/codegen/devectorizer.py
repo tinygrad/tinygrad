@@ -168,7 +168,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
       oidx = idx.src[1] + global_offset
-      if oidx.divides(fold_length) is None: continue
+      if oidx.simplify().divides(fold_length) is None: continue
       lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
@@ -281,7 +281,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
   # devectorize is optional
-  if DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
+  if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
+  elif DEVECTORIZE: sink = graph_rewrite(sink, sym+devectorize+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
   else: sink = graph_rewrite(sink, sym+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
 
   # optional pre matcher
