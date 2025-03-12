@@ -61,7 +61,7 @@ class HostLLVMCompiler(LLVMCompiler):
 class AMDGPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch: str):
     self.arch = arch
-    super().__init__("AMDGPU", "amdgcn-amd-amdhsa", self.arch, "+cumode", jit=False, cache_key="llvm_amdgpu")
+    super().__init__("AMDGPU", b'amdgcn-amd-amdhsa', self.arch.encode(), b'+cumode', jit=False, cache_key="llvm_amdgpu")
   def __reduce__(self): return (AMDGPULLVMCompiler, (self.arch,))
   def compile(self, src:str) -> bytes:
     try: return super().compile(src)

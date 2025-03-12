@@ -79,8 +79,6 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}" if isinstance(x.dtype, PtrDType) else None),
 
   # unary/binary/ternary ops
-  (UPat(Ops.SQRT, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = call{flags} {ldt(x.dtype)} @llvm.sqrt.{ldt(x.src[0].dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), render_cast),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
@@ -137,6 +135,7 @@ class LLVMRenderer(Renderer):
     kernel: list[str] = []
     end_lines: dict[str, None] = {}
     vc = -1
+
     local_args: list[str] = []
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
