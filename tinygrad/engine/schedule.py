@@ -275,12 +275,15 @@ add_buffer_ops = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp(Ops.LOAD, x.dtype, (UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)), x.st.to_uop()))),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
-  # assign can store to a non contiguous ShapeTracker
+  # partial assign can store to a non-contiguous ShapeTracker
   (UPat(Ops.SINK, src=(UPat(Ops.ASSIGN, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), unwrap(x.src[0].st).to_uop(), x.src[1]).sink()),
-  # otherwise it's a contiguous store
+  # otherwise the store is contiguous
   (UPat(Ops.SINK, src=(UPat(GroupOp.All-{Ops.STORE}, name="x"),)),
    lambda x: UOp.store(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), 0), ShapeTracker.from_shape(x.shape).to_uop(), x).sink()),
+  # no CONTIGUOUS/DEVICE in ast
+  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
 ])
 
 # ** push views to buffer ops
@@ -362,9 +365,6 @@ def check_load_st(glbl:UOp, view:UOp):
 fix_kernel_ops = PatternMatcher([
   # BIND in shapetracker becomes DEFINE_VAR
   (UPat(Ops.VIEW, name="x"), unbind_shapetracker),
-  # remove CONTIGUOUS/DEVICE
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.DEVICE),)), lambda view: view.replace(src=())),
   # remove unmasked valid
   (UPat.where(UPat(Ops.VALID, name="valid"), UPat.cvar("x"), UPat()), lambda valid,x: x if all(v.mask is None for v in valid.st.views) else None),
   # no ImageDType after load
