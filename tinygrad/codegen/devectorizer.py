@@ -20,7 +20,9 @@ def fancy_gep(vec:UOp, i:int):
 
 def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
   lengths = []
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+  if ctx is not None and ctx.device == "DSP":
+    lengths = [128]
+  elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
