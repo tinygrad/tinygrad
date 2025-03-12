@@ -1,5 +1,5 @@
 from typing import Optional, Any, Callable, cast
-import functools, operator
+import functools, operator, itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
@@ -19,16 +19,6 @@ def fancy_gep(vec:UOp, i:int):
   return vec.gep(i)
 
 def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
-  lengths = []
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
-    pass
-  elif isinstance(buf.dtype, ImageDType):
-    lengths = [4]
-  elif ctx is not None and ctx.supports_float4:
-    # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
-  lengths.append(1)  # worst case, it's not folded
-
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
@@ -42,30 +32,23 @@ def expand_index(ctx:Renderer|None, buf:UOp, vec:UOp, mask:UOp|None=None):
   # the buf.dtype is always a pointer
   ptrdtype = cast(PtrDType, buf.dtype)
 
-  # then rewrite everything we can
+  # then rewrite everything we can into groups
   ret = []
   idxs: list[int|None] = [None]*vec.dtype.count
-  used: set[tuple[Any, int]] = set()
   global_offset = 0
   for rootsrc, offsets in offsets_rootsrc.items():
-    for o in offsets:
-      for fold_length in lengths:
-        if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
-          # get the index offset for this element. using [0] is okay, because they are the same
-          oidx = fancy_gep(vec, offsets[o][0])
-          if oidx.divides(fold_length) is None: continue
-          # on images, the index dtype is the load dtype
-          lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
-          # if we are folding, we set the dtype correctly
-          if fold_length > 1:
-            lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
-          # set the idxs of the output
-          for i in range(fold_length):
-            used.add((rootsrc,o+i))
-            for oo in offsets[o+i]: idxs[oo] = global_offset+i
-          # add this lidx to the CAT
-          ret.append(lidx)
-          global_offset += fold_length
+    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
+    for grp in grouped_offsets:
+      # get the index offset for this element. using [0] is okay, because they are the same
+      oidx = fancy_gep(vec, offsets[grp[0]][0])
+      lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
+      if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      # set the idxs of the output
+      for i,g in enumerate(grp):
+        for oo in offsets[g]: idxs[oo] = global_offset+i
+      # add this lidx to the CAT
+      ret.append(lidx)
+      global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
   return UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
@@ -108,6 +91,18 @@ def image_fixup(ls:UOp):
 
   return None
 
+def split_load_store(ctx:Renderer|None, ls:UOp):
+  buf = ls.src[0].src[0] if ls.src[0].op is Ops.INDEX else ls.src[0].src[0].src[0]
+  lengths = []
+  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+    pass
+  elif isinstance(buf.dtype, ImageDType):
+    lengths = [4]
+  elif ctx is not None and ctx.supports_float4:
+    # TODO: a better way to get this than ctx
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+  lengths.append(1)  # worst case, it's not folded
+
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
@@ -122,6 +117,8 @@ load_store_folding = PatternMatcher([
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put CAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
+  # split LOAD/STORE
+  #(UPat((Ops.LOAD, Ops.STORE), name="ls"), split_load_store),
   # image indexing, including unfoldable images
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
 ])
