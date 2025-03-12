@@ -9,10 +9,10 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.nn.state import get_state_dict, safe_save
 from tinygrad.helpers import Context
 from tinygrad.dtype import DType
-from typing import Callable, Sequence, Any, Tuple, Dict, List, Optional
+from typing import Callable, Sequence, Any, Optional
 from collections import OrderedDict
 
-def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
+def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str], list[tuple[str,list[str],list[int]]], dict[str,tuple[int,DType,int]]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
     fxn: ProgramSpec = ji.prg.p
@@ -31,10 +31,9 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
     cargs += [var for var in fxn.vars if getattr(var, "op", None) is Ops.DEFINE_VAR] # symbolic vars; is it necessary or sufficient to check for DEFINE_VAR?
     statements.append((fxn.function_name, cargs, fxn.global_size, fxn.local_size))
 
-  #return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}
 
-def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
+def jit_model(model, *args) -> tuple[TinyJit,dict[int,str]]:
   assert hasattr(model, "forward") or callable(model), "model needs a forward function"
   @TinyJit
   def run(*x):
@@ -61,15 +60,13 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
-#def export_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars={}, stream_weights=False) -> Tuple[str,int,int]:
-def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None, model_name="model", save_weights=True):
+def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
+                   model_name="model", save_weights=True) -> tuple[str, dict[str, Tensor]]:
   """
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
 
-  #assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, CPU, CUDA, GPU, METAL are supported"
   Device.DEFAULT="WEBGPU"
-  #state_dict = get_state_dict(model)
   state_dict = get_state_dict(getattr(fxn, "__self__", None))
   for k,v in state_dict.items():
     v.to("WEBGPU").realize()
@@ -97,14 +94,6 @@ def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[An
         if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
           name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
           global_size[j] = f"_{name.arg[0]}[0] + {val.arg}"
-
-
-
-  #prg = export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars, stream_weights)
-  #return prg, {input:bufs[input][0] for input in input_names}, {output:bufs[output][0] for output in output_names}, state
-
-
-
 
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _, _, _) in statements])
@@ -136,7 +125,6 @@ def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[An
     const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
 }};\n""" if save_weights else ""
-  #return f"""
   prg = f"""
 const {model_name} = (() => {{
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
