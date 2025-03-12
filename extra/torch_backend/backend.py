@@ -2,7 +2,7 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -12,9 +12,12 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
+
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
-def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype))
+def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -24,6 +27,7 @@ class TinyBackend:
   def current_device(self): return 0
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
+  def device_count(self): return getenv("GPUS", 1) # TODO: device count in tiny?
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
@@ -32,7 +36,7 @@ aten = torch.ops.aten
 # in place operations with views
 def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is not None
 def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
-  assert self.device.type == "tiny"
+  assert self.is_tiny
   self = unwrap(self)
   if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
@@ -64,18 +68,18 @@ def inplace_fn(outvars: str|list[str]):
 @torch.library.impl("aten::masked_select", "privateuseone")
 def masked_select(self, mask):
   # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()]))
+  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()], device=_from_torch_device(self.device)))
 
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 @inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
-  ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).tiny()
+  ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
   return wrap(unwrap(self).assign(unwrap(ret)))
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
-  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).tiny()
+  return aten.index(x.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in y]).to(x.device)
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
@@ -167,13 +171,13 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype))
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device))
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
   if TORCH_DEBUG: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())).contiguous()
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)).contiguous()
   return wrap(ret)
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
@@ -218,7 +222,7 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0])
+  grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0], device=_from_torch_device(weight.device))
   if not transposed: out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   else:
     bias = Tensor.zeros(weight.shape[1] * groups)
@@ -301,17 +305,19 @@ def scatter_add(self, dim, index, src):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = str(dest.device) == "tiny" and maybe_realize_storage(dest)
+  realize = dest.is_tiny and maybe_realize_storage(dest)
   cast_dtype = _from_torch_dtype(dest.dtype)
-  if str(src.device) == "tiny" and str(dest.device) == "tiny":
-    unwrap(dest).assign(unwrap(src).cast(cast_dtype))
+  if src.is_tiny and dest.is_tiny:
+    to_device = _from_torch_device(dest.device)
+    unwrap(dest).assign(unwrap(src).cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(unwrap(dest))
-  elif str(src.device) == "tiny" and str(dest.device) == "cpu":
+  elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
-  elif str(src.device) == "cpu" and str(dest.device) == "tiny":
-    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype))
+  elif src.is_cpu and dest.is_tiny:
+    to_device = _from_torch_device(dest.device)
+    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(unwrap(dest))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
@@ -458,6 +464,7 @@ def wrap_out(f):
     assigned = f(*args, **kwargs)
     if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
+    assert out.device == assigned.device, f"device mismatch: {assigned.device} -> {out.device}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
     if out.lazydata.is_realized: assigned = assigned.contiguous() # TODO: how does this map to torch's semantics
     return out.assign(assigned)
@@ -576,7 +583,7 @@ def get_real_tinygrad_buffers():
   res = set()
   for mod in _torch_modules_with_buffers:
     for _,b in mod.named_buffers(recurse=False):
-      if b is not None and str(b.device) == "tiny":
+      if b is not None and b.is_tiny:
         res.add(unwrap(b))
   return res
 torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
@@ -590,7 +597,7 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
   for state_dict in optimizer.state.values():
     for _, value in state_dict.items():
       if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if str(x.device) == "tiny"]
+  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if x.is_tiny]
   real_tinygrad_tensors += get_real_tinygrad_buffers()
   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
