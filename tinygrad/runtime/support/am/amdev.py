@@ -258,7 +258,9 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    # if zero: self.adev.paddr2cpu(paddr, size).cast('Q')[:] = [0] * (size // 8)
+    # if zero:
+    #   self.adev.vram.copyin(paddr, memoryview(bytearray(size)))
+      # self.adev.paddr2cpu(paddr, size).cast('Q')[:] = [0] * (size // 8)
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)

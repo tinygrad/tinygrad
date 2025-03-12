@@ -41,7 +41,7 @@ class USBConnector:
     ]
     self.read_cmd = (ctypes.c_uint8 * len(usb_cmd))(*bytes(usb_cmd))
     self.read_status = (ctypes.c_uint8 * 64)()
-    self.read_data = (ctypes.c_uint8 * 112)()
+    self.read_data = (ctypes.c_uint8 * 256)()
 
     print("USB device initialized successfully")
 
@@ -50,7 +50,7 @@ class USBConnector:
     libusb.libusb_clear_halt(self.handle, 0x04)
     libusb.libusb_clear_halt(self.handle, 0x02)
 
-    endpoints = [0x81, 0x83]
+    endpoints = [0x02, 0x81, 0x83]
     streams = (ctypes.c_uint8*len(endpoints))(*endpoints)
     # print(hex(streams[0]))
     x = libusb.libusb_alloc_streams(self.handle, len(endpoints), streams, len(endpoints))
@@ -60,7 +60,7 @@ class USBConnector:
     # required to be set, but not a trigger
     self.write(0xB213, bytes([0x01]))
     self.write(0xB214, bytes([0, 0]))
-    self.write(0xB216, bytes([0x20])) # Enable PCIe interface features (bus master, etc.)
+    self.write(0xB216, bytes([0x20]))
 
   def _detect_version(self):
     try: self.read(0x07f0, 6)
@@ -98,7 +98,17 @@ class USBConnector:
   # def _send_with_stream(self, cdb, ret_len=0):
   #   pass
 
-  def _send(self, cdb, ret_len=0):
+  def post_write_request(self, in_data):
+    in_transfer = libusb.libusb_alloc_transfer(0)
+    self.setup_transfer(in_transfer, 0x02, 0x1, in_data, len(in_data))
+    libusb.libusb_submit_transfer(in_transfer)
+
+  def post_read_request(self, in_data):
+    in_transfer = libusb.libusb_alloc_transfer(0)
+    self.setup_transfer(in_transfer, 0x81, 0x1, in_data, len(in_data))
+    libusb.libusb_submit_transfer(in_transfer)
+
+  def _send(self, cdb, ret_len=0, in_data=None):
     def __send():
       actual_length = ctypes.c_int(0)
       for i in range(3):

@@ -347,8 +347,10 @@ class AM_PSP(AM_IP):
 
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
-    sos_components_load_order = [(am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
-      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
+    sos_components_load_order = [
+      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
+      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV),
+    ]
 
     print(self.is_sos_alive())
     if not self.is_sos_alive():
@@ -379,20 +381,25 @@ class AM_PSP(AM_IP):
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
 
-  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0x0FFFFFFF, value=0x00000000)
+  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 
   def _prep_msg1(self, data, paddr=None):
     # assert data.nbytes <= 267552, f"{data.nbytes}"
     # print("msg1", hex(self.msg1_paddr), data.nbytes)
 
     self.adev.vram.copyin(paddr or self.msg1_paddr, data)
-    if self.prev_size - data.nbytes > 0:
-      self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(self.prev_size - data.nbytes)))
+    assert (xxx:=self.adev.vram.copyout(paddr or self.msg1_paddr, data.nbytes)) == data
+    print(xxx)
+    print(data)
+    # if self.prev_size - data.nbytes > 0:
+    #   self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(self.prev_size - data.nbytes)))
     # assert self.adev.vram.copyout(self.msg1_paddr, data.nbytes) == data
     self.prev_size = data.nbytes
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
+    assert ((self.adev.paddr2mc(self.msg1_paddr) >> 20) << 20) == self.adev.paddr2mc(self.msg1_paddr)
+    
     if fw not in self.adev.fw.sos_fw: return 0
 
     # self.adev.regMP0_SMN_C2PMSG_35.write(0x80000000)
