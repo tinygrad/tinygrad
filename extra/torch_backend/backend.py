@@ -400,6 +400,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": inplace_fn("x")(lambda x, y: x.assign(x | y)),
   "aten.multinomial": Tensor.multinomial,
+  "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
