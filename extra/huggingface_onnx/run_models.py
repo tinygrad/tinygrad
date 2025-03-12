@@ -72,7 +72,7 @@ def debug_run(model_path, truncate, config, rtol, atol):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Huggingface ONNX Model Validator and Ops Checker")
-  parser.add_argument("input", type=str, help="Input YAML file")
+  parser.add_argument("input", type=str, help="Path to the input YAML configuration file containing model information.")
   parser.add_argument("--check_ops", action="store_true", default=False,
                       help="Check support for ONNX operations in models from the YAML file")
   parser.add_argument("--validate", action="store_true", default=False,

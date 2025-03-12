@@ -2,8 +2,7 @@ import yaml, argparse
 from pathlib import Path
 from huggingface_hub import snapshot_download
 
-def download_models(yaml_file: Path, download_dir: Path):
-  yaml_file = Path(yaml_file).resolve()
+def download_models(yaml_file: str, download_dir: str) -> None:
   with open(yaml_file, 'r') as f: metadata = yaml.safe_load(f)
   n = len(metadata["repositories"])
 
@@ -21,9 +20,10 @@ def download_models(yaml_file: Path, download_dir: Path):
   print("Download completed according to YAML file.")
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(description="Download top Huggingface ONNX repositories")
-  parser.add_argument("input", type=str, help="Input YAML file")
+  parser = argparse.ArgumentParser(description="Download models from Huggingface Hub based on a YAML configuration file.")
+  parser.add_argument("input", type=str, help="Path to the input YAML configuration file containing model information.")
   args = parser.parse_args()
 
   models_folder = Path(__file__).parent / "models"
-  download_models(args.input, models_folder)
+  models_folder.mkdir(parents=True, exist_ok=True)
+  download_models(args.input, str(models_folder))

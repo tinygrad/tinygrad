@@ -54,7 +54,8 @@ def get_metadata(repos:list[str]) -> dict:
       filename = file.rfilename
       if not (filename.endswith('.onnx') or filename.endswith('.onnx_data')): continue
       if any(skip_str in filename for skip_str in SKIPPED_FILES): continue
-      file_size = file.size or int(requests.head(f"{HUGGINGFACE_URL}/{repo}/resolve/main/{filename}", allow_redirects=True).headers.get('Content-Length', 0))
+      head = requests.head(f"{HUGGINGFACE_URL}/{repo}/resolve/main/{filename}", allow_redirects=True)
+      file_size = file.size or int(head.headers.get('Content-Length', 0))
       files_metadata.append({"file": filename, "size": f"{file_size/1e6:.2f}MB"})
       total_size += file_size
 
