@@ -9,7 +9,7 @@ class USBConnector:
     ret = libusb.libusb_init(ctypes.byref(self.usb_ctx))
     if ret != 0: raise Exception(f"Failed to init libusb: {ret}")
 
-    # libusb.libusb_set_option(self.usb_ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
+    if DEBUG >= 6: libusb.libusb_set_option(self.usb_ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
     
     # Open device
     self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
@@ -50,16 +50,14 @@ class USBConnector:
     libusb.libusb_clear_halt(self.handle, 0x04)
     libusb.libusb_clear_halt(self.handle, 0x02)
 
-    streams = (ctypes.c_uint8*3)(0x81, 0x83, 0x2)
-    print(hex(streams[0]))
+    streams = (ctypes.c_uint8*3)(0x2, 0x81, 0x83)
+    # print(hex(streams[0]))
     x = libusb.libusb_alloc_streams(self.handle, 3, streams, 3)
-    print("hm", x)
+    assert x >= 0, f"got {x}"
+    # print("hm", x)
 
     # required to be set, but not a trigger
     self.write(0xB213, bytes([0x01]))
-    # print(self.read(0xB213, 1))
-    # exit(0)
-
     self.write(0xB214, bytes([0, 0]))
     self.write(0xB216, bytes([0x20])) # Enable PCIe interface features (bus master, etc.)
 
@@ -72,14 +70,14 @@ class USBConnector:
     transfer.contents.status = 0xff
     transfer.contents.flags = 0
     transfer.contents.endpoint = endpoint
-    transfer.contents.type = libusb.LIBUSB_TRANSFER_TYPE_BULK_STREAM
+    transfer.contents.type = libusb.LIBUSB_TRANSFER_TYPE_BULK if stream_id is None else libusb.LIBUSB_TRANSFER_TYPE_BULK_STREAM
     transfer.contents.timeout = 1000
     transfer.contents.length = length
     # transfer.contents.callback = None
     transfer.contents.user_data = None
     transfer.contents.buffer = data
     transfer.contents.num_iso_packets = 0
-    libusb.libusb_transfer_set_stream_id(transfer, stream_id)
+    if stream_id is not None: libusb.libusb_transfer_set_stream_id(transfer, stream_id)
   
   def _send_ops_and_wait(self, *cmds):
     for x in cmds: libusb.libusb_submit_transfer(x)
@@ -112,7 +110,7 @@ class USBConnector:
         self.setup_transfer(stat_transfer, 0x83, 0x1, self.read_status, 64)
 
         cmd_transfer = libusb.libusb_alloc_transfer(0)
-        self.setup_transfer(cmd_transfer, 0x04, 0x1, self.read_cmd, len(self.read_cmd))
+        self.setup_transfer(cmd_transfer, 0x04, None, self.read_cmd, len(self.read_cmd))
 
         # ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1000)
         # assert actual_length.value == len(self.read_cmd)
