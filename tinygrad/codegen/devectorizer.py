@@ -16,6 +16,10 @@ def fancy_gep(vec:UOp, i:int):
   if vec.op is Ops.ADD:
     if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) + vec.src[1].gep(i)
     if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) + vec.src[0].gep(i)
+  # if there's a vectorized AND here, expand through it
+  if vec.op is Ops.AND:
+    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) & vec.src[1].gep(i)
+    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) & vec.src[0].gep(i)
   return vec.gep(i)
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
