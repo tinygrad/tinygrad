@@ -395,6 +395,12 @@ class Tensor(SimpleMathTrait):
     assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
     devices = tuple(Device.canonicalize(x) for x in devices)
     mlb = self.lazydata.shard(devices, self._resolve_dim(axis) if axis is not None else None)
+    
+    # Propagate metadata to each shard
+    if hasattr(self.lazydata, 'st') and hasattr(mlb, 'src'):
+        for i in range(len(mlb.src)):
+            mlb.src[i].st = self.lazydata.st
+    
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:

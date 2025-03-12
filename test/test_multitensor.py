@@ -392,6 +392,23 @@ class TestMultiTensor(unittest.TestCase):
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
+  def test_resnet_shard_metadata_propagation(self):
+    from extra.models.resnet import ResNet18
+    
+    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image_sharded = fake_image.shard(devices_2, axis=0)
+    assert all(hasattr(fake_image_sharded.lazydata.src[i], 'st') 
+              for i in range(len(fake_image_sharded.lazydata.src))), "Shards missing ShapeTracker metadata"
+    m = ResNet18()
+    param = m.conv1.weight
+    param_sharded = param.shard(devices_2)
+    assert all(hasattr(param_sharded.lazydata.src[i], 'st') 
+              for i in range(len(param_sharded.lazydata.src))), "Parameter shards missing ShapeTracker"
+    result = (param_sharded + 1).realize()
+    assert hasattr(result.lazydata.src[0], 'st'), "Result shard 0 missing ShapeTracker"
+    assert hasattr(result.lazydata.src[1], 'st'), "Result shard 1 missing ShapeTracker"
+    assert result.shape == param.shape, f"Shape mismatch after operation: {result.shape} vs {param.shape}"
+
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8
 
