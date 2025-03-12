@@ -323,11 +323,6 @@ def train_cifar():
   # initialize model weights
   model = SpeedyResNet(W)
 
-  # with open("cifar.safetensor", "w") as f:
-  # torch.save(model.state_dict(), "cifar.safetensor")
-  state_dict = torch.load("cifar.safetensor", weights_only=False)
-  model.load_state_dict(state_dict)
-
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
 
