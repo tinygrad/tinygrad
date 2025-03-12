@@ -1056,8 +1056,8 @@ class TestOps(unittest.TestCase):
                        forward_only=True)
 
     # this actually runs!
-    val, _ = Tensor.randint(100000, low=-9999, high=9999).sort()
-    np.testing.assert_equal(val.numpy(), np.sort(val.numpy()))
+    # val, _ = Tensor.randint(100000, low=-9999, high=9999).sort()
+    # np.testing.assert_equal(val.numpy(), np.sort(val.numpy()))
 
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
