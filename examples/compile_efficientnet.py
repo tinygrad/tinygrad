@@ -10,18 +10,20 @@ if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
   dirname = Path(__file__).parent
-  # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
-  # loading the state dict from a safetensor file changes the generated kernels
-  if getenv("WEBGPU"):
+  mode = "clang" if getenv("CPU", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
+  if mode != "webgpu":
+    prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
+
+  if mode == "webgpu":
+    # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
+    # loading the state dict from a safetensor file changes the generated kernels
     safe_save(get_state_dict(model), (dirname / "net.safetensors").as_posix())
     load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
-  mode = "clang" if getenv("CPU", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
-  prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
-  if getenv("CPU", "") == "":
-    ext = "js" if getenv("WEBGPU", "") != "" else "json"
-    with open(dirname / f"net.{ext}", "w") as text_file:
+    prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
+    with open(dirname / f"net.js", "w") as text_file:
       text_file.write(prg)
-  else:
+
+  elif mode == "clang":
     cprog = [prg]
     # image library!
     cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").read_text().replace("half", "_half")]
@@ -71,3 +73,7 @@ if __name__ == "__main__":
     # CPU=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
     # category : 281 (tabby, tabby cat) with 9.452788
     print('\n'.join(cprog))
+
+  else:
+    with open(dirname / f"net.json", "w") as text_file:
+      text_file.write(prg)
