@@ -37,6 +37,8 @@ canvas {  display: none; }
 <div id="time"></div>
 </div>
 <script>
+	const urlParams = new URLSearchParams(window.location.search);
+	const useShaderF16 = urlParams.get('useShaderF16') !== 'false';
 	const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
 	const resultText = document.getElementById('result');
 	let labels, net;
@@ -50,7 +52,7 @@ canvas {  display: none; }
 		if (!navigator.gpu) error("WebGPU not supported.");
 		const adapter = await navigator.gpu.requestAdapter();
 		return await adapter.requestDevice({
-			requiredFeatures: ["shader-f16"],
+			requiredFeatures: useShaderF16 ? ["shader-f16"] : [],
 			powerPreference: "high-performance"
 		});
 	};

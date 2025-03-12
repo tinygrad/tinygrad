@@ -1,3 +1,5 @@
+const disableShaderF16 = process.argv.includes('--disableShaderF16');
+const query = disableShaderF16 ? "?useShaderF16=false" : "";
 const puppeteer = require("puppeteer");
 const { spawn } = require("child_process");
 const child = spawn("python", ["-m", "http.server", "8000"], { shell: true, detached: true });
@@ -51,7 +53,7 @@ async function runTest() {
       console.log(`error from page ${message}`),
     );
 
-  const res = await page.goto("http://localhost:8000/examples/webgpu/efficientnet/index.html");
+  const res = await page.goto(`http://localhost:8000/examples/webgpu/efficientnet/index.html${query}`);
   if (res.status() !== 200) throw new Error("Failed to load page");
 
   const textSelector = await page.waitForSelector("#result");
