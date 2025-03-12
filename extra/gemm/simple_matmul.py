@@ -24,7 +24,7 @@ if __name__ == "__main__":
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = init_matrix(M, K), init_matrix(K, N)
-    c = a.matmul(b, acc_dtype=acc_dtype).realize()
+    c = a.matmul(b, dtype=acc_dtype).realize()
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()

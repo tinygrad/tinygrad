@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Callable, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap
@@ -172,6 +172,9 @@ def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
   with open(path, "rb") as f: return pickle.load(f)
 
+# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
+class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=str, help='Path to kernels', default=None)
@@ -193,7 +196,7 @@ if __name__ == "__main__":
 
   perfetto_profile = to_perfetto(profile) if profile is not None else None
 
-  server = HTTPServer(('', PORT), Handler)
+  server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(f"*** started viz on {HOST}:{PORT}")

@@ -69,7 +69,7 @@ class TestQuantizeOnnx(unittest.TestCase):
   def test_prequant_conv2d_1x1(self):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(64, 32, 1, 1)).astype(np.uint8))
-    out = X.conv2d(W, acc_dtype=X.dtype)
+    out = X.conv2d(W, dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
 
@@ -77,7 +77,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     N = 512
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
-    out = X.matmul(W, acc_dtype=X.dtype)
+    out = X.matmul(W, dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
 
@@ -204,7 +204,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8)).realize()
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     #out = X @ W
-    out = X.matmul(W, acc_dtype=X.dtype)
+    out = X.matmul(W, dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
 

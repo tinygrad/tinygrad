@@ -27,6 +27,54 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["out"]
     self.helper_test_single_op("Reshape", inputs, attributes, outputs)
 
+  def test_conv(self):
+    # test VALID auto_pad
+    inputs = {
+      "x": np.random.randn(1, 3, 384, 384).astype(np.float32),
+      "w": np.random.randn(1152, 3, 14, 14).astype(np.float32),
+      "b": np.random.randn(1152).astype(np.float32)
+    }
+    attributes = {'auto_pad': 'VALID', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (14, 14), 'strides': (14, 14)}
+    outputs = ["y"]
+    self.helper_test_single_op("Conv", inputs, attributes, outputs, atol=1e-4)
+
+  def test_gather(self):
+    # test const negative indices
+    inputs = {
+      "input": np.random.randn(1, 3, 3).astype(np.float32),
+      "indices": np.array(-2, dtype=np.int64),
+    }
+    attributes = {'axis': 1}
+    outputs = ["y"]
+    self.helper_test_single_op("Gather", inputs, attributes, outputs)
+
+  def test_quantize_linear(self):
+    test_cases = [
+      {"test_case": "round_half_to_even", "qdtype": np.int8, "qzero_point": 0, "x": [-1.5, -0.5, 0.5, 1.5], "scale": 1.0},
+      {"test_case": "round_to_even_before_add_zero_point", "qdtype": np.uint8, "qzero_point": 1, "x": [0.5, 1.5], "scale": 1.0},
+    ]
+    for case in test_cases:
+      with self.subTest(test_case=case["test_case"]):
+        inputs = {
+          "x": np.array([case["x"]], dtype=np.float32),
+          "y_scale": np.array(case["scale"], dtype=np.float32),
+          "y_zero_point": np.array(case["qzero_point"], dtype=case["qdtype"])
+        }
+        self.helper_test_single_op("QuantizeLinear", inputs, {}, ["y"])
+
+  def test_dynamic_quantize_linear(self):
+    test_cases = [
+      {"name": "round_half_to_even", "x": np.array([0, 0.5, 1.5, 255], dtype=np.float32)},
+      {"name": "round_zero_point_half_down_to_even", "x": np.array([-1, 509], dtype=np.float32)},
+      {"name": "round_zero_point_half_up_to_even", "x": np.array([-11, 499], dtype=np.float32)},
+      # other tests from https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-45
+      {"name": "max_adjusted", "x": np.array([-1.0, -2.1, -1.3, -2.5, -3.34, -4.0], dtype=np.float32)},
+      {"name": "min_adjusted", "x": np.array([1, 2.1, 1.3, 2.5, 3.34, 4.0, 1.5, 2.6, 3.9, 4.0, 3.0, 2.345], dtype=np.float32).reshape((3, 4))},
+    ]
+    for case in test_cases:
+      with self.subTest(test_case=case["name"]):
+        self.helper_test_single_op("DynamicQuantizeLinear", {"x": case["x"]}, {}, ["y", "y_scale", "y_zero_point"])
+
   def test_qlinear_conv(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for b in (np.ones([32], dtype=np.int32), np.zeros([32], dtype=np.int32)):
@@ -45,7 +93,7 @@ class TestMainOnnxOps(TestOnnxOps):
           }
           attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
           outputs = ["out"]
-          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1)
+          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1) # occasionally inaccurate
 
   def test_qlinear_matmul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
@@ -63,11 +111,26 @@ class TestMainOnnxOps(TestOnnxOps):
         }
         attributes = {}
         outputs = ["Y"]
-        self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs, atol=1)
+        self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
+
+    for name,val in (("round_half_down_to_even", 1), ("round_half_up_to_even", 3)):
+      with self.subTest(test_case=name, val=val):
+        inputs = {
+          "A": np.array([val], dtype=np.int8),
+          "A_scale": np.array(0.5, dtype=np.float32),
+          "A_zero_point": np.array(0, dtype=np.int8),
+          "B": np.array([1], dtype=np.int8),
+          "B_scale": np.array(1, dtype=np.float32),
+          "B_zero_point": np.array(0, dtype=np.int8),
+          "Y_scale": np.array(1, dtype=np.float32),
+          "Y_zero_point": np.array(0, dtype=np.int8)
+        }
+        attributes = {}
+        outputs = ["Y"]
+        self.helper_test_single_op("QLinearMatMul", inputs, attributes, outputs)
 
 class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = "com.microsoft"
-
   def test_attention(self):
     batch_size, seq_len, input_hidden_size = 2, 8, 256
     num_heads, head_size = 4, 64
@@ -158,7 +221,55 @@ class TestContribOnnxOps(TestOnnxOps):
         }
         attributes = {}
         outputs = ["C"]
-        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs, atol=1)
+        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
+
+    with self.subTest(test_case="round_half_to_even"):
+      inputs = {
+        "A": np.array([1, 1, 1, 1], dtype=np.int8),
+        "A_scale": np.array(1, dtype=np.float32),
+        "A_zero_point": np.array(0, dtype=np.int8),
+        "B": np.array([1, 5, -3, -7], dtype=np.int8),
+        "B_scale": np.array(1, dtype=np.float32),
+        "B_zero_point": np.array(0, dtype=np.int8),
+        "C_scale": np.array(4, dtype=np.float32),
+        "C_zero_point": np.array(0, dtype=np.int8)
+      }
+      attributes = {}
+      outputs = ["C"]
+      self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs)
+
+  def test_qlinear_mul(self):
+    for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
+      with self.subTest(dtype=dtype, zero_point=zero_point):
+        dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
+        inputs = {
+          "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
+          "A_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "A_zero_point": np.array(zero_point, dtype=dtype),
+          "B": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
+          "B_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "B_zero_point": np.array(zero_point, dtype=dtype),
+          "C_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+          "C_zero_point": np.array(zero_point, dtype=dtype)
+        }
+        attributes = {}
+        outputs = ["C"]
+        self.helper_test_single_op("QLinearMul", inputs, attributes, outputs)
+
+    with self.subTest(test_case="round_half_to_even"):
+      inputs = {
+        "A": np.array([1, 1, 1, 1], dtype=np.int8),
+        "A_scale": np.array(1, dtype=np.float32),
+        "A_zero_point": np.array(0, dtype=np.int8),
+        "B": np.array([2, 6, -2, -6], dtype=np.int8),
+        "B_scale": np.array(1, dtype=np.float32),
+        "B_zero_point": np.array(0, dtype=np.int8),
+        "C_scale": np.array(4, dtype=np.float32),
+        "C_zero_point": np.array(0, dtype=np.int8)
+      }
+      attributes = {}
+      outputs = ["C"]
+      self.helper_test_single_op("QLinearMul", inputs, attributes, outputs)
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
@@ -173,7 +284,7 @@ class TestContribOnnxOps(TestOnnxOps):
         }
         attributes = {"channels_last": 0}
         outputs = ["C"]
-        self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs, atol=1)
+        self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs)
 
 if __name__ == "__main__":
   unittest.main()
