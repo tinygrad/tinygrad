@@ -546,7 +546,7 @@ torch.nn.parallel.comm.gather = _torch_patched_gather
 class TinyDistributedBackend:
   rank = 0
   size = 1
-  # TODO: optimize these to be off CPU
+  # TODO: move these off CPU
   def allreduce(self, tensors, opts):
     tensors_cpu = [x.cpu() for x in tensors]
     for a,b in zip(tensors, tensors_cpu):

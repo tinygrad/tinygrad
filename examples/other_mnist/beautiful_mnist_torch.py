@@ -32,16 +32,15 @@ if __name__ == "__main__":
   else:
     device = torch.device("mps")
 
-  GPUS = getenv("GPUS", 1)
-  DDP = getenv("DDP", 0)
-  RANK = getenv("LOCAL_RANK", 0)
+  GPUS, DDP, RANK = getenv("GPUS", 1), getenv("DDP", 0), getenv("LOCAL_RANK", 0)
   if DDP:
+    assert getenv("LOCAL_WORLD_SIZE") == GPUS, "number of workers must match number of gpus"
     import os, atexit
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "29500"
     device = torch.device(device.type, index=RANK)
     backend = "cpu:gloo,cuda:nccl" + ",tiny:tiny" if device.type == "tiny" else ""
-    torch.distributed.init_process_group(backend=backend, rank=RANK, world_size=GPUS)
+    torch.distributed.init_process_group(backend=backend)
     atexit.register(torch.distributed.destroy_process_group)
 
   X_train, Y_train, X_test, Y_test = mnist()

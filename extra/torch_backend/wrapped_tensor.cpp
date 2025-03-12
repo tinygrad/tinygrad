@@ -85,11 +85,10 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
 C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
 }
 
-class TinyLazyStorage final : public c10::StorageImpl {
+class TinyLazyStorageImpl : public c10::StorageImpl {
 public:
-  TinyLazyStorage() : c10::StorageImpl(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(), nullptr, /*resizable=*/false) {
-    // TODO: investigate why can't turn the following on without everything breaking
-    // release_data_and_set_meta_custom_data_ptr_error_msg_("TinyLazyStorage: data access is not supported");
+  TinyLazyStorageImpl() :
+    c10::StorageImpl(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(), nullptr, /*resizable=*/false) {
   }
 };
 template <typename OpaqueHandle>
@@ -103,7 +102,7 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       c10::IntArrayRef strides)
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
-    this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorage>());
+    this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorageImpl>());
     TensorImpl::storage_access_should_throw_ = false;
   }
 };
@@ -186,7 +185,7 @@ public:
 
   virtual const std::string getBackendName() const override { return "tiny"; }
 
-  c10::intrusive_ptr<c10d::Work> allreduce(std::vector<at::Tensor>& tensors, const c10d::AllreduceOptions& opts) {
+  c10::intrusive_ptr<c10d::Work> allreduce(std::vector<at::Tensor>& tensors, const c10d::AllreduceOptions& opts) override {
     py::gil_scoped_acquire gil;
     py::object py_result = py_backend_.attr("allreduce")(tensors, opts);
     auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::TensorType::get()));
@@ -194,7 +193,7 @@ public:
     return c10::make_intrusive<WorkShim>(c10d::OpType::ALLREDUCE, std::move(fut));
   }
 
-  virtual c10::intrusive_ptr<c10d::Work> broadcast(std::vector<at::Tensor>& tensors, const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) {
+  c10::intrusive_ptr<c10d::Work> broadcast(std::vector<at::Tensor>& tensors, const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) override {
     py::gil_scoped_acquire gil;
     py::object py_result = py_backend_.attr("broadcast")(tensors, opts);
     auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::TensorType::get()));
@@ -212,7 +211,6 @@ public:
     fut->markCompleted(c10::IValue(outputTensors));
     return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
   }
-
 private:
   py::object py_backend_;
 };
