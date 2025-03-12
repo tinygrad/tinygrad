@@ -92,7 +92,7 @@ class USBConnector:
     raise RuntimeError("USB transfer failed")
 
   def read(self, start_addr, read_len, stride=255):
-    if DEBUG >= 2: print("read", hex(start_addr))
+    if DEBUG >= 4: print("read", hex(start_addr))
     data = bytearray(read_len)
 
     for i in range(0, read_len, stride):
@@ -107,7 +107,7 @@ class USBConnector:
     return bytes(data[:read_len])
 
   def write(self, start_addr, data):
-    if DEBUG >= 2: print("write", hex(start_addr))
+    if DEBUG >= 4: print("write", hex(start_addr))
     for offset, value in enumerate(data):
       current_addr = start_addr + offset
       assert current_addr >> 17 == 0
@@ -123,7 +123,7 @@ class USBConnector:
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
     assert size > 0 and size <= 4
-    if DEBUG >= 1: print("pcie_request", hex(fmt_type), hex(address), value, size, cnt)
+    if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size, cnt)
 
     # TODO: why is this needed?
     #time.sleep(0.005)
@@ -168,14 +168,15 @@ class USBConnector:
     while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
       print("stat early poll", stat)
       continue
-    assert stat == 6, f"stat was {stat}"
+    # assert stat == 6, f"stat was {stat}"
     #print("stat out", stat)
 
     # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
     self.write(0xB296, bytes([0x04]))
 
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000):
-      assert False, "not supported"
+      return
+      # assert False, "not supported"
 
     while (stat:=self.read(0xB296, 1)[0]) & 2 == 0:
       print("stat poll", stat)

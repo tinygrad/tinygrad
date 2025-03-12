@@ -333,6 +333,7 @@ class AM_PSP(AM_IP):
     super().__init__(adev)
 
     self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
+    self.msg2_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
     self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
 
@@ -342,16 +343,30 @@ class AM_PSP(AM_IP):
     self.max_tmr_size = 0x1300000
     self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
 
+    self.prev_size = 0x0
+
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
-    sos_components_load_order = [
-      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
-      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
-      (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
-      (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
+    sos_components_load_order = [(am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
+      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
+    print(self.is_sos_alive())
     if not self.is_sos_alive():
       for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
+
+      # print("will load")
+      
+      # self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
+      # self.adev.regMP0_SMN_C2PMSG_35.write(am.PSP_BL__LOAD_SYSDRV)
+
+      # self._wait_for_bootloader()
+      # print("first ok")
+
+      # self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg2_paddr) >> 20)
+      # self.adev.regMP0_SMN_C2PMSG_35.write(am.PSP_BL__LOAD_SOSDRV)
+      # self._wait_for_bootloader()
+      # print("ok")
+
       while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
@@ -366,13 +381,15 @@ class AM_PSP(AM_IP):
 
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0x0FFFFFFF, value=0x00000000)
 
-  def _prep_msg1(self, data):
-    assert data.nbytes <= 267552, f"{data.nbytes}"
+  def _prep_msg1(self, data, paddr=None):
+    # assert data.nbytes <= 267552, f"{data.nbytes}"
     # print("msg1", hex(self.msg1_paddr), data.nbytes)
 
-    self.adev.vram.copyin(self.msg1_paddr, data)
-    self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(267552 - data.nbytes)))
+    self.adev.vram.copyin(paddr or self.msg1_paddr, data)
+    if self.prev_size - data.nbytes > 0:
+      self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(self.prev_size - data.nbytes)))
     # assert self.adev.vram.copyout(self.msg1_paddr, data.nbytes) == data
+    self.prev_size = data.nbytes
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):

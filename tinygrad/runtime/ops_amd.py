@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec, CPUProgram
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX, tqdm, trange
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio
 from tinygrad.runtime.autogen.am import am
@@ -584,52 +584,51 @@ class AMUSBBar(AMBar):
   def _copy_size(self, sz): return next(x for x in [4, 2, 1] if sz % x == 0)
   def copyin(self, offset, mv):
     x = mv.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(mv.nbytes)])
-    print("copyin", len(x), cp_sz)
-    for i in range(len(x)): self.write(offset + i * cp_sz, x[i], cp_sz)
+    for i in trange(len(x), desc=f"copyin {len(x)} {cp_sz}"): self.write(offset + i * cp_sz, x[i], cp_sz)
   def copyout(self, offset, size):
     x = memoryview(bytearray(size))
     mv = x.cast({1:'B', 2:'H', 4:'I'}[cp_sz:=self._copy_size(size)])
-    print("copyout", len(mv), cp_sz)
-    for i in range(len(mv)): mv[i] = self.read(offset + i * cp_sz, cp_sz)
+    for i in trange(len(mv), desc=f"copyout {len(mv)} {cp_sz}"): mv[i] = self.read(offset + i * cp_sz, cp_sz)
     return x
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id):
     self.dev = dev
-    connector_t = USBConnector if getenv("LIBUSB", 0) else SCSIConnector
-    self.usb = connector_t("/dev/sg2")
+    connector_t = USBConnector if getenv("LIBUSB", 1) else SCSIConnector
+    self.usb = connector_t("")
 
-    gpu_bus = 4 if self.usb.is_24 else 3
+    is_24 = True # if self.usb.is_24 else 3
+    gpu_bus = 4 if is_24 else 3
 
-    # setup pci switch
-    # self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=0, dev=0, fn=0, value=0x1, size=2)
-    # self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=0, dev=0, fn=0, value=gpu_bus, size=1)
-    # self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=1, dev=0, fn=0, value=gpu_bus, size=1)
-    # self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=0, dev=0, fn=0, value=1, size=1)
-    # self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=0, dev=0, fn=0, value=0, size=1)
-
-    for bus in ([0, 1] if self.usb.is_24 else [0]):
-      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
-
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
-
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
-
-    for bus in ([2, 3] if self.usb.is_24 else [1, 2]):
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
-
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
-
+    for bus in ([0, 1] if is_24 else [0]):
       self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
       self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
       self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
 
       self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
-      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)      
+      time.sleep(0.1)
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)
+
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+
+    for bus in ([2, 3] if is_24 else [1, 2]):
+      self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_SECONDARY_BUS, bus=bus, dev=0, fn=0, value=bus+1, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
+
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
+      time.sleep(0.1)
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x1000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=0x2000, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
       self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
     bar_next_addr, bar_off, self.bars = [0x10000000, 0x20000000], 0, {}
@@ -656,6 +655,14 @@ class USBIface(PCIIface):
     vram_bar = AMUSBBar(self.bars[0], self.usb)
     doorbell_bar = AMUSBBar(self.bars[1], self.usb)
     mmio_bar = AMUSBBar(self.bars[3], self.usb)
+
+    # i = 0
+    # while True:
+    #   addr = [0, 0x1000, 0x5000][i % 3]
+    #   vram_bar.write(addr, [0xdeadbeef, 0x12345678][i % 2], 4)
+    #   assert vram_bar.read(addr, 4) == [0xdeadbeef, 0x12345678][i % 2]
+    #   i += 1
+    #   if (i % 1000) == 0: print(i)
 
     AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
 
