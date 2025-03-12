@@ -12,12 +12,8 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
-def _from_torch_device(device: torch.device):
-  assert device.type == "tiny"
-  return f"{Device.DEFAULT}:{device.index or 0}"
-def _to_torch_device(device: str):
-  assert (d:=device.partition(":"))[0] == Device.DEFAULT
-  return torch.device("tiny", int(d[2] or 0))
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
@@ -31,7 +27,7 @@ class TinyBackend:
   def current_device(self): return 0
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
-  def device_count(self): return getenv("GPUS", 1) # TODO: query device count instead?
+  def device_count(self): return getenv("GPUS", 1) # TODO: device count in tiny?
   def get_device_properties(self, i):
     # TODO: stub
     props = {"total_memory": 1, "multi_processor_count": 1}
