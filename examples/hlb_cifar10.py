@@ -8,10 +8,9 @@ import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
-from tinygrad.nn.state import get_state_dict, get_parameters
+from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
-from tinygrad.nn.state import safe_load, safe_save, get_state_dict, load_state_dict, torch_load
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -95,55 +94,25 @@ class ConvGroup:
 
     return x + residual
 
-# class SpeedyResNet:
-#   def __init__(self, W):
-#     self.whitening = W
-#     self.net = [
-#       nn.Conv2d(12, 32, kernel_size=1, bias=False),
-#       lambda x: x.quick_gelu(),
-#       ConvGroup(32, 64),
-#       ConvGroup(64, 256),
-#       ConvGroup(256, 512),
-#       lambda x: x.max((2,3)),
-#       nn.Linear(512, 10, bias=False),
-#       lambda x: x / 9.,
-#     ]
-
-#   def __call__(self, x, training=True):
-#     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
-#     # TODO: remove the pad but instead let the kernel optimize itself
-#     forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
-#     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
-
-
 class SpeedyResNet:
   def __init__(self, W):
     self.whitening = W
-    self.conv2d = nn.Conv2d(12, 32, kernel_size=1, bias=False)
-    self.conv_group_1 = ConvGroup(32, 64)
-    self.conv_group_2 = ConvGroup(64, 256)
-    self.conv_group_3 = ConvGroup(256, 512)
-    self.linear = nn.Linear(512, 10, bias=False)
-
-  def _forward(self, x):
-    x = x.conv2d(self.whitening)
-    x = x.pad((1,0,0,1))
-    x = self.conv2d(x)
-    x = x.quick_gelu()
-    x = self.conv_group_1(x)
-    x = self.conv_group_2(x)
-    x = self.conv_group_3(x)
-    x = x.max((2,3))
-    x = self.linear(x)
-    x = x / 9.
-    return x
+    self.net = [
+      nn.Conv2d(12, 32, kernel_size=1, bias=False),
+      lambda x: x.quick_gelu(),
+      ConvGroup(32, 64),
+      ConvGroup(64, 256),
+      ConvGroup(256, 512),
+      lambda x: x.max((2,3)),
+      nn.Linear(512, 10, bias=False),
+      lambda x: x / 9.,
+    ]
 
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    # forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
-    return self._forward(x) if training else (self._forward(x) + self._forward(x[..., ::-1])) / 2.
-
+    forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
+    return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
