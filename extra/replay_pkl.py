@@ -1,6 +1,7 @@
 import pickle, sys
 from dataclasses import replace
 from tinygrad import Device
+from tinygrad.device import Buffer
 from tinygrad.helpers import getenv
 from tinygrad.engine.jit import TinyJit
 from tinygrad.engine.realize import CompiledRunner
@@ -38,7 +39,6 @@ if __name__ == "__main__":
           else:
             k.hand_coded_optimizations()
         p2 = k.to_program()
-        new_ei = replace(ei, prg=CompiledRunner(p2))
+        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", b.size, b.dtype) for b in ei.bufs])
         new_ei.run()
       knum += 1
-
