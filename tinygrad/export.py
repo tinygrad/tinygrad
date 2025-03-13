@@ -34,13 +34,12 @@ def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str]
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}
 
 def jit_model(model, *args) -> tuple[TinyJit,dict[int,str]]:
-  assert hasattr(model, "forward") or callable(model), "model needs a forward function"
+  assert callable(model), "model must be callable"
   @TinyJit
   def run(*x):
-    out = model.forward(*x) if hasattr(model, "forward") else model(*x)
-    assert isinstance(out, tuple) or isinstance(out, list) or isinstance(out, Tensor), "model output must be a Tensor, tuple, or a list of Tensors for export"
-    out = [out] if isinstance(out, Tensor) else out
-    return [o.realize() for o in out]
+    out:list[Tensor]|tuple[Tensor] = returned if isinstance((returned := model(*x)), (list, tuple)) else [returned]
+    assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
+    return [t.realize() for t in out]
 
   # twice to run the JIT
   for _ in range(2): the_output = run(*args)
