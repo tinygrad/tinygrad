@@ -1,6 +1,6 @@
 import pickle, sys
 from dataclasses import replace
-from tinygrad import Device
+from tinygrad import Device, Context
 from tinygrad.device import Buffer
 from tinygrad.helpers import getenv
 from tinygrad.engine.jit import TinyJit
@@ -9,10 +9,11 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 
 if __name__ == "__main__":
-  with open(sys.argv[1], "rb") as f:
-    fxn: TinyJit = pickle.load(f)
-    print(f"{f.tell()/1e6:.2f}M loaded")
-  print(type(fxn))
+  with Context(DEBUG=0):
+    with open(sys.argv[1], "rb") as f:
+      fxn: TinyJit = pickle.load(f)
+      print(f"{f.tell()/1e6:.2f}M loaded")
+    print(type(fxn))
 
   knum = 1
   for ei in fxn.captured.jit_cache:
