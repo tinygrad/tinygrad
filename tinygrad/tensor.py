@@ -2574,6 +2574,7 @@ class Tensor(SimpleMathTrait):
     padded_len = 2 ** math.ceil(math.log2(orig_len))
     p_arg = tuple((0, padded_len - orig_len) if i == dim else None for i in range(t.ndim))
     t = t.pad(p_arg, value=p_val)
+    print(t.shape)
 
     i = Tensor.arange(padded_len).reshape(tuple(1 if i != dim else -1 for i in range(t.ndim))).expand(t.shape)
     # pretty much this https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
@@ -2582,12 +2583,18 @@ class Tensor(SimpleMathTrait):
       j = k // 2
       while j > 0:
         ixj = i ^ j
-        t_partner = t.gather(dim, ixj)
+
+        # t_partner = t.gather(dim, ixj)
+        d = int(math.log2(t.shape[dim]))
+        r = int(math.log2(j))
+        t_partner = t.reshape(-1, *([2] * d)).flip(-1 - r).reshape(t.shape)
+
         mask = t > t_partner
         t_fat_larger = mask.where(t, t_partner)
         t_fat_smaller = t + t_partner - t_fat_larger
         point_towards = (((i & k) == 0) & (i > ixj)) | (((i & k) != 0) & (i < ixj))
-        t = point_towards.where(t_fat_smaller, t_fat_larger) if descending else point_towards.where(t_fat_larger, t_fat_smaller)
+        t = (point_towards.where(t_fat_smaller, t_fat_larger) if descending else point_towards.where(t_fat_larger, t_fat_smaller)).contiguous()
+        # t = point_towards.where(t_fat_smaller, t_fat_larger) if descending else point_towards.where(t_fat_larger, t_fat_smaller)
         j //= 2
       k *= 2
 
