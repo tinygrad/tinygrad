@@ -3,7 +3,7 @@ from typing import cast, Type, TypeVar, Generic, Any, ClassVar
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
-from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
+from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 
@@ -246,11 +246,12 @@ class HCQSignal(Generic[DeviceType]):
 
     Args:
       value: The value to wait for.
-      timeout: Maximum time to wait in milliseconds. Defaults to 10s.
+      timeout: Maximum time to wait in milliseconds. Defaults to 30s.
     """
     start_time = int(time.perf_counter() * 1000)
-    while self.value < value and (time_spent:=int(time.perf_counter() * 1000) - start_time) < timeout:
+    while (prev_value:=self.value) < value and (time_spent:=int(time.perf_counter() * 1000) - start_time) < timeout:
       self._sleep(time_spent)
+      if self.value != prev_value: start_time = int(time.perf_counter() * 1000) # progress was made, reset timer
     if self.value < value: raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
@@ -290,8 +291,9 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
     self.bind_sints_to_ptr(*vals, ptr=self.ptr + len(prefix or []) * 4 + len(bufs) * 8, fmt='I')
 
 class HCQProgram(Generic[DeviceType]):
-  def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int):
+  def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int, lib:bytes|None=None, base:int|None=None):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
+    if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base)]
 
   def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=(), kernargs_ptr:int|None=None) -> HCQArgsState:
     """
