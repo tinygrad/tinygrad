@@ -304,7 +304,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
   strides = strides_for_shape(rshape)
   nv = [View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                     v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None) for v in st.views]
-  # create a new reduceop on the swizzled input
+  # create a new reduceop for the swizzled input
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   return UOp(Ops.REDUCE_AXIS, r.dtype, (apply_swizzle(src.view(src.arg+new_input_st if src.op is Ops.VIEW else new_input_st)),),
