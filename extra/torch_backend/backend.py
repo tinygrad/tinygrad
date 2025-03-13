@@ -187,9 +187,6 @@ for i,pre in enumerate(["", "bi", "tri"]):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  # print('hi')
-  # print(src.detach().cpu().numpy())
-  # print(dest.detach().cpu().numpy())
   realize = dest.is_tiny and maybe_realize_storage(dest)
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
