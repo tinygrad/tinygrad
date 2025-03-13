@@ -1058,7 +1058,6 @@ class Tensor(SimpleMathTrait):
     print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
     ```
     """
-    print('padding!')
     if mode not in {"constant", "reflect", "replicate", "circular"}: raise NotImplementedError(f"{mode=} is not supported")
     # flat padding
     if all(isinstance(p, (int,UOp)) for p in padding):
