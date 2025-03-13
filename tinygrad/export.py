@@ -6,7 +6,7 @@
 from tinygrad import Tensor, dtypes, TinyJit, Device
 from tinygrad.ops import Ops
 from tinygrad.renderer import ProgramSpec
-from tinygrad.nn.state import get_state_dict, safe_save
+from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save
 from tinygrad.helpers import Context
 from tinygrad.dtype import DType
 from typing import Callable, Sequence, Any, Optional
@@ -60,18 +60,22 @@ def jit_model(model, *args) -> tuple[TinyJit,dict[int,str]]:
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
-def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
+def export_webgpu(model:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
                    model_name="model", save_weights=True) -> tuple[str, dict[str, Tensor]]:
   """
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
 
   Device.DEFAULT="WEBGPU"
-  state_dict = get_state_dict(getattr(fxn, "__self__", None))
+  state_dict = get_state_dict(weights_holder:=getattr(model, "__self__", None))
   for k,v in state_dict.items():
-    v.to("WEBGPU").realize()
+    # torch_load sometimes loads non-contiguous tensors, which when saved with safe_save, can cause exported WebGPU inference to fail
+    # TODO: investigate contiguity in torch_load, and in safe_save/safe_load cycle (which enforces contiguity)
+    # TODO: exporting a model from non-WEBGPU device doesn't work yet despite the below .to("WEBGPU")
+    state_dict[k] = v.contiguous().to("WEBGPU").realize()
+  load_state_dict(weights_holder, state_dict)
 
-  with Context(JIT=2): run, special_names = jit_model(fxn, *inputs)
+  with Context(JIT=2): run, special_names = jit_model(model, *inputs)
   functions, statements, bufs = compile_net(run, special_names)
 
 

@@ -16,13 +16,6 @@ if __name__ == "__main__":
     prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
 
   if mode == "webgpu":
-    # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
-    # loading the state dict from a safetensor file changes the generated kernels
-    safe_save(get_state_dict(model), (dirname / "net.safetensors").as_posix())
-    load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
-    #prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
-    #with open(dirname / f"net.js", "w") as text_file:
-      #text_file.write(prg)
     export_webgpu(model.forward, (Tensor.randn(1,3,224,224),), dirname / "net.js")
 
   elif mode == "clang":
