@@ -76,6 +76,7 @@ def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[An
 
 
   weight_names = {id(x.lazydata.base.realized): name for name, x in state_dict.items()}
+  max_buf_nbytes = max(v[0] for k,v in bufs.items())
   input_names = [name for _,name in special_names.items() if "input" in name]
   output_names = [name for _,name in special_names.items() if "output" in name]
 
@@ -130,7 +131,8 @@ if (!navigator.gpu) throw new Error("WebGPU not supported.");
 const adapter = await navigator.gpu.requestAdapter();
 const device = await adapter.requestDevice({{
 	requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [],
-	powerPreference: "high-performance"
+	powerPreference: "high-performance",
+  requiredLimits: {{maxStorageBufferBindingSize: {max_buf_nbytes}, maxBufferSize: {max_buf_nbytes}}},
 }});
 
 const {model_name} = (() => {{
