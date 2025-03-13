@@ -123,13 +123,20 @@ class USBConnector:
         cmd_transfer = libusb.libusb_alloc_transfer(0)
         self.setup_transfer(cmd_transfer, 0x04, None, self.read_cmd, len(self.read_cmd))
 
+        if in_data is not None:
+          in_transfer = libusb.libusb_alloc_transfer(0)
+          self.setup_transfer(in_transfer, 0x02, 0x1, in_data, len(in_data))
+
         # ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1000)
         # assert actual_length.value == len(self.read_cmd)
 
-        if ret_len > 0:
-          self._send_ops_and_wait(res_transfer, stat_transfer, cmd_transfer)
-        else:
-          self._send_ops_and_wait(stat_transfer, cmd_transfer)
+        transfers = []
+        if ret_len > 0: transfers.append(res_transfer)
+        if in_data is not None: transfers.append(in_transfer)
+        transfers += [stat_transfer, cmd_transfer]
+        self._send_ops_and_wait(*transfers)
+
+        # print([x for x in self.read_status])
 
         # if ret:
         #   print(i, "0x4", ret, len(self.read_cmd))
@@ -168,6 +175,22 @@ class USBConnector:
       if read_data: return read_data
     raise RuntimeError("USB transfer failed")
 
+  def wrcfg(self, buf):
+    if DEBUG >= 4: print("wrcf", hex(len(buf)))
+    assert len(buf) == 128
+    cdb = struct.pack('>B15x', 0xe1)
+    self._send(cdb, in_data=buf)
+    # for i in range(0, read_len, stride):
+    #   remaining = read_len - i
+    #   buf_len = min(stride, remaining)
+    #   current_addr = (start_addr + i)
+    #   assert current_addr >> 17 == 0
+    #   current_addr &= 0x01ffff
+    #   current_addr |= 0x500000
+    #   cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
+    #   data[i:i+buf_len] = self._send(cdb, buf_len)
+    # return bytes(data[:read_len])
+
   def read(self, start_addr, read_len, stride=255):
     if DEBUG >= 4: print("read", hex(start_addr))
     data = bytearray(read_len)
@@ -192,6 +215,11 @@ class USBConnector:
       current_addr |= 0x500000
       cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
       self._send(cdb)
+
+  def scsi_write(self, buf):
+    # scsi write 0x28 packet
+    cdb = struct.pack('>BBIHB', 0x2a, 0, 0, len(buf) // 512, 0)
+    return self._send(cdb, in_data=buf)
 
   def pcie_write_request_fw(self, address, value):
     cdb = struct.pack('>BII', 0x03, address, value)
@@ -271,6 +299,7 @@ class USBConnector:
 
     # Retrieve completion data from Link Status (0xB22A, 0xB22B)
     completion = struct.unpack('>H', self.read(0xB22A, 2))
+    # print(hex(completion[0]))
 
     # Validate completion status based on PCIe request typ
     if (fmt_type & 0xbe == 0x04):
