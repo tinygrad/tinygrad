@@ -21,7 +21,10 @@ if __name__ == "__main__":
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
         if not getenv("NOOPT"):
-          if knum == 5:
+          if knum in [6,7,9,11]:
+            k.apply_opt(Opt(OptOps.PADTO, 1, 128))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
+          elif knum in [5,8]:
             k.apply_opt(Opt(op=OptOps.UNROLL, axis=1, arg=0))
             k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
             k.apply_opt(Opt(OptOps.PADTO, 2, 128))
