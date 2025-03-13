@@ -2527,5 +2527,12 @@ class TestUOpBecome(unittest.TestCase):
     assert b.lazydata.is_realized
     assert b.lazydata.base.buffer._base is None
 
+  def test_setitem_offset(self):
+    a = Tensor.full((16,), 0.).contiguous().realize()
+    b = Tensor.full((16,), 1.).contiguous().realize()
+    a_view = a[4:].reshape(3, 4).shrink(((0,2),(0,2))).reshape((4,))
+    b.shrink(((0,4),)).assign(a_view).realize()
+    self.assertListEqual(b.tolist(), [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
