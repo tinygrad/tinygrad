@@ -187,6 +187,9 @@ for i,pre in enumerate(["", "bi", "tri"]):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
+  # print('hi')
+  # print(src.detach().cpu().numpy())
+  # print(dest.detach().cpu().numpy())
   realize = dest.is_tiny and maybe_realize_storage(dest)
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
@@ -397,7 +400,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": inplace_fn("x")(lambda x, y: x.assign(x | y)),
   "aten.multinomial": Tensor.multinomial,
-  "aten.pad": Tensor.pad,
+  "aten.pad": lambda input, pad, mode, value: Tensor.pad(input, pad, mode, 0 if value is None else value),
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
