@@ -115,6 +115,14 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
+  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+    ret = (functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)]),)
+    #ret = tuple([ret.gep(i) for i in range(ret.dtype.count)])
+  else:
+    ret = (ret,)
+  return UOp(Ops.REDUCE, x.dtype, ret+tuple(reduce_range), alu_op)
+  """
   # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
   ctx.acc_num += 1
@@ -126,6 +134,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   if not len(reduce_range): return ret
   # create ACC and assign
   return acc.assign(ret)
+  """
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -143,7 +152,6 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   if (not cast(PtrDType, x.src[0].dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
-  valid = None  # hack for DSP
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
 
 def lower_const(x:UOp):

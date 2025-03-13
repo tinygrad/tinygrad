@@ -12,6 +12,7 @@ from tinygrad.renderer import Renderer
 # ***** load/store grouping *****
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
+  mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
@@ -270,6 +271,29 @@ pm_render = PatternMatcher([
 
 # *** uop graph ***
 
+from dataclasses import dataclass
+from tinygrad.ops import identity_element
+from tinygrad.helpers import partition
+
+@dataclass
+class ReduceContext:
+  acc_num: int = 0
+
+def reduce_to_acc(ctx:ReduceContext, x:UOp):
+  ret = x.src[0]
+  reduce_range, reduce_expand = partition(x.src, lambda y: y.op is Ops.RANGE)
+  alu_op = x.arg
+  # create acc
+  acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+  ctx.acc_num += 1
+  ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [acc]+list(reduce_expand))
+  # create ACC and assign
+  return acc.assign(ret)
+
+pm_reduce = PatternMatcher([
+  (UPat(Ops.REDUCE, name="x"), reduce_to_acc)
+])
+
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
@@ -282,6 +306,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   # optional pre matcher
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
+
+  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext())
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
