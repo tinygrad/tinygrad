@@ -143,6 +143,7 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   if (not cast(PtrDType, x.src[0].dtype).local) or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
+  valid = None  # hack for DSP
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[2]))
 
 def lower_const(x:UOp):

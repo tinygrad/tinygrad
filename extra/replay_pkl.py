@@ -39,6 +39,9 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
           else:
             k.hand_coded_optimizations()
+          if knum in [2]:
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            pass
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", 128+b.size*2, b.dtype).view(b.size, b.dtype, 128) for b in ei.bufs])
         new_ei.run()
