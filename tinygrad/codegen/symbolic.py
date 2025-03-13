@@ -170,19 +170,6 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
-def gep_through_wmma(gep:UOp, wmma:UOp):
-  out_sz = prod(x[1] for x in wmma.arg[6][-1])
-  wmma_idxs = gep.arg[::out_sz]
-  for i in range(out_sz):
-    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
-  tsrcs = []
-  for s,sz in zip(wmma.src, wmma.arg[6]):
-    src_args = []
-    ssz = prod(x[1] for x in sz)
-    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
-    tsrcs.append(s.gep(tuple(src_args)))
-  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
-
 symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
   (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
@@ -386,6 +373,19 @@ def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
   if alu.op is Ops.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
+
+def gep_through_wmma(gep:UOp, wmma:UOp):
+  out_sz = prod(x[1] for x in wmma.arg[6][-1])
+  wmma_idxs = gep.arg[::out_sz]
+  for i in range(out_sz):
+    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
+  tsrcs = []
+  for s,sz in zip(wmma.src, wmma.arg[6]):
+    src_args = []
+    ssz = prod(x[1] for x in sz)
+    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
+    tsrcs.append(s.gep(tuple(src_args)))
+  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
 
 acc_pat, rng_pat = UPat(Ops.DEFINE_ACC, name="acc"), UPat(Ops.RANGE, name="rng")
 rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
