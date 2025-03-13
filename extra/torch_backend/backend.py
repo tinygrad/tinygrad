@@ -339,7 +339,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
-        self.sum(axis if axis is None or len(axis) else None, keepdim,
+    self.sum(axis if axis is None or len(axis) else None, keepdim,
                          dtype = _from_torch_dtype(dtype) if dtype is not None else None),
   "aten.amax.out": Tensor.max,
 }}

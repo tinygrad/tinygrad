@@ -435,6 +435,5 @@ def train_cifar():
     else:
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
-
 if __name__ == "__main__":
   train_cifar()
