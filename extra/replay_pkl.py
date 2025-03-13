@@ -39,6 +39,6 @@ if __name__ == "__main__":
           else:
             k.hand_coded_optimizations()
         p2 = k.to_program()
-        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", b.size, b.dtype) for b in ei.bufs])
+        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", 128+b.size*2, b.dtype).view(b.size, b.dtype, 128) for b in ei.bufs])
         new_ei.run()
       knum += 1
