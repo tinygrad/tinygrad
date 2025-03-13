@@ -1,16 +1,26 @@
 # stuff needed to unpack a kernel
 from tinygrad import Variable
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.ops import UOp, Ops, KernelInfo
+from tinygrad.ops import UOp, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 inf, nan = float('inf'), float('nan')
 UOps = Ops
 
+def replace_shapetracker(v: UOp, st: ShapeTracker):
+  if st == v.st: return None
+  if len(v.src) == 0: return UOp(Ops.VIEW, arg=st)
+  return v.src[0].view(st)
+
+fix_views = PatternMatcher([
+  (UPat(Ops.VIEW, name="v"), lambda v: replace_shapetracker(v,
+    ShapeTracker(tuple(View.create(vi.shape, vi.strides, vi.offset, vi.mask) for vi in v.st.views)))),
+])
+
 # kernel unpacker
 from tinygrad.codegen.kernel import Kernel
-def ast_str_to_ast(ast_str:str) -> UOp: return eval(ast_str)
+def ast_str_to_ast(ast_str:str) -> UOp: return graph_rewrite(eval(ast_str), fix_views)
 def ast_str_to_lin(ast_str:str, opts=None): return Kernel(ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
   (ast, applied_opts,) = eval(kern_str)
