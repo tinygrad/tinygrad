@@ -345,7 +345,7 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
-  from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform
+  from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform, Conv2dHeNormal
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models import resnet
   from extra.lr_scheduler import LambdaLR
@@ -427,14 +427,15 @@ def train_retinanet():
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
+  resnet.Conv2d = Conv2dHeNormal # NOTE: overriding to support float32 weights when training float16
+
   retinanet.ConvHead = Conv2dNormal
   retinanet.ConvClassificationHeadLogits = functools.partial(Conv2dNormal, prior_prob=0.01)
   retinanet.ConvFPN = Conv2dKaimingUniform
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=None)
-  # TODO: Figure out if casting to float16 should be done
-  # backbone.load_from_pretrained()
+  backbone.load_from_pretrained()
   _freeze_backbone_layers(backbone, 3)
 
   model = retinanet.RetinaNet(backbone, num_classes=NUM_CLASSES)
