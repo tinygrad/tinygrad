@@ -339,8 +339,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
-    self.sum(axis if axis is None or len(axis) else None, keepdim,
-                         dtype = _from_torch_dtype(dtype) if dtype is not None else None),
+    self.sum(axis if axis is None or len(axis) else None, keepdim, dtype = _from_torch_dtype(dtype) if dtype is not None else None),
+  "aten.amax.out": Tensor.max,
 }}
 
 # we add the "out" here
@@ -400,7 +400,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.logical_not": Tensor.logical_not,
   "aten.logical_or_": inplace_fn("x")(lambda x, y: x.assign(x | y)),
   "aten.multinomial": Tensor.multinomial,
-  "aten.pad": lambda input, pad, mode, value: Tensor.pad(input, pad, mode, 0 if value is None else value),
+  # "aten.pad": Tensor.pad,
   "aten.reflection_pad2d": functools.partial(Tensor.pad, mode="reflect"),
   "aten.masked_fill_.Scalar": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
@@ -435,7 +435,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
   "aten.detach": Tensor.detach,
-  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
+  "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
 }}
 
 def wrap_fxn(k,f):
