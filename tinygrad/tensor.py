@@ -2590,11 +2590,12 @@ class Tensor(SimpleMathTrait):
         t_partner = t.reshape(-1, *([2] * d)).flip(-1 - r).reshape(t.shape)
 
         mask = t > t_partner
-        t_fat_larger = mask.where(t, t_partner)
-        t_fat_smaller = t + t_partner - t_fat_larger
+        larger = mask.where(t, t_partner)
+        # smaller = t + t_partner - larger
+        smaller = mask.where(t_partner, t)
         point_towards = (((i & k) == 0) & (i > ixj)) | (((i & k) != 0) & (i < ixj))
-        t = (point_towards.where(t_fat_smaller, t_fat_larger) if descending else point_towards.where(t_fat_larger, t_fat_smaller)).contiguous()
-        # t = point_towards.where(t_fat_smaller, t_fat_larger) if descending else point_towards.where(t_fat_larger, t_fat_smaller)
+        t = point_towards.where(smaller, larger) if descending else point_towards.where(larger, smaller)
+        if j%4 == 0: t = t.contiguous()
         j //= 2
       k *= 2
 
