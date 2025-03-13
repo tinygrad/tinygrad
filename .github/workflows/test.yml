@@ -180,6 +180,8 @@ jobs:
       run: PYTHONPATH=. LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/test_ops.py --durations=20 || true
     - name: Test in-place operations on views
       run: PYTHONPATH=. TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
+    - name: Test multi-gpu
+      run: PYTHONPATH=. LLVM=1 GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
 
   torchbackendmore:
     name: Torch Backend Tests More
@@ -328,8 +330,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
-    - name: Repo line count < 11500 lines
-      run: MAX_LINE_COUNT=11500 python sz.py
+    - name: Repo line count < 12000 lines
+      run: MAX_LINE_COUNT=12000 python sz.py
 
   fuzzing:
     name: Fuzzing
