@@ -137,9 +137,9 @@ class PythonProgram:
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
           elif arg[4] == "AMD" and arg[5] == 64:
-            def a_elem(x, k, row, goff): return x[k % 4][goff + (k // 4) * 16 + row]
+            def a_elem(x, k, row, goff): return x[k%4][goff + (k//4)*16 + row]
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
-            def c_map(lane, elem): return (lane % 16, (lane // 16) * 4 + elem)
+            def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
             ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
           elif arg[4] == "AMD":
             # A (16 elements on 32 threads): col major, lane 16-32 == lane 0-15
