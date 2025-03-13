@@ -12,12 +12,13 @@ def expect(x, err, ret=None):
   return ret
 
 class LLVMCompiler(Compiler):
-  def __init__(self, target_arch:str, triple:bytes, cpu:bytes, feats:bytes, jit:bool=False, cache_key:str="llvm"):
+  def __init__(self, target_arch:str, processor:str, feats:str, jit:bool=True):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{target_arch}{component}')()
 
+    triple = {'AArch64': b'aarch64-none-unknown-elf', 'X86': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[target_arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    if DEBUG >= 2: print(f"LLVM init for {cpu!r} with {feats!r}")
-    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, cpu, feats,
+    if DEBUG >= 2: print(f"LLVM init for {processor!r} with {feats!r}")
+    self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor.encode(), feats.encode(),
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
@@ -31,7 +32,7 @@ class LLVMCompiler(Compiler):
       self.passes = b'default<O0>'
 
     self.jit = jit
-    super().__init__(f"compile_{cache_key}{'_opt' if opt else ''}")
+    super().__init__(f"compile_llvm_{target_arch}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
@@ -53,10 +54,9 @@ class LLVMCompiler(Compiler):
 class HostLLVMCompiler(LLVMCompiler):
   def __init__(self):
     host_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
-    triple = {'AArch64': b'aarch64', 'X86': b'x86_64'}[host_arch] + b'-none-unknown-elf'
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
-    super().__init__(host_arch, triple, cpu, feats, jit=True, cache_key="llvm_jit")
+    super().__init__(host_arch, cpu.decode(), feats.decode())
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
