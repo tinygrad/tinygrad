@@ -2581,28 +2581,17 @@ class Tensor(SimpleMathTrait):
     while k <= padded_len:
       j = k // 2
       while j > 0:
-        t_fat = t.reshape(-1,2,j)
-        t_fat_larger = t_fat.max(-2, keepdim=True).expand(t_fat.shape).reshape(t.shape)
-        t_fat_smaller = t_fat.min(-2, keepdim=True).expand(t_fat.shape).reshape(t.shape)
         ixj = i ^ j
+        t_partner = t.gather(dim, ixj)
+        mask = t > t_partner
+        t_fat_larger = mask.where(t, t_partner)
+        t_fat_smaller = t + t_partner - t_fat_larger
         point_towards = (((i & k) == 0) & (i > ixj)) | (((i & k) != 0) & (i < ixj))
-        t = point_towards.where(t_fat_smaller, t_fat_larger)if descending else point_towards.where(t_fat_larger, t_fat_smaller)
+        t = point_towards.where(t_fat_smaller, t_fat_larger) if descending else point_towards.where(t_fat_larger, t_fat_smaller)
         j //= 2
       k *= 2
-        # # TODO: this part can be optimized I think. It follows the example code right now
-        # l = i ^ j
-        # valid = l > i
-        # cond_up = ((i & k) != 0) & (cmp_up(t, t.gather(dim, l)))
-        # cond_down = ((i & k) == 0) & (cmp_down(t, t.gather(dim, l)))
-        # swap_cond = valid & (cond_up | cond_down)
-        # # swap
-        # new_perm = valid.where(swap_cond.where(l, i), swap_cond.gather(dim,l).where(l, i))
-        # t, idx = t.gather(dim,new_perm), idx.gather(dim, new_perm)
-        # j //= 2
-      # k *= 2
 
     s_arg = tuple((0, orig_len) if i == dim else None for i in range(t.ndim))
-
     return t.shrink(s_arg)
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
