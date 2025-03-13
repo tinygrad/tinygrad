@@ -2564,10 +2564,9 @@ class Tensor(SimpleMathTrait):
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   def sort(self, dim=-1, descending=False):
+    assert dim == -1
     t = self
-    if dtypes.is_float(t.dtype): p_val = -65504.0 if descending else 65504.0
-    else: p_val = dtypes.min(t.dtype) if descending else dtypes.max(t.dtype)
-    cmp_down, cmp_up = (Tensor.__lt__, Tensor.__gt__) if descending else (Tensor.__gt__, Tensor.__lt__)
+    p_val = dtypes.min(t.dtype) if descending else dtypes.max(t.dtype)
 
     # pad to power of 2
     dim = t._resolve_dim(dim)
@@ -2576,27 +2575,35 @@ class Tensor(SimpleMathTrait):
     p_arg = tuple((0, padded_len - orig_len) if i == dim else None for i in range(t.ndim))
     t = t.pad(p_arg, value=p_val)
 
-    idx = Tensor.arange(padded_len).reshape(tuple(1 if i != dim else -1 for i in range(t.ndim))).expand(t.shape)
     i = Tensor.arange(padded_len).reshape(tuple(1 if i != dim else -1 for i in range(t.ndim))).expand(t.shape)
-    # https://en.wikipedia.org/wiki/Bitonic_sorter#Example_code
+    # pretty much this https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     k = 2
     while k <= padded_len:
       j = k // 2
       while j > 0:
-        # TODO: this part can be optimized I think. It follows the example code right now
-        l = i ^ j
-        valid = l > i
-        cond_up = ((i & k) != 0) & (cmp_up(t, t.gather(dim, l)))
-        cond_down = ((i & k) == 0) & (cmp_down(t, t.gather(dim, l)))
-        swap_cond = valid & (cond_up | cond_down)
-        # swap
-        new_perm = valid.where(swap_cond.where(l, i), swap_cond.gather(dim,l).where(l, i))
-        t, idx = t.gather(dim,new_perm), idx.gather(dim, new_perm)
+        t_fat = t.reshape(-1,2,j)
+        t_fat_larger = t_fat.max(-2, keepdim=True).expand(t_fat.shape).reshape(t.shape)
+        t_fat_smaller = t_fat.min(-2, keepdim=True).expand(t_fat.shape).reshape(t.shape)
+        ixj = i ^ j
+        point_towards = (((i & k) == 0) & (i > ixj)) | (((i & k) != 0) & (i < ixj))
+        t = point_towards.where(t_fat_smaller, t_fat_larger)if descending else point_towards.where(t_fat_larger, t_fat_smaller)
         j //= 2
       k *= 2
+        # # TODO: this part can be optimized I think. It follows the example code right now
+        # l = i ^ j
+        # valid = l > i
+        # cond_up = ((i & k) != 0) & (cmp_up(t, t.gather(dim, l)))
+        # cond_down = ((i & k) == 0) & (cmp_down(t, t.gather(dim, l)))
+        # swap_cond = valid & (cond_up | cond_down)
+        # # swap
+        # new_perm = valid.where(swap_cond.where(l, i), swap_cond.gather(dim,l).where(l, i))
+        # t, idx = t.gather(dim,new_perm), idx.gather(dim, new_perm)
+        # j //= 2
+      # k *= 2
 
     s_arg = tuple((0, orig_len) if i == dim else None for i in range(t.ndim))
-    return t.shrink(s_arg), idx.shrink(s_arg)
+
+    return t.shrink(s_arg)
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
     """
