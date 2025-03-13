@@ -126,6 +126,13 @@ def export_webgpu(fxn:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[An
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
 }};\n""" if save_weights else ""
   prg = f"""
+if (!navigator.gpu) throw new Error("WebGPU not supported.");
+const adapter = await navigator.gpu.requestAdapter();
+const device = await adapter.requestDevice({{
+	requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [],
+	powerPreference: "high-performance"
+}});
+
 const {model_name} = (() => {{
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
@@ -175,7 +182,7 @@ const addComputePass = (device, commandEncoder, pipeline, layout, infinityUnifor
 
 {kernel_code}
 
-const setupNet = async (device, {"state_dict" if not save_weights else "safetensor"}) => {{
+const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not not save_weights else ""}
     const infinityBuf = createInfinityUniformBuf(device);
 
@@ -214,7 +221,7 @@ const setupNet = async (device, {"state_dict" if not save_weights else "safetens
         return {output_return};
     }}
 }}
-const load = async (device, weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}
+const load = async (weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(new Uint8Array(x))); }}
 return {{ load, setupNet }};
 }})();
 export default {model_name};
@@ -226,17 +233,3 @@ export default {model_name};
     safe_save(state_dict, f"{js_outfile}.safetensors")
 
   return prg, state_dict
-
-
-"""
-from examples.llama3 import build_transformer
-model_path = fetch("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-f16.gguf", "Llama-3.2-1B-Instruct-f16.gguf", subdir="llama3-1b-instruct")
-TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P = 0.95, 0, 0.0, 0.0, 0.0
-max_context=1024
-start_pos = Variable("start_pos", 0, max_context).bind(0)
-model_input = [Tensor([[128000]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P]
-model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device="NV", max_context=max_context)
-
-export_model_webgpu(model.forward, model_input, "webgpu_model.js")
-done = 1
-"""
