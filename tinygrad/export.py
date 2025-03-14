@@ -4,6 +4,7 @@
 # TODO: refactor in progress, simplify everything
 
 from tinygrad import Tensor, dtypes, TinyJit, Device
+from tinygrad.engine.jit import _prepare_jit_inputs
 from tinygrad.ops import Ops
 from tinygrad.renderer import ProgramSpec
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save, get_parameters
@@ -33,26 +34,27 @@ def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str]
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}
 
-def jit_model(model, *args) -> tuple[TinyJit,dict[int,str]]:
-  assert callable(model), "model must be callable"
+def jit_model(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], *args) -> tuple[TinyJit,dict[int,str]]:
   @TinyJit
   def run(*x) -> list[Tensor]:
     out:list[Tensor]|tuple[Tensor] = returned if isinstance((returned := model(*x)), (list, tuple)) else [returned]
-    assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors" # TODO: do we want this?
-    return [t.realize() for t in out]
+    # TODO do we want this assertion? at least require no literals because CapturedJit modifies self.ret in place?
+    assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
+    return [t.realize() for t in out] # TODO: or change to nn.state.get_parameters and then realize
   for _ in range(2): run(*args) # generate run.captured:CapturedJit by calling run twice
 
-  for (j,i),idx in run.captured.input_replace.items(): run.jit_cache[j].bufs[i] = args[idx].lazydata.base.realized
-  special_names = {id(args[idx].lazydata.base.realized): f"input{idx}" for idx in run.captured.input_replace.values()}
-  # TODO: requires that run.captured.ret is list[Tensor]
-  special_names.update({id(t.lazydata.base.realized): f"output{idx}" for idx,t in enumerate(run.captured.ret)})
+  input_buffers, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(args, {}) # TODO: handle kwargs
+  # TODO: requires that run.captured.ret is list[Tensor]; instead can use nn.state.get_parameters, but ensure canonical ordering
+  special_names = {id(t.lazydata.base.realized): f"output{i}" for i,t in enumerate(cast(list[Tensor], run.captured.ret))}
+  special_names.update({id(k): f"input{v}" for k,v in zip(input_buffers, names)})
+  for (j,i),idx in run.captured.input_replace.items(): run.jit_cache[j].bufs[i] = input_buffers[idx]
   
   return run, special_names
 
 def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
-def export_webgpu(model:Callable[..., Tensor|Sequence[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
+def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
                    model_name="model", save_weights=True) -> tuple[str, dict[str, Tensor]]:
   """
   Exports a javascript WebGPU implementation of a tinygrad model.
