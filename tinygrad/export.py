@@ -38,9 +38,9 @@ def jit_model(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], *args) -> 
   @TinyJit
   def run(*x) -> list[Tensor]:
     out:list[Tensor]|tuple[Tensor] = returned if isinstance((returned := model(*x)), (list, tuple)) else [returned]
-    # TODO do we want this assertion? at least require no literals because CapturedJit modifies self.ret in place?
+    # TODO do we want this assertion? the non-Tensor ret values aren't modified, and may be tricky to export - are they ever useful?
     assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
-    return [t.realize() for t in out] # TODO: or change to nn.state.get_parameters and then realize
+    return [t.realize() for t in out] # TODO: or if we allow non-tensors, change to nn.state.get_parameters and then realize
   for _ in range(2): run(*args) # generate run.captured:CapturedJit by calling run twice
 
   input_buffers, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(args, {}) # TODO: handle kwargs
@@ -55,13 +55,15 @@ def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
 def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
-                   model_name="model", save_weights=True) -> tuple[str, dict[str, Tensor]]:
+                  state_dict:Optional[dict[str,Tensor]]=None, model_name="model", save_weights=True) -> tuple[str, dict[str, Tensor]]:
   """
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
 
   Device.DEFAULT="WEBGPU"
-  state_dict = get_state_dict(weights_holder:=getattr(model, "__self__", None))
+  # TODO: don't get/use any state_dict by default; let user provide state_dict if they want exported weights to have keys (names) from state_dict
+  # TODO: instead, if state_dict is None, make a state_dict out of bufs_to_save; need to consider how random seeds are handled
+  state_dict = state_dict if state_dict else get_state_dict(weights_holder:=getattr(model, "__self__", None))
   for k,v in state_dict.items():
     # torch_load sometimes loads non-contiguous tensors, which when saved with safe_save, can cause exported WebGPU inference to fail
     # TODO: investigate contiguity in torch_load, and in safe_save/safe_load cycle (which enforces contiguity)
