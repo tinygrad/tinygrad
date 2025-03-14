@@ -5,7 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, least_upper_dtype
 from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop, GroupOp
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, QUANT
+from tinygrad.helpers import all_int, prod, partition, flatten, unwrap, QUANTIZE
 from tinygrad.codegen.expander import expand_rewrite
 from tinygrad.codegen.symbolic import symbolic
 
@@ -215,7 +215,7 @@ pm_quant = symbolic+PatternMatcher([
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
-  if QUANT and opts.device in {"CPU", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
+  if QUANTIZE and opts.device in {"CPU", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
   sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
   # expand_rewrite turns this into a vectorized program
   return expand_rewrite(sink)
