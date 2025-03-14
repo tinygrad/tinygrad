@@ -4,27 +4,73 @@ assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, all_same
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
+from tinygrad.codegen.symbolic import gep_pushing
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.ops import PatternMatcher, UPat
 
-dsp_pm = PatternMatcher([
+def vectorize_vconst(v, vc):
+  good = True
+  one_element = None
+  for u, c in zip(v.src, vc.arg):
+    if u.op is Ops.CONST and u.arg == 0 and c == 0: pass
+    elif c == 1:
+      if one_element is not None and one_element is not u: good = False
+      one_element = u
+    else:
+      good = False
+  if not good: return None
+  return v.src[0].broadcast(len(vc.arg)) * vc
+
+dsp_pm = gep_pushing+PatternMatcher([
+  # push all GEPs through ALUs (fix arange stuff)
+  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'),
+   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
+     tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) else None),
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-                      "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 else None),
+  # GEP all_same on CONST hack
+  (UPat(Ops.GEP, name="gep") * UPat(Ops.CONST, name="c"),
+   lambda gep,c: (gep.src[0]*c.arg).broadcast(len(gep.arg)) if all_same(gep.arg) and gep.arg[0] == 0 else None),
+  (UPat(Ops.VECTORIZE, name="v") * UPat(Ops.VCONST, name="vc"), vectorize_vconst),
 ])
 
-dsp_pm_late = PatternMatcher([
-  (UPat.var("x")+UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
-  (UPat.var("x")*UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
-  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}")),
+def mul_pat(acc, a0, b0, a1, b1, a2, b2, a3, b3):
+  print(a0.src[0].arg, a0.src[0].dtype)
+  a = UOp(Ops.CAT, a0.src[0].dtype.scalar().vec(a0.dtype.count*4), (a0.src[0], a1.src[0], a2.src[0], a3.src[0]))
+  b = UOp(Ops.CAT, b0.src[0].dtype.scalar().vec(b0.dtype.count*4), (b0.src[0], b1.src[0], b2.src[0], b3.src[0]))
+  # Vx32.w+=vrmpy(Vu32.ub,Vv32.b)
+  assert b.dtype.scalar() == dtypes.uchar and a.dtype.scalar() == dtypes.char
+  return UOp(Ops.CUSTOMI, acc.dtype, src=(acc, b, a), arg="__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+
+dsp_pm_late = gep_pushing+PatternMatcher([
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld", allow_any_len=True),
+   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
+  # CAT on GEP
+  (UPat(Ops.CAT, src=UPat(Ops.GEP, src=(UPat.var("x"),)), name="cat"),
+   lambda cat,x: x.gep(sum([y.arg if isinstance(y.arg, tuple) else (y.arg,) for y in cat.src], ()))),
+  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
+  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+    if not isinstance(x.dtype, PtrDType) else None),
+  # CAST
+  (UPat(Ops.CAST, name="a0")*UPat(Ops.CAST, name="b0")+UPat(Ops.CAST, name="a1")*UPat(Ops.CAST, name="b1")+
+   UPat(Ops.CAST, name="a2")*UPat(Ops.CAST, name="b2")+UPat(Ops.CAST, name="a3")*UPat(Ops.CAST, name="b3")+
+   UPat(Ops.DEFINE_ACC, name="acc"), mul_pat),
+  #(UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+  #  "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+  (UPat.var("x")+UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}") if x.op is not Ops.CUSTOMI else None),
+  (UPat.var("x")*UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}") if x.op is not Ops.CUSTOMI else None),
+  (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+])
+
+dsp_string = PatternMatcher([
+  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
 ])
 
 class DSPRenderer(ClangRenderer):
@@ -34,6 +80,7 @@ class DSPRenderer(ClangRenderer):
   kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
+  string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {**ClangRenderer.code_for_op, Ops.SIN: lambda x,dtype: f"__builtin_sin({x})",
                  Ops.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",

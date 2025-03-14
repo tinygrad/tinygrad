@@ -5,13 +5,14 @@ from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym
-from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
+from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
 
 # ***** load/store grouping *****
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
+  mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
@@ -32,6 +33,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   global_offset = 0
   for rootsrc, offsets in offsets_rootsrc.items():
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
+    #print(grouped_offsets, rootsrc[0] if mask is not None else None)
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
       oidx = vec.gep(offsets[grp[0]][0])
@@ -45,7 +47,8 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  return UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
+  ret = UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)) if len(ret) > 1 else ret[0]
+  return ret.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
   # TODO: this is written in many places
@@ -143,7 +146,11 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if (sz:=ls.src[0].dtype.count) == 1: return None
   lengths = []
   buf = idx.src[0]
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+  must_divide = True
+  if ctx.device == "DSP":
+    lengths = [128,64,32,16,8,4]
+    must_divide = False
+  elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
@@ -158,7 +165,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
       oidx = idx.src[1] + global_offset
-      if oidx.simplify().divides(fold_length) is None: continue
+      if must_divide and oidx.simplify().divides(fold_length) is None: continue
       lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
@@ -253,7 +260,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.CONST, name='c'),
    lambda c: UOp(Ops.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
   (UPat(Ops.VCONST, name='c'), lambda c: UOp(Ops.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
-  (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
+  # no multi gep
+  #(UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # move masks of loads/stores
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask"))),
@@ -264,6 +272,52 @@ pm_render = PatternMatcher([
 ])
 
 # *** uop graph ***
+
+from dataclasses import dataclass
+from tinygrad.ops import identity_element
+from tinygrad.helpers import partition, dedup, get_single_element
+
+@dataclass
+class ReduceContext:
+  acc_num: int = 0
+
+def reduce_to_acc(ctx:ReduceContext, x:UOp):
+  ret = x.src[0]
+  reduce_range, reduce_expand = partition(x.src, lambda y: y.op is Ops.RANGE)
+  alu_op = x.arg
+  # create acc
+  acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+  ctx.acc_num += 1
+  ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [acc]+list(reduce_expand))
+  # create ACC and assign
+  return acc.assign(ret)
+
+pm_reduce = PatternMatcher([
+  (UPat(Ops.REDUCE, name="x"), reduce_to_acc)
+])
+
+def fix_vectorize(v):
+  dd = dedup(x.src[0] for x in v.src)
+  if len(dd) != 4: return None
+  gep = [(dd.index(x.src[0]), get_single_element(x.arg)) for x in v.src]
+
+  gep_1 = ','.join([str(y + (dd[0].dtype.count if x == 1 else 0)) for x,y in gep if x in [0,1]])
+  gep_2 = ','.join([str(y + (dd[2].dtype.count if x == 3 else 0)) for x,y in gep if x in [2,3]])
+
+  x = "__builtin_shufflevector({0}, {1}, "+gep_1+")"
+  y = "__builtin_shufflevector({2}, {3}, "+gep_2+")"
+
+  gep_final = ','.join([str(x) for x in range(0, len(gep))])
+  ret = f"__builtin_shufflevector({x}, {y}, {gep_final})"
+  return UOp(Ops.CUSTOM, v.dtype, tuple(dd), ret)
+  #print("HERE", len(dd))
+  #pass
+
+pm_late = PatternMatcher([
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"), fix_vectorize),
+])
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
@@ -278,6 +332,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # optional pre matcher
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
 
+  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext())
+
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
+  sink = graph_rewrite(sink, pm_late)
   return sink
