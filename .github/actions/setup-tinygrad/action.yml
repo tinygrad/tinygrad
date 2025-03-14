@@ -54,7 +54,7 @@ runs:
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python${{ inputs.python-version }}/site-packages
         key: python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
-        restore-key: python-package-${{ inputs.key }}-
+        restore-keys: python-package-${{ inputs.key }}-
     - name: Cache Python packages (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
