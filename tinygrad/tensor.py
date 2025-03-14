@@ -2564,43 +2564,30 @@ class Tensor(SimpleMathTrait):
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   def sort(self, dim=-1, descending=False):
-    assert dim == -1
-    t = self
-    p_val = dtypes.min(t.dtype) if descending else dtypes.max(t.dtype)
-
+    x, dim = self, self._resolve_dim(dim)
     # pad to power of 2
-    dim = t._resolve_dim(dim)
-    orig_len = t.shape[dim]
-    padded_len = 2 ** math.ceil(math.log2(orig_len))
-    p_arg = tuple((0, padded_len - orig_len) if i == dim else None for i in range(t.ndim))
-    t = t.pad(p_arg, value=p_val)
-    print(t.shape)
-
-    i = Tensor.arange(padded_len).reshape(tuple(1 if i != dim else -1 for i in range(t.ndim))).expand(t.shape)
+    orig_len = x.shape[dim]
+    n_stages = math.ceil(math.log2(orig_len))
+    bitonic_len = 2**n_stages
+    fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
+    x = x.pad(tuple((0, bitonic_len - orig_len) if i == dim else None for i in range(x.ndim)), value=fill_value)
+    i = Tensor.arange(bitonic_len).reshape(tuple(bitonic_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
     # pretty much this https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
-    k = 2
-    while k <= padded_len:
-      j = k // 2
-      while j > 0:
+    for stage in range(1, n_stages+1):
+      k = cast(int, 2**stage)
+      for substage in range(stage-1, -1, -1):
+        j = cast(int, 2**substage)
         ixj = i ^ j
-
-        # t_partner = t.gather(dim, ixj)
-        d = int(math.log2(t.shape[dim]))
-        r = int(math.log2(j))
-        t_partner = t.reshape(-1, *([2] * d)).flip(-1 - r).reshape(t.shape)
-
-        mask = t > t_partner
-        larger = mask.where(t, t_partner)
-        # smaller = t + t_partner - larger
-        smaller = mask.where(t_partner, t)
+        # x_partner = x.gather(dim, ixj)
+        x_partner = x.reshape(x.shape[:dim] + ((2,) * n_stages) + x.shape[dim+1:]).flip(dim + (n_stages - 1 - substage)).reshape(x.shape)
+        larger = (x > x_partner).where(x, x_partner)
+        smaller = (x_partner > x).where(x, x_partner)
         point_towards = (((i & k) == 0) & (i > ixj)) | (((i & k) != 0) & (i < ixj))
-        t = point_towards.where(smaller, larger) if descending else point_towards.where(larger, smaller)
-        if j%4 == 0: t = t.contiguous()
-        j //= 2
-      k *= 2
-
-    s_arg = tuple((0, orig_len) if i == dim else None for i in range(t.ndim))
-    return t.shrink(s_arg)
+        x = (point_towards.where(smaller, larger) if descending else point_towards.where(larger, smaller)).contiguous()
+    x = x.shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+    idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
+    return x, idx
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
     """

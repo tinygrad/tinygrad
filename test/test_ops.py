@@ -1049,14 +1049,14 @@ class TestOps(unittest.TestCase):
 
   def test_sort(self):
     # TODO: repeated values indices no work
-    # for dim in [-1, 0, 1]:
-    #   for descending in [True, False]:
-    #     helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
-    #     helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
-    #                    forward_only=True)
+    for dim in [-1, 0, 1]:
+      for descending in [True, False]:
+        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
+        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
+                       forward_only=True)
 
     # this actually runs!
-    val = Tensor.randint(100000, low=-9999, high=9999).sort()
+    val, _ = Tensor.randint(100000, low=-9999, high=9999).sort()
     np.testing.assert_equal(val.numpy(), np.sort(val.numpy()))
 
   def test_topk(self):
