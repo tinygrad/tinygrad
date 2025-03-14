@@ -16,6 +16,7 @@ class ExternalTestDatasets(unittest.TestCase):
     np.random.seed(42)
     random.seed(42)
 
+class TestKiTS19Dataset(ExternalTestDatasets):
   def _create_samples(self, val, num_samples=2):
     self._set_seed()
 
@@ -38,7 +39,7 @@ class ExternalTestDatasets(unittest.TestCase):
 
     return preproc_pth, list(preproc_pth.glob("*_x.npy")), list(preproc_pth.glob("*_y.npy"))
 
-  def _create_kits19_ref_dataloader(self, preproc_img_pths, preproc_lbl_pths, val):
+  def _create_ref_dataloader(self, preproc_img_pths, preproc_lbl_pths, val):
     if val:
       dataset = PytVal(preproc_img_pths, preproc_lbl_pths)
     else:
@@ -46,7 +47,7 @@ class ExternalTestDatasets(unittest.TestCase):
 
     return iter(dataset)
 
-  def _create_kits19_tinygrad_dataloader(self, preproc_pth, val, batch_size=1, shuffle=False, seed=42, use_old_dataloader=False):
+  def _create_tinygrad_dataloader(self, preproc_pth, val, batch_size=1, shuffle=False, seed=42, use_old_dataloader=False):
     if use_old_dataloader:
       dataset = iterate(list(Path(tempfile.gettempdir()).glob("case_*")), preprocessed_dir=preproc_pth, val=val, shuffle=shuffle, bs=batch_size)
     else:
@@ -54,10 +55,10 @@ class ExternalTestDatasets(unittest.TestCase):
 
     return iter(dataset)
 
-  def test_kits19_training_set(self):
+  def test_training_set(self):
     preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(False)
-    ref_dataset = self._create_kits19_ref_dataloader(preproc_img_pths, preproc_lbl_pths, False)
-    tinygrad_dataset = self._create_kits19_tinygrad_dataloader(preproc_pth, False)
+    ref_dataset = self._create_ref_dataloader(preproc_img_pths, preproc_lbl_pths, False)
+    tinygrad_dataset = self._create_tinygrad_dataloader(preproc_pth, False)
 
     for ref_sample, tinygrad_sample in zip(ref_dataset, tinygrad_dataset):
       self._set_seed()
@@ -65,10 +66,10 @@ class ExternalTestDatasets(unittest.TestCase):
       np.testing.assert_equal(tinygrad_sample[0][:, 0].numpy(), ref_sample[0])
       np.testing.assert_equal(tinygrad_sample[1][:, 0].numpy(), ref_sample[1])
 
-  def test_kits19_validation_set(self):
+  def test_validation_set(self):
     preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(True)
-    ref_dataset = self._create_kits19_ref_dataloader(preproc_img_pths, preproc_lbl_pths, True)
-    tinygrad_dataset = self._create_kits19_tinygrad_dataloader(preproc_pth, True, use_old_dataloader=True)
+    ref_dataset = self._create_ref_dataloader(preproc_img_pths, preproc_lbl_pths, True)
+    tinygrad_dataset = self._create_tinygrad_dataloader(preproc_pth, True, use_old_dataloader=True)
 
     for ref_sample, tinygrad_sample in zip(ref_dataset, tinygrad_dataset):
       np.testing.assert_equal(tinygrad_sample[0][:, 0], ref_sample[0])
