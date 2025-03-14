@@ -154,6 +154,7 @@ class Ops(FastEnum):
 
   # CUSTOMI is inline
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
+  IGNORE = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
