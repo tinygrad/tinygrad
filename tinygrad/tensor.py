@@ -74,25 +74,25 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
   return ret
 
 def _get_winograd_matcols(mat_const, dims:int) -> list[list[Tensor]]:
-    """Creates a list of matrices for each dimension without materializing tensors"""
-    return [[mat_const[i][k] for k in range(len(mat_const[0]))] 
-            for i in range(len(mat_const))]
+  """Creates a list of matrices for each dimension without materializing tensors"""
+  return [[mat_const[i][k] for k in range(len(mat_const[0]))]
+          for i in range(len(mat_const))]
 
 def _apply_winograd_matrix(mat_const, t:Tensor, dims:int) -> Tensor:
-    """Apply Winograd transformation matrix to tensor t"""
-    # Get matcols without shape/device info
-    matcols = _get_winograd_matcols(mat_const, dims)
-    
-    # Reshape input for broadcasting - this part is similar to the original
-    t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:])
-    t_ = t_.expand(t.shape[:dims] + (len(mat_const),) * dims + t.shape[dims:])
-    
-    # Multiply each element of t_ by the corresponding stacked column of kron(mat, mat)
-    # This follows the original implementation's pattern more closely
-    ret = sum(prod(col[idx].cast(t.dtype) for col, idx in zip(matcols, mat_is)) * t_[mat_is] 
-              for mat_is in itertools.product(range(len(mat_const[0])), repeat=dims))
-    
-    return ret
+  """Apply Winograd transformation matrix to tensor t"""
+  # Get matcols without shape/device info
+  matcols = _get_winograd_matcols(mat_const, dims)
+  
+  # Reshape input for broadcasting - this part is similar to the original
+  t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:])
+  t_ = t_.expand(t.shape[:dims] + (len(mat_const),) * dims + t.shape[dims:])
+  
+  # Multiply each element of t_ by the corresponding stacked column of kron(mat, mat)
+  # This follows the original implementation's pattern more closely
+  ret = sum(prod(col[idx].cast(t.dtype) for col, idx in zip(matcols, mat_is)) * t_[mat_is]
+            for mat_is in itertools.product(range(len(mat_const[0])), repeat=dims))
+  
+  return ret
 
 def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   # unsqueeze left to make every shape same length
@@ -4103,28 +4103,28 @@ if TRACEMETA >= 1:
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
 
-# Winograd constants at the module level
+# winograd constants at the module level
 def _init_winograd_constants():
-    global winograd_G_const, winograd_Bt_const, winograd_At_const
-    
-    winograd_G_const = [[Tensor(1/4), Tensor(0), Tensor(0)], 
-                        [Tensor(-1/6), Tensor(-1/6), Tensor(-1/6)],
-                        [Tensor(-1/6), Tensor(1/6), Tensor(-1/6)],
-                        [Tensor(1/24), Tensor(1/12), Tensor(1/6)],
-                        [Tensor(1/24), Tensor(-1/12), Tensor(1/6)],
-                        [Tensor(0), Tensor(0), Tensor(1)]]
-    
-    winograd_Bt_const = [[Tensor(4), Tensor(0), Tensor(-5), Tensor(0), Tensor(1), Tensor(0)],
-                         [Tensor(0), Tensor(-4), Tensor(-4), Tensor(1), Tensor(1), Tensor(0)],
-                         [Tensor(0), Tensor(4), Tensor(-4), Tensor(-1), Tensor(1), Tensor(0)],
-                         [Tensor(0), Tensor(-2), Tensor(-1), Tensor(2), Tensor(1), Tensor(0)],
-                         [Tensor(0), Tensor(2), Tensor(-1), Tensor(-2), Tensor(1), Tensor(0)],
-                         [Tensor(0), Tensor(4), Tensor(0), Tensor(-5), Tensor(0), Tensor(1)]]
-    
-    winograd_At_const = [[Tensor(1), Tensor(1), Tensor(1), Tensor(1), Tensor(1), Tensor(0)],
-                         [Tensor(0), Tensor(1), Tensor(-1), Tensor(2), Tensor(-2), Tensor(0)],
-                         [Tensor(0), Tensor(1), Tensor(1), Tensor(4), Tensor(4), Tensor(0)],
-                         [Tensor(0), Tensor(1), Tensor(-1), Tensor(8), Tensor(-8), Tensor(1)]]
+  global winograd_G_const, winograd_Bt_const, winograd_At_const
+  
+  winograd_G_const = [[Tensor(1/4), Tensor(0), Tensor(0)], 
+                      [Tensor(-1/6), Tensor(-1/6), Tensor(-1/6)],
+                      [Tensor(-1/6), Tensor(1/6), Tensor(-1/6)],
+                      [Tensor(1/24), Tensor(1/12), Tensor(1/6)],
+                      [Tensor(1/24), Tensor(-1/12), Tensor(1/6)],
+                      [Tensor(0), Tensor(0), Tensor(1)]]
+  
+  winograd_Bt_const = [[Tensor(4), Tensor(0), Tensor(-5), Tensor(0), Tensor(1), Tensor(0)],
+                       [Tensor(0), Tensor(-4), Tensor(-4), Tensor(1), Tensor(1), Tensor(0)],
+                       [Tensor(0), Tensor(4), Tensor(-4), Tensor(-1), Tensor(1), Tensor(0)],
+                       [Tensor(0), Tensor(-2), Tensor(-1), Tensor(2), Tensor(1), Tensor(0)],
+                       [Tensor(0), Tensor(2), Tensor(-1), Tensor(-2), Tensor(1), Tensor(0)],
+                       [Tensor(0), Tensor(4), Tensor(0), Tensor(-5), Tensor(0), Tensor(1)]]
+  
+  winograd_At_const = [[Tensor(1), Tensor(1), Tensor(1), Tensor(1), Tensor(1), Tensor(0)],
+                       [Tensor(0), Tensor(1), Tensor(-1), Tensor(2), Tensor(-2), Tensor(0)],
+                       [Tensor(0), Tensor(1), Tensor(1), Tensor(4), Tensor(4), Tensor(0)],
+                       [Tensor(0), Tensor(1), Tensor(-1), Tensor(8), Tensor(-8), Tensor(1)]]
 
-# Initialize winograd matrices
+# initialize winograd matrices
 _init_winograd_constants()
