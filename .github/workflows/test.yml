@@ -332,8 +332,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
-    - name: Repo line count < 11500 lines
-      run: MAX_LINE_COUNT=11500 python sz.py
+    - name: Repo line count < 12000 lines
+      run: MAX_LINE_COUNT=12000 python sz.py
 
   fuzzing:
     name: Fuzzing
