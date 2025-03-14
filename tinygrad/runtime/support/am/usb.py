@@ -50,10 +50,11 @@ class USBConnector:
     libusb.libusb_clear_halt(self.handle, 0x04)
     libusb.libusb_clear_halt(self.handle, 0x02)
 
+    self.max_parallel = 8
     endpoints = [0x02, 0x81, 0x83]
     streams = (ctypes.c_uint8*len(endpoints))(*endpoints)
     # print(hex(streams[0]))
-    x = libusb.libusb_alloc_streams(self.handle, len(endpoints), streams, len(endpoints))
+    x = libusb.libusb_alloc_streams(self.handle, len(endpoints) * (self.max_parallel + 1), streams, len(endpoints))
     assert x >= 0, f"got {x}"
     # print("hm", x)
 
@@ -61,6 +62,28 @@ class USBConnector:
     # self.write(0xB213, bytes([0x01]))
     # self.write(0xB214, bytes([0, 0]))
     # self.write(0xB216, bytes([0x20]))
+    self.res_transfer = libusb.libusb_alloc_transfer(0)
+    self.stat_transfer = libusb.libusb_alloc_transfer(0)
+    self.cmd_transfer = libusb.libusb_alloc_transfer(0)
+    self.in_transfer = libusb.libusb_alloc_transfer(0)
+
+    self.res_transfers = {}
+    self.stat_transfers = {}
+    self.cmd_transfers = {}
+    self.in_transfers = {}
+    self.read_cmds = {}
+    self.read_statuses = {}
+    self.read_datas = {}
+    for i in range(self.max_parallel):
+      self.res_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.stat_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.cmd_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.in_transfers[i] = libusb.libusb_alloc_transfer(0)
+      self.read_cmds[i] = (ctypes.c_uint8 * len(usb_cmd))(*bytes(usb_cmd))
+      self.read_statuses[i] = (ctypes.c_uint8 * 64)()
+      self.read_datas[i] = (ctypes.c_uint8 * 256)()
+
+    self.cached = {}
 
   def _detect_version(self):
     try: self.read(0x07f0, 6)
@@ -108,65 +131,47 @@ class USBConnector:
     self.setup_transfer(in_transfer, 0x81, 0x1, in_data, len(in_data))
     libusb.libusb_submit_transfer(in_transfer)
 
+  def _send_batch(self, cdbs, ret_lens=[]):
+    ops_sub = []
+    # assert len(cdbs) <= 8
+    for i in range(len(cdbs)):
+      emm = (i % self.max_parallel)
+      self.read_cmds[emm][3] = emm + 1
+      self.read_cmds[emm][4:6] = len(cdbs[i]).to_bytes(2, 'big')
+      self.read_cmds[emm][16:16+len(cdbs[i])] = cdbs[i]
+      if ret_lens[i] > 0:
+        assert False
+        # self.setup_transfer(self.res_transfers[i], 0x81, 1, self.read_cmds[i], ret_lens[i])
+        # ops_sub.append(self.res_transfers[i])
+      self.setup_transfer(self.stat_transfers[emm], 0x83, emm + 1, self.read_statuses[emm], 64)
+      self.setup_transfer(self.cmd_transfers[emm], 0x04, None, self.read_cmds[emm], len(self.read_cmds[emm]))
+      ops_sub += [self.stat_transfers[emm], self.cmd_transfers[emm]]
+      if i + 1 == len(cdbs) or len(ops_sub) == 16:
+        self._send_ops_and_wait(*ops_sub)
+        ops_sub = []
+
   def _send(self, cdb, ret_len=0, in_data=None):
     def __send():
       actual_length = ctypes.c_int(0)
       for i in range(3):
         #assert len(self.read_cmd) == 31
-        if ret_len > 0:
-          res_transfer = libusb.libusb_alloc_transfer(0)
-          self.setup_transfer(res_transfer, 0x81, 0x1, self.read_data, ret_len)
-
-        stat_transfer = libusb.libusb_alloc_transfer(0)
-        self.setup_transfer(stat_transfer, 0x83, 0x1, self.read_status, 64)
-
-        cmd_transfer = libusb.libusb_alloc_transfer(0)
-        self.setup_transfer(cmd_transfer, 0x04, None, self.read_cmd, len(self.read_cmd))
-
-        if in_data is not None:
-          in_transfer = libusb.libusb_alloc_transfer(0)
-          self.setup_transfer(in_transfer, 0x02, 0x1, in_data, len(in_data))
+        if ret_len > 0: self.setup_transfer(self.res_transfer, 0x81, 0x1, self.read_data, ret_len)
+        self.setup_transfer(self.stat_transfer, 0x83, 0x1, self.read_status, 64)
+        self.setup_transfer(self.cmd_transfer, 0x04, None, self.read_cmd, len(self.read_cmd))
+        if in_data is not None: self.setup_transfer(self.in_transfer, 0x02, 0x1, in_data, len(in_data))
 
         # ret = libusb.libusb_bulk_transfer(self.handle, 0x04, self.read_cmd, len(self.read_cmd), ctypes.byref(actual_length), 1000)
         # assert actual_length.value == len(self.read_cmd)
 
         transfers = []
-        if ret_len > 0: transfers.append(res_transfer)
-        if in_data is not None: transfers.append(in_transfer)
-        transfers += [stat_transfer, cmd_transfer]
+        if ret_len > 0: transfers.append(self.res_transfer)
+        if in_data is not None: transfers.append(self.in_transfer)
+        transfers += [self.stat_transfer, self.cmd_transfer]
         self._send_ops_and_wait(*transfers)
-
-        # print([x for x in self.read_status])
-
-        # if ret:
-        #   print(i, "0x4", ret, len(self.read_cmd))
-        #   return None
-
-        # if ret_len > 0:
-        #   # wait for data ready
-        #   ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1000)
-        #   assert ret == 0 and self.read_status[0] == 6, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
-
-        #   # get data
-        #   ret = libusb.libusb_bulk_transfer(self.handle, 0x81, self.read_data, ret_len, ctypes.byref(actual_length), 1000)
-        #   if ret:
-        #     print(i, "0x81", ret, ret_len)
-        #     continue
-        #   assert actual_length.value == ret_len, f"only sent {actual_length.value}, wanted {ret_len}"
-
-        # # get status
-        # ret = libusb.libusb_bulk_transfer(self.handle, 0x83, self.read_status, 64, ctypes.byref(actual_length), 1000)
-        # assert ret == 0 and self.read_status[0] == 3, f"got {self.read_status[0]} ret {ret} with length {actual_length}"
-
-        # # return a copy of the bytes
-        # libusb.libusb_clear_halt(self.handle, 0x81)
-        # libusb.libusb_clear_halt(self.handle, 0x83)
-        # libusb.libusb_clear_halt(self.handle, 0x04)
-        # libusb.libusb_clear_halt(self.handle, 0x02)
-
         return bytes(self.read_data[:])
       return None
 
+    self.read_cmd[3] = 1
     self.read_cmd[4:6] = len(cdb).to_bytes(2, 'big')
     self.read_cmd[16:16+len(cdb)] = cdb
     for j in range(1):
@@ -204,17 +209,41 @@ class USBConnector:
       current_addr |= 0x500000
       cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
       data[i:i+buf_len] = self._send(cdb, buf_len)
+      for j in range(buf_len): self.cached[current_addr + j] = data[i + j]
     return bytes(data[:read_len])
 
-  def write(self, start_addr, data):
+  def write(self, start_addr, data, ignore_cache=False):
     if DEBUG >= 4: print("write", hex(start_addr))
+    
+    cdbs = []
     for offset, value in enumerate(data):
       current_addr = start_addr + offset
       assert current_addr >> 17 == 0
       current_addr &= 0x01ffff
       current_addr |= 0x500000
-      cdb = struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00)
-      self._send(cdb)
+      if not ignore_cache and self.cached.get(current_addr, None) == value: continue
+      cdbs.append(struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00))
+
+      self.cached[current_addr] = value
+      # self._send(cdb)
+    self._send_batch(cdbs, [0] * len(cdbs))
+
+  def write_batch(self, start_addrs, datas, ignores):
+    if DEBUG >= 4: print("write", hex(start_addr))
+    
+    cdbs = []
+    for start_addr, data, ignore_cache in zip(start_addrs, datas, ignores):
+      for offset, value in enumerate(data):
+        current_addr = start_addr + offset
+        assert current_addr >> 17 == 0
+        current_addr &= 0x01ffff
+        current_addr |= 0x500000
+        if not ignore_cache and self.cached.get(current_addr, None) == value: continue
+        cdbs.append(struct.pack('>BBBHB', 0xe5, value, current_addr >> 16, current_addr & 0xffff, 0x00))
+
+        self.cached[current_addr] = value
+        # self._send(cdb)
+    self._send_batch(cdbs, [0] * len(cdbs))
 
   def scsi_write(self, buf):
     # scsi write 0x28 packet
@@ -223,7 +252,7 @@ class USBConnector:
 
   def pcie_write_request_fw(self, address, value):
     cdb = struct.pack('>BII', 0x03, address, value)
-    self._send(cdb)
+    self._send(cdb)    
 
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
@@ -248,26 +277,48 @@ class USBConnector:
 
     byte_enable = ((1 << size) - 1) << offset
 
+    self.addrs, self.datas, self.ignores = [], [], []
+    
     if value is not None:
       assert value >> (8 * size) == 0, f"{value}"
       shifted_value = value << (8 * offset)
       # Store write data in PCIE_CONFIG_DATA register (0xB220)
-      self.write(0xB220, struct.pack('>I', value << (8 * offset)))
+      # self.write(0xB220, struct.pack('>I', value << (8 * offset)), ignore_cache=True)
+      self.addrs.append(0xB220)
+      self.ignores.append(True)
+      self.datas.append(struct.pack('>I', shifted_value))
 
     # setup address + length
-    self.write(0xB218, struct.pack('>I', masked_address))
+    # self.write(0xB218, struct.pack('>I', masked_address))
+    self.addrs.append(0xB218)
+    self.ignores.append(False)
+    self.datas.append(struct.pack('>I', masked_address))
+
     assert byte_enable < 0x100
-    self.write(0xB217, bytes([byte_enable]))
+    # self.write(0xB217, bytes([byte_enable]), ignore_cache=False)
+    self.addrs.append(0xB217)
+    self.ignores.append(False)
+    self.datas.append(bytes([byte_enable]))
 
     # Configure PCIe request by writing to PCIE_REQUEST_CONTROL (0xB210)
-    self.write(0xB210, bytes([fmt_type]))
+    # self.write(0xB210, bytes([fmt_type]), ignore_cache=False)
+    self.addrs.append(0xB210)
+    self.ignores.append(False)
+    self.datas.append(bytes([fmt_type]))
 
     # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
-    self.write(0xB296, bytes([0x04]))
+    # self.write(0xB296, bytes([0x04]), ignore_cache=True)
+    # self.addrs.append(0xB296)
+    # self.ignores.append(False)
+    # self.datas.append(bytes([0x04]))
 
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
     # this appears to be the trigger
-    self.write(0xB254, bytes([0x0f]))
+    # self.write(0xB254, bytes([0x0f]), ignore_cache=True)
+    self.addrs.append(0xB254)
+    self.ignores.append(True)
+    self.datas.append(bytes([0x0f]))
+    self.write_batch(self.addrs, self.datas, self.ignores)
 
     # Wait for PCIe transaction to complete (PCIE_STATUS_REGISTER: 0xB296, bit 2)
     while (stat:=self.read(0xB296, 1)[0]) & 4 == 0:
@@ -277,7 +328,7 @@ class USBConnector:
     #print("stat out", stat)
 
     # Acknowledge completion of PCIe request (PCIE_STATUS_REGISTER: 0xB295)
-    self.write(0xB296, bytes([0x04]))
+    self.write(0xB296, bytes([0x04]), ignore_cache=True)
 
     if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000):
       return
@@ -292,7 +343,7 @@ class USBConnector:
     assert stat == 2, f"stat read 2 was {stat}"
 
     # Acknowledge PCIe completion (PCIE_STATUS_REGISTER: 0xB296)
-    self.write(0xB296, bytes([0x02]))
+    # self.write(0xB296, bytes([0x02]), ignore_cache=True)
 
     b284 = self.read(0xB284, 1)[0]
     b284_bit_0 = b284 & 0x01
