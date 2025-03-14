@@ -1,5 +1,6 @@
 import numpy as np
 from tinygrad.helpers import getenv
+from tinygrad.tensor import _to_np_dtype
 from tinygrad import dtypes, Tensor
 
 dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
@@ -13,12 +14,14 @@ K = getenv("K", N)
 CNT = getenv("CNT", 10)
 ATOL = getenv("ATOL", 1e-4)
 RTOL = getenv("RTOL", 3e-2)
+INT_LOW = getenv("INT_LOW", 0)
+INT_HIGH = getenv("INT_HIGH", 10)
 
 if __name__ == "__main__":
   def init_matrix(rows, cols):
     if dtype_in in dtypes.ints:
-      return Tensor.randint((rows, cols), dtype=dtype_in).realize()
-    return Tensor.rand(rows, cols, dtype=dtype_in).realize()
+      return Tensor(np.random.randint(INT_LOW, INT_HIGH, (rows, cols)).astype(_to_np_dtype(dtype_in)))
+    return Tensor(np.random.rand(rows, cols).astype(_to_np_dtype(dtype_in)))
 
   a, b = init_matrix(M, K), init_matrix(K, N)
   for i in range(CNT):
