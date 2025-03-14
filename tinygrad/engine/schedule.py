@@ -113,6 +113,8 @@ sym = symbolic_simple+PatternMatcher([
 
 # **** UOp realization
 
+DONT_PUSH_VIEWS = {Ops.BUFFER, *GroupOp.Buffer, Ops.ASSIGN, Ops.SINK}
+
 @dataclass(frozen=True)
 class GrouperContext:
   assigns: dict[UOp, UOp]                     # maps realized buffers to assigns
@@ -133,7 +135,7 @@ def realize_before_view(ctx:GrouperContext, view:UOp, src:UOp) -> None:
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x.base, None) for x in s.src if x.base.op not in {Ops.CONST, Ops.BIND, Ops.BUFFER})),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.op not in DONT_PUSH_VIEWS)),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
@@ -265,8 +267,6 @@ create_kernels = merge_views+PatternMatcher([
   # remove downstream reshapes from SINK
   (UPat(Ops.SINK, name="x"), lambda x:x.replace(src=tuple(s.base for s in x.src)) if any(s.op is Ops.VIEW for s in x.src) else None),
 ])
-
-DONT_PUSH_VIEWS = {Ops.BUFFER, *GroupOp.Buffer, Ops.ASSIGN, Ops.SINK}
 
 # **** fix kernel AST
 
