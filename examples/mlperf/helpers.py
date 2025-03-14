@@ -1,6 +1,7 @@
 from collections import OrderedDict
 import unicodedata
 from typing import Optional
+import math
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
@@ -230,3 +231,68 @@ def get_fake_data_bert(BS:int):
     "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CPU"),
     "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.int32, device="CPU"),
   }
+
+def find_matches(match_quality_matrix:np.ndarray, high_threshold:float=0.5, low_threshold:float=0.4, allow_low_quality_matches:bool=False) -> np.ndarray:
+  BELOW_LOW_THRESHOLD, BETWEEN_THRESHOLDS = -1, -2
+
+  def _set_low_quality_matches_(matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
+    highest_quality_foreach_gt = np.max(match_quality_matrix, axis=1)
+    pred_inds_to_update = np.nonzero(match_quality_matrix == highest_quality_foreach_gt[:, None])[1]
+    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+  assert low_threshold <= high_threshold
+
+  matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
+  all_matches = np.copy(matches) if allow_low_quality_matches else None
+  below_low_threshold = matched_vals < low_threshold
+  between_thresholds = (matched_vals >= low_threshold) & (matched_vals < high_threshold)
+  matches[below_low_threshold] = BELOW_LOW_THRESHOLD
+  matches[between_thresholds] = BETWEEN_THRESHOLDS
+
+  if allow_low_quality_matches:
+    assert all_matches is not None
+    _set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+
+  return matches
+
+def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
+  def _box_area(boxes:np.ndarray) -> np.ndarray: return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+
+  def _box_inter_union(boxes1:np.ndarray, boxes2:np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    area1, area2 = _box_area(boxes1), _box_area(boxes2)
+    lt, rb = np.maximum(boxes1[:, None, :2], boxes2[:, :2]), np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])
+    wh = np.clip(rb - lt, a_min=0, a_max=None)
+    inter = wh[:, :, 0] * wh[:, :, 1]
+    union = area1[:, None] + area2 - inter
+    return inter, union
+
+  inter, union = _box_inter_union(boxes1, boxes2)
+  return inter / union
+
+def generate_anchors(input_size:tuple[int, int], batch_size:int = 1, scales:Optional[tuple[Tensor, ...]] = None, aspect_ratios:Optional[tuple[Tensor, ...]] = None) -> list[np.ndarray]:
+  def _compute_grid_sizes(input_size:tuple[int, int]) -> np.ndarray:
+    return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
+
+  scales = tuple((i, int(i * 2 ** (1/3)), int(i * 2 ** (2/3))) for i in 2 ** np.arange(5, 10)) if scales is None else scales
+  aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
+  aspect_ratios = tuple(ar for ar in aspect_ratios)
+  grid_sizes = _compute_grid_sizes(input_size)
+
+  assert len(scales) == len(aspect_ratios) == len(grid_sizes), "scales, aspect_ratios, and grid_sizes must have the same length"
+
+  anchors = []
+  for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
+    s, ar = np.array(s), np.array(ar)
+    h_ratios = np.sqrt(ar)
+    w_ratios = 1 / h_ratios
+    ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
+    hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
+    base_anchors = (np.stack([-ws, -hs, ws, hs], axis=1) / 2).round()
+    stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
+    shifts_x, shifts_y = np.meshgrid(np.arange(gs[1]) * stride_w, np.arange(gs[0]) * stride_h)
+    shifts_x, shifts_y = shifts_x.reshape(-1), shifts_y.reshape(-1)
+    shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
+    anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
+
+  if batch_size > 1: return [np.concatenate(anchors)] * batch_size
+  return anchors
