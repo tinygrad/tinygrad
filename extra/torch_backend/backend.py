@@ -435,7 +435,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
-  "aten.detach": Tensor.detach,
+  #"aten.detach": Tensor.detach, # we don't use tiny autograd, and resulting torch tensors must alias
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
 }}
 
