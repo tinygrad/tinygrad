@@ -39,7 +39,7 @@ if __name__ == "__main__":
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "29500"
     device = torch.device(device.type, index=RANK)
-    backend = "cpu:gloo,cuda:nccl" + ",tiny:tiny" if device.type == "tiny" else ""
+    backend = "cpu:gloo,tiny:tiny" if device.type == "tiny" else None
     torch.distributed.init_process_group(backend=backend)
     atexit.register(torch.distributed.destroy_process_group)
 

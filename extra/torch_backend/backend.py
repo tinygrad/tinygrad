@@ -12,7 +12,7 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
-def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or torch.tiny.current_device()}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
@@ -24,7 +24,7 @@ def unwrap(x:torch.Tensor) -> Tensor:
 class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
-  def current_device(self): return 0
+  def current_device(self): return 0 # TODO:
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
   def device_count(self): return getenv("GPUS", 1) # TODO: device count in tiny?
@@ -157,15 +157,15 @@ def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, k
 
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::arange.start", "privateuseone")
 def arange_start(start, end, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::arange.start_step", "privateuseone")
 def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
