@@ -20,7 +20,7 @@ INT_HIGH = getenv("INT_HIGH", 10)
 if __name__ == "__main__":
   def init_matrix(rows, cols):
     if dtype_in in dtypes.ints:
-      return Tensor(np.random.randint(INT_LOW, INT_HIGH, (rows, cols)).astype(_to_np_dtype(dtype_in)))
+      return Tensor(np.random.default_rng().integers(INT_LOW, INT_HIGH, (rows, cols)).astype(_to_np_dtype(dtype_in)))
     return Tensor(np.random.rand(rows, cols).astype(_to_np_dtype(dtype_in)))
 
   a, b = init_matrix(M, K), init_matrix(K, N)
