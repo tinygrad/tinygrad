@@ -395,9 +395,9 @@ def train_retinanet():
     optim.zero_grad()
 
     losses = model(normalize(x, GPUS), **kwargs)
-    loss = (sum([l for l in losses.values()]) * loss_scaler)
+    loss = sum([l for l in losses.values()])
 
-    loss.backward()
+    (loss * loss_scaler).backward()
     for t in optim.params: t.grad = t.grad.contiguous() / loss_scaler
 
     optim.step()
