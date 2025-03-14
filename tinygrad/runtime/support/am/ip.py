@@ -261,8 +261,7 @@ class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
     self.ring_size = 512 << 10
-    def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=not self.adev.partial_boot, boot=True),
-                                    self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True))
+    def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=False, boot=True), self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
 
   def interrupt_handler(self):
@@ -332,8 +331,7 @@ class AM_PSP(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
-    self.msg2_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
+    self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=False, boot=True)
     self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
 
@@ -341,7 +339,7 @@ class AM_PSP(AM_IP):
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=not self.adev.partial_boot, boot=True)
 
     self.max_tmr_size = 0x1300000
-    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
+    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True)
 
     self.prev_size = 0x0
 
@@ -352,7 +350,7 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV),
     ]
 
-    print(self.is_sos_alive())
+    # print(self.is_sos_alive())
     if not self.is_sos_alive():
       for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
 
@@ -384,28 +382,15 @@ class AM_PSP(AM_IP):
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 
   def _prep_msg1(self, data, paddr=None):
-    # assert data.nbytes <= 267552, f"{data.nbytes}"
-    # print("msg1", hex(self.msg1_paddr), data.nbytes)
-
-    self.adev.vram.copyin(paddr or self.msg1_paddr, data)
-    assert (xxx:=self.adev.vram.copyout(paddr or self.msg1_paddr, data.nbytes)) == data
-    print(xxx)
-    print(data)
-    # if self.prev_size - data.nbytes > 0:
-    #   self.adev.vram.copyin(self.msg1_paddr + data.nbytes, memoryview(bytearray(self.prev_size - data.nbytes)))
-    # assert self.adev.vram.copyout(self.msg1_paddr, data.nbytes) == data
+    self.adev.vram.copyin(self.msg1_paddr, data)
+    self.adev.vram.write(self.msg1_paddr + data.nbytes, 0x0, 4)
     self.prev_size = data.nbytes
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw, compid):
-    assert ((self.adev.paddr2mc(self.msg1_paddr) >> 20) << 20) == self.adev.paddr2mc(self.msg1_paddr)
-    
     if fw not in self.adev.fw.sos_fw: return 0
 
-    # self.adev.regMP0_SMN_C2PMSG_35.write(0x80000000)
-    # print(hex(self.adev.regMP0_SMN_C2PMSG_35.read()))
     self._wait_for_bootloader()
-    print("load", hex(compid))
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
@@ -448,8 +433,8 @@ class AM_PSP(AM_IP):
     write_loc.fence_addr_hi, write_loc.fence_addr_lo = data64(self.adev.paddr2mc(self.fence_paddr))
     write_loc.fence_value = prev_wptr
 
-    self.adev.vram.copyin(self.cmd_paddr, memoryview(cmd))
-    self.adev.vram.copyin(self.ring_paddr + prev_wptr * 4, memoryview(write_loc))
+    self.adev.vram.copyin(self.cmd_paddr, memoryview(cmd).cast('B'))
+    self.adev.vram.copyin(self.ring_paddr + prev_wptr * 4, memoryview(write_loc).cast('B'))
 
     # Move the wptr
     self.adev.regMP0_SMN_C2PMSG_67.write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)

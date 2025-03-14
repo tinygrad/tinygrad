@@ -58,9 +58,9 @@ class USBConnector:
     # print("hm", x)
 
     # required to be set, but not a trigger
-    self.write(0xB213, bytes([0x01]))
-    self.write(0xB214, bytes([0, 0]))
-    self.write(0xB216, bytes([0x20]))
+    # self.write(0xB213, bytes([0x01]))
+    # self.write(0xB214, bytes([0, 0]))
+    # self.write(0xB216, bytes([0x20]))
 
   def _detect_version(self):
     try: self.read(0x07f0, 6)

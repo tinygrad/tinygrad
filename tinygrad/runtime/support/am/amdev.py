@@ -258,9 +258,7 @@ class AMMemoryManager:
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
     assert self.adev.is_booting == boot, "During booting, only boot memory can be allocated"
     paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
-    # if zero:
-    #   self.adev.vram.copyin(paddr, memoryview(bytearray(size)))
-      # self.adev.paddr2cpu(paddr, size).cast('Q')[:] = [0] * (size // 8)
+    if zero: self.adev.vram.copyin(paddr, memoryview(bytearray(size)))
     return paddr
 
   def pfree(self, paddr:int): self.pa_allocator.free(paddr)
@@ -307,9 +305,9 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
-      if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
-      self.partial_boot = False
+    # if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
+    #   if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
+    #   self.partial_boot = False
 
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
@@ -328,10 +326,8 @@ class AMDev:
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc21, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
+    print(hex(self.reg("regSCRATCH_REG7").read()))
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
-
-    self.fini()
-    exit(0)
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
@@ -386,7 +382,14 @@ class AMDev:
     self.regs_offset = {13: {0: [3072, 37784576]}, 28: {0: [93184, 37754880], 1: [93696, 37755904], 2: [94208, 37756928], 3: [94720, 37757952], 4: [110592, 37935104], 5: [111104, 37936128], 6: [111616, 37937152]}, 22: {0: [18, 192, 13504, 36864, 37764096]}, 21: {0: [28672, 12582912, 37795840, 130023424, 306184192]}, 1: {0: [4704, 40960, 114688, 37760000]}, 2: {0: [3872, 37790720]}, 11: {0: [70656, 38103040]}, 12: {0: [106496, 37783552]}, 15: {0: [90112, 14417920, 14680064, 14942208, 38009856]}, 16: {0: [90112, 14417920, 14680064, 14942208, 38009856]}, 14: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 26: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 23: {0: [4256, 37789696]}, 33: {0: [0, 20, 3360, 66560, 37859328, 67371008]}, 25: {0: []}, 3: {0: [4704, 40960, 114688, 37760000]}, 4: {0: [4704, 40960, 114688, 37760000]}, 24: {0: [92160, 92672, 37752832, 54788096]}, 27: {0: [91648, 37751808]}, 29: {0: [81920, 37902336], 1: [344064, 37903360], 2: [606208, 37904384], 3: [868352, 37905408]}, 17: {0: [30720, 32256]}}
     return
 
-    bhdr = am.struct_binary_header.from_address(self.paddr2cpu(self.vram_size - (64 << 10)))
+    bn = self.vram.copyout((256 << 20) - (64 << 10), 1 << 10)
+    from hexdump import hexdump
+    hexdump(bn)
+
+    exit(0)
+
+    bhdr = am.struct_binary_header.from_buffer_copy(bn)
+    print(hex(bhdr.table_list[am.IP_DISCOVERY].offset))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)
     assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 

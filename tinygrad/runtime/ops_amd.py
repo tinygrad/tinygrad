@@ -572,15 +572,17 @@ class PCIIface:
 class AMUSBBar(AMBar):
   def __init__(self, addr, usb): (self.addr, self.size), self.usb = addr, usb
   def read(self, off, sz):
+    assert off + sz <= self.size
     assert sz in [1, 2, 4, 8]
     upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, None, 4)
     x = self.usb.pcie_mem_req(self.addr + off, None, min(sz, 4)) | (upper << 32)
-    print('rd', hex(self.addr + off), sz, x)
+    # print('rd', hex(self.addr + off), sz, x)
     return x
   def write(self, off, val, sz):
+    assert off + sz <= self.size
     assert sz in [1, 2, 4, 8]
-    print('wr', hex(self.addr + off), sz, val)
-    if sz >= 4: self.usb.pcie_mem_req(self.addr + off + 4, val >> 32, 4)
+    # print('wr', hex(self.addr + off), sz, val)
+    if sz > 4: self.usb.pcie_mem_req(self.addr + off + 4, val >> 32, 4)
     self.usb.pcie_mem_req(self.addr + off, val & 0xffffffff, min(sz, 4))
   def _copy_size(self, sz): return next(x for x in [4, 2, 1] if sz % x == 0)
   def copyin(self, offset, mv):
@@ -601,8 +603,8 @@ class USBIface(PCIIface):
     is_24 = True # if self.usb.is_24 else 3
     gpu_bus = 4 if is_24 else 3
 
-    perf_mem_base = 0x40000000
-    mem_base = 0xc0000000
+    perf_mem_base = 0x10000000
+    mem_base = 0x40000000
 
     for bus in ([0, 1] if is_24 else [0]):
       self.usb.pcie_cfg_req(pci.PCI_SUBORDINATE_BUS, bus=bus, dev=0, fn=0, value=gpu_bus, size=1)
@@ -610,13 +612,13 @@ class USBIface(PCIIface):
       self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
 
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=mem_base>>16, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xf000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=perf_mem_base>>16, size=2)
       self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=mem_base>>16, size=2)
 
       self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
       time.sleep(0.1)
-      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=0x0, size=1)
 
       self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
@@ -627,13 +629,13 @@ class USBIface(PCIIface):
       self.usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=max(0, bus-1), size=1)
 
       self.usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=mem_base>>16, size=2)
-      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+      self.usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xf000, size=2)
       self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=perf_mem_base>>16, size=2)
       self.usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=mem_base>>16, size=2)
 
       self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_BUS_RESET, size=1)
       time.sleep(0.1)
-      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=pci.PCI_BRIDGE_CTL_PARITY|pci.PCI_BRIDGE_CTL_SERR, size=1)
+      self.usb.pcie_cfg_req(pci.PCI_BRIDGE_CONTROL, bus=bus, dev=0, fn=0, value=0x0, size=1)
 
       self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
@@ -649,9 +651,13 @@ class USBIface(PCIIface):
           self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=bar_next_addr[is_pref], size=4)
           self.bars[bar_off // 4] = (bar_next_addr[is_pref], bar_size)
           bar_next_addr[is_pref] += round_up(bar_size, 2 << 20)
-          print(bar_off // 4, bar_size, hex(self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)))
       print(bar_off // 4, hex(bar_cfg))
+      if bar_cfg & pci.PCI_BASE_ADDRESS_SPACE == pci.PCI_BASE_ADDRESS_MEM_TYPE_64:
+        self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=4)
       bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
+
+    # print(self.bars)
+    # exit(0)
 
     # print(hex(self.bars[0][0]))
     # print(hex(self.bars[1][0]))
@@ -664,11 +670,30 @@ class USBIface(PCIIface):
 
     self.usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
+    
+    # self.bars = 
+
     vram_bar = AMUSBBar(self.bars[0], self.usb)
     doorbell_bar = AMUSBBar(self.bars[2], self.usb)
     mmio_bar = AMUSBBar(self.bars[5], self.usb)
 
     AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
+    self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,
+      'max_waves_per_simd': 16, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
+    # if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
+    #   vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+    #   va = HWInterface.anon_mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, 0)
+
+    #   # Read pagemap to get the physical address of each page. The pages are locked.
+    #   self.pagemap.seek(va // mmap.PAGESIZE * 8)
+    #   paddrs = [((x & ((1<<55) - 1)) * mmap.PAGESIZE, mmap.PAGESIZE) for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
+    #   am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
+    #   return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
+    am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
+    if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
+    return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
 
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
@@ -698,10 +723,13 @@ class AMDDevice(HCQCompiled):
     if self.target//10000 == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
     debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x8000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
-    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x8000)
+
+    print("done queues init")
+    exit(0)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)

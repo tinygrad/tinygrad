@@ -74,8 +74,8 @@ def write_flash(addr, byte):
   usb.write(0x7000, bytes([byte]))
 
   # Set FLASH_CON_MODE to read, with normal I/O config.
-  usb.write(0xC8AD, bytes([0x1f]))
-  usb.write(0xC8AA, bytes([0x3]))
+  usb.write(0xC8AD, bytes([0x1]))
+  usb.write(0xC8AA, bytes([0x1]))
 
   # Set FLASH_CON_BUF_OFFSET to zero.
   usb.write(0xC8AE, struct.pack('>H', 0x0000))
@@ -108,9 +108,9 @@ for i in range(0x0, 0x20000, 0x200):
       hexdump(z)
       print(hex(i+j))
 
-# write_flash(0x3a1e, 0x6F)
-z = read_flash(0x0, 128)
-hexdump(z)
+write_flash(0x3a1e, 0x6F)
+print(read_flash(0x3a1e, 1))
+exit(0)
 
 xxx = (ctypes.c_uint8 * 128)()
 for i in range(128): xxx[i] = z[i]

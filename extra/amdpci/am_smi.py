@@ -7,7 +7,7 @@ from tinygrad.runtime.autogen.am import smu_v13_0_0
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
-AM_VERSION = 0xA0000002
+AM_VERSION = 0xA0000003
 SMU_11_0_GFX_BUSY_THRESHOLD = 15
 
 def bold(s): return f"\033[1m{s}\033[0m"
