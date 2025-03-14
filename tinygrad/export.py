@@ -6,10 +6,10 @@
 from tinygrad import Tensor, dtypes, TinyJit, Device
 from tinygrad.ops import Ops
 from tinygrad.renderer import ProgramSpec
-from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save
+from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save, get_parameters
 from tinygrad.helpers import Context
 from tinygrad.dtype import DType
-from typing import Callable, Sequence, Any, Optional
+from typing import Callable, Sequence, Any, Optional, cast
 from collections import OrderedDict
 
 def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str], list[tuple[str,list[str],list[int]]], dict[str,tuple[int,DType,int]]]:
@@ -36,24 +36,17 @@ def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str]
 def jit_model(model, *args) -> tuple[TinyJit,dict[int,str]]:
   assert callable(model), "model must be callable"
   @TinyJit
-  def run(*x):
+  def run(*x) -> list[Tensor]:
     out:list[Tensor]|tuple[Tensor] = returned if isinstance((returned := model(*x)), (list, tuple)) else [returned]
-    assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
+    assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors" # TODO: do we want this?
     return [t.realize() for t in out]
+  for _ in range(2): run(*args) # generate run.captured:CapturedJit by calling run twice
 
-  # twice to run the JIT
-  for _ in range(2): the_output = run(*args)
-  special_names = {}
-
-  # hack to put the inputs back
-  for (j,i),idx in run.input_replace.items():
-    realized_input = args[idx].lazydata.base.realized
-    run.jit_cache[j].bufs[i] = realized_input
-    special_names[id(realized_input)] = f'input{idx}'
-
-  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  for i, output in enumerate(the_output):
-    special_names[id(output.lazydata.base.realized)] = f'output{i}'
+  for (j,i),idx in run.captured.input_replace.items(): run.jit_cache[j].bufs[i] = args[idx].lazydata.base.realized
+  special_names = {id(args[idx].lazydata.base.realized): f"input{idx}" for idx in run.captured.input_replace.values()}
+  # TODO: requires that run.captured.ret is list[Tensor]
+  special_names.update({id(t.lazydata.base.realized): f"output{idx}" for idx,t in enumerate(run.captured.ret)})
+  
   return run, special_names
 
 def dtype_to_js_type(dtype: DType) -> str:
