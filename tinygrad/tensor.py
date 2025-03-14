@@ -73,21 +73,26 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
 
-def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...], dtype:DType) -> list[list[Tensor]]:
-  return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
-           for k in range(len(mat[0]))] for dim in range(dims)]
+def _get_winograd_matcols(mat_const, dims:int) -> list[list[Tensor]]:
+    """Creates a list of matrices for each dimension without materializing tensors"""
+    return [[mat_const[i][k] for k in range(len(mat_const[0]))] 
+            for i in range(len(mat_const))]
 
-# winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
-def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
-  # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
-  # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
-  t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
-  # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
-  matcols = _get_winograd_matcols(mat, dims, t_.shape[dims:], t_.device, t_.dtype)
-  # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
-  ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
-  assert isinstance(ret, Tensor), "sum didn't return a Tensor"
-  return ret
+def _apply_winograd_matrix(mat_const, t:Tensor, dims:int) -> Tensor:
+    """Apply Winograd transformation matrix to tensor t"""
+    # Get matcols without shape/device info
+    matcols = _get_winograd_matcols(mat_const, dims)
+    
+    # Reshape input for broadcasting - this part is similar to the original
+    t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:])
+    t_ = t_.expand(t.shape[:dims] + (len(mat_const),) * dims + t.shape[dims:])
+    
+    # Multiply each element of t_ by the corresponding stacked column of kron(mat, mat)
+    # This follows the original implementation's pattern more closely
+    ret = sum(prod(col[idx].cast(t.dtype) for col, idx in zip(matcols, mat_is)) * t_[mat_is] 
+              for mat_is in itertools.product(range(len(mat_const[0])), repeat=dims))
+    
+    return ret
 
 def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   # unsqueeze left to make every shape same length
@@ -2241,12 +2246,12 @@ class Tensor(SimpleMathTrait):
 
     # compute 6x6 winograd tiles: GgGt, BtdB
     # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
-    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
+    gfactors = _apply_winograd_matrix(winograd_G_const, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
     # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
-    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
+    dfactors = _apply_winograd_matrix(winograd_Bt_const, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
 
     # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
-    ret = _apply_winograd_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
+    ret = _apply_winograd_matrix(winograd_At_const, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
 
     # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
     ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])
@@ -4097,3 +4102,29 @@ if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+
+# Winograd constants at the module level
+def _init_winograd_constants():
+    global winograd_G_const, winograd_Bt_const, winograd_At_const
+    
+    winograd_G_const = [[Tensor(1/4), Tensor(0), Tensor(0)], 
+                        [Tensor(-1/6), Tensor(-1/6), Tensor(-1/6)],
+                        [Tensor(-1/6), Tensor(1/6), Tensor(-1/6)],
+                        [Tensor(1/24), Tensor(1/12), Tensor(1/6)],
+                        [Tensor(1/24), Tensor(-1/12), Tensor(1/6)],
+                        [Tensor(0), Tensor(0), Tensor(1)]]
+    
+    winograd_Bt_const = [[Tensor(4), Tensor(0), Tensor(-5), Tensor(0), Tensor(1), Tensor(0)],
+                         [Tensor(0), Tensor(-4), Tensor(-4), Tensor(1), Tensor(1), Tensor(0)],
+                         [Tensor(0), Tensor(4), Tensor(-4), Tensor(-1), Tensor(1), Tensor(0)],
+                         [Tensor(0), Tensor(-2), Tensor(-1), Tensor(2), Tensor(1), Tensor(0)],
+                         [Tensor(0), Tensor(2), Tensor(-1), Tensor(-2), Tensor(1), Tensor(0)],
+                         [Tensor(0), Tensor(4), Tensor(0), Tensor(-5), Tensor(0), Tensor(1)]]
+    
+    winograd_At_const = [[Tensor(1), Tensor(1), Tensor(1), Tensor(1), Tensor(1), Tensor(0)],
+                         [Tensor(0), Tensor(1), Tensor(-1), Tensor(2), Tensor(-2), Tensor(0)],
+                         [Tensor(0), Tensor(1), Tensor(1), Tensor(4), Tensor(4), Tensor(0)],
+                         [Tensor(0), Tensor(1), Tensor(-1), Tensor(8), Tensor(-8), Tensor(1)]]
+
+# Initialize Winograd Matrices
+_init_winograd_constants()
