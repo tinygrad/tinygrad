@@ -467,7 +467,7 @@ jobs:
   testdsp:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
