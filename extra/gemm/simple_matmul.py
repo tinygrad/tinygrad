@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.helpers import getenv
-from tinygrad.tensor import _to_np_dtype
+from tinygrad.dtype import _to_np_dtype
 from tinygrad import dtypes, Tensor
 
 dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
