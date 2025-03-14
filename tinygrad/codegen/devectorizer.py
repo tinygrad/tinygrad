@@ -47,7 +47,8 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  return UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
+  ret = UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)) if len(ret) > 1 else ret[0]
+  return ret.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
   # TODO: this is written in many places
@@ -259,7 +260,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.CONST, name='c'),
    lambda c: UOp(Ops.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
   (UPat(Ops.VCONST, name='c'), lambda c: UOp(Ops.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
-  (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
+  # no multi gep
+  #(UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # move masks of loads/stores
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask"))),
@@ -273,7 +275,7 @@ pm_render = PatternMatcher([
 
 from dataclasses import dataclass
 from tinygrad.ops import identity_element
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, dedup, get_single_element
 
 @dataclass
 class ReduceContext:
@@ -294,6 +296,29 @@ pm_reduce = PatternMatcher([
   (UPat(Ops.REDUCE, name="x"), reduce_to_acc)
 ])
 
+def fix_vectorize(v):
+  dd = dedup(x.src[0] for x in v.src)
+  if len(dd) != 4: return None
+  gep = [(dd.index(x.src[0]), get_single_element(x.arg)) for x in v.src]
+
+  gep_1 = ','.join([str(y + (dd[0].dtype.count if x == 1 else 0)) for x,y in gep if x in [0,1]])
+  gep_2 = ','.join([str(y + (dd[2].dtype.count if x == 3 else 0)) for x,y in gep if x in [2,3]])
+
+  x = "__builtin_shufflevector({0}, {1}, "+gep_1+")"
+  y = "__builtin_shufflevector({2}, {3}, "+gep_2+")"
+
+  gep_final = ','.join([str(x) for x in range(0, len(gep))])
+  ret = f"__builtin_shufflevector({x}, {y}, {gep_final})"
+  return UOp(Ops.CUSTOM, v.dtype, tuple(dd), ret)
+  #print("HERE", len(dd))
+  #pass
+
+pm_late = PatternMatcher([
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"), fix_vectorize),
+])
+
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
@@ -311,4 +336,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
+  sink = graph_rewrite(sink, pm_late)
   return sink

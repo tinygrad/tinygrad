@@ -39,9 +39,29 @@ dsp_pm = gep_pushing+PatternMatcher([
   (UPat(Ops.VECTORIZE, name="v") * UPat(Ops.VCONST, name="vc"), vectorize_vconst),
 ])
 
-dsp_pm_late = PatternMatcher([
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+def mul_pat(acc, a0, b0, a1, b1, a2, b2, a3, b3):
+  print(a0.src[0].arg, a0.src[0].dtype)
+  a = UOp(Ops.CAT, a0.src[0].dtype.scalar().vec(a0.dtype.count*4), (a0.src[0], a1.src[0], a2.src[0], a3.src[0]))
+  b = UOp(Ops.CAT, b0.src[0].dtype.scalar().vec(b0.dtype.count*4), (b0.src[0], b1.src[0], b2.src[0], b3.src[0]))
+  # Vx32.w+=vrmpy(Vu32.ub,Vv32.b)
+  assert b.dtype.scalar() == dtypes.uchar and a.dtype.scalar() == dtypes.char
+  return UOp(Ops.CUSTOMI, acc.dtype, src=(acc, b, a), arg="__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+
+dsp_pm_late = gep_pushing+PatternMatcher([
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld", allow_any_len=True),
+   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
+  # CAT on GEP
+  (UPat(Ops.CAT, src=UPat(Ops.GEP, src=(UPat.var("x"),)), name="cat"),
+   lambda cat,x: x.gep(sum([y.arg if isinstance(y.arg, tuple) else (y.arg,) for y in cat.src], ()))),
+  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
+  (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+    if not isinstance(x.dtype, PtrDType) else None),
+  # CAST
+  (UPat(Ops.CAST, name="a0")*UPat(Ops.CAST, name="b0")+UPat(Ops.CAST, name="a1")*UPat(Ops.CAST, name="b1")+
+   UPat(Ops.CAST, name="a2")*UPat(Ops.CAST, name="b2")+UPat(Ops.CAST, name="a3")*UPat(Ops.CAST, name="b3")+
+   UPat(Ops.DEFINE_ACC, name="acc"), mul_pat),
+  #(UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+  #  "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
   (UPat.var("x")+UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")*UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")//UPat(Ops.VECTORIZE, src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI, x.dtype, (y,), arg="{0}") if x.op is not Ops.CUSTOMI else None),
