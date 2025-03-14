@@ -1,4 +1,4 @@
-name: Cleanup pull request caches on close
+name: Cleanup pull request caches
 on:
   pull_request:
     types:
