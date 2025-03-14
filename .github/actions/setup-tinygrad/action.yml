@@ -61,12 +61,14 @@ runs:
       with:
         path: /Users/runner/Library/Python/${{ inputs.python-version }}/lib/python/site-packages
         key: osx-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        restore-keys: osx-python-package-${{ inputs.key }}-
     - name: Cache Python packages (Windows)
       if: inputs.key != '' && runner.os == 'Windows'
       uses: actions/cache@v4
       with:
         path: ${{ env.Python3_ROOT_DIR }}\Lib\site-packages
         key: windows-python-package-${{ inputs.key }}-${{ hashFiles('**/setup.py') }}
+        restore-keys: windows-python-package-${{ inputs.key }}-
 
     # **** Caching downloads ****
 
