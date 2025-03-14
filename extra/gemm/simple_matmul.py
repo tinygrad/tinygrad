@@ -21,7 +21,7 @@ if __name__ == "__main__":
   def init_matrix(rows, cols):
     rng = np.random.default_rng()
     if dtype_in in dtypes.ints:
-      return Tensor(rng.integers(INT_LOW, INT_HIGH, (rows, cols), _to_np_dtype(dtype_in))).realize()
+      return Tensor(rng.integers(INT_LOW, INT_HIGH, (rows, cols), dtype=_to_np_dtype(dtype_in))).realize()
     return Tensor(rng.random((rows, cols), dtype=np.float32).astype(_to_np_dtype(dtype_in))).realize()
 
   a, b = init_matrix(M, K), init_matrix(K, N)
