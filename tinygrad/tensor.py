@@ -4126,5 +4126,5 @@ def _init_winograd_constants():
                          [Tensor(0), Tensor(1), Tensor(1), Tensor(4), Tensor(4), Tensor(0)],
                          [Tensor(0), Tensor(1), Tensor(-1), Tensor(8), Tensor(-8), Tensor(1)]]
 
-# Initialize Winograd Matrices
+# Initialize winograd matrices
 _init_winograd_constants()
