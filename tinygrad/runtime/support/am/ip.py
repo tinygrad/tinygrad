@@ -61,7 +61,14 @@ class AM_GMC(AM_IP):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.paddr | 1)
-    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=(3 - page_table.lv))
+    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1800000, pde0_protection_fault_enable_interrupt=1, pde0_protection_fault_enable_default=1,
+                                                         dummy_page_protection_fault_enable_interrupt=1, dummy_page_protection_fault_enable_default=1,
+                                                         range_protection_fault_enable_interrupt=1, range_protection_fault_enable_default=1,
+                                                         valid_protection_fault_enable_interrupt=1, valid_protection_fault_enable_default=1,
+                                                         read_protection_fault_enable_interrupt=1, read_protection_fault_enable_default=1,
+                                                         write_protection_fault_enable_interrupt=1, write_protection_fault_enable_default=1,
+                                                         execute_protection_fault_enable_interrupt=1, execute_protection_fault_enable_default=1,
+                                                         enable_context=1, page_table_depth=(3 - page_table.lv))
 
   def init_hub(self, ip:Literal["MM", "GC"]):
     # Init system apertures
@@ -290,7 +297,7 @@ class AM_IH(AM_IP):
       self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
       self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
 
-      self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((am.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
+      self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(offset=(am.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2, enable=1)
 
     self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
