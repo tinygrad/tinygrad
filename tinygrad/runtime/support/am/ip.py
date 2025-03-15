@@ -61,7 +61,8 @@ class AM_GMC(AM_IP):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.paddr | 1)
-    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1800000, pde0_protection_fault_enable_interrupt=1, pde0_protection_fault_enable_default=1,
+    # TODO: 0x1800000
+    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(pde0_protection_fault_enable_interrupt=1, pde0_protection_fault_enable_default=1,
                                                          dummy_page_protection_fault_enable_interrupt=1, dummy_page_protection_fault_enable_default=1,
                                                          range_protection_fault_enable_interrupt=1, range_protection_fault_enable_default=1,
                                                          valid_protection_fault_enable_interrupt=1, valid_protection_fault_enable_default=1,
@@ -69,7 +70,6 @@ class AM_GMC(AM_IP):
                                                          write_protection_fault_enable_interrupt=1, write_protection_fault_enable_default=1,
                                                          execute_protection_fault_enable_interrupt=1, execute_protection_fault_enable_default=1,
                                                          enable_context=1, page_table_depth=(3 - page_table.lv))
-
   def init_hub(self, ip:Literal["MM", "GC"]):
     # Init system apertures
     self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0)
@@ -162,7 +162,7 @@ class AM_SMU(AM_IP):
 class AM_GFX(AM_IP):
   def init(self):
     # Wait for RLC autoload to complete
-    while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read(bootload_complete=1) != 0: pass
+    while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read()['bootload_complete'] != 0: pass
 
     self._config_gfx_rs64()
     self.adev.gmc.init_hub("GC")
@@ -208,17 +208,17 @@ class AM_GFX(AM_IP):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
 
     mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
-      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
+      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode_bitfields(preload_size=0x55, preload_req=1),
       cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
       cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
       cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
       cp_hqd_pq_wptr_poll_addr_lo=lo32(wptr_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wptr_addr),
-      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell*2, doorbell_en=1),
-      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2),
-      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
-      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1), cp_hqd_vmid=0,
+      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode_bitfields(doorbell_offset=doorbell*2, doorbell_en=1),
+      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode_bitfields(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2), # noqa: E501
+      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.encode_bitfields(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
+      cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode_bitfields(priv_state=1), cp_hqd_vmid=0,
       cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
-      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_size//4).bit_length()-2))
+      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode_bitfields(eop_size=(eop_size//4).bit_length()-2))
 
     # Copy mqd into memory
     ctypes.memmove(self.adev.paddr2cpu(mqd.paddrs[0][0]), ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
@@ -227,7 +227,7 @@ class AM_GFX(AM_IP):
     self._grbm_select(me=1, pipe=pipe, queue=queue)
 
     mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
-    for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.reg_off, self.adev.regCP_HQD_PQ_WPTR_HI.reg_off + 1)):
+    for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr, self.adev.regCP_HQD_PQ_WPTR_HI.addr + 1)):
       self.adev.wreg(reg, mqd_st_mv[0x80 + i])
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
@@ -280,7 +280,7 @@ class AM_IH(AM_IP):
     _, rwptr_vm, suf, _ = self.rings[0]
     wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
 
-    if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
+    if self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()['rb_overflow']:
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
