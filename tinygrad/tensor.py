@@ -2571,29 +2571,27 @@ class Tensor(SimpleMathTrait):
     bitonic_len = 2 ** n_stages
     fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
     x = x.pad(tuple((0, bitonic_len - orig_len) if i == dim else None for i in range(x.ndim)), value=fill_value)
-    # BUTTERFLY
+    i = Tensor.arange(bitonic_len).reshape(tuple(bitonic_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
     # pretty much this https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
-    orig_shape = x.shape
-    x = x.reshape(x.shape[:dim] + ((2,)*n_stages) + x.shape[dim+1:])
-    interim_shape = x.shape
-    for stage in range(1, n_stages+1):
-      for substage in range(stage-1, -1, -1):
-        partner_dim = dim + n_stages - substage - 1
-        if stage == n_stages:
-          xA, xB = (t.squeeze(partner_dim) for t in x.split(1, partner_dim))
-          larger, smaller = xA.maximum(xB), xA.minimum(xB)
-          x = (larger.stack(smaller, dim=partner_dim) if descending else smaller.stack(larger, dim=partner_dim)).contiguous()
-          x = x.reshape(interim_shape).contiguous()
-        else:
-          xA, xB = (t for t in x.split(1, partner_dim-(stage-substage)))
-          xAA, xAB = (t for t in xA.split(1, partner_dim))
-          xBA, xBB = (t for t in xB.split(1, partner_dim))
-          xA = xAA.minimum(xAB).stack(xAA.maximum(xAB), dim=partner_dim) if descending else xAA.maximum(xAB).stack(xAA.minimum(xAB), dim=partner_dim)
-          xB = xBA.maximum(xBB).stack(xBA.minimum(xBB), dim=partner_dim) if descending else xBA.minimum(xBB).stack(xBA.maximum(xBB), dim=partner_dim)
-          x = xA.stack(xB, dim=partner_dim-(stage-substage))
-          x = x.reshape(interim_shape).contiguous()
-    x = x.reshape(orig_shape).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+    stages = [(1 << stage, 1 << substage) for stage in range(1, n_stages + 1) for substage in range(stage - 1, -1, -1)]
+    for k, j in stages:
+      i_partner = i ^ j
+      # NOTE gather is uhhhhhhh cursed with jit
+      # x_partner = x.gather(dim, i_partner)
+      x_partner = x.reshape(x.shape[:dim] + ((2,)*n_stages) + x.shape[dim+1:]).flip(dim + (n_stages - 1 - int(math.log2(j)))).reshape(x.shape)
+      # NOTE maximum is slower than where
+      # larger, smaller = x.maximum(x_partner), x.minimum(x_partner)
+      larger, smaller = (x > x_partner).where(x, x_partner), (x_partner > x).where(x, x_partner)
+      point_towards = ((i < i_partner) ^ ((i & k) == 0))
+      x = (point_towards.where(smaller, larger) if descending else point_towards.where(larger, smaller)).contiguous()
+    x = x.shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    # print(((x.unsqueeze(dim+1) == self.unsqueeze(dim)) * idx.unsqueeze(1)).numpy())
+    # mask = (x.unsqueeze(dim) == self.unsqueeze(dim+1))
+    # value = idx.unsqueeze(dim+1).expand(mask.shape)
+    # print(mask.numpy())
+    # print(value.numpy())
+    # print(mask.split(1, 0))
     idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
