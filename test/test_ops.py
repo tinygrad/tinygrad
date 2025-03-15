@@ -1067,6 +1067,7 @@ class TestOps(unittest.TestCase):
     np.testing.assert_equal(value.numpy(), [0, 0, 0])
     np.testing.assert_equal(indices.numpy(), [2, 4, 6])
     self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
+
   def test_masked_select(self):
     helper_test_op([(2, 3)],
                    lambda x: torch.masked_select(x, torch.tensor([[True, False, True], [False, True, False]])),

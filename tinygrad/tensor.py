@@ -2602,15 +2602,15 @@ class Tensor(SimpleMathTrait):
     ```
     """
     try:
-        mask = mask._broadcast_to(self.shape)
-    except Exception:
-        raise ValueError(f"masked_select: mask shape {mask.shape} is not broadcastable to input shape {self.shape}")
+      mask = mask._broadcast_to(self.shape)
+    except Exception as exc:
+      raise ValueError(f"masked_select: mask shape {mask.shape} is not broadcastable to input shape {self.shape}") from exc
     x, m = self.flatten(), mask.flatten()
     if not (num_true := int(m.sum().item())): return Tensor.empty(0, device=self.device, dtype=self.dtype)
     indices = [Tensor.argmax(m, axis=0, keepdim=True)]
     for _ in range(num_true - 1):
-        m = m.scatter(0, indices[-1], 0)
-        indices.append(Tensor.argmax(m, axis=0, keepdim=True))
+      m = m.scatter(0, indices[-1], 0)
+      indices.append(Tensor.argmax(m, axis=0, keepdim=True))
     return x.gather(0, indices[0].cat(*indices[1:], dim=0))
 
   # ***** unary ops *****
