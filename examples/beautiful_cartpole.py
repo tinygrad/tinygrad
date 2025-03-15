@@ -23,6 +23,7 @@ LEARNING_RATE = 1e-2
 TRAIN_STEPS = 5
 EPISODES = 40
 DISCOUNT_FACTOR = 0.99
+EXAMPLE_RUN_INTERVAL = 50  # Set to 0 to disable example runs, otherwise shows an example every n episodes
 
 class ActorCritic:
   def __init__(self, in_features, out_features, hidden_state=HIDDEN_UNITS):
@@ -38,7 +39,7 @@ class ActorCritic:
     x = self.c1(obs).relu()
     return act, self.c2(x)
 
-def evaluate(model:ActorCritic, test_env:gym.Env) -> float:
+def evaluate(model:ActorCritic, test_env:gym.Env, render:bool=True) -> float:
   (obs, _), terminated, truncated = test_env.reset(), False, False
   total_rew = 0.0
   while not terminated and not truncated:
@@ -124,6 +125,13 @@ if __name__ == "__main__":
       # TODO: is this recompiling based on the shape?
       action_loss, entropy_loss, critic_loss = train_step(X[samples], A[samples], R[samples], old_log_dist[samples])
     t.set_description(f"sz: {len(Xn):5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.3f} entropy_loss: {entropy_loss.item():7.3f} critic_loss: {critic_loss.item():8.3f} reward: {sum(rews):6.2f}")
+    
+    # Run example episode if interval is set and we're at the right episode
+    if EXAMPLE_RUN_INTERVAL > 0 and (episode_number + 1) % EXAMPLE_RUN_INTERVAL == 0:
+      print(f"\nRunning example episode after {episode_number + 1} training episodes:")
+      example_env = gym.make(ENVIRONMENT_NAME, render_mode='human')
+      example_reward = evaluate(model, example_env)
+      print(f"Example episode reward: {example_reward:.2f}\n")
 
   test_rew = evaluate(model, gym.make(ENVIRONMENT_NAME, render_mode='human'))
   print(f"test reward: {test_rew}")
