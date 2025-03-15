@@ -31,6 +31,18 @@ if __name__ == "__main__":
     device = torch.device("tiny")
   else:
     device = torch.device("mps")
+
+  GPUS, DDP, RANK = getenv("GPUS", 1), getenv("DDP", 0), getenv("LOCAL_RANK", 0)
+  if DDP:
+    assert getenv("LOCAL_WORLD_SIZE") == GPUS, "number of workers must match number of gpus"
+    import os, atexit
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "29500"
+    device = torch.device(device.type, index=RANK)
+    backend = "cpu:gloo,tiny:tiny" if device.type == "tiny" else None
+    torch.distributed.init_process_group(backend=backend)
+    atexit.register(torch.distributed.destroy_process_group)
+
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
   Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
@@ -39,6 +51,14 @@ if __name__ == "__main__":
 
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
+  BS = getenv("BS", 512) // GPUS
+
+  if GPUS > 1:
+    if DDP:
+      # TODO: model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[RANK])
+    else:
+      model = torch.nn.DataParallel(model, range(GPUS))
 
   loss_fn = nn.CrossEntropyLoss()
   #@torch.compile
@@ -53,7 +73,7 @@ if __name__ == "__main__":
 
   test_acc = float('nan')
   for i in (t:=trange(70)):
-    samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
+    samples = torch.randint(0, X_train.shape[0], (BS,))  # putting this in JIT didn't work well
     loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
