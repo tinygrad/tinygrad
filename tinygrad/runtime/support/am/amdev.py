@@ -3,7 +3,7 @@ import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -51,16 +51,19 @@ class AMFirmware:
     self.descs: list[tuple[list[int], memoryview]] = []
 
     blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v1_0)
+    print(hdr.header.header_version_major, hdr.header.header_version_minor)
     self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
 
     # SDMA firmware
-    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0)
-    self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
-    self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
+    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v3_0)
+    print(hdr.header.header_version_major, hdr.header.header_version_minor)
+    self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
+    # self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
       blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
+      print(hdr.header.header_version_major, hdr.header.header_version_minor)
 
       # Code part
       self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'))]
@@ -72,6 +75,7 @@ class AMFirmware:
 
     # IMU firmware
     blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_imu.bin", am.struct_imu_firmware_header_v1_0)
+    print(hdr.header.header_version_major, hdr.header.header_version_minor)
     imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
     self.descs += [self.desc(blob, imu_i_off, imu_i_sz, am.GFX_FW_TYPE_IMU_I), self.desc(blob, imu_i_off + imu_i_sz, imu_d_sz, am.GFX_FW_TYPE_IMU_D)]
 
@@ -87,9 +91,10 @@ class AMFirmware:
       off, sz = getattr(hdr2, f'rlc_{fmem}_ucode_offset_bytes'), getattr(hdr2, f'rlc_{fmem}_ucode_size_bytes')
       self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
-    for mem in ['P', 'V']:
-      off, sz = getattr(hdr3, f'rlc{mem.lower()}_ucode_offset_bytes'), getattr(hdr3, f'rlc{mem.lower()}_ucode_size_bytes')
-      self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
+    if hdr0.header.header_version_minor == 3:
+      for mem in ['P', 'V']:
+        off, sz = getattr(hdr3, f'rlc{mem.lower()}_ucode_offset_bytes'), getattr(hdr3, f'rlc{mem.lower()}_ucode_size_bytes')
+        self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
@@ -110,9 +115,9 @@ class AMPageTableEntry:
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
 
     f = (am.AMDGPU_PTE_VALID if valid else 0) | ((am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE) if not table else 0) \
-      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
+      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE_GFX12 if not table and self.lv != am.AMDGPU_VM_PTB else (am.AMDGPU_PTE_IS_PTE if not table else 0)) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
-      | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
+      | (am.AMDGPU_PTE_MTYPE_GFX12(0, self.adev.soc.soc_mod.MTYPE_UC) if uncached else 0)
     self.entries[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
 
 class AMPageTableTraverseContext:
@@ -130,7 +135,7 @@ class AMPageTableTraverseContext:
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
       entry = pt.entries[pte_idx]
 
-    assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
+    assert entry & am.AMDGPU_PDE_PTE_GFX12 == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -156,7 +161,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE_GFX12 != am.AMDGPU_PDE_PTE_GFX12): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -167,13 +172,17 @@ class AMPageTableTraverseContext:
       self.level_up()
 
 class AMMemoryManager:
-  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x7F0000000000) # global for all devices.
+  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x6F0000000000) # global for all devices.
 
   def __init__(self, adev:AMDev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
     self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
+    
+    # arch specific:
+    self.pde_pte_flag = am.AMDGPU_PDE_PTE_GFX12
+    self.pte_mtype = am.AMDGPU_PTE_MTYPE_GFX12
 
   def _frag_size(self, va, sz, must_cover=True):
     """
@@ -286,7 +295,7 @@ class AMDev:
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
-    self.soc21:AM_SOC21 = AM_SOC21(self)
+    self.soc:AM_SOC = AM_SOC(self)
     self.gmc:AM_GMC = AM_GMC(self)
     self.ih:AM_IH = AM_IH(self)
     self.psp:AM_PSP = AM_PSP(self)
@@ -300,7 +309,7 @@ class AMDev:
 
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
-      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
         ip.init()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
@@ -313,7 +322,7 @@ class AMDev:
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     self.smu.set_clocks(level=-1) # last level, max perf.
-    for ip in [self.soc21, self.gfx]: ip.set_clockgating_state()
+    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
@@ -388,6 +397,10 @@ class AMDev:
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
+    # print(self.regs_offset)
+    # print(self.ip_versions)
+    # exit(0)
+
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
@@ -399,7 +412,7 @@ class AMDev:
     raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
 
   def _build_regs(self):
-    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
+    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbif", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
       ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
       ("HDP", self._ip_module("hdp", am.HDP_HWIP))]
 
