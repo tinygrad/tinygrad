@@ -2590,8 +2590,7 @@ class Tensor(SimpleMathTrait):
     return self.gather(dim, combined_indices), combined_indices
 
   def masked_select(self, mask: Tensor) -> Tensor:
-    if self.shape != mask.shape:
-      raise ValueError("masked_select: input and mask must have the same shape")
+    mask = mask if self.shape == mask.shape else mask._broadcast_to(self.shape) # is this if necessary or can we just broadcast either way?
     x, m = self.flatten(), mask.flatten()
     # Count the number of True values in the mask
     num_true = int(m.sum().item())

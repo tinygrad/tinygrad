@@ -1077,21 +1077,20 @@ class TestOps(unittest.TestCase):
       x = torch.tensor([[1, 2, 3], [4, 5, 6]])
       mask = torch.tensor([[True, False, True], [False, True, False]])
       return torch.masked_select(x, mask).numpy()
-    print(f"test_tinygrad: {test_tinygrad()} and test_pytorch: {test_pytorch()}")
     np.testing.assert_equal(test_tinygrad(), test_pytorch())
 
-    # # Test with different shapes that can broadcast
-    # def test_tinygrad_broadcast():
-    #   x = Tensor([[1, 2, 3], [4, 5, 6]])
-    #   mask = Tensor([True, False, True])  # Will broadcast to [[T,F,T], [T,F,T]]
-    #   return x.masked_select(mask).numpy()
+    # Test with different shapes that can broadcast
+    def test_tinygrad_broadcast():
+      x = Tensor([[1, 2, 3], [4, 5, 6]])
+      mask = Tensor([True, False, True])  # Will broadcast to [[T,F,T], [T,F,T]]
+      return x.masked_select(mask).numpy()
 
-    # def test_pytorch_broadcast():
-    #   x = torch.tensor([[1, 2, 3], [4, 5, 6]])
-    #   mask = torch.tensor([True, False, True])
-    #   return torch.masked_select(x, mask).numpy()
+    def test_pytorch_broadcast():
+      x = torch.tensor([[1, 2, 3], [4, 5, 6]])
+      mask = torch.tensor([True, False, True])
+      return torch.masked_select(x, mask).numpy()
 
-    # np.testing.assert_equal(test_tinygrad_broadcast(), test_pytorch_broadcast())
+    np.testing.assert_equal(test_tinygrad_broadcast(), test_pytorch_broadcast())
 
   def test_einsum(self):
     # matrix transpose
