@@ -64,11 +64,6 @@ def inplace_fn(outvars: str|list[str]):
 
 # *** bad functions on CPU ***
 
-@torch.library.impl("aten::masked_select", "privateuseone")
-def masked_select(self, mask):
-  # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()], device=_from_torch_device(self.device)))
-
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 @inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
@@ -384,6 +379,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
+  "aten.masked_select": Tensor.masked_select,
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": inplace_fn("self")(lambda self:
