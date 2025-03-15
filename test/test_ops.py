@@ -1046,7 +1046,7 @@ class TestOps(unittest.TestCase):
     # NOTE: torch does not support this on bool
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
-
+  
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
     helper_test_op([(10)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
@@ -1067,6 +1067,32 @@ class TestOps(unittest.TestCase):
     np.testing.assert_equal(value.numpy(), [0, 0, 0])
     np.testing.assert_equal(indices.numpy(), [2, 4, 6])
     self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
+  def test_masked_select(self):
+    def test_tinygrad():
+      x = Tensor([[1, 2, 3], [4, 5, 6]])
+      mask = Tensor([[True, False, True], [False, True, False]])
+      return x.masked_select(mask).numpy()
+
+    def test_pytorch():
+      x = torch.tensor([[1, 2, 3], [4, 5, 6]])
+      mask = torch.tensor([[True, False, True], [False, True, False]])
+      return torch.masked_select(x, mask).numpy()
+    print(f"test_tinygrad: {test_tinygrad()} and test_pytorch: {test_pytorch()}")
+    np.testing.assert_equal(test_tinygrad(), test_pytorch())
+    
+    # # Test with different shapes that can broadcast
+    # def test_tinygrad_broadcast():
+    #   x = Tensor([[1, 2, 3], [4, 5, 6]])
+    #   mask = Tensor([True, False, True])  # Will broadcast to [[T,F,T], [T,F,T]]
+    #   return x.masked_select(mask).numpy()
+
+    # def test_pytorch_broadcast():
+    #   x = torch.tensor([[1, 2, 3], [4, 5, 6]])
+    #   mask = torch.tensor([True, False, True])
+    #   return torch.masked_select(x, mask).numpy()
+    
+    # np.testing.assert_equal(test_tinygrad_broadcast(), test_pytorch_broadcast())
+
 
   def test_einsum(self):
     # matrix transpose
