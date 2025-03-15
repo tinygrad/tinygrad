@@ -131,6 +131,11 @@ for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
 for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
   torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=getattr(aten, i)))
 
+@torch.library.impl("aten::ones_like", "privateuseone")
+def ones_like(x, memory_format=None, **kwargs):
+  # TODO: move to tinygrad, required for TestOps.test_biased_conv2d
+  return aten.ones_like(x.cpu(), memory_format=memory_format).tiny()
+
 # *** end bad functions on CPU ***
 
 @torch.library.impl("aten::zero_", "privateuseone")
