@@ -2590,27 +2590,25 @@ class Tensor(SimpleMathTrait):
     return self.gather(dim, combined_indices), combined_indices
 
   def masked_select(self, mask: Tensor) -> Tensor:
-    mask = mask if self.shape == mask.shape else mask._broadcast_to(self.shape) # is this if necessary or can we just broadcast either way?
+    """
+    Returns a 1D tensor containing elements of this tensor where the corresponding element in `mask` is `True`.
+
+    This supports broadcasting, meaning `mask` can be smaller than `self` as long as it expands correctly.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    mask = Tensor([[True, False, True], [False, True, False]])
+    print(t.masked_select(mask).numpy())  # [1, 3, 5]
+    ```
+    """
+    mask = mask._broadcast_to(self.shape)
     x, m = self.flatten(), mask.flatten()
-    # Count the number of True values in the mask
-    num_true = int(m.sum().item())
-    if not num_true: return Tensor.empty(0, device=self.device, dtype=self.dtype)
-    indices = []
-    # Iteratively, use argmax to find a True (1) in the mask,
-    # then mask that position out using scatter (set it to 0)
-    for _ in range(num_true):
-      idx = Tensor.argmax(m, axis=0, keepdim=True)
-      # If the value at the found index is no longer True, break early.
-      if m.gather(0, idx).item() == 0:
-        break
-      indices.append(idx)
-      m = m.scatter(0, idx, Tensor.full((1,), 0, dtype=m.dtype, device=m.device))
-    # Concatenate all gathered indices into a 1D index tensor.
-    combined_indices = indices[0]
-    for idx in indices[1:]:
-      combined_indices = combined_indices.cat(idx, dim=0)
-    # Gather the corresponding elements from the flattened input tensor.
-    return x.gather(0, combined_indices)
+    if not (num_true := int(m.sum().item())): return Tensor.empty(0, device=self.device, dtype=self.dtype)
+    indices = [Tensor.argmax(m, axis=0, keepdim=True)]
+    for _ in range(num_true - 1):
+        m = m.scatter(0, indices[-1], 0)
+        indices.append(Tensor.argmax(m, axis=0, keepdim=True))
+    return x.gather(0, indices[0].cat(*indices[1:], dim=0))
 
   # ***** unary ops *****
 
