@@ -2592,7 +2592,6 @@ class Tensor(SimpleMathTrait):
     # print(mask.numpy())
     # print(value.numpy())
     # print(mask.split(1, 0))
-    # exit()
     idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
