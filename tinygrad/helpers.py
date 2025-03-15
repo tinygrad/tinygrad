@@ -283,6 +283,10 @@ def capstone_flatdump(lib: bytes):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
+def amdgpu_disassemble(lib:bytes):
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)

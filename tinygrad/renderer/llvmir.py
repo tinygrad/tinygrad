@@ -1,17 +1,17 @@
 from typing import cast
 import math, struct, sys
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer.cstyle import ClangRenderer, AMDRenderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
-  if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
-  return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
+  if isinstance(dt, PtrDType): return ldt(dt.base) + (" addrspace(3)*" if dt.local else "*")
+  return {dtypes.void: "void", dtypes.bool: "i1", dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
-          dtypes.float16: "half", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1", dtypes.void: "void"}[dt]
+          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
@@ -19,17 +19,18 @@ def lconst(x, dtype:DType):
     return truncate[dtype](x)
   return int(x)
 
-def lcast(input_type:DType, output_type:DType):
-  if dtypes.is_float(input_type):
-    if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
-    if dtypes.is_int(output_type): return 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
-  if dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
-    if dtypes.is_float(output_type): return 'uitofp'
-    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
-  if dtypes.is_int(input_type):
-    if dtypes.is_float(output_type): return 'sitofp'
-    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
-  raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
+def render_cast(ctx, x: UOp) -> str:
+  ot, it, cast_op = x.dtype, x.src[0].dtype, ""
+  pre, pre_type = (f"  {ctx[x]}_ext = fpext {ldt(it)} {ctx[x.src[0]]} to float\n", "float") if {it, ot} == {dtypes.half, dtypes.bfloat16} else \
+                  (f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n", "i32") if dtypes.is_bool(it) and ot == dtypes.bfloat16 else ("", "")
+  if dtypes.is_float(it) and dtypes.is_float(ot): cast_op = 'fpext' if ot.itemsize > it.itemsize else 'fptrunc'
+  elif dtypes.is_float(it) and dtypes.is_int(ot): cast_op = 'fptoui' if dtypes.is_unsigned(ot) else 'fptosi'
+  elif dtypes.is_int(it) or dtypes.is_bool(it):
+    cast_op = ('uitofp' if dtypes.is_unsigned(it) or dtypes.is_bool(it) else 'sitofp') if dtypes.is_float(ot) else \
+              ('zext' if dtypes.is_unsigned(it) or dtypes.is_bool(it) else 'sext') if dtypes.is_int(ot) and ot.itemsize >= it.itemsize else \
+               'trunc' if dtypes.is_int(ot) and ot.itemsize < it.itemsize else ""
+  if not cast_op: raise NotImplementedError(f"cast from {it} -> {ot} not implemented")
+  return pre + f"  {ctx[x]} = {cast_op} {pre_type if pre else ldt(it)} {ctx[x] + '_ext' if pre else ctx[x.src[0]]} to {ldt(ot)}"
 
 # https://github.com/corsix/amx
 def render_wmma(ctx, wmma: UOp) -> str:
@@ -48,7 +49,7 @@ def render_wmma(ctx, wmma: UOp) -> str:
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", }
 signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
-flags = " nsz arcp contract afn"
+flags = " nsz arcp contract "
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
@@ -62,7 +63,8 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
-  (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
+  (UPat(Ops.LOAD, src=(UPat.var('idx'),), allow_any_len=True, name="x"),
+   lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
@@ -78,7 +80,7 @@ base_rewrite = PatternMatcher([
 
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+  (UPat(Ops.CAST, name="x"), render_cast),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
    f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
@@ -112,7 +114,7 @@ class LLVMRenderer(Renderer):
   supports_float4 = True
   has_local = False
   has_shared = False
-  global_max = None
+  global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite
   if AMX: tensor_cores = ClangRenderer.amx_tc
 
@@ -134,6 +136,7 @@ class LLVMRenderer(Renderer):
     end_lines: dict[str, None] = {}
     vc = -1
 
+    local_args: list[str] = []
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
       if u.op is Ops.ASSIGN: # prealloc all assigns
@@ -157,6 +160,10 @@ class LLVMRenderer(Renderer):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         # NOTE: MallocAllocator promises 0x20 alignment
         args.append(f"{ldt(u.dtype)}{' noalias align 32' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
+      elif u.op == Ops.DEFINE_LOCAL:
+        r[u] = f"@local_{u.arg}"
+        assert isinstance(u.dtype, PtrDType)
+        local_args.append(f"{r[u]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
@@ -181,7 +188,7 @@ class LLVMRenderer(Renderer):
               r[x] = f"%acc{vc}"
 
     # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
-    return f'''\
+    return "\n".join(local_args) +"\n"f'''\
 define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
 {chr(10).join(kernel)}
   ret void
@@ -189,3 +196,17 @@ define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(ar
 {chr(10).join(end_lines.keys())}
 attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
 '''
+barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
+code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
+                     "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+class AMDLLVMRenderer(LLVMRenderer):
+  device = "AMD"
+  has_local = True
+  has_shared = True
+  shared_max = AMDRenderer.shared_max
+  global_max = Renderer.global_max
+  abi = "protected amdgpu_kernel"
+  string_rewrite = base_rewrite + PatternMatcher([
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
+    (UPat(Ops.BARRIER), lambda ctx: barrier),
+  ])
