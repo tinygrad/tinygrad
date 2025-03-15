@@ -4,12 +4,12 @@
 if [[ ! $(clang2py -V) ]]; then
   pushd .
   cd /tmp
-  sudo apt-get install -y --no-install-recommends clang
+  sudo apt-get install -y --no-install-recommends clang-14
   pip install --upgrade pip setuptools
   pip install clang==14.0.6
   git clone https://github.com/nimlgen/ctypeslib.git
   cd ctypeslib
-  pip install --user .
+  pip install  .
   clang2py -V
   popd
 fi
@@ -39,8 +39,16 @@ def _try_dlopen_$name():
 EOF
 }
 
+# sudo apt install intel-ocloc intel-ocloc-dev
+generate_ocloc() {
+  clang2py --clang-args="-x c++" /usr/include/ocloc_api.h -o $BASE/intel_ocloc.py -l /usr/lib/x86_64-linux-gnu/libocloc.so -k cdefstum
+  # hot patch (change char*[] to char**)
+  sed -i "s/ctypes.POINTER(ctypes.c_char) \* 0/ctypes.POINTER(ctypes.POINTER(ctypes.c_char))/g"  $BASE/intel_ocloc.py
+  python3 -c "import tinygrad.runtime.autogen.intel_ocloc"
+}
+
 generate_opencl() {
-  clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
+  clang2py  /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
   fixup $BASE/opencl.py
   # hot patches
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/opencl.py
@@ -400,6 +408,7 @@ elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
+elif [ "$1" == "intel_offline_compiler" ]; then generate_ocloc
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu; generate_ocloc
 else echo "usage: $0 <type>"
 fi
