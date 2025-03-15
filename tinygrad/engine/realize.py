@@ -2,7 +2,8 @@ from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
-from tinygrad.helpers import DEVECTORIZE, time_to_str
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU
+from tinygrad.dtype import _to_np_dtype
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -166,6 +167,30 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[ExecItem, None, Non
 capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
-  for ei in lower_schedule(schedule):
-    if len(capturing) and CAPTURING: capturing[0].add(ei)
-    ei.run(var_vals, do_update_stats=do_update_stats)
+  # DEBUG: move the buffers to the CPU and test them
+  if VALIDATE_WITH_CPU:
+    # TODO: this should be moved to Buffer from Tensor
+    import numpy as np
+    def to_np(buf): return np.frombuffer(buf.as_buffer().cast(buf.dtype.base.fmt), dtype=_to_np_dtype(buf.dtype.base))
+
+    while len(schedule):
+      if len(capturing) and CAPTURING: capturing[0].add(ei)
+      si = schedule.pop(0)
+
+      # copy in allocated buffers from the GPU
+      if si.ast.op is Ops.SINK:
+        nb: list[Buffer] = [Buffer("CPU", b.size, b.dtype) for b in si.bufs]
+        for cpu_b, gpu_b in zip(nb, si.bufs):
+          if gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
+
+      # run on GPU
+      lower_schedule_item(si).run(var_vals, do_update_stats=do_update_stats)
+
+      # validate the buffers match
+      if si.ast.op is Ops.SINK:
+        lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata)).run(var_vals, do_update_stats=True)
+        np.testing.assert_allclose(to_np(nb[0]), to_np(si.bufs[0]), rtol=1e-3, atol=1e-3)
+  else:
+    for ei in lower_schedule(schedule):
+      if len(capturing) and CAPTURING: capturing[0].add(ei)
+      ei.run(var_vals, do_update_stats=do_update_stats)
