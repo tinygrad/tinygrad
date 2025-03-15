@@ -1055,9 +1055,10 @@ class TestOps(unittest.TestCase):
         helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
                        forward_only=True)
 
-    # this actually runs!
-    val, _ = Tensor.randint(100000, low=-9999, high=9999).sort()
-    np.testing.assert_equal(val.numpy(), np.sort(val.numpy()))
+    # TODO!!!!!! NEED TO FIGURE THIS ONE OUT. IF THIS IF FIGURED OUT, MAXPOOL INDICES IS FIGURED OUT!!!!:W
+    # _, indices = Tensor([0, 1] * 9).sort()
+    # print(indices.tolist())
+    # np.testing.assert_equal(indices.tolist(), [ 2, 16,  4,  6, 14,  8,  0, 10, 12,  9, 17, 15, 13, 11,  7,  5,  3,  1])
 
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)

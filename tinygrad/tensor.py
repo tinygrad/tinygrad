@@ -2568,26 +2568,42 @@ class Tensor(SimpleMathTrait):
     # pad to power of 2
     orig_len = x.shape[dim]
     n_stages = math.ceil(math.log2(orig_len))
-    bitonic_len = 2**n_stages
+    bitonic_len = 2 ** n_stages
     fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
     x = x.pad(tuple((0, bitonic_len - orig_len) if i == dim else None for i in range(x.ndim)), value=fill_value)
     i = Tensor.arange(bitonic_len).reshape(tuple(bitonic_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
     # pretty much this https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
-    for stage in range(1, n_stages+1):
-      k = cast(int, 2**stage)
-      for substage in range(stage-1, -1, -1):
-        j = cast(int, 2**substage)
-        ixj = i ^ j
-        # x_partner = x.gather(dim, ixj)
-        x_partner = x.reshape(x.shape[:dim] + ((2,) * n_stages) + x.shape[dim+1:]).flip(dim + (n_stages - 1 - substage)).reshape(x.shape)
-        larger = (x > x_partner).where(x, x_partner)
-        smaller = (x_partner > x).where(x, x_partner)
-        point_towards = (((i & k) == 0) & (i > ixj)) | (((i & k) != 0) & (i < ixj))
-        x = (point_towards.where(smaller, larger) if descending else point_towards.where(larger, smaller)).contiguous()
+    stages = [(1 << stage, 1 << substage) for stage in range(1, n_stages + 1) for substage in range(stage - 1, -1, -1)]
+    for k, j in stages:
+      i_partner = i ^ j
+      # NOTE gather is uhhhhhhh cursed with jit
+      # x_partner = x.gather(dim, i_partner)
+      x_partner = x.reshape(x.shape[:dim] + ((2,)*n_stages) + x.shape[dim+1:]).flip(dim + (n_stages - 1 - int(math.log2(j)))).reshape(x.shape)
+      # NOTE maximum is slower than where
+      # larger, smaller = x.maximum(x_partner), x.minimum(x_partner)
+      larger, smaller = (x > x_partner).where(x, x_partner), (x_partner > x).where(x, x_partner)
+      point_towards = ((i < i_partner) ^ ((i & k) == 0))
+      x = (point_towards.where(smaller, larger) if descending else point_towards.where(larger, smaller)).contiguous()
     x = x.shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    # print(((x.unsqueeze(dim+1) == self.unsqueeze(dim)) * idx.unsqueeze(1)).numpy())
+    # mask = (x.unsqueeze(dim) == self.unsqueeze(dim+1))
+    # value = idx.unsqueeze(dim+1).expand(mask.shape)
+    # print(mask.numpy())
+    # print(value.numpy())
+    # print(mask.split(1, 0))
+    # exit()
     idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
+
+# def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
+#   # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
+#   values = values * mask
+#   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+#   # remove extra dims from reduce
+#   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
+#   # select from values for each True element in mask else select from self
+#   return mask.where(values, target)
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
     """
