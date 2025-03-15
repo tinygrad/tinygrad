@@ -539,7 +539,7 @@ class KFDIface:
 class AMAllocationMeta: owner:AMDDevice; mapped_devs:list[AMDDevice]; mapping:AMMapping # noqa: E702
 
 class PCIIface:
-  supported_devs:list[int] = [0x744c, 0x7480]
+  supported_devs:list[int] = [0x7550]
   vfio:bool = getenv("VFIO", 1) and HWInterface.exists("/dev/vfio/vfio")
   vfio_fd:HWInterface
   gpus:list[Any] = []
@@ -685,7 +685,8 @@ class AMDDevice(HCQCompiled):
     self.dev_iface = PCIIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self, self.device_id)
     self.target = int(self.dev_iface.props['gfx_target_version'])
     self.arch = "gfx%d%x%x" % (self.target // 10000, (self.target // 100) % 100, self.target % 100)
-    if self.target < 100300 or self.target >= 120000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+    if self.target < 100300 or self.target >= 130000: raise RuntimeError(f"Unsupported arch: {self.arch}")
+    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.max_cu_id = self.dev_iface.props['simd_count'] // self.dev_iface.props['simd_per_cu'] - 1
     self.max_wave_id = self.dev_iface.props['max_waves_per_simd'] * self.dev_iface.props['simd_per_cu'] - 1
