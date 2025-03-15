@@ -2588,7 +2588,7 @@ class Tensor(SimpleMathTrait):
       x = x.scatter(dim, idx, mask_value)
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
-  
+
   def masked_select(self, mask: Tensor) -> Tensor:
     if self.shape != mask.shape:
       raise ValueError("masked_select: input and mask must have the same shape")

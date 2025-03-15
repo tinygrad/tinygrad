@@ -1046,7 +1046,7 @@ class TestOps(unittest.TestCase):
     # NOTE: torch does not support this on bool
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
-  
+
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
     helper_test_op([(10)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
@@ -1079,7 +1079,7 @@ class TestOps(unittest.TestCase):
       return torch.masked_select(x, mask).numpy()
     print(f"test_tinygrad: {test_tinygrad()} and test_pytorch: {test_pytorch()}")
     np.testing.assert_equal(test_tinygrad(), test_pytorch())
-    
+
     # # Test with different shapes that can broadcast
     # def test_tinygrad_broadcast():
     #   x = Tensor([[1, 2, 3], [4, 5, 6]])
@@ -1090,9 +1090,8 @@ class TestOps(unittest.TestCase):
     #   x = torch.tensor([[1, 2, 3], [4, 5, 6]])
     #   mask = torch.tensor([True, False, True])
     #   return torch.masked_select(x, mask).numpy()
-    
-    # np.testing.assert_equal(test_tinygrad_broadcast(), test_pytorch_broadcast())
 
+    # np.testing.assert_equal(test_tinygrad_broadcast(), test_pytorch_broadcast())
 
   def test_einsum(self):
     # matrix transpose
