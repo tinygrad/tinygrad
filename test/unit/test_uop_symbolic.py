@@ -516,9 +516,12 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     aa = cond.where(a, a.ufix(0))
     bb = cond.where(b, b.ufix(1))
+    bb_flipped = cond.where(b.ufix(1), b)
     self.helper_test_variable(aa, 0, 3, "(a if (x<2) else 0)")
     self.helper_test_variable(bb, 0, 3, "(b if (x<2) else 1)")
+    self.helper_test_variable(bb_flipped, 0, 3, "(1 if (x<2) else b)")
     self.helper_test_variable(aa+bb, 0, 6, "((a+b) if (x<2) else 1)")
+    self.helper_test_variable(aa+bb_flipped, 0, 4, "((a+1) if (x<2) else b)")
     self.helper_test_variable(aa.maximum(bb), 0, 3, "(max(a, b) if (x<2) else 1)")
 
     # not combining because it increased total ALU
