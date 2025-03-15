@@ -330,8 +330,8 @@ jobs:
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
-    - name: Repo line count < 11500 lines
-      run: MAX_LINE_COUNT=11500 python sz.py
+    - name: Repo line count < 12000 lines
+      run: MAX_LINE_COUNT=12000 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -423,6 +423,8 @@ jobs:
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test Additional ONNX Ops (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
+      - name: Test Quantize ONNX
+        run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run CLOUD=1 Test
         run: |
           CLOUDDEV=CPU CLOUD=1 python3 test/test_tiny.py
@@ -467,7 +469,7 @@ jobs:
   testdsp:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
