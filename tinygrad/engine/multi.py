@@ -158,10 +158,8 @@ multi_pm = PatternMatcher([
 ])
 
 def copy_before_expand(uop:UOp, device:str) -> UOp|None:
-  if uop.op in (Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.CONST):
-    return None
-  if uop.base is not uop and prod(uop.base.shape) < prod(uop.shape):
-    return uop.replace(src=(uop.src[0].copy_to_device(device),))
+  if uop.op in (Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.CONST): return None
+  if uop.op == Ops.EXPAND: return uop.replace(src=(uop.src[0].copy_to_device(device),))
   src_match = [copy_before_expand(src, device) for src in uop.src]
   if all(m is None for m in src_match): return None
   new_src = tuple(m if m is not None else src.copy_to_device(device) for m, src in zip(src_match, uop.src))
