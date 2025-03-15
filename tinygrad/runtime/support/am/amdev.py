@@ -399,7 +399,7 @@ class AMDev:
     raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
 
   def _build_regs(self):
-    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
+    mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbif", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
       ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
       ("HDP", self._ip_module("hdp", am.HDP_HWIP))]
 

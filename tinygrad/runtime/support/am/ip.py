@@ -118,21 +118,22 @@ class AM_SMU(AM_IP):
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=not self.adev.partial_boot, boot=True)
 
   def init(self):
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
-    self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
+    self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
   def is_smu_alive(self):
-    with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_TestMessage, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0, poll=True)
+    if True: self._send_msg(2, 0, debug=True)
+    else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
     time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, cmd):
-    self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd, poll=True)
+    self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
     return table_t.from_buffer(to_mv(self.adev.paddr2cpu(self.driver_table_paddr), ctypes.sizeof(table_t)))
   def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
@@ -144,21 +145,18 @@ class AM_SMU(AM_IP):
         self.clcks[clck] = [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
 
     for clck, vals in self.clcks.items():
-      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), poll=True)
-      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]), poll=True)
+      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]))
+      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
-  def _smu_cmn_poll_stat(self, timeout=10000): self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90, mask=0xFFFFFFFF, value=1, timeout=timeout)
-  def _smu_cmn_send_msg(self, msg, param=0):
-    self.adev.mmMP1_SMN_C2PMSG_90.write(0) # resp reg
-    self.adev.mmMP1_SMN_C2PMSG_82.write(param)
-    self.adev.mmMP1_SMN_C2PMSG_66.write(msg)
+  def _smu_cmn_send_msg(self, msg, param=0, debug=False):
+    (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg
+    (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
+    (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
-  def _send_msg(self, msg, param, poll=True, read_back_arg=False, timeout=10000): # 10s
-    if poll: self._smu_cmn_poll_stat(timeout=timeout)
-
-    self._smu_cmn_send_msg(msg, param)
-    self._smu_cmn_poll_stat(timeout=timeout)
-    return self.adev.mmMP1_SMN_C2PMSG_82.read() if read_back_arg else None
+  def _send_msg(self, msg, param, read_back_arg=False, timeout=10000, debug=False): # 10s
+    self._smu_cmn_send_msg(msg, param, debug=debug)
+    self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54, mask=0xFFFFFFFF, value=1, timeout=timeout)
+    return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
   def init(self):
@@ -288,6 +286,8 @@ class AM_IH(AM_IP):
     self.adev.regIH_RB_RPTR.write(wptr % self.ring_size)
 
   def init(self):
+    return
+
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
 
@@ -359,7 +359,7 @@ class AM_PSP(AM_IP):
     self.max_tmr_size = 0x1300000
     self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
 
-  def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
+  def is_sos_alive(self): return self.adev.regMPASP_SMN_C2PMSG_81.read() != 0x0
   def init(self):
     sos_components_load_order = [
       (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
@@ -381,7 +381,7 @@ class AM_PSP(AM_IP):
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
 
-  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
+  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMPASP_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 
   def _prep_msg1(self, data):
     ctypes.memset(cpu_addr:=self.adev.paddr2cpu(self.msg1_paddr), 0, am.PSP_1_MEG)
@@ -394,8 +394,8 @@ class AM_PSP(AM_IP):
     self._wait_for_bootloader()
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
-    self.adev.regMP0_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
-    self.adev.regMP0_SMN_C2PMSG_35.write(compid)
+    self.adev.regMPASP_SMN_C2PMSG_36.write(self.adev.paddr2mc(self.msg1_paddr) >> 20)
+    self.adev.regMPASP_SMN_C2PMSG_35.write(compid)
 
     return self._wait_for_bootloader()
 
@@ -407,26 +407,26 @@ class AM_PSP(AM_IP):
 
   def _ring_create(self):
     # If the ring is already created, destroy it
-    if self.adev.regMP0_SMN_C2PMSG_71.read() != 0:
-      self.adev.regMP0_SMN_C2PMSG_64.write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+    if self.adev.regMPASP_SMN_C2PMSG_71.read() != 0:
+      self.adev.regMPASP_SMN_C2PMSG_64.write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
 
       # There might be handshake issue with hardware which needs delay
       time.sleep(0.02)
 
     # Wait until the sOS is ready
-    self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x80000000, value=0x80000000)
+    self.adev.wait_reg(self.adev.regMPASP_SMN_C2PMSG_64, mask=0x80000000, value=0x80000000)
 
-    self.adev.wreg_pair("regMP0_SMN_C2PMSG", "_69", "_70", self.adev.paddr2mc(self.ring_paddr))
-    self.adev.regMP0_SMN_C2PMSG_71.write(self.ring_size)
-    self.adev.regMP0_SMN_C2PMSG_64.write(am.PSP_RING_TYPE__KM << 16)
+    self.adev.wreg_pair("regMPASP_SMN_C2PMSG", "_69", "_70", self.adev.paddr2mc(self.ring_paddr))
+    self.adev.regMPASP_SMN_C2PMSG_71.write(self.ring_size)
+    self.adev.regMPASP_SMN_C2PMSG_64.write(am.PSP_RING_TYPE__KM << 16)
 
     # There might be handshake issue with hardware which needs delay
     time.sleep(0.02)
 
-    self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x8000FFFF, value=0x80000000)
+    self.adev.wait_reg(self.adev.regMPASP_SMN_C2PMSG_64, mask=0x8000FFFF, value=0x80000000)
 
   def _ring_submit(self):
-    prev_wptr = self.adev.regMP0_SMN_C2PMSG_67.read()
+    prev_wptr = self.adev.regMPASP_SMN_C2PMSG_67.read()
     ring_entry_addr = self.adev.paddr2cpu(self.ring_paddr) + prev_wptr * 4
 
     ctypes.memset(ring_entry_addr, 0, ctypes.sizeof(am.struct_psp_gfx_rb_frame))
@@ -436,7 +436,7 @@ class AM_PSP(AM_IP):
     write_loc.fence_value = prev_wptr
 
     # Move the wptr
-    self.adev.regMP0_SMN_C2PMSG_67.write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
+    self.adev.regMPASP_SMN_C2PMSG_67.write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
 
     while to_mv(self.adev.paddr2cpu(self.fence_paddr), 4).cast('I')[0] != prev_wptr: pass
     time.sleep(0.005)
