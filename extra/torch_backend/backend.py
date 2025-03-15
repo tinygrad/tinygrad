@@ -131,9 +131,9 @@ for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
 for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
   torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=getattr(aten, i)))
 
-@torch.library.impl("aten::ones_like", "privateuseone")
+# @torch.library.impl("aten::ones_like", "privateuseone")
 def ones_like(x, memory_format=None, **kwargs):
-  # TODO: move to tinygrad, required for TestOps.test_biased_conv2d
+  # TODO: this works for TestOps.test_biased_conv2d, but fails for TestOps.test_var_one_in_axis or TestOps.test_std_one_in_axis.
   return aten.ones_like(x.cpu(), memory_format=memory_format).tiny()
 
 # *** end bad functions on CPU ***
@@ -554,6 +554,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
+  "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
   "aten.t": Tensor.transpose,
   "aten.detach": Tensor.detach,
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
