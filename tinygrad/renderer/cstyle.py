@@ -402,6 +402,10 @@ class AMDRenderer(CStyleLanguage):
     opts=("l0","l0","l0","l0","l1","u1","u1","u1"), swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))))
     for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
 
+  def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900
+    self.tensor_cores, self.arch = AMDRenderer.tensor_cores, arch
+  def __reduce__(self): return self.__class__, (self.arch,)
+
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
   ocml = [(f"__ocml_{name}_f{n}", f"{dt}, {dt}" if "fmax" == name else dt, dt, atr)
