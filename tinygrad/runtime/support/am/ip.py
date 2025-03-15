@@ -1,4 +1,4 @@
-import ctypes, time, contextlib
+import ctypes, time, contextlib, importlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -9,8 +9,9 @@ class AM_IP:
   def fini(self): pass
   def set_clockgating_state(self): pass
 
-class AM_SOC21(AM_IP):
+class AM_SOC(AM_IP):
   def init(self):
+    self.soc_mod = importlib.import_module(f"tinygrad.runtime.autogen.am.soc{24 if self.adev.ip_versions[am.GC_HWIP]//10000 == 12 else 21}")
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
@@ -85,7 +86,7 @@ class AM_GMC(AM_IP):
 
     # Init TLB and cache
     self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
-                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=am.MTYPE_UC)
+                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=self.adev.soc.soc_mod.MTYPE_UC)
 
     self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=0, enable_default_page_out_to_system_memory=1,
       l2_pde0_cache_tag_generation_mode=0, pde_fault_classification=0, context1_identity_access_mode=1, identity_mode_fragment_size=0)
@@ -177,8 +178,8 @@ class AM_GFX(AM_IP):
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
     for i in range(0, 16):
       self._grbm_select(vmid=i)
-      self.adev.regSH_MEM_CONFIG.write(address_mode=am.SH_MEM_ADDRESS_MODE_64, alignment_mode=am.SH_MEM_ALIGNMENT_MODE_UNALIGNED,
-                                       initial_inst_prefetch=3)
+      self.adev.regSH_MEM_CONFIG.write(address_mode=self.adev.soc.soc_mod.SH_MEM_ADDRESS_MODE_64,
+                                       alignment_mode=self.adev.soc.soc_mod.SH_MEM_ALIGNMENT_MODE_UNALIGNED, initial_inst_prefetch=3)
 
       # Configure apertures:
       # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
