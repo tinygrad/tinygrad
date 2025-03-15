@@ -13,13 +13,12 @@ x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR
 x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss", Ops.DEFINE_ACC: "movss"}
 # NOTE: we use avx instructions for float ops
 x86_float32_ops = {Ops.ADD: "vaddss", Ops.SUB: "vsubss", Ops.MUL: "vmulss", Ops.FDIV: "vdivss", Ops.CMPLT: "vucomiss", Ops.CMPNE: "vucomiss",
-                 Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
+                 Ops.SQRT: "sqrtss", Ops.MULACC: "vfmadd213ss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_float32_ops.items()}}
-x86_vec2_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:v+"lps" for k,v in x86_mov_ops.items()}}
-x86_vec2_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec2_float32_ops.items()}}
+x86_vec2_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:"v"+v+"q" for k,v in x86_mov_ops.items()}}
 x86_vec4_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:"v"+v+"aps" for k,v in x86_mov_ops.items()}}
 # TODO: this requires ymm registers, must be 32 byte aligned
-x86_vec4_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec4_float32_ops.items()}}
+x86_vec2_float64_ops = x86_vec4_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec4_float32_ops.items()}}
 x86_vec8_float32_ops = x86_vec4_float32_ops
 
 x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
@@ -45,6 +44,7 @@ def to_hex(x, dt:DType) -> str:
 
 def cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.src[0].dtype in dtypes.sints else "setb"
 
+# TODO: switch this to avx
 def float_cast(x:DType, s:DType) -> str:
   if s is dtypes.float16: return "vcvtph2ps"
   cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
@@ -75,13 +75,15 @@ x86_rewrite = PatternMatcher([
    lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.float16, name="x"), lambda ctx,x: f"vcvtps2ph {ctx[x]}, {ctx[x.src[0]]}, 0x4"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"vmov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
   # ternary ops (no cmov for floats)
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\n"
    f"jnz .L{ctx.uops.index(x)}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.WHERE, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\ncmovz {ctx[x]}, {ctx[x.src[2]]}"),
+  (UPat(Ops.MULACC, name="x"),
+   lambda ctx,x: f"{f'{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n' if ctx[x] != ctx[x.src[0]] else ''}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}"),
   # binary ops
   # float cmp requires nan check
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat(dtype=dtypes.floats), UPat()), name="x"),
@@ -136,6 +138,8 @@ x86_matcher = PatternMatcher([
     lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
   (UPat(Ops.WHERE, dtype=(dtypes.bool, dtypes.uint8, dtypes.int8), name="x"),
     lambda x: UOp(Ops.WHERE, dtype=dtypes.int16, src=(x.src[0], x.src[1].cast(dtypes.int16), x.src[2].cast(dtypes.int16))).cast(x.dtype)),
+  # mulacc only available for floats
+  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
   # *** also in ptx ***
   # cast between pointers is a noop
   (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
@@ -265,7 +269,7 @@ class X86Renderer(Renderer):
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
           # reuse first operand register when possible TODO: why do we need the last check??
-          elif u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]) \
+          elif u.op in (*GroupOp.Binary, Ops.MULACC) and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]) \
                 and len(tuple(r[x] for x in r if r[x] == r[u.src[0]])) == 1: r[u] = r[u.src[0]]
           else: r[u] = assign_reg(i, u.dtype)
         if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
