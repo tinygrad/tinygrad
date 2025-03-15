@@ -1068,29 +1068,45 @@ class TestOps(unittest.TestCase):
     np.testing.assert_equal(indices.numpy(), [2, 4, 6])
     self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
   def test_masked_select(self):
-    def test_tinygrad():
-      x = Tensor([[1, 2, 3], [4, 5, 6]])
-      mask = Tensor([[True, False, True], [False, True, False]])
-      return x.masked_select(mask).numpy()
+    # Basic test case
+    x = Tensor([[1, 2, 3], [4, 5, 6]])
+    mask = Tensor([[True, False, True], [False, True, False]])
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
 
-    def test_pytorch():
-      x = torch.tensor([[1, 2, 3], [4, 5, 6]])
-      mask = torch.tensor([[True, False, True], [False, True, False]])
-      return torch.masked_select(x, mask).numpy()
-    np.testing.assert_equal(test_tinygrad(), test_pytorch())
+    # Edge Case 1: Empty Mask (No True Values)
+    x = Tensor([[1, 2, 3], [4, 5, 6]])
+    mask = Tensor([[False, False, False], [False, False, False]])
+    assert x.masked_select(mask).numel() == 0  # Should return an empty tensor
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
 
-    # Test with different shapes that can broadcast
-    def test_tinygrad_broadcast():
-      x = Tensor([[1, 2, 3], [4, 5, 6]])
-      mask = Tensor([True, False, True])  # Will broadcast to [[T,F,T], [T,F,T]]
-      return x.masked_select(mask).numpy()
+    # Edge Case 2: All True Mask (Select Everything)
+    x = Tensor([[1, 2, 3], [4, 5, 6]])
+    mask = Tensor([[True, True, True], [True, True, True]])
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
 
-    def test_pytorch_broadcast():
-      x = torch.tensor([[1, 2, 3], [4, 5, 6]])
-      mask = torch.tensor([True, False, True])
-      return torch.masked_select(x, mask).numpy()
+    # Edge Case 3: 1D Input Tensor
+    x = Tensor([10, 20, 30, 40, 50])
+    mask = Tensor([True, False, True, False, True])  # Selects [10, 30, 50]
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
 
-    np.testing.assert_equal(test_tinygrad_broadcast(), test_pytorch_broadcast())
+    # Edge Case 4: Scalar Tensor (Single Value)
+    x = Tensor(42)
+    mask = Tensor(True)  # Should return [42]
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
+
+    mask = Tensor(False)  # Should return an empty tensor
+    assert x.masked_select(mask).numel() == 0
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
+
+    # Edge Case 5: Broadcasting with Higher Dimensions
+    x = Tensor([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])  # Shape (2,2,3)
+    mask = Tensor([True, False, True])  # Should broadcast across last dim
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
+
+    # Edge Case 6: Broadcasting with 2D Mask on 3D Tensor
+    x = Tensor([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])  # Shape (2,2,3)
+    mask = Tensor([[True, False, True], [False, True, False]])  # Will broadcast across first dimension
+    np.testing.assert_equal(x.masked_select(mask).numpy(), torch.masked_select(torch.tensor(x.numpy()), torch.tensor(mask.numpy())).numpy())
 
   def test_einsum(self):
     # matrix transpose
