@@ -32,7 +32,7 @@ def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str]
     cargs += [var for var in fxn.vars if getattr(var, "op", None) is Ops.DEFINE_VAR] # symbolic vars; is it necessary or sufficient to check for DEFINE_VAR?
     statements.append((fxn.function_name, cargs, fxn.global_size, fxn.local_size))
 
-  return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}
+  return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
 def jit_model(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], *args) -> tuple[TinyJit,dict[int,str]]:
   @TinyJit
@@ -60,22 +60,22 @@ def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
 
-  Device.DEFAULT="WEBGPU"
-  # TODO: don't get/use any state_dict by default; let user provide state_dict if they want exported weights to have keys (names) from state_dict
-  # TODO: instead, if state_dict is None, make a state_dict out of bufs_to_save; need to consider how random seeds are handled
-  state_dict = state_dict if state_dict else get_state_dict(weights_holder:=getattr(model, "__self__", None))
-  for k,v in state_dict.items():
-    # torch_load sometimes loads non-contiguous tensors, which when saved with safe_save, can cause exported WebGPU inference to fail
-    # TODO: investigate contiguity in torch_load, and in safe_save/safe_load cycle (which enforces contiguity)
-    # TODO: exporting a model from non-WEBGPU device doesn't work yet despite the below .to("WEBGPU")
-    state_dict[k] = v.contiguous().to("WEBGPU").realize()
-  load_state_dict(weights_holder, state_dict)
+  # TODO: get rid of this _state_dict stuff
+  # torch_load sometimes loads non-contiguous tensors, which when saved with safe_save, can cause exported WebGPU inference to fail
+  # TODO: investigate contiguity in torch_load, and in safe_save/safe_load cycle (which enforces contiguity)
+  _state_dict = state_dict if state_dict else get_state_dict(weights_holder:=getattr(model, "__self__", None))
+  for k,v in _state_dict.items():
+    _state_dict[k] = v.contiguous().to("WEBGPU").realize()
+  load_state_dict(weights_holder, _state_dict)
 
   with Context(JIT=2): run, special_names = jit_model(model, *inputs)
-  functions, statements, bufs = compile_net(run, special_names)
+  functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
-
-  weight_names = {id(x.lazydata.base.realized): name for name, x in state_dict.items()}
+  # TODO: if user passes incomplete state_dict, make it still work by filling in gaps with bufs_to_save
+  if state_dict:
+    weight_names = {id(x.lazydata.base.realized): name for name, x in state_dict.items()}
+  else:
+    weight_names = {id(buf): name for name, buf in bufs_to_save.items()}
   max_buf_nbytes = max(v[0] for k,v in bufs.items())
   input_names = [name for _,name in special_names.items() if "input" in name]
   output_names = [name for _,name in special_names.items() if "output" in name]
@@ -231,7 +231,9 @@ export default {model_name};
 
   if js_outfile:
     with open(js_outfile, "w") as f: f.write(prg)
-  if save_weights and state_dict:
+  if save_weights:
+    if not state_dict:
+      state_dict = {name: Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize() for name, buf in bufs_to_save.items()}
     safe_save(state_dict, f"{js_outfile}.safetensors")
 
   return prg, state_dict
