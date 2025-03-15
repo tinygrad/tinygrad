@@ -9,16 +9,24 @@ x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov", Ops.DEFINE_
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
                     Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
-x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
-                 Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
-x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
 # NOTE: these are just for reg/stack reg/reg movs, for float16 heap load/stores we use gen regs
 x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss", Ops.DEFINE_ACC: "movss"}
-x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
-x86_vec4_ops = {**{k:v+"aps" for k,v in x86_mov_ops.items()}}
+# NOTE: we use avx instructions for float ops
+x86_float32_ops = {Ops.ADD: "vaddss", Ops.SUB: "vsubss", Ops.MUL: "vmulss", Ops.FDIV: "vdivss", Ops.CMPLT: "vucomiss", Ops.CMPNE: "vucomiss",
+                 Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
+x86_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_float32_ops.items()}}
+x86_vec2_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:v+"lps" for k,v in x86_mov_ops.items()}}
+x86_vec2_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec2_float32_ops.items()}}
+x86_vec4_float32_ops = {**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **{k:"v"+v+"aps" for k,v in x86_mov_ops.items()}}
+# TODO: this requires ymm registers, must be 32 byte aligned
+x86_vec4_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_vec4_float32_ops.items()}}
+x86_vec8_float32_ops = x86_vec4_float32_ops
+
 x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
           dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
-          dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
+          dtypes.float32.vec(2):x86_vec2_float32_ops, dtypes.float32.vec(4):x86_vec4_float32_ops,
+          dtypes.float64.vec(2):x86_vec2_float64_ops, dtypes.float64.vec(4):x86_vec4_float64_ops,
+          dtypes.float32.vec(8):x86_vec8_float32_ops}
 
 gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
@@ -84,6 +92,8 @@ x86_rewrite = PatternMatcher([
   # requires cl if second operand is a register
   (UPat((Ops.SHL, Ops.SHR), name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.bitshift(x, x.src[1])}" if ctx.r[x.src[1]] in ctx.all_regs else None),
+  # avx instructions allow 3 operands
+  (UPat(GroupOp.Binary, dtypes.floats, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(GroupOp.Binary, name="x"),
    lambda ctx,x: f"{f'{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n' if ctx[x] != ctx[x.src[0]] else ''}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
