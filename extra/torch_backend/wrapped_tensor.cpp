@@ -87,8 +87,8 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
 
 class TinyLazyStorageImpl : public c10::StorageImpl {
 public:
-  TinyLazyStorageImpl() :
-    c10::StorageImpl(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(), nullptr, /*resizable=*/false) {
+  TinyLazyStorageImpl(c10::Device device) :
+    c10::StorageImpl(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(nullptr, device), nullptr, /*resizable=*/false) {
   }
 };
 template <typename OpaqueHandle>
@@ -102,8 +102,8 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       c10::IntArrayRef strides)
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
-    this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorageImpl>());
-    TensorImpl::storage_access_should_throw_ = false;
+    this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorageImpl>(device));
+    TensorImpl::storage_access_should_throw_ = false; // TODO: a hack around is_alias_of checks
   }
 };
 }
