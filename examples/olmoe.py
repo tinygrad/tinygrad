@@ -33,11 +33,20 @@ class MixtureFeedForward:
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
 
 def fetch_weights() -> dict[str, Tensor]:
-  # TODO: make this lazy so the 3 fetches can happen in parallel
-  m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00001-of-00003.safetensors").to(Device.DEFAULT)
-  m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00002-of-00003.safetensors").to(Device.DEFAULT)
-  m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to(Device.DEFAULT)
-  return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3)}
+  # TODO: make this lazy so the fetches can happen in parallel
+  if getenv("OLMOE0125"):
+    m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0125/resolve/main/model-00001-of-00006.safetensors").to(Device.DEFAULT)
+    m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0125/resolve/main/model-00002-of-00006.safetensors").to(Device.DEFAULT)
+    m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0125/resolve/main/model-00003-of-00006.safetensors").to(Device.DEFAULT)
+    m4 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0125/resolve/main/model-00004-of-00006.safetensors").to(Device.DEFAULT)
+    m5 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0125/resolve/main/model-00005-of-00006.safetensors").to(Device.DEFAULT)
+    m6 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0125/resolve/main/model-00006-of-00006.safetensors").to(Device.DEFAULT)
+    return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3), **nn.state.safe_load(m4), **nn.state.safe_load(m5), **nn.state.safe_load(m6)}
+  else:
+    m1 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00001-of-00003.safetensors").to(Device.DEFAULT)
+    m2 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00002-of-00003.safetensors").to(Device.DEFAULT)
+    m3 = Tensor.from_url("https://huggingface.co/allenai/OLMoE-1B-7B-0924/resolve/main/model-00003-of-00003.safetensors").to(Device.DEFAULT)
+    return {**nn.state.safe_load(m1), **nn.state.safe_load(m2), **nn.state.safe_load(m3)}
 
 if __name__ == "__main__":
   if getenv("TORCH"):
