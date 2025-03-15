@@ -2563,6 +2563,45 @@ class Tensor(SimpleMathTrait):
       return mask.where(src, 0).sum(-1, dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
+  def sort(self, dim=-1, descending=False):
+    """
+    Performs a bitonic sort on the tensor along the specified dimension.
+
+    See: https://en.wikipedia.org/wiki/Bitonic_sorter
+
+    ```python
+    t = Tensor([[3, 1, 4], [1, 5, 9]])
+    sorted_t, indices = t.sort(dim=1, descending=True)
+    print(sorted_t.numpy())
+    print(indices.numpy())
+    ```
+    """
+    x, dim = self, self._resolve_dim(dim)
+    # pad to power of 2
+    orig_len = x.shape[dim]
+    n_stages = math.ceil(math.log2(orig_len))
+    fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
+    pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
+    x = x.pad(pads, value=fill_value).unflatten(dim, (2,)*n_stages)
+    for stage in range(1, n_stages+1):
+      if stage != n_stages:
+        flip_split_dim = dim + n_stages - stage - 1
+        point_down, point_up = x.split(1, flip_split_dim)
+        flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
+        x = point_down.cat(point_up.flip(flip_dims), dim=flip_split_dim)
+      for substage in range(stage-1, -1, -1):
+        partner_dim = dim + n_stages - substage - 1
+        x_top, x_bottom = x.split(1, partner_dim)
+        x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
+        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
+      if stage != n_stages:
+        point_down, point_up_flipped = x.split(1, flip_split_dim)
+        x = point_down.cat(point_up_flipped.flip(flip_dims), dim=flip_split_dim)
+    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+    idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
+    return x, idx
+
   def topk(self, k, dim=-1, largest=True, sorted_=True):
     """
     Computes the top-k elements of the tensor along the specified `dim`.
