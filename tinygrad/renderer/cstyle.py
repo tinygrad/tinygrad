@@ -397,6 +397,8 @@ def cast_float_to_bf16(x: UOp) -> UOp:
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
+  # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
+  global_max = (2147483647, 65535, 65535)
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","l1","u1","u1","u1"), swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))))
