@@ -2588,6 +2588,30 @@ class Tensor(SimpleMathTrait):
       x = x.scatter(dim, idx, mask_value)
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
+  
+  def masked_select(self, mask: Tensor) -> Tensor:
+    if self.shape != mask.shape:
+      raise ValueError("masked_select: input and mask must have the same shape")
+    x, m = self.flatten(), mask.flatten()
+    # Count the number of True values in the mask
+    num_true = int(m.sum().item())
+    if not num_true: return Tensor.empty(0, device=self.device, dtype=self.dtype)
+    indices = []
+    # Iteratively, use argmax to find a True (1) in the mask,
+    # then mask that position out using scatter (set it to 0)
+    for _ in range(num_true):
+      idx = Tensor.argmax(m, axis=0, keepdim=True)
+      # If the value at the found index is no longer True, break early.
+      if m.gather(0, idx).item() == 0:
+        break
+      indices.append(idx)
+      m = m.scatter(0, idx, Tensor.full((1,), 0, dtype=m.dtype, device=m.device))
+    # Concatenate all gathered indices into a 1D index tensor.
+    combined_indices = indices[0]
+    for idx in indices[1:]:
+      combined_indices = combined_indices.cat(idx, dim=0)
+    # Gather the corresponding elements from the flattened input tensor.
+    return x.gather(0, combined_indices)
 
   # ***** unary ops *****
 
