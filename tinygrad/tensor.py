@@ -2564,43 +2564,46 @@ class Tensor(SimpleMathTrait):
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   def sort(self, dim=-1, descending=False):
+    """
+    Performs a bitonic sort on the tensor along the specified dimension.
+
+    See: https://en.wikipedia.org/wiki/Bitonic_sorter
+
+    ```python
+    t = Tensor([[3, 1, 4], [1, 5, 9]])
+    sorted_t, indices = t.sort(dim=1, descending=True)
+    print(sorted_t.numpy())
+    print(indices.numpy())
+    ```
+    """
     x, dim = self, self._resolve_dim(dim)
     # pad to power of 2
     orig_len = x.shape[dim]
     n_stages = math.ceil(math.log2(orig_len))
-    bitonic_len = 2 ** n_stages
     fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
-    x = x.pad(tuple((0, bitonic_len - orig_len) if i == dim else None for i in range(x.ndim)), value=fill_value)
-    # https://en.wikipedia.org/wiki/Bitonic_sorter#Alternative_representation
-    orig_shape = x.shape
-    x = x.reshape(x.shape[:dim] + ((2,)*n_stages) + x.shape[dim+1:])
+    pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
+    x = x.pad(pads, value=fill_value).unflatten(dim, (2,)*n_stages)
+    # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     for stage in range(1, n_stages+1):
       if stage != n_stages:
+        # flip so arrows of green boxes point the same way as blue boxes
         flip_split_dim = dim + n_stages - stage - 1
-        flip_dims = [-i for i in range(1, stage+1+(self.ndim-dim))]
-        xA, xB = x.split(1, flip_split_dim)
-        x = xA.cat(xB.flip(flip_dims), dim=flip_split_dim)
+        blue_box, green_box = x.split(1, flip_split_dim)
+        flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
+        x = blue_box.cat(green_box.flip(flip_dims), dim=flip_split_dim)
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
-        xA, xB = x.split(1, partner_dim)
-        larger, smaller = xA.maximum(xB), xA.minimum(xB)
-        x = (larger.cat(smaller, dim=partner_dim) if descending else smaller.cat(larger, dim=partner_dim)).contiguous()
+        x_top, x_bottom = x.split(1, partner_dim)
+        x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
+        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
       if stage != n_stages:
-        xA, xB = x.split(1, flip_split_dim)
-        x = xA.cat(xB.flip(flip_dims), dim=flip_split_dim)
-    x = x.reshape(orig_shape).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+        # flip wires back to undo the crossover
+        blue_box, flipped_green_box = x.split(1, flip_split_dim)
+        x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=flip_split_dim)
+    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
     idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
-
-# def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
-#   # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
-#   values = values * mask
-#   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
-#   # remove extra dims from reduce
-#   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
-#   # select from values for each True element in mask else select from self
-#   return mask.where(values, target)
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
     """
