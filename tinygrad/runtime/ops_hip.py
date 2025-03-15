@@ -12,8 +12,10 @@ def check(status):
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
-    if DEBUG >= 1: print(f"HIPDevice: opening {self.device_id} with arch {self.arch}")
+    props = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id)))
+    self.max_global, self.max_local, self.max_threads = list(props.maxGridSize), list(props.maxThreadsDim), props.maxThreadsPerBlock
+    self.arch = props.gcnArchName.decode()
+    if DEBUG >= 1: print(f"HIPDevice: opening {self.device_id} arch {self.arch} max g:{self.max_global} l:{self.max_local} / {self.max_threads}")
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
     super().__init__(device, HIPAllocator(self), HIPRenderer(self.arch), AMDCompiler(self.arch), functools.partial(HIPProgram, self))
   def synchronize(self):
