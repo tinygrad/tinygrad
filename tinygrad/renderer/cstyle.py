@@ -403,7 +403,8 @@ class AMDRenderer(CStyleLanguage):
     for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
 
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900
-    self.tensor_cores, self.arch = AMDRenderer.tensor_cores, arch
+    # TODO: fix tensor cores for gfx1201
+    self.tensor_cores, self.arch = AMDRenderer.tensor_cores if arch != "gfx1201" else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
