@@ -581,6 +581,7 @@ if TORCH_DEBUG:
   from torch.utils._python_dispatch import TorchDispatchMode
   class DispatchLog(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+      #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
       print(f"Dispatch Log: {func}")
       return func(*args, **(kwargs or {}))
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
