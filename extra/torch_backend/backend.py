@@ -219,7 +219,7 @@ def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
-    print(f"convolution {input.shape=} {weight.shape=} {bias.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
+    print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   if not transposed: return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
                                    groups=groups, stride=stride, dilation=dilation, padding=padding))
   return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
@@ -577,13 +577,13 @@ def wrap_fxn(k,f):
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
-from torch.utils._python_dispatch import TorchDispatchMode
-class DispatchLog(TorchDispatchMode):
-  def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-    if TORCH_DEBUG:
+if TORCH_DEBUG:
+  from torch.utils._python_dispatch import TorchDispatchMode
+  class DispatchLog(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
       print(f"Dispatch Log: {func}")
-    return func(*args, **(kwargs or {}))
-(_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
+      return func(*args, **(kwargs or {}))
+  (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
 import weakref
