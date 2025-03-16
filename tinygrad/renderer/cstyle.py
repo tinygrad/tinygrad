@@ -397,10 +397,17 @@ def cast_float_to_bf16(x: UOp) -> UOp:
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
+  # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
+  global_max = (2147483647, 65535, 65535)
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
     opts=("l0","l0","l0","l0","l1","u1","u1","u1"), swizzle=(((4,9,10,11,0),(1,2,3,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8))))
     for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half)]]
+
+  def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900
+    # TODO: fix tensor cores for gfx1201
+    self.tensor_cores, self.arch = AMDRenderer.tensor_cores if arch != "gfx1201" else [], arch
+  def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
