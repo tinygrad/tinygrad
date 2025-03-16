@@ -323,7 +323,7 @@ class Kernel:
           for opt in extra_opts: self.apply_opt(opt)
         else:
           if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-          if use_tensor_cores in (1, 2, 3): return True
+          # if use_tensor_cores in (1, 2, 3): return True
           # hand-coded TC opts
           for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
             szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
@@ -615,7 +615,7 @@ class Kernel:
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(
-                s if (x >= self.global_dims and x < self.first_reduce) or (x >= (len(self.full_shape) - len(tc_upcast_axes[i]))) else 1
+                s if (x >= self.global_dims and x < self.first_reduce) or (x >= (len(self.full_shape) - len(tc_upcast_axes[i])-2)) else 1
                 for x, s in enumerate(self.full_shape)
               )
               print(local_shape)
