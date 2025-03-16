@@ -128,11 +128,11 @@ class TestRewriteMap(unittest.TestCase):
       yz_sum_zero  = yz_sum + zero_node   -> rewrites to yz_sum
       yz_neg       = -yz_sum_zero        -> -(y+z)
       yz_dneg      = -yz_neg             -> y+z    (double neg gone)
-      x_plus_yz    = x_var + yz_dneg     -> x + (y+z)
-      double_neg_x = -(-x_plus_yz)       -> x + (y+z)
-      final_expr   = double_neg_x * one_node -> x + (y+z)
+      x_plus_yz    = x_var + yz_dneg     -> (x+y)+z  (add nodes get sorted)
+      double_neg_x = -(-x_plus_yz)       -> (x+y)+z
+      final_expr   = double_neg_x * one_node -> (x+y)+z
 
-    We expect the final result to be (x + (y+z)).
+    We expect the final result to be ((x+y)+z).
     Each original node should map to the final node that replaces it,
     which might be structurally equivalent but not the same reference.
     """
@@ -147,9 +147,9 @@ class TestRewriteMap(unittest.TestCase):
     yz_sum_zero = yz_sum + zero_node    # (y + z) + 0
     yz_neg = -yz_sum_zero               # -(y+z)
     yz_dneg = -yz_neg                   # -(-(y+z)) -> (y+z)
-    x_plus_yz = x_var + yz_dneg         # x + (y+z)
-    double_neg_x = -(-x_plus_yz)        # neg(neg(x+(y+z))) -> x+(y+z)
-    final_expr = double_neg_x * one_node  # (x+(y+z)) * 1 -> x+(y+z)
+    x_plus_yz = x_var + yz_dneg         # x + (y+z) -> (x+y)+z
+    double_neg_x = -(-x_plus_yz)        # neg(neg(x+(y+z))) -> (x+y)+z
+    final_expr = double_neg_x * one_node  # ((x+y)+z) * 1 -> (x+y)+z
 
     node_map = graph_rewrite_map(final_expr, symbolic)
 
@@ -166,14 +166,15 @@ class TestRewriteMap(unittest.TestCase):
     # -(-(y+z)) => (y+z)
     self.assertEqual(node_map[yz_dneg], yz_sum)
 
-    # x + (y+z) => might get recreated if yz_dneg was changed, so compare to x + yz_sum
-    self.assertEqual(node_map[x_plus_yz], x_var + yz_sum)
+    # x + (y+z) => (x+y)+z
+    expected_xyz = (x_var + y_var) + z_var
+    self.assertEqual(node_map[x_plus_yz], expected_xyz)
 
-    # -(-(x+(y+z))) => x + (y+z)
-    self.assertEqual(node_map[double_neg_x], x_var + yz_sum)
+    # -(-(x+(y+z))) => (x+y)+z
+    self.assertEqual(node_map[double_neg_x], expected_xyz)
 
-    # (x+(y+z)) * 1 => x+(y+z)
-    self.assertEqual(node_map[final_expr], x_var + yz_sum)
+    # ((x+y)+z) * 1 => (x+y)+z
+    self.assertEqual(node_map[final_expr], expected_xyz)
 
     # Unchanged atomic nodes map to themselves
     self.assertEqual(node_map[x_var], x_var)
