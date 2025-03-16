@@ -108,7 +108,7 @@ runs:
           intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
           intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
           intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16 \
-          intel-ocloc=24.52.32224.14-1077~24.04 intel-ocloc-dev=24.52.32224.14-1077~24.04
+          intel-ocloc intel-ocloc-dev
 
     # **** AMD ****
 
