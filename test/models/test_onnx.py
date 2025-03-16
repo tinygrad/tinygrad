@@ -8,16 +8,9 @@ try:
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from extra.onnx import OnnxRunner
+from extra.onnx_helpers import validate
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
-
-def run_onnx_torch(onnx_model, inputs):
-  import torch
-  from onnx2torch import convert
-  torch_model = convert(onnx_model)
-  with torch.no_grad():
-    torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
-  return torch_out
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -69,7 +62,8 @@ class TestOnnxModel(unittest.TestCase):
       ps.print_stats(30)
 
   def test_openpilot_model(self):
-    onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
+    onnx_file = fetch(OPENPILOT_MODEL)
+    onnx_model = onnx.load(onnx_file)
     run_onnx = OnnxRunner(onnx_model)
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -92,12 +86,8 @@ class TestOnnxModel(unittest.TestCase):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    Tensor.no_grad = True
-    torch_out = run_onnx_torch(onnx_model, inputs).numpy()
-    Tensor.no_grad = False
-    print(tinygrad_out, torch_out)
-    assert tinygrad_out.dtype == torch_out.dtype, f"tinygrad dtype {tinygrad_out.dtype}, torch dtype {torch_out.dtype}"
-    np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-2, rtol=5e-2)
+    validate(onnx_file, inputs, atol=1e-2, rtol=4e-2)
+    print("openpilot model validated")
 
   @unittest.skip("slow")
   def test_efficientnet(self):
