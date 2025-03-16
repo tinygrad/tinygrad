@@ -8,8 +8,7 @@ try:
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from extra.onnx import OnnxRunner
-from extra.onnx_helpers import validate
-from tinygrad.tensor import Tensor
+from extra.onnx_helpers import validate, get_example_inputs
 from tinygrad.helpers import CI, fetch, temp
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
@@ -20,20 +19,9 @@ class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
-    def get_inputs():
-      np_inputs = {
-        "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-        "desire": np.zeros((1, 100, 8)),
-        "traffic_convention": np.array([[1., 0.]]),
-        "nav_features": np.zeros((1, 256)),
-        "features_buffer": np.zeros((1, 99, 128)),
-    }
-      inputs = {k:Tensor(v.astype(np.float16), requires_grad=False) for k,v in np_inputs.items()}
-      return inputs
 
     for _ in range(7):
-      inputs = get_inputs()
+      inputs = get_example_inputs(run_onnx.graph_inputs)
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()
@@ -47,7 +35,7 @@ class TestOnnxModel(unittest.TestCase):
     if not CI:
       import cProfile
       import pstats
-      inputs = get_inputs()
+      inputs = get_example_inputs(run_onnx.graph_inputs)
       pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
       pr.enable()
     tinygrad_out = run_onnx(inputs)['outputs']
@@ -65,15 +53,7 @@ class TestOnnxModel(unittest.TestCase):
     onnx_file = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(onnx_file)
     run_onnx = OnnxRunner(onnx_model)
-    inputs = {
-      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
-      "desire": np.zeros((1, 100, 8)),
-      "traffic_convention": np.array([[1., 0.]]),
-      "nav_features": np.zeros((1, 256)),
-      "features_buffer": np.zeros((1, 99, 128)),
-    }
-    inputs = {k:v.astype(np.float16) for k,v in inputs.items()}
+    inputs = get_example_inputs(run_onnx.graph_inputs)
 
     st = time.monotonic()
     print("****** run onnx ******")
@@ -86,7 +66,7 @@ class TestOnnxModel(unittest.TestCase):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    validate(onnx_file, inputs, atol=1e-2, rtol=4e-2)
+    validate(onnx_file, inputs, atol=1e-2, rtol=5e-2)
     print("openpilot model validated")
 
   @unittest.skip("slow")

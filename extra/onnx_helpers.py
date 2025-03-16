@@ -34,6 +34,12 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
       case "image_tensor": val = np.random.randint(0, 256, shape)
       case "task_id": return Tensor(0, dtype=dtype)
+      case "input_imgs": val = np.random.randn(*shape)
+      case "big_input_imgs": val = np.random.randn(*shape)
+      case "desire": val = np.zeros(shape)
+      case "traffic_convention": val = np.array([[1., 0.]])
+      case "nav_features": val = np.zeros(shape)
+      case "features_buffer": val = np.zeros(shape)
       case _: val = np.random.uniform(size=shape) * 8
     return Tensor(val.astype(_to_np_dtype(dtype))).realize()
 
