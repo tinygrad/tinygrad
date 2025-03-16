@@ -2563,7 +2563,6 @@ class Tensor(SimpleMathTrait):
       return mask.where(src, 0).sum(-1, dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
-
   def sort(self, dim=-1, descending=False):
     """
     Performs a bitonic sort on the tensor along the specified dimension.
