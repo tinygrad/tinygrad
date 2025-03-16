@@ -20,6 +20,9 @@ def dtype_parse(onnx_dtype: int) -> DType:
     TensorProto.UNDEFINED, TensorProto.STRING, TensorProto.COMPLEX64, TensorProto.COMPLEX128, TensorProto.FLOAT8E4M3FN, TensorProto.FLOAT8E4M3FNUZ,
     TensorProto.FLOAT8E5M2, TensorProto.FLOAT8E5M2FNUZ, TensorProto.UINT4, TensorProto.INT4
   }
+  print(onnx_dtype, "what")
+  print(supported[onnx_dtype])
+  print(is_dtype_supported(supported[onnx_dtype]))
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   return supported[onnx_dtype] if is_dtype_supported(supported[onnx_dtype]) else dtypes.float
 
@@ -60,6 +63,7 @@ def type_parse(onnx_type: TypeProto):
   if elem_type.HasField("tensor_type"):
     shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
+    print(dtype, "aaaaaa")
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 

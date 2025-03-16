@@ -20,6 +20,7 @@ class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
+    print(list(onnx_model.graph.input))
     print(run_onnx.graph_inputs)
     def get_inputs():
       np_inputs = {
