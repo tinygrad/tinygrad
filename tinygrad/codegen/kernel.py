@@ -613,15 +613,17 @@ class Kernel:
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
             if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
 
-            # if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-            local_shape = tuple(
-              s if (x >= self.global_dims and x < self.first_reduce) or (x >= (len(self.full_shape) - len(tc_upcast_axes[i]))) else 1
-              for x, s in enumerate(self.full_shape)
-            )
-            store_st = ShapeTracker.from_shape(local_shape)
-            local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=store_st.real_size(), local=True), (), f"temp{i}")
-            local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-            srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, store_st.to_uop(), local_store))
+            if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
+              local_shape = tuple(
+                s if (x >= self.global_dims and x < self.first_reduce) or (x >= (len(self.full_shape) - len(tc_upcast_axes[i]))) else 1
+                for x, s in enumerate(self.full_shape)
+              )
+              print(local_shape)
+              permuted_st = store_st = ShapeTracker.from_shape(local_shape)
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=store_st.real_size(), local=True), (), f"temp{i}")
+              if swizzle: permuted_st = get_tc_swizzle_st(local_shape, *swizzle)
+              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, permuted_st.to_uop(), local_store))
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
