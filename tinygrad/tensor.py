@@ -2570,9 +2570,12 @@ class Tensor(SimpleMathTrait):
     See: https://en.wikipedia.org/wiki/Bitonic_sorter
 
     ```python
-    t = Tensor([[3, 1, 4], [1, 5, 9]])
-    sorted_t, indices = t.sort(dim=1, descending=True)
-    print(sorted_t.numpy())
+    t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
+    print(t.numpy())
+    ```
+    ```
+    sorted_values, indices = t.sort(dim=1, descending=True)
+    print(sorted_values.numpy())
     print(indices.numpy())
     ```
     """
