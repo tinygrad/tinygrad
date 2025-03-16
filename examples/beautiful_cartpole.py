@@ -21,7 +21,7 @@ PPO_EPSILON = 0.2
 HIDDEN_UNITS = 32
 LEARNING_RATE = 1e-2
 TRAIN_STEPS = 5
-EPISODES = 40
+EPISODES = 400
 DISCOUNT_FACTOR = 0.99
 EXAMPLE_RUN_INTERVAL = 50  # Set to 0 to disable example runs, otherwise shows an example every n episodes
 
@@ -125,7 +125,6 @@ if __name__ == "__main__":
       # TODO: is this recompiling based on the shape?
       action_loss, entropy_loss, critic_loss = train_step(X[samples], A[samples], R[samples], old_log_dist[samples])
     t.set_description(f"sz: {len(Xn):5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.3f} entropy_loss: {entropy_loss.item():7.3f} critic_loss: {critic_loss.item():8.3f} reward: {sum(rews):6.2f}")
-    
     # Run example episode if interval is set and we're at the right episode
     if EXAMPLE_RUN_INTERVAL > 0 and (episode_number + 1) % EXAMPLE_RUN_INTERVAL == 0:
       print(f"\nRunning example episode after {episode_number + 1} training episodes:")
