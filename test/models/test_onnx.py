@@ -9,9 +9,8 @@ except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from extra.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
-from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
-from tinygrad.device import Device, is_dtype_supported
+from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import dtypes
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
@@ -19,7 +18,7 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
-  @unittest.skipIf(is_dtype_supported(dtypes.float16))
+  @unittest.skipIf(not is_dtype_supported(dtypes.float16), "openpilot model specifies float16 inputs")
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
@@ -53,7 +52,7 @@ class TestOnnxModel(unittest.TestCase):
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
 
-  @unittest.skipIf(is_dtype_supported(dtypes.float16))
+  @unittest.skipIf(not is_dtype_supported(dtypes.float16), "openpilot model specifies float16 inputs")
   def test_openpilot_model(self):
     onnx_file = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(onnx_file)
@@ -74,7 +73,6 @@ class TestOnnxModel(unittest.TestCase):
     validate(onnx_file, inputs, atol=1e-2, rtol=5e-2)
     print("openpilot model validated")
 
-  @unittest.skip("slow")
   def test_efficientnet(self):
     input_name, input_new = "images:0", True
     self._test_model(
@@ -87,7 +85,6 @@ class TestOnnxModel(unittest.TestCase):
       fetch("https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx"),
       input_name, input_new)
 
-  @unittest.skip("test is very slow")
   def test_resnet(self):
     # NOTE: many onnx models can't be run right now due to max pool with strides != kernel_size
     input_name, input_new = "data", False

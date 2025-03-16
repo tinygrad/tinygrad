@@ -41,6 +41,7 @@ def attribute_parse(onnx_attribute: AttributeProto):
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
+  print(onnx_tensor.data_type, onnx_tensor.name)
   if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
              list(onnx_tensor.uint64_data):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
@@ -60,7 +61,6 @@ def type_parse(onnx_type: TypeProto):
   if elem_type.HasField("tensor_type"):
     shape = tuple(d.dim_param or d.dim_value for d in elem_type.tensor_type.shape.dim)
     dtype = dtype_parse(elem_type.tensor_type.elem_type)
-    print(dtype, "aaaaaa")
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 

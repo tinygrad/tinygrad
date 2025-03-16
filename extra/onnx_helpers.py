@@ -34,6 +34,7 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
       case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
       case "image_tensor": val = np.random.randint(0, 256, shape)
       case "task_id": return Tensor(0, dtype=dtype)
+      # openpilot
       case "input_imgs": val = np.random.randn(*shape)
       case "big_input_imgs": val = np.random.randn(*shape)
       case "desire": val = np.zeros(shape)
