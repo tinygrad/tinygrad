@@ -2563,17 +2563,17 @@ class Tensor(SimpleMathTrait):
       return mask.where(src, 0).sum(-1, dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
-  def sort(self, dim=-1, descending=False):
+  def sort(self, dim:int=-1, descending:bool=False):
     """
     Performs a bitonic sort on the tensor along the specified dimension.
 
     See: https://en.wikipedia.org/wiki/Bitonic_sorter
 
-    ```python
+    ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
     print(t.numpy())
     ```
-    ```
+    ```python exec="true" source="above" session="tensor" result="python"
     sorted_values, indices = t.sort(dim=1, descending=True)
     print(sorted_values.numpy())
     print(indices.numpy())
@@ -2611,7 +2611,7 @@ class Tensor(SimpleMathTrait):
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
-  def topk(self, k, dim=-1, largest=True, sorted_=True):
+  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True):
     """
     Computes the top-k elements of the tensor along the specified `dim`.
 
