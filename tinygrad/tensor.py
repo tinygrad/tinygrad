@@ -2590,10 +2590,10 @@ class Tensor(SimpleMathTrait):
     for stage in range(1, n_stages+1):
       if stage != n_stages:
         # flip so arrows of green boxes point the same way as blue boxes
-        flip_split_dim = dim + n_stages - stage - 1
-        blue_box, green_box = x.split(1, flip_split_dim)
+        crossover_dim = dim + n_stages - stage - 1
+        blue_box, green_box = x.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
-        x = blue_box.cat(green_box.flip(flip_dims), dim=flip_split_dim)
+        x = blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
@@ -2601,12 +2601,13 @@ class Tensor(SimpleMathTrait):
         x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
       if stage != n_stages:
         # flip wires back to undo the crossover
-        blue_box, flipped_green_box = x.split(1, flip_split_dim)
-        x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=flip_split_dim)
+        blue_box, flipped_green_box = x.split(1, crossover_dim)
+        x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+    # compute indices for sorted values
     idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
-    count_orig = ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (self.unsqueeze(dim) == self.unsqueeze(dim+1))).sum(dim+1)
-    count_sorted = ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (x.unsqueeze(dim) == x.unsqueeze(dim+1))).sum(dim+1)
+    def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
+    count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
