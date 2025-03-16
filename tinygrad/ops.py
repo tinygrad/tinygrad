@@ -154,6 +154,7 @@ class Ops(FastEnum):
 
   # CUSTOMI is inline
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
+  IGNORE = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -366,6 +367,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
+  def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[tuple[int, ...], int]):
     if isinstance(i, int):
@@ -688,7 +690,7 @@ def get_location() -> tuple[str, int]:
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "rewriter.py", "schedule.py", "multi.py",
                                                                                         "symbolic.py", "expander.py", "lowerer.py", "cstyle.py",
-                                                                                        "linearize.py"}:
+                                                                                        "linearize.py", "devectorizer.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
