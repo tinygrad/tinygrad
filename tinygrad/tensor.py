@@ -2563,6 +2563,7 @@ class Tensor(SimpleMathTrait):
       return mask.where(src, 0).sum(-1, dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
+
   def sort(self, dim=-1, descending=False):
     """
     Performs a bitonic sort on the tensor along the specified dimension.
@@ -2601,8 +2602,11 @@ class Tensor(SimpleMathTrait):
         blue_box, flipped_green_box = x.split(1, flip_split_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=flip_split_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
-    idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
-    idx = ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
+    idx = Tensor.arange(orig_len).reshape([orig_len if i == dim else 1 for i in range(x.ndim)]).expand(x.shape)
+    count_orig = ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (self.unsqueeze(dim) == self.unsqueeze(dim+1))).sum(dim+1)
+    count_sorted = ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (x.unsqueeze(dim) == x.unsqueeze(dim+1))).sum(dim+1)
+    cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
+    idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
   def topk(self, k, dim=-1, largest=True, sorted_=True):
