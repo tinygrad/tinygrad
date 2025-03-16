@@ -1,5 +1,5 @@
 from typing import Optional, Union, Literal, Callable, cast
-import os, math, sys
+import os, math, sys, random
 from collections import defaultdict, Counter
 from tinygrad.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
@@ -173,7 +173,16 @@ class CStyleLanguage(Renderer):
     del self.r
 
     # NOTE: this relies on bufs dict preserving order
-    return self.render_kernel(name, kernel, list(bufs.values()), uops)
+    ret = self.render_kernel(name, kernel, list(bufs.values()), uops)
+    DIR = os.environ.get("DUMP_CUDA_DIR")
+    PREFIX = os.environ.get("DUMP_CUDA_PREFIX")
+    if DIR is not None and PREFIX is not None:
+      _path = f"{DIR}/{PREFIX}_{name}.cu"
+      while os.path.isfile(_path):
+        _path = f"{DIR}/{PREFIX}_{name}_N{random.randint(1, 100)}.cu"
+      with open(_path, "w") as f:
+        f.write(ret)
+    return ret
 
 class ClangRenderer(CStyleLanguage):
   device = "CPU"

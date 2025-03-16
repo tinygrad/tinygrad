@@ -1,8 +1,11 @@
-import subprocess, hashlib, tempfile, ctypes, ctypes.util, re, pathlib
+import subprocess, hashlib, tempfile, ctypes, ctypes.util, re, pathlib, os
+from tempfile import NamedTemporaryFile
 from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.device import Compiler, CompileError
+from extra.sass.assembler.CubinFile import CubinFile
+from extra.sass.assembler.CuAsmParser import CuAsmParser
 
 PTX = getenv("PTX")  # this shouldn't be here, in fact, it shouldn't exist
 
@@ -77,3 +80,27 @@ class NVPTXCompiler(PTXCompiler):
     data = _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
     jitlink_check(nvrtc.nvJitLinkDestroy(handle))
     return data
+
+class SASSCompiler(Compiler):
+  def __init__(self, arch:str, cache_key="sass"):
+    sm = os.environ.get("SM")
+    assert sm, "set an SM version (80, 89)"
+    self.arch = f"sm_{sm}"
+
+    super().__init__(f"compile_{cache_key}_{self.arch}")
+  
+  def compile(self, src: str):
+    with NamedTemporaryFile() as cuda_file, NamedTemporaryFile() as ptx_file, NamedTemporaryFile() as ptxas_cubin_file, \
+      NamedTemporaryFile() as cuasm_file, NamedTemporaryFile() as cuasm_cubin_file: 
+      with open(cuda_file.name, "w") as f: f.write(src)
+      subprocess.run(["nvcc", "-arch", self.arch, "--ptx", "-x", "cu", "-o", ptx_file.name, cuda_file.name], check=True)
+      subprocess.run(["ptxas", "-arch", self.arch, "-m64", "-o", ptxas_cubin_file.name, ptx_file.name], check=True)
+      cf = CubinFile(ptxas_cubin_file.name)
+      cf.saveAsCuAsm(cuasm_file.name)
+      parser = CuAsmParser()
+      parser.parse(cuasm_file.name)
+      parser.saveAsCubin(cuasm_cubin_file.name)
+      cubin = cuasm_cubin_file.read()
+      return cubin
+
+
