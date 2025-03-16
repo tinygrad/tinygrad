@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, prod, flatten
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys
+import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -36,21 +36,46 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 
+#
+def is_view(tensor: torch.Tensor): return "_tiny_base" in mod.get_meta(tensor)
+def canonical_base(view: torch.Tensor): return mod.get_meta(view).get("_tiny_base", view)
+def derived_views(base: torch.Tensor): return [t for tref in mod.get_meta(base).get("_tiny_views", set()) if (t:=tref()) is not None]
+def wrap_view_op(fn):
+  def _wrap(*args,**kwargs):
+    base = args[0]
+    ret = wrap(fn(unwrap(base),*args[1:],**kwargs))
+    mod.get_meta(ret)["_tiny_base"] = base = canonical_base(base)
+    mod.get_meta(base).setdefault("_tiny_views", set()).add(weakref.ref(unwrap(ret)))
+    return ret
+  return _wrap
+
+view_ops = {
+  "aten.view": Tensor.reshape,
+  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
+  "aten::view.dtype": lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.expand": Tensor.expand,
+  "aten.t": Tensor.transpose,
+  "aten.squeeze.dim": Tensor.squeeze,
+  "aten.unsqueeze": Tensor.unsqueeze,
+  "aten.repeat": Tensor.repeat,
+  "aten.detach": Tensor.detach,
+}
+
+for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
+
 # in place operations with views
-def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is not None
 def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
   assert self.is_tiny
   self = unwrap(self)
   if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
   for v in views:
-    v = unwrap(v)
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
 def maybe_realize_storage(self: torch.Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views(self._base, [self]) # TODO: other views could exist
+  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
   return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
@@ -117,14 +142,15 @@ def cached_to_movement_ops(shape, st) -> list:
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+@wrap_view_op
+def as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # TODO: this is heavyweight
   st = ShapeTracker((View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)))
-  ret = unwrap(tensor)
-  if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
+  ret = tensor
+  #if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
   for mo in cached_to_movement_ops(tuple(tensor.shape), st): ret = apply_mop(ret, mo)
-  return wrap(ret)
+  return ret
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -358,8 +384,6 @@ def wrap_out(f):
   return _wrap_out
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
-  "aten.view": Tensor.reshape,
-  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
   "aten.floor_divide_.Tensor": inplace_fn("x")(lambda x,y: x.assign(x//y)),
@@ -419,23 +443,16 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": Tensor.full, # TODO: looks wrong
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
-  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True),
+  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True), # TODO: inplace view op, here?
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
   "aten.topk": Tensor.topk,
-  "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
-  "aten.squeeze.dim": Tensor.squeeze,
-  "aten.unsqueeze": Tensor.unsqueeze,
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
-  "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
-  "aten.expand": Tensor.expand,
-  "aten.t": Tensor.transpose,
-  #"aten.detach": Tensor.detach, # we don't use tiny autograd, and resulting torch tensors must alias
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
 }}
 
@@ -466,7 +483,6 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
 def get_real_tinygrad_buffers():
