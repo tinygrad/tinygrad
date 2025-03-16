@@ -2601,7 +2601,7 @@ class Tensor(SimpleMathTrait):
         blue_box, flipped_green_box = x.split(1, flip_split_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=flip_split_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
-    idx = Tensor.arange(orig_len).reshape([orig_len if i == dim else 1 for i in range(x.ndim)]).expand(x.shape)
+    idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
     count_orig = ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (self.unsqueeze(dim) == self.unsqueeze(dim+1))).sum(dim+1)
     count_sorted = ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (x.unsqueeze(dim) == x.unsqueeze(dim+1))).sum(dim+1)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
@@ -2623,16 +2623,10 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
-    if k > self.shape[dim]: raise ValueError(f"selected index {k=} is out of range")
-    x, dim = self, self._resolve_dim(dim)
-    select_fxn, mask_value = (Tensor.argmax, dtypes.min(self.dtype)) if largest else (Tensor.argmin, dtypes.max(self.dtype))
-    indices: list[Tensor] = []
-    for _ in range(k):
-      idx = select_fxn(x, dim, keepdim=True)
-      indices.append(idx)
-      x = x.scatter(dim, idx, mask_value)
-    combined_indices = indices[0].cat(*indices[1:], dim=dim)
-    return self.gather(dim, combined_indices), combined_indices
+    if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
+    x, idx = self.sort(dim, descending=largest)
+    shrink_to_k = tuple((0, k) if i == dim else None for i in range(self.ndim))
+    return x.shrink(shrink_to_k), idx.shrink(shrink_to_k)
 
   # ***** unary ops *****
 
