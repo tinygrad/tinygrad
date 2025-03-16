@@ -63,7 +63,7 @@ class IntelOfflineCompiler:
       raise CompileError(f"Intel OpenCL Offline Compiler (ocloc) Error\n\n{ocloc._ocloc_error_t__enumvalues[ocloc_retcode]}")
     binary = bytes(ctypes.string_at(data_outputs_param[0], len_outputs_param[0]))
     # free memory which was internally allocated for output buffers
-    ocloc_retcode = ocloc.oclocFreeOutput(ctypes.byref(num_outputs_param), ctypes.byref(data_outputs_param), 
+    ocloc_retcode = ocloc.oclocFreeOutput(ctypes.byref(num_outputs_param), ctypes.byref(data_outputs_param),
                                           ctypes.byref(len_outputs_param), ctypes.byref(name_outputs_param))
     if ocloc_retcode != ocloc.OCLOC_SUCCESS:
       print("Error: ocloc freeing memory failed!")
