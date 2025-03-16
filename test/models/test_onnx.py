@@ -9,6 +9,7 @@ except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from extra.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
+from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
@@ -19,9 +20,21 @@ class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
+    print(run_onnx.graph_inputs)
+    def get_inputs():
+      np_inputs = {
+        "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+        "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+        "desire": np.zeros((1, 100, 8)),
+        "traffic_convention": np.array([[1., 0.]]),
+        "nav_features": np.zeros((1, 256)),
+        "features_buffer": np.zeros((1, 99, 128)),
+      }
+      inputs = {k:Tensor(v.astype(np.float16), requires_grad=False) for k,v in np_inputs.items()}
+      return inputs
 
     for _ in range(7):
-      inputs = get_example_inputs(run_onnx.graph_inputs)
+      inputs = get_inputs()
       st = time.monotonic()
       tinygrad_out = run_onnx(inputs)['outputs']
       mt = time.monotonic()
@@ -35,7 +48,7 @@ class TestOnnxModel(unittest.TestCase):
     if not CI:
       import cProfile
       import pstats
-      inputs = get_example_inputs(run_onnx.graph_inputs)
+      inputs = get_inputs()
       pr = cProfile.Profile(timer=time.perf_counter_ns, timeunit=1e-6)
       pr.enable()
     tinygrad_out = run_onnx(inputs)['outputs']
@@ -53,7 +66,15 @@ class TestOnnxModel(unittest.TestCase):
     onnx_file = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(onnx_file)
     run_onnx = OnnxRunner(onnx_model)
-    inputs = get_example_inputs(run_onnx.graph_inputs)
+    inputs = {
+      "input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
+      "desire": np.zeros((1, 100, 8)),
+      "traffic_convention": np.array([[1., 0.]]),
+      "nav_features": np.zeros((1, 256)),
+      "features_buffer": np.zeros((1, 99, 128)),
+    }
+    inputs = {k:v.astype(np.float16) for k,v in inputs.items()}
 
     st = time.monotonic()
     print("****** run onnx ******")
