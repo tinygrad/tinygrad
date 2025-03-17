@@ -502,7 +502,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
-  "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
+  "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
+    self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
+                                        "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.t": Tensor.transpose,
   "aten.detach": Tensor.detach,
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
