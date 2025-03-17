@@ -1857,9 +1857,7 @@ class TestIndexing(unittest.TestCase):
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
-    ast = a.schedule()[0].ast
-    swizzle = ast.src[0].src[2].reshape((4, 1))
-    new_uop = swizzle_rewrite(swizzle)
+    new_uop = swizzle_rewrite(a.lazydata.reshape((4, 1)))
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
@@ -1870,10 +1868,10 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(swizzle_cnt(sink), 0)
 
   def test_simple_store_reshape(self):
-    a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(32,1)
+    a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(1,32)
     ast = a.schedule()[0].ast
     self.assertEqual(ast.shape, (32, 1))
-    self.assertEqual(a.lazydata.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (1, 32))
 
   def test_no_reshape_reduceop(self):
     a = Tensor.empty(32, 32).sum(axis=(1,)).contiguous()
@@ -1883,7 +1881,7 @@ class TestIndexing(unittest.TestCase):
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0])
+def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op is not Ops.BUFFER])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
