@@ -283,10 +283,9 @@ def pad_backward(grad_out, self, padding, mode):
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
 for dim in [1, 2, 3]:
-  torch.library.impl(f"aten::replication_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="replicate"))
-  torch.library.impl(f"aten::reflection_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="reflect"))
-  torch.library.impl(f"aten::replication_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="replicate"))
-  torch.library.impl(f"aten::reflection_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode="reflect"))
+  for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
+    torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
+    torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
 
 for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
