@@ -304,8 +304,11 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # swizzler + create_kernels
   view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left)
-  view_right_map = graph_rewrite_map(vsink:=view_left_map[sink], view_right, track_children=True)
-  contiguous_map = graph_rewrite_map(view_right_map[vsink], merge_views+insert_contiguous+create_kernels, ctx=KernelContext({}))
+  view_right_map = graph_rewrite_map(vl_sink:=view_left_map[sink], view_right, track_children=True)
+  contiguous_map = graph_rewrite_map(vr_sink:=view_right_map[vl_sink], merge_views+insert_contiguous+create_kernels, ctx=KernelContext({}))
+  # map sink sources back to the kernel op
+  assert len(vr_sink.src) == len(contiguous_map[vr_sink].src)
+  for vs,ks in zip(vr_sink.src, contiguous_map[vr_sink].src): contiguous_map[vs] = ks
   # walk the maps forward and map tensors to kernels
   # childless tensors won't have a key in one of the maps, this is fine, just skip those
   kernel_map: dict[UOp, UOp] = {}
