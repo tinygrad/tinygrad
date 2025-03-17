@@ -26,6 +26,8 @@ if __name__ == "__main__":
             k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
             k.apply_opt(Opt(OptOps.PADTO, 2, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
+          elif knum == 3:
+            k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=128))
           else:
             k.hand_coded_optimizations()
         p2 = k.to_program()

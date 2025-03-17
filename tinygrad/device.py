@@ -58,6 +58,9 @@ class ProfileDeviceEvent(ProfileEvent):
 class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
+class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
+
+@dataclass(frozen=True)
 class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
@@ -342,8 +345,9 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
 
-    from tinygrad.ops import launch_viz
-    launch_viz("PROFILE", fn)
+    if not getenv("SQTT", 0):
+      from tinygrad.ops import launch_viz
+      launch_viz("PROFILE", fn)
 
 if __name__ == "__main__":
   for device in ALL_DEVICES:

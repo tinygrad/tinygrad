@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, fetch
+import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
+from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
@@ -424,10 +424,10 @@ class AMDev:
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-  def _ip_module(self, prefix:str, hwip):
+  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""):
     version = [self.ip_versions[hwip]//10000, (self.ip_versions[hwip]//100)%100, self.ip_versions[hwip]%100]
     for ver in [version, version[:2]+[0], version[:1]+[0, 0]]:
-      try: return __import__(f"tinygrad.runtime.autogen.am.{prefix}_{ver[0]}_{ver[1]}_{ver[2]}", fromlist=[f"{prefix}_{ver[0]}_{ver[1]}_{ver[2]}"])
+      try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
       except ImportError: pass
     raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
 
