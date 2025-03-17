@@ -11,6 +11,7 @@ from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save, get_pa
 from tinygrad.helpers import Context
 from tinygrad.dtype import DType
 from typing import Callable, Sequence, Any, Optional, cast
+import types
 from collections import OrderedDict
 
 def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str], list[tuple[str,list[str],list[int]]], dict[str,tuple[int,DType,int]]]:
@@ -60,13 +61,20 @@ def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
 
-  # TODO: get rid of this _state_dict stuff
+  if isinstance(model, types.MethodType): weights_holder = model.__self__
+  elif hasattr(model, "__call__") and not isinstance(model, types.FunctionType): weights_holder = model
+  else: weights_holder = None
+
+  # TODO: get rid of this _state_dict / contiguous stuff
   # torch_load sometimes loads non-contiguous tensors, which when saved with safe_save, can cause exported WebGPU inference to fail
   # TODO: investigate contiguity in torch_load, and in safe_save/safe_load cycle (which enforces contiguity)
-  _state_dict = state_dict if state_dict else get_state_dict(weights_holder:=getattr(model, "__self__", None))
-  for k,v in _state_dict.items():
-    _state_dict[k] = v.contiguous().to("WEBGPU").realize()
-  load_state_dict(weights_holder, _state_dict)
+  _state_dict = get_state_dict(weights_holder)
+  if _state_dict:
+    for k,v in _state_dict.items():
+      _state_dict[k] = v.contiguous().to("WEBGPU").realize()
+    load_state_dict(weights_holder, _state_dict)
+
+  if not state_dict: state_dict = _state_dict
 
   with Context(JIT=2): run, special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
@@ -231,7 +239,6 @@ export default {model_name};
 
   if js_outfile:
     with open(js_outfile, "w") as f: f.write(prg)
-  if save_weights:
     if not state_dict:
       state_dict = {name: Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize() for name, buf in bufs_to_save.items()}
     safe_save(state_dict, f"{js_outfile}.safetensors")
