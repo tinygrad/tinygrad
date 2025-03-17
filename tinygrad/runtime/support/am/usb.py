@@ -370,7 +370,7 @@ class USBConnector:
 
     # Handle completion errors or inconsistencies
     if status or ((fmt_type & 0xbe == 0x04) and (((value is None) and (not b284_bit_0)) or ((value is not None) and b284_bit_0))):
-      raise Exception("Completion status: {}, 0xB284 bit 0: {}".format(
+      raise RuntimeError("Completion status: {}, 0xB284 bit 0: {}".format(
         status_map.get(status, "Reserved (0b{:03b})".format(status)), b284_bit_0))
 
     if value is None:
