@@ -50,6 +50,6 @@ if __name__ == "__main__":
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
         p2 = k.to_program()
-        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", 128+b.size*2, b.dtype).view(b.size, b.dtype, 128) for b in ei.bufs])
+        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", 1024+b.size*2, b.dtype).view(b.size, b.dtype, 512) for b in ei.bufs])
         new_ei.run()
       knum += 1
