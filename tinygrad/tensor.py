@@ -1556,6 +1556,27 @@ class Tensor(SimpleMathTrait):
     t = t.permute([lhs.index(name) for name in rhs])
     return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
 
+  def masked_select(self, mask):
+    """
+    Selects elements from `self` based on the boolean `mask`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+    mask = Tensor([[True, False, True], [False, True, False], [False, False, True]])
+    print(t.numpy())
+    print(mask.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.masked_select(mask).numpy())
+    ```
+    """
+    if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
+    x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
+    mask_cumsum = mask.cumsum()
+    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.uint32)
+    idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
+    return x[idxs]
+
   # ***** reduce ops *****
 
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
