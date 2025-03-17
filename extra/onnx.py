@@ -1,7 +1,7 @@
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, IMAGE
 from tinygrad.dtype import DType, ConstType, dtypes
 from tinygrad.device import is_dtype_supported
 
@@ -106,8 +106,10 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
   return ret
 
 # ***** runner ******
-debug = int(getenv("DEBUGONNX", "0"))
-limit = int(getenv("ONNXLIMIT", "-1"))
+debug = int(getenv("DEBUGONNX", "0"))            # prints debug information of op nodes
+limit = int(getenv("ONNXLIMIT", "-1"))           # returns early up to limit
+typed = getenv("ONNXTYPED", "1") and not IMAGE   # does runtime validation of input shapes and dtypes
+
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
@@ -130,15 +132,15 @@ class OnnxRunner:
     if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
-      if not all(t.dtype is spec.dtype for t in sequence): raise RuntimeError(f"Dtypes for {name} sequence should all be {spec.dtype}")
+      if typed and not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
+      if typed and not all(t.dtype is spec.dtype for t in sequence): raise RuntimeError(f"Dtypes for {name} sequence should all be {spec.dtype}")
       return sequence
     tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-    if tensor.dtype is not spec.dtype: raise RuntimeError(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}")
+    if typed and tensor.dtype is not spec.dtype: raise RuntimeError(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
+      if typed and user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
   def _dispatch_op(self, op, inps, opts):
