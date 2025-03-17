@@ -18,6 +18,8 @@ dsp_pm = gep_pushing+PatternMatcher([
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
   (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
     "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+  (UPat(Ops.GEP, name="g").cast().named("cast"),
+   lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
 ])
 
 dsp_pm_late = PatternMatcher([

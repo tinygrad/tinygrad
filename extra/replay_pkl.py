@@ -54,6 +54,7 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
             k.apply_opt(Opt(OptOps.PADTO, 1, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 256))
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
           else:
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
