@@ -169,6 +169,17 @@ def view_to_mask(x:UOp):
   if st.views[-1].mask is None: return None
   return ShapeTracker((View(st.shape, (0,)*len(st.shape), 0, st.views[-1].mask, False),))
 
+def ignore_on_reduce(r:UOp, ig:UOp):
+  in_shape = r.src[0].shape
+  from tinygrad.shape.shapetracker import ShapeTracker, View
+  st = cast(ShapeTracker, ig.arg)
+  new_mask = []
+  for s1, s2, om in zip(in_shape, st.shape, st.views[-1].mask):
+    if s1 != s2: new_mask.append((0,s1))
+    else: new_mask.append(om)
+  new_st = ShapeTracker((View(in_shape, (0,)*len(st.shape), 0, tuple(new_mask), False),))
+  return r.replace(src=(UOp(Ops.IGNORE, r.dtype, r.src, arg=new_st),))
+
 FP = (1 << 16)
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
@@ -176,6 +187,9 @@ pm_quant = symbolic+PatternMatcher([
    lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))+y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
   (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32),
    lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))*y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+  # masked MUL after masked ADD (new, might be wrong)
+  #((UPat.var("x") + UPat.var("v").where(UPat.var('cadd'), UPat(Ops.CONST, arg=0))) * UPat.var("v").where(UPat.var('cmul'), UPat(Ops.CONST, arg=0)),
+  # lambda x,v,cadd,cmul: x*v.where(cmul, 0)+v.where(cadd*cmul, 0)),
   # MUL after reduce
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x") * UPat.cvar("c"),), name="r"), lambda x,c,r: r.replace(src=(x,))*c),
   # CAST after reduce (doesn't work if it's a size change)
@@ -212,6 +226,7 @@ pm_quant = symbolic+PatternMatcher([
    lambda ig,alu: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x,), ig.arg) for x in alu.src))),
   (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
   (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
+  (UPat(Ops.IGNORE, src=(UPat(Ops.REDUCE_AXIS, name="r"),), name="ig"), ignore_on_reduce),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
