@@ -113,7 +113,7 @@ sym = symbolic_simple+PatternMatcher([
 
 # **** UOp realization
 
-DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.ASSIGN, Ops.COPY, Ops.CONTIGUOUS, Ops.SINK}
+DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
 
 insert_contiguous = PatternMatcher([
   (UPat(Ops.SINK, name="s"),
