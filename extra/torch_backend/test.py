@@ -91,6 +91,11 @@ class TestTorchBackend(unittest.TestCase):
     res2 = x ^ y
     print(res2.cpu())
 
+  def test_nonzero(self):
+    x = torch.tensor([1, 0, 2, 0], device=device)
+    res = x.nonzero()
+    np.testing.assert_equal(res.cpu().numpy(), [[0], [2]])
+
   def test_topk(self):
     # test topk return_types
     a = torch.tensor([1, 3, 2, 4], device=device)

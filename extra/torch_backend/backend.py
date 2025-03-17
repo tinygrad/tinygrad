@@ -321,6 +321,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   # TODO: support this in tinygrad
   "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
   "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
+  "aten.nonzero": Tensor.nonzero,
   # not in tinygrad. are there decomps for these?
   "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),

@@ -2595,38 +2595,31 @@ class Tensor(SimpleMathTrait):
     return self.gather(dim, combined_indices), combined_indices
 
   def nonzero(self):
-    # Torch compatibility for empty tensors
-    if self.numel() == 0:
-      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, )
-    if self.ndim == 0:
-      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
+    """
+    Returns the indices of the elements that are non-zero.
 
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0, 1, 0], [2, 0, 3]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero().numpy())
+    ```
+    """
+
+    if self.numel() == 0:
+        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0,)
+    if self.ndim == 0:
+        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
     flat_t = self.reshape(-1)
-    # Create a tensor of 1’s for nonzero elements and 0’s otherwise.
-    if flat_t.dtype == dtypes.bool:
-      m = flat_t.cast(dtype=dtypes.int32)
-    else:
-      m = (flat_t != 0).cast(dtype=dtypes.int32)
-    # Compute the cumulative sum along the flattened dimension.
-    cumsum = m.cumsum(0)
-    # The last element of cumsum is the count of nonzero items.
-    nonzero_count = cumsum[-1].item()
-    if nonzero_count == 0:
-      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
-    # Build targets from 1 to nonzero_count.
-    targets = Tensor.arange(1, nonzero_count + 1, device=self.device, dtype=dtypes.int32)
-    # Expand and compute absolute differences:
-    #   cumsum: shape (n,) -> (n,1)
-    #   targets: shape (nonzero_count,) -> (1, nonzero_count)
-    # For each target, find the index where the difference is minimized.
-    idxs = (cumsum.unsqueeze(1) - targets.unsqueeze(0)).abs().argmin(axis=0)
-    # Convert the linear indices into coordinates.
-    coords = []
-    for dim_size in self.shape[::-1]:
-      coords.append(idxs % dim_size)
-      idxs = idxs // dim_size
-    coords = coords[::-1]  # restore original order
-    return coords[0].stack(*coords[1:],dim=-1)
+    m = flat_t.cast(dtype=dtypes.int32) if flat_t.dtype == dtypes.bool else (flat_t != 0).cast(dtype=dtypes.int32)
+    cumsum = m.cumsum(0); nz = cumsum[-1].item()
+    if nz == 0:
+        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
+    idxs = (cumsum.unsqueeze(1) - Tensor.arange(1, nz + 1, device=self.device, dtype=dtypes.int32).unsqueeze(0)).abs().argmin(axis=0)
+    coords, _ = functools.reduce(lambda acc, s: (acc[0] + [acc[1] % s], acc[1] // s), self.shape[::-1], ([], idxs))
+    coords.reverse()
+    return coords[0].stack(*coords[1:], dim=-1)
 
   # ***** unary ops *****
 
