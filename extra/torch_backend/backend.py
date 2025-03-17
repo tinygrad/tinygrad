@@ -235,12 +235,6 @@ def select_backward(grad_out, input_sizes, dim, index):
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
 
-@torch.library.impl("aten::select.int", "privateuseone")
-def select_int(self, dim, index):
-  slices = [slice(None)] * unwrap(self).ndim
-  slices[dim] = index
-  return wrap(unwrap(self)[tuple(slices)])
-
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   if stride == []: stride = None
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
@@ -250,6 +244,10 @@ def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
+
+for dim in [2, 3]:
+  torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
+  torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
 def pad_forward(self, padding, mode=None): return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
 
@@ -262,10 +260,6 @@ for dim in [1, 2, 3]:
   for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
-
-for dim in [2, 3]:
-  torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
-  torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
