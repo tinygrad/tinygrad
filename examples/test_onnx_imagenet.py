@@ -74,5 +74,8 @@ if __name__ == "__main__":
     hit += y==t
     print(f"target: {y:3d}  pred: {t:3d}  acc: {hit/(i+1)*100:.2f}%")
 
+  MS_TARGET = 13.4
+  print(f"need {GlobalCounters.global_ops/1e9*(1000/MS_TARGET):.2f} GFLOPS for {MS_TARGET:.2f} ms")
+
   import pickle
   with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)
