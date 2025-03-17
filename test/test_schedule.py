@@ -98,6 +98,12 @@ class TestSchedule(unittest.TestCase):
     a.realize()
     assert not a.lazydata.is_realized
 
+  def test_simplify_padded_const(self):
+    a = Tensor.empty(1022).cummax(axis=0)
+    sched = check_schedule(a, 5)
+    ast = sched[0].ast
+    self.assertLessEqual(len([u for u in ast.toposort if u.op is Ops.WHERE]), 6)
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -1964,6 +1970,16 @@ class TestSwizzle(unittest.TestCase):
     b_reduce = b.sum(axis=(0,))
     t = a_reduce+b_reduce
     with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
+
+  def test_unsafe_pad(self):
+    x = Tensor.full((2,2), 1.0).contiguous()
+    y = x*x.sum((1,)).reciprocal()
+    t = y.pad(((0,1),None)).contiguous()
+    swizzled = swizzle_rewrite(t.lazydata)
+    sched = check_schedule(swizzled.sink(), 3)
+    output_buffer = sched[-1].bufs[0]
+    run_schedule(sched)
+    self.assertListEqual(output_buffer.as_buffer().cast("f").tolist(), [0.5, 0.5, 0.5, 0.5, 0., 0.])
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
