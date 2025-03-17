@@ -13,6 +13,9 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import ProgramSpec
 
 actions = []
+actions += [(Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0))]
+actions += [(Opt(op=OptOps.UNROLL, axis=1, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0))]
+actions += [(Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0))]
 actions += [(Opt(op=OptOps.PADTO, axis=axis, arg=amt), Opt(op=OptOps.UPCAST, axis=axis, arg=amt)) for amt in [128] for axis in range(7)]
 actions += [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7,16,32,64,128] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
