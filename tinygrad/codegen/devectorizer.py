@@ -12,6 +12,7 @@ from tinygrad.renderer import Renderer
 # ***** load/store grouping *****
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
+  if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
