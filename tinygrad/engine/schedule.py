@@ -113,9 +113,11 @@ sym = symbolic_simple+PatternMatcher([
 
 # **** UOp realization
 
-DONT_PUSH_VIEWS = {Ops.BUFFER, *GroupOp.Buffer, Ops.ASSIGN, Ops.COPY, Ops.CONTIGUOUS, Ops.SINK}
+DONT_PUSH_VIEWS = {Ops.BUFFER, *GroupOp.Buffer, Ops.ASSIGN, Ops.COPY, Ops.CONTIGUOUS, Ops.DEVICE, Ops.SINK}
 
 insert_contiguous = PatternMatcher([
+  (UPat(Ops.SINK, name="s"),
+   lambda s: s.replace(src=new_src) if (new_src:=tuple(x if x.base.op in DONT_PUSH_VIEWS else x.contiguous() for x in s.src)) != s.src else None),
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="x"),), name="view"), lambda x,view: x.contiguous().view(view.arg)),
 ])
 
@@ -149,7 +151,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
       if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
-create_kernels = merge_views+PatternMatcher([
+create_kernels = PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
@@ -300,8 +302,17 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # swizzler + create_kernels
   view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left)
-  view_right_map = graph_rewrite_map(sink:=view_left_map[sink], view_right)
-  kernel_map = graph_rewrite_map(sink:=view_right_map[sink], insert_contiguous+create_kernels, ctx=KernelContext({}))
+  view_right_map = graph_rewrite_map(vsink:=view_left_map[sink], view_right)
+  contiguous_map = graph_rewrite_map(view_right_map[vsink], merge_views+insert_contiguous+create_kernels, ctx=KernelContext({}))
+  # walk the maps forward and map tensors to kernels
+  # childless tensors won't have a key in one of the maps, this is fine, just skip those
+  kernel_map: dict[UOp, UOp] = {}
+  for k,v in view_left_map.items():
+    if v not in view_right_map: continue
+    vr = view_right_map[v]
+    if vr not in contiguous_map: continue
+    ct = contiguous_map[vr]
+    kernel_map[k] = ct
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
