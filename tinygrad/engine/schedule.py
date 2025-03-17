@@ -168,7 +168,9 @@ create_kernels = PatternMatcher([
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
-def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
+def swizzle_reduceop(ctx, r:UOp, src:UOp, view:UOp):
+  ctx.update_children()
+  if r in ctx.children and len(ctx.children[r]) > 1: return r.contiguous().view(view.arg)
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -302,7 +304,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # swizzler + create_kernels
   view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left)
-  view_right_map = graph_rewrite_map(vsink:=view_left_map[sink], view_right)
+  view_right_map = graph_rewrite_map(vsink:=view_left_map[sink], view_right, track_children=True)
   contiguous_map = graph_rewrite_map(view_right_map[vsink], merge_views+insert_contiguous+create_kernels, ctx=KernelContext({}))
   # walk the maps forward and map tensors to kernels
   # childless tensors won't have a key in one of the maps, this is fine, just skip those
