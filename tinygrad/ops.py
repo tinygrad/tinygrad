@@ -908,8 +908,12 @@ class RewriteContext:
     self.ctx = self if children is not None else ctx
     self.replace: dict[UOp, UOp] = {}
     self.children = children
+  # TODO: is this function always right?
   def update_children(self):
-    # TODO: is this always right?
+    # add any new children from UOps that were replaced
+    for u in self.replace.values():
+      for s in u.src: self.children.setdefault(s, {})[u] = None
+    # find any children that were replaced and replace them
     for k,v in self.children.items():
       new_child: dict[UOp, None] = {}
       for tv in v:

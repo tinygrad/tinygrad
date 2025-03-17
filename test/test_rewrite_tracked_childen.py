@@ -1,13 +1,21 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite
+from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp
 
 class TestRewriteTrackedChildren(unittest.TestCase):
   def test_children_in_context(self):
-    def print_children(ctx, sink):
-      assert set([x.arg for x in ctx.children[sink.src[0].src[0].src[0]]]) == set((2,3))
+    def print_children(ctx:RewriteContext, sink:UOp):
+      view_w_child = sink.src[0].src[0].src[0]
+      assert view_w_child.op is Ops.VIEW
+      assert set([x.arg for x in ctx.children[view_w_child]]) == set((2,3))
       ctx.update_children()
-      assert set([x.arg for x in ctx.children[sink.src[0].src[0].src[0]]]) == set((3,4))
+      assert set([x.arg for x in ctx.children[view_w_child]]) == set((3,4))
+      # this is the 3
+      assert len(ctx.children[sink.src[0].src[1]]) == 1
+      assert next(iter(ctx.children[sink.src[0].src[1]])).op is Ops.ADD
+      # this is the 4
+      assert len(ctx.children[sink.src[0].src[0]]) == 1
+      assert next(iter(ctx.children[sink.src[0].src[0]])).op is Ops.ADD
     rewrite = PatternMatcher([
       (UPat(Ops.CONST, arg=2, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.SINK, name="sink"), print_children)
