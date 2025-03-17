@@ -2594,7 +2594,7 @@ class Tensor(SimpleMathTrait):
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
 
-  def nonzero(self):
+  def nonzero(self, as_tuple=False) -> Tensor:
     """
     Returns the indices of the elements that are non-zero.
 
@@ -2606,19 +2606,20 @@ class Tensor(SimpleMathTrait):
     print(t.nonzero().numpy())
     ```
     """
-
     if self.numel() == 0:
-        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0,)
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0,)
     if self.ndim == 0:
-        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
     flat_t = self.reshape(-1)
     m = flat_t.cast(dtype=dtypes.int32) if flat_t.dtype == dtypes.bool else (flat_t != 0).cast(dtype=dtypes.int32)
     cumsum = m.cumsum(0); nz = cumsum[-1].item()
     if nz == 0:
-        return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
+      return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
     idxs = (cumsum.unsqueeze(1) - Tensor.arange(1, nz + 1, device=self.device, dtype=dtypes.int32).unsqueeze(0)).abs().argmin(axis=0)
     coords, _ = functools.reduce(lambda acc, s: (acc[0] + [acc[1] % s], acc[1] // s), self.shape[::-1], ([], idxs))
     coords.reverse()
+    if as_tuple:
+      return tuple(coords)
     return coords[0].stack(*coords[1:], dim=-1)
 
   # ***** unary ops *****
