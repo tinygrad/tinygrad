@@ -102,31 +102,15 @@ def cummax(self, dim):
 # TODO: move to tinygrad
 def nonzero(self): return aten.nonzero(self.cpu()).tiny()
 
-def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
-  return f(grad_out.cpu(), output_size, input_size, scales).tiny()
+def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
-def upsample_2d_backward(grad_out, output_size, input_size, scales_h=None, scales_w=None, f=None):
-  return f(grad_out.cpu(), output_size, input_size, scales_h, scales_w).tiny()
-
-def upsample_3d_backward(grad_out, output_size, input_size, scales_d=None, scales_h=None, scales_w=None, f=None):
-  return f(grad_out.cpu(), output_size, input_size, scales_d, scales_h, scales_w).tiny()
-
-@torch.library.impl("aten::upsample_trilinear3d_backward", "privateuseone")
-def upsample_trilinear3d_backward(grad_output, output_size, input_size,  align_corners, scales_d=None, scales_h=None, scales_w=None):
-  return aten.upsample_trilinear3d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_d, scales_h, scales_w).tiny()
-
-@torch.library.impl("aten::upsample_bilinear2d_backward", "privateuseone")
-def upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners, scales_h=None, scales_w=None):
-  return aten.upsample_bilinear2d_backward(grad_output.cpu(), output_size, input_size, align_corners, scales_h, scales_w).tiny()
-
-for i in ["upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward"]:
-  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_1d_backward, f=getattr(aten, i)))
-
-for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
-  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_2d_backward, f=getattr(aten, i)))
-
-for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
-  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=getattr(aten, i)))
+for i in [
+  "upsample_linear1d_backward", "upsample_nearest1d_backward", "_upsample_nearest_exact1d_backward",
+  "upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward",
+  "upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward",
+  "upsample_trilinear3d_backward", "upsample_bilinear2d_backward"
+]:
+  torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_backward, f=getattr(aten, i)))
 
 # *** end bad functions on CPU ***
 
