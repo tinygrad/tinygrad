@@ -98,6 +98,13 @@ class TestSchedule(unittest.TestCase):
     a.realize()
     assert not a.lazydata.is_realized
 
+  @unittest.expectedFailure
+  def test_simplify_padded_const(self):
+    a = Tensor.empty(1022).cummax(axis=0)
+    sched = check_schedule(a, 5)
+    ast = sched[0].ast
+    self.assertLessEqual(len([u for u in ast.toposort if u.op is Ops.WHERE]), 6)
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
