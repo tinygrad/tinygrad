@@ -222,8 +222,8 @@ class X86Renderer(Renderer):
       if u not in mem:
         mem[u] = f"[rbp - {stack_size}]"
         stack_size += 16
-      dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or r[u] == "r15" else u.dtype
-      kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}")
+        dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or r[u] == "r15" else u.dtype
+        kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}")
       r[u] = mem[u]
 
     def assign_reg(i:int, dt:DType) -> str:
