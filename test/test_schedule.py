@@ -14,7 +14,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, merge_views, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, all_same, temp
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
@@ -97,6 +97,12 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     a.realize()
     assert not a.lazydata.is_realized
+
+  def test_simplify_padded_const(self):
+    a = Tensor.empty(1022).cummax(axis=0)
+    sched = check_schedule(a, 5)
+    ast = sched[0].ast
+    self.assertLessEqual(len([u for u in ast.toposort if u.op is Ops.WHERE]), 6)
 
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
@@ -1851,44 +1857,31 @@ class TestIndexing(unittest.TestCase):
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
-    ast = a.schedule()[0].ast
-    swizzle = ast.src[0].src[2].reshape((4, 1))
-    new_uop = swizzle_rewrite(swizzle)
+    new_uop = swizzle_rewrite(a.lazydata.reshape((4, 1)))
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
   def test_no_rewrite_elementwise(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
-    ld1 = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    ld2 = UOp(Ops.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((32, 32)).to_uop()))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
-    rsink = graph_rewrite(sink, view_right)
-    self.assertEqual(rsink.key, sink.key)
+    a = Tensor.empty(32, 32)
+    b = Tensor.empty(32, 32)
+    sink = (a+b).schedule()[0].ast
+    self.assertEqual(swizzle_cnt(sink), 0)
 
   def test_simple_store_reshape(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
-    r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    r = r + r.const_like(2).replace(src=(unwrap(r.st).to_uop(),))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
-    rsink = graph_rewrite(sink, view_right)
-    # this AST first needs to swizzle, but it doesn't have implicit movementops
-    self.assertEqual(swizzle_cnt(sink), 1)
-    verify_ast(rsink)
+    a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(1,32)
+    ast = a.schedule()[0].ast
+    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (1, 32))
 
   def test_no_reshape_reduceop(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
-    rsink = graph_rewrite(sink, view_right)
-    verify_ast(sink)
-    self.assertEqual(sink.key, rsink.key)
+    a = Tensor.empty(32, 32).sum(axis=(1,)).contiguous()
+    ast = a.schedule()[0].ast
+    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (32,))
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0])
+def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op is not Ops.BUFFER])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -1964,6 +1957,16 @@ class TestSwizzle(unittest.TestCase):
     b_reduce = b.sum(axis=(0,))
     t = a_reduce+b_reduce
     with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
+
+  def test_unsafe_pad(self):
+    x = Tensor.full((2,2), 1.0).contiguous()
+    y = x*x.sum((1,)).reciprocal()
+    t = y.pad(((0,1),None)).contiguous()
+    swizzled = swizzle_rewrite(t.lazydata)
+    sched = check_schedule(swizzled.sink(), 3)
+    output_buffer = sched[-1].bufs[0]
+    run_schedule(sched)
+    self.assertListEqual(output_buffer.as_buffer().cast("f").tolist(), [0.5, 0.5, 0.5, 0.5, 0., 0.])
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
@@ -2526,6 +2529,13 @@ class TestUOpBecome(unittest.TestCase):
     b.realize()
     assert b.lazydata.is_realized
     assert b.lazydata.base.buffer._base is None
+
+  def test_setitem_offset(self):
+    a = Tensor.full((16,), 0.).contiguous().realize()
+    b = Tensor.full((16,), 1.).contiguous().realize()
+    a_view = a[4:].reshape(3, 4).shrink(((0,2),(0,2))).reshape((4,))
+    b.shrink(((0,4),)).assign(a_view).realize()
+    self.assertListEqual(b.tolist(), [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

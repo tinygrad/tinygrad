@@ -11,26 +11,17 @@ from tinygrad.renderer import Renderer
 
 # ***** load/store grouping *****
 
-def fancy_gep(vec:UOp, i:int):
-  # if there's a vectorized ADD here, expand through it
-  if vec.op is Ops.ADD:
-    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) + vec.src[1].gep(i)
-    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) + vec.src[0].gep(i)
-  # if there's a vectorized AND here, expand through it
-  if vec.op is Ops.AND:
-    if vec.src[0].op is Ops.VECTORIZE and vec.src[1].op is Ops.VCONST: return vec.src[0].gep(i) & vec.src[1].gep(i)
-    if vec.src[1].op is Ops.VECTORIZE and vec.src[0].op is Ops.VCONST: return vec.src[1].gep(i) & vec.src[0].gep(i)
-  return vec.gep(i)
-
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
+  if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx = fancy_gep(vec, i)
+    idx = vec.gep(i).simplify()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+    elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (fancy_gep(mask, i), root_src)
+    if mask is not None: root_src = (mask.gep(i).simplify(), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
@@ -44,7 +35,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
-      oidx = fancy_gep(vec, offsets[grp[0]][0])
+      oidx = vec.gep(offsets[grp[0]][0])
       lidx = UOp(Ops.INDEX, buf.dtype, (buf, oidx, rootsrc[0]) if mask is not None else (buf, oidx))
       if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
       # set the idxs of the output
@@ -55,7 +46,8 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  return UOp(Ops.CAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret)).gep(tuple(cast(list[int], idxs)))
+  post_cat = UOp(Ops.PTRCAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret))
+  return post_cat.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
   # TODO: this is written in many places
@@ -83,11 +75,11 @@ load_store_folding = PatternMatcher([
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
   # GEP on data of STORE
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
-  # put CAT after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.CAT, name="cat"),), name="ld", allow_any_len=True),
+  # put PTRCAT after LOAD
+  (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
-  # put CAT after STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.CAT, name="cat"), UPat(name="data"))), cat_after_store),
+  # put PTRCAT after STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data"))), cat_after_store),
 ])
 
 # ***** image load valid simplification *****
@@ -153,7 +145,11 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if (sz:=ls.src[0].dtype.count) == 1: return None
   lengths = []
   buf = idx.src[0]
-  if buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+  must_divide = True
+  if ctx is not None and ctx.device == "DSP":
+    lengths = [128,64,32,16,8,4]
+    must_divide = False
+  elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
@@ -168,7 +164,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
       oidx = idx.src[1] + global_offset
-      if oidx.simplify().divides(fold_length) is None: continue
+      if must_divide and oidx.simplify().divides(fold_length) is None: continue
       lidx = buf.index(oidx, idx.src[2] if len(idx.src) > 2 else None)
       if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
