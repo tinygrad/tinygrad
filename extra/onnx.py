@@ -2,7 +2,7 @@ from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
-from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
+from tinygrad.dtype import DType, ConstType, dtypes
 from tinygrad.device import is_dtype_supported
 
 # ***** protobuf parsing ******
@@ -305,7 +305,7 @@ def get_onnx_ops():
   # ***** Unary Ops (broadcasted) *****
   def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
-  def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
+  def Div(x:Tensor,y:Tensor): return x.div(y, rounding_mode='trunc' if dtypes.is_int(x.dtype) else None)
   def Less(x:Tensor,y:Tensor): return x < y
   def LessOrEqual(x:Tensor,y:Tensor): return x <= y
   def Greater(x:Tensor,y:Tensor): return x > y
