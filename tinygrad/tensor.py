@@ -2567,6 +2567,8 @@ class Tensor(SimpleMathTrait):
     """
     Performs a bitonic sort on the tensor along the specified dimension.
 
+    Order of indices for equivalent elements is always preserved.
+
     See: https://en.wikipedia.org/wiki/Bitonic_sorter
 
     ```python exec="true" source="above" session="tensor" result="python"

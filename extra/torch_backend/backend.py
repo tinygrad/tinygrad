@@ -209,6 +209,23 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
 def cat_out(tensors, dim=0, out=None):
   unwrap(out).assign(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
 
+@torch.library.impl("aten::topk.values", "privateuseone")
+@inplace_fn(["values", "indices"])
+def topk_values(input, k, values, indices, dim=None, largest=True, sorted=True):
+  out_values, out_indices = unwrap(input).topk(k, dim if dim is not None else -1, largest, sorted)
+  unwrap(values).assign(out_values)
+  unwrap(indices).assign(out_indices)
+  return values, indices
+
+@torch.library.impl("aten::sort.values", "privateuseone")
+@inplace_fn(["values", "indices"])
+def sort_values(input, values, indices, dim=-1, descending=False, stable=False):
+  # indices for tinygrad sort is always stable
+  out_values, out_indices = unwrap(input).sort(dim, descending)
+  unwrap(values).assign(out_values)
+  unwrap(indices).assign(out_indices)
+  return values, indices
+
 # register some decompositions
 from torch._decomp import get_decompositions
 aten = torch.ops.aten
