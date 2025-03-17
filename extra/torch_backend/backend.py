@@ -297,9 +297,9 @@ def cumsum(self, dim):
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 def scatter_add(self, dim, index, src, out):
-  if unwrap(self).shape == (): return wrap(unwrap(out).assign(unwrap(src)))
-  ret = unwrap(out).assign(Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum'))
-  return wrap(ret)
+  self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
+  if self.shape == (): return wrap(out.assign(src))
+  return wrap(out.assign(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
