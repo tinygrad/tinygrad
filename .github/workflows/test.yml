@@ -676,6 +676,33 @@ jobs:
       - name: Run macOS-specific unit test
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
+  
+  osxhuggingface:
+    name: HuggingFace ONNX Models
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: huggingface
+          deps: testing
+      - name: Restore HuggingFace Metadata Cache
+        uses: actions/cache@v3
+        id: hf_metadata_cache
+        with:
+          path: extra/huggingface_onnx/huggingface_repos.yaml
+          key: huggingface-metadata
+      - name: Verify Metadata Exists
+        run: test -s extra/huggingface_onnx/huggingface_repos.yaml || echo "Metadata not found in cache."
+      - name: Collect HuggingFace Metadata
+        if: steps.hf_metadata_cache.outputs.cache-hit != 'true'
+        run: PYTHONPATH=. python extra/huggingface_onnx/collect_metadata.py --limit 100
+      # - name: Validate HuggingFace Models
+      #   run: PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --validate
+
 
 # ****** Windows Tests ******
 
