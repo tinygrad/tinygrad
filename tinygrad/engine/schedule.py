@@ -304,8 +304,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
   # swizzler + create_kernels
-  view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left)
-  view_right_map = graph_rewrite_map(vl_sink:=view_left_map[sink], view_right, track_children=True)
+  view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left, name="view_left")
+  view_right_map = graph_rewrite_map(vl_sink:=view_left_map[sink], view_right, track_children=True, name="view_right")
   contiguous_map = graph_rewrite_map(vr_sink:=view_right_map[vl_sink], merge_views+insert_contiguous+create_kernels, ctx=KernelContext({}))
   # map sink sources back to the kernel op
   assert len(vr_sink.src) == len(contiguous_map[vr_sink].src)
