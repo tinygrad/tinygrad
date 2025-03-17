@@ -1573,7 +1573,7 @@ class Tensor(SimpleMathTrait):
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.uint32)
+    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
