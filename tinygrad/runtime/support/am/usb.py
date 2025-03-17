@@ -172,6 +172,7 @@ class USBConnector:
         transfers += [self.stat_transfer, self.cmd_transfer]
         if in_data is not None: transfers.append(self.in_transfer)
         self._send_ops_and_wait(*transfers)
+        # print("stat is ", [x for x in self.read_status])
         return bytes(self.read_data[:])
       return None
 

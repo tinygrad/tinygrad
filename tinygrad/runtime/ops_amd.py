@@ -328,10 +328,12 @@ class AMDCopyQueue(HWQueue):
       tail_blit_dword += cmdsz
 
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
-    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
+    # dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
+    for i in range(tail_blit_dword): dev.sdma_queue.ring[start_idx + i] = cmds[i]
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
+      assert False
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
       ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
       dev.sdma_queue.put_value += zero_fill
@@ -681,7 +683,18 @@ class PCIIface:
   def device_fini(self): self.adev.fini()
 
 class AMUSBBar(AMBar):
-  def __init__(self, addr, usb): (self.addr, self.size), self.usb = addr, usb
+  def __init__(self, addr, usb): (self.addr, self.size), self.usb, self.sz = addr, usb, 1
+  def __getitem__(self, index): return self.read(index * self.sz, self.sz)
+  def __setitem__(self, index, value): self.write(index * self.sz, value, self.sz)
+  def __len__(self): return self.size // self.sz
+
+  @property
+  def nbytes(self): return self.size
+
+  def cast(self, new_type):
+    self.sz = {'B':1, 'H':2, 'I':4, 'Q':8}[new_type]
+    return self
+
   def read(self, off, sz):
     assert off + sz <= self.size
     assert sz in [1, 2, 4, 8]
@@ -792,6 +805,10 @@ class USBIface(PCIIface):
     self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,
       'max_waves_per_simd': 16, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
+    print("creating system mapping")
+    vaddr = self.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    self.system_mapping = self.adev.mm.map_range(vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)
+
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     # if host or (not getenv("AMD_ALLOC_QUEUE_DEV_MEM", 1) and uncached and cpu_access): # host or gtt-like memory.
     #   vaddr = self.adev.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
@@ -805,6 +822,21 @@ class USBIface(PCIIface):
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
     # if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
     return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
+  
+  def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
+      self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
+    else:
+      self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
+
+    db_mv = AMUSBBar((self.bars[2][0] + doorbell_index * 8, 8), self.usb)
+    ring_mv = AMUSBBar((self.bars[0][0] + ring.meta.mapping.paddrs[0][0], 0x8000), self.usb)
+    rptr_mv = AMUSBBar((self.bars[0][0] + gart.meta.mapping.paddrs[0][0], 8), self.usb)
+    wptr_mv = AMUSBBar((self.bars[0][0] + gart.meta.mapping.paddrs[0][0]+0x10, 8), self.usb)
+    return AMDQueueDesc(ring=ring_mv.cast("I"), doorbell=db_mv.cast("Q"), read_ptr=rptr_mv.cast("Q"), write_ptr=wptr_mv.cast("Q"))
+
 
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
@@ -835,12 +867,30 @@ class AMDDevice(HCQCompiled):
     if self.target//10000 == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
     debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
-    # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x8000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
-    #                                        eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x8000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+                                           eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x8000)
-
     print("done queues init")
+
+    the_sig = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
+    test_sig = AMDSignal(base_addr=the_sig.va_addr)
+    AMDComputeQueue().signal(test_sig, 0x1).submit(self)
+    time.sleep(1.0)
+    print("comp done??")
+
+    print(self.dev_iface.adev.vram.read(the_sig.meta.mapping.paddrs[0][0], 4))
+    
+    AMDCopyQueue().copy(self.dev_iface.system_mapping.va_addr, self.ring.va_addr, 0x1000).signal(test_sig, 0x1).submit(self)
+    time.sleep(1.0)
+    print("copy done??")
+
+    print(self.dev_iface.adev.vram.read(the_sig.meta.mapping.paddrs[0][0], 4))
+  
+    buf = self.dev_iface.usb.read(0xf000, 256)
+    from hexdump import hexdump
+    hexdump(buf)
+
     exit(0)
 
     super().__init__(device, AMDAllocator(self), AMDRenderer(self.arch), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
@@ -866,7 +916,7 @@ class AMDDevice(HCQCompiled):
       AMDComputeQueue().start_trace(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
-    ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
+    self.ring = ring = self.dev_iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
     eop_buffer = self.dev_iface.alloc(eop_buffer_size) if eop_buffer_size else None
     return self.dev_iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, debug_memory_size=debug_memory_size,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
-from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
+from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp, fetch
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
@@ -123,7 +123,7 @@ class AMPageTableEntry:
       | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
       | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
-    self.adev.vram.write(self.paddr + entry_id * 8, 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
+    self.adev.vram.write(self.paddr + entry_id * 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
   def entry(self, entry_id:int) -> int: return self.adev.vram.read(self.paddr + entry_id * 8, 8)
 
 class AMPageTableTraverseContext:
@@ -204,7 +204,7 @@ class AMMemoryManager:
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
-          assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
+          assert pt.entry(pte_idx + pte_off) & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 

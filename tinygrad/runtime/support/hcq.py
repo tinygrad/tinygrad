@@ -212,7 +212,7 @@ class HCQSignal(Generic[DeviceType]):
 
     if isinstance(self.base_addr, int):
       self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
-      self.value_mv[0] = value
+      # self.value_mv[0] = value
 
   def __del__(self):
     if isinstance(self.base_addr, int) and self.dev_t is not None: self.dev_t.signal_pool.append(self.base_addr)

@@ -229,7 +229,8 @@ class AM_GFX(AM_IP):
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_size//4).bit_length()-2))
 
     # Copy mqd into memory
-    ctypes.memmove(self.adev.paddr2cpu(mqd.paddrs[0][0]), ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
+    self.adev.vram.copyin(mqd.paddrs[0][0], to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)))
+    # ctypes.memmove(self.adev.paddr2cpu(mqd.paddrs[0][0]), ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
     self.adev.gmc.flush_hdp()
 
     self._grbm_select(me=1, pipe=pipe, queue=queue)
