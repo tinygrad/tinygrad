@@ -2612,7 +2612,8 @@ class Tensor(SimpleMathTrait):
       return Tensor([], device=self.device, dtype=dtypes.int32).reshape(1, 0)
     flat_t = self.reshape(-1)
     m = flat_t.cast(dtype=dtypes.int32) if flat_t.dtype == dtypes.bool else (flat_t != 0).cast(dtype=dtypes.int32)
-    cumsum = m.cumsum(0); nz = cumsum[-1].item()
+    cumsum = m.cumsum(0)
+    nz = cumsum[-1].item()
     if nz == 0:
       return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
     idxs = (cumsum.unsqueeze(1) - Tensor.arange(1, nz + 1, device=self.device, dtype=dtypes.int32).unsqueeze(0)).abs().argmin(axis=0)
