@@ -197,8 +197,8 @@ class ClangRenderer(CStyleLanguage):
   if sys.platform == 'win32':
     kernel_prefix = "__attribute__((ms_abi)) "
   def render_vector_prefix(self, dt:DType) -> str:
-    # round (down) to power of two
-    alignment = 2**int(math.log2(dt.itemsize))
+    # round (down) to power of two (this is actually the default clang behavior)
+    alignment = 2**int(math.log2(dt.itemsize)) if getenv("ALIGNED", 1) else 1
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),vector_size({dt.itemsize})));"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
