@@ -99,16 +99,8 @@ def cummax(self, dim):
   return (cummax.tiny(), indices.tiny())
 
 @torch.library.impl("aten::nonzero", "privateuseone")
-def nonzero(self):
-  # TODO: move to tinygrad
-  return aten.nonzero(self.cpu()).tiny()
-
-@torch.library.impl("aten::scatter.src", "privateuseone")
-def scatter_src(self, dim, index, src):
-  if TORCH_DEBUG: print(f"scatter.src {self.shape=} {dim} {index.shape=} {src.shape=}")
-  # TODO: refactor to use Tensor.scatter_reduce, fails for TestOps.test_scatter
-  # return wrap(unwrap(self).scatter_reduce(dim, unwrap(index), unwrap(src), reduce='sum'))
-  return aten.scatter.src(self.cpu(), dim, index.cpu(), src.cpu()).tiny()
+# TODO: move to tinygrad
+def nonzero(self): return aten.nonzero(self.cpu()).tiny()
 
 def upsample_1d_backward(grad_out, output_size, input_size, scales=None, f=None):
   return f(grad_out.cpu(), output_size, input_size, scales).tiny()
@@ -135,11 +127,6 @@ for i in ["upsample_nearest2d_backward", "_upsample_nearest_exact2d_backward"]:
 
 for i in ["upsample_nearest3d_backward", "_upsample_nearest_exact3d_backward"]:
   torch.library.impl(f"aten::{i}", "privateuseone")(functools.partial(upsample_3d_backward, f=getattr(aten, i)))
-
-# @torch.library.impl("aten::ones_like", "privateuseone")
-def ones_like(x, memory_format=None, **kwargs):
-  # TODO: this works for TestOps.test_biased_conv2d, but fails for TestOps.test_var_one_in_axis or TestOps.test_std_one_in_axis.
-  return aten.ones_like(x.cpu(), memory_format=memory_format).tiny()
 
 # *** end bad functions on CPU ***
 
@@ -308,6 +295,12 @@ def cumsum(self, dim):
   if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
   return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
 
+@torch.library.impl("aten::scatter_add.out", "privateuseone")
+def scatter_add(self, dim, index, src, out):
+  if unwrap(self).shape == (): return wrap(unwrap(out).assign(unwrap(src)))
+  ret = unwrap(out).assign(Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum'))
+  return wrap(ret)
+
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   realize = dest.is_tiny and maybe_realize_storage(dest)
@@ -455,8 +448,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.scatter.value_out": Tensor.scatter,
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
-  "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
-  "aten.scatter.src_out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
+  "aten.scatter.src_out": Tensor.scatter,
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
     self.sum(axis if axis is None or len(axis) else None, keepdim,
