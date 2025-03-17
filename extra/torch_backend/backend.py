@@ -211,20 +211,19 @@ def cat_out(tensors, dim=0, out=None):
 
 @torch.library.impl("aten::topk.values", "privateuseone")
 @inplace_fn(["values", "indices"])
-def topk_values(input, k, values, indices, dim=None, largest=True, sorted=True):
+def topk_values(input, k, dim=None, largest=True, sorted=True, **kwargs):
   out_values, out_indices = unwrap(input).topk(k, dim if dim is not None else -1, largest, sorted)
-  unwrap(values).assign(out_values)
-  unwrap(indices).assign(out_indices)
-  return values, indices
+  unwrap(kwargs["values"]).assign(out_values)
+  unwrap(kwargs["indices"]).assign(out_indices.cast(dtypes.int64))
+  return wrap(out_values), wrap(out_indices)
 
-@torch.library.impl("aten::sort.values", "privateuseone")
+@torch.library.impl("aten::sort.values_stable", "privateuseone")
 @inplace_fn(["values", "indices"])
-def sort_values(input, values, indices, dim=-1, descending=False, stable=False):
-  # indices for tinygrad sort is always stable
+def sort_values(input, dim=-1, descending=False, stable=True, **kwargs):
   out_values, out_indices = unwrap(input).sort(dim, descending)
-  unwrap(values).assign(out_values)
-  unwrap(indices).assign(out_indices)
-  return values, indices
+  unwrap(kwargs["values"]).assign(out_values)
+  unwrap(kwargs["indices"]).assign(out_indices.cast(dtypes.int64))
+  return wrap(out_values), wrap(out_indices)
 
 # register some decompositions
 from torch._decomp import get_decompositions
@@ -436,8 +435,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
-  "aten.sort": Tensor.sort,
-  "aten.topk": Tensor.topk,
   "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
