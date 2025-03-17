@@ -113,7 +113,7 @@ sym = symbolic_simple+PatternMatcher([
 
 # **** UOp realization
 
-DONT_PUSH_VIEWS = {Ops.BUFFER, *GroupOp.Buffer, Ops.ASSIGN, Ops.SINK}
+DONT_PUSH_VIEWS = {Ops.BUFFER, *GroupOp.Buffer, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS}
 
 @dataclass(frozen=True)
 class GrouperContext:
