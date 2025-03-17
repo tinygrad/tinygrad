@@ -199,7 +199,6 @@ def elementwise_view_right(root:UOp):
 
 def merge_double_reduce(root:UOp, first_reduce:UOp):
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
-  assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.src[0].toposort), "can't merge more than two reduceops at a time"
   return first_reduce.replace(arg=(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 # push VIEW to children
