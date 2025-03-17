@@ -98,6 +98,11 @@ def cummax(self, dim):
   cummax, indices = aten.cummax(self.cpu(), dim)
   return (cummax.tiny(), indices.tiny())
 
+@torch.library.impl("aten::nonzero", "privateuseone")
+def nonzero(self):
+  # TODO: move to tinygrad
+  return aten.nonzero(self.cpu()).tiny()
+
 @torch.library.impl("aten::scatter.src", "privateuseone")
 def scatter_src(self, dim, index, src):
   if TORCH_DEBUG: print(f"scatter.src {self.shape=} {dim} {index.shape=} {src.shape=}")
@@ -457,7 +462,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.where.self_out": Tensor.where,
   "aten.prod.int_out": Tensor.prod,
   "aten.scatter_add.out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
-  # "aten.scatter.src_out": functools.partial(Tensor.scatter_reduce, reduce='sum'), # TODO: This might be wrong
+  "aten.scatter.src_out": functools.partial(Tensor.scatter_reduce, reduce='sum'),
   # NOTE: axis=[] in torch means all, change tinygrad?
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
     self.sum(axis if axis is None or len(axis) else None, keepdim,
