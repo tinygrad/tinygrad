@@ -49,7 +49,7 @@ class AM_GMC(AM_IP):
     self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
       invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
 
-    # self.adev.wait_reg(self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK"), mask=(1 << vmid), value=(1 << vmid))
+    self.adev.wait_reg(self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK"), mask=(1 << vmid), value=(1 << vmid))
 
     if ip == "MM":
       self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
@@ -62,7 +62,7 @@ class AM_GMC(AM_IP):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.paddr | 1)
-    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1800000, pde0_protection_fault_enable_interrupt=1, pde0_protection_fault_enable_default=1,
+    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x3800000, pde0_protection_fault_enable_interrupt=1, pde0_protection_fault_enable_default=1,
                                                          dummy_page_protection_fault_enable_interrupt=1, dummy_page_protection_fault_enable_default=1,
                                                          range_protection_fault_enable_interrupt=1, range_protection_fault_enable_default=1,
                                                          valid_protection_fault_enable_interrupt=1, valid_protection_fault_enable_default=1,
@@ -107,9 +107,9 @@ class AM_GMC(AM_IP):
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
-      st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
+      st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS_LO32').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
       va = (va | (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()) << 32) << 12
-      if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
+      if st: raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
 
 class AM_SMU(AM_IP):
   def __init__(self, adev):
@@ -120,7 +120,7 @@ class AM_SMU(AM_IP):
   def init(self):
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
-    # self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
+    self._send_msg(0x6, 0) # EnableAllSmuFeatures
 
   def is_smu_alive(self):
     with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_TestMessage, 0, timeout=100)
@@ -168,7 +168,8 @@ class AM_GFX(AM_IP):
     self.adev.gmc.init_hub("GC")
 
     # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
-    self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
+    # self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
+    self.adev.regDB_MEM_CONFIG.write(self.adev.regDB_MEM_CONFIG.read() | 0x00008000)
     self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1)
 
     self.adev.regGDC_S2A0_S2A_DOORBELL_ENTRY_0_CTRL.write(s2a_doorbell_port0_enable=1, s2a_doorbell_port0_awid=0x3, s2a_doorbell_port0_awaddr_31_28_value=0x3)
@@ -191,6 +192,7 @@ class AM_GFX(AM_IP):
     self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x450)
 
     # Enable MEC
+    # print(hex(self.adev.regCP_MEC_RS64_CNTL.read()))
     self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0,
                                          mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
 
@@ -207,7 +209,8 @@ class AM_GFX(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
 
-    mqd_struct = am.struct_v12_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
+    xx = self.adev.paddr2mc(mqd.paddrs[0][0])
+    mqd_struct = am.struct_v12_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(xx), cp_mqd_base_addr_hi=hi32(xx),
       cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
       cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
       cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),

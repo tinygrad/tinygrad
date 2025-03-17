@@ -115,9 +115,9 @@ class AMPageTableEntry:
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
 
     f = (am.AMDGPU_PTE_VALID if valid else 0) | ((am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE) if not table else 0) \
-      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
+      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE_GFX12 if not table and self.lv != am.AMDGPU_VM_PTB else (am.AMDGPU_PTE_IS_PTE if not table else 0)) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
-      | (am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.soc_mod.MTYPE_UC) if uncached else 0)
+      | (am.AMDGPU_PTE_MTYPE_GFX12(0, self.adev.soc.soc_mod.MTYPE_UC) if uncached else 0)
     self.entries[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
 
 class AMPageTableTraverseContext:
@@ -135,7 +135,7 @@ class AMPageTableTraverseContext:
       pt.set_entry(pte_idx, self.adev.mm.palloc(0x1000, zero=True), table=True, valid=True)
       entry = pt.entries[pte_idx]
 
-    assert entry & am.AMDGPU_PDE_PTE == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
+    assert entry & am.AMDGPU_PDE_PTE_GFX12 == 0, f"Must be table pt={pt.paddr:#x}, {pte_idx=} {entry=:#x}"
     child_page_table = AMPageTableEntry(self.adev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -161,7 +161,7 @@ class AMPageTableTraverseContext:
       if self.create_pts:
         while pte_covers > size: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE != am.AMDGPU_PDE_PTE): pt, pte_idx, pte_covers = self.level_down()
+        while pt.lv!=am.AMDGPU_VM_PTB and (pt.entries[pte_idx] & am.AMDGPU_PDE_PTE_GFX12 != am.AMDGPU_PDE_PTE_GFX12): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, 512 - pte_idx)
       assert entries > 0, "Invalid entries"
@@ -172,13 +172,17 @@ class AMPageTableTraverseContext:
       self.level_up()
 
 class AMMemoryManager:
-  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x7F0000000000) # global for all devices.
+  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x6F0000000000) # global for all devices.
 
   def __init__(self, adev:AMDev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
     self.boot_allocator = TLSFAllocator(32 << 20, base=vram_size - (64 << 20)) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
+    
+    # arch specific:
+    self.pde_pte_flag = am.AMDGPU_PDE_PTE_GFX12
+    self.pte_mtype = am.AMDGPU_PTE_MTYPE_GFX12
 
   def _frag_size(self, va, sz, must_cover=True):
     """
