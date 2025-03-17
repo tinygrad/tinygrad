@@ -1,4 +1,4 @@
-import ctypes, struct, time, os
+import ctypes, struct, time, os, time
 from tinygrad.runtime.autogen import libc, libusb
 from tinygrad.helpers import DEBUG
 from hexdump import hexdump
@@ -50,7 +50,7 @@ class USBConnector:
     libusb.libusb_clear_halt(self.handle, 0x04)
     libusb.libusb_clear_halt(self.handle, 0x02)
 
-    self.max_parallel = 8
+    self.max_parallel = 16
     endpoints = [0x02, 0x81, 0x83]
     streams = (ctypes.c_uint8*len(endpoints))(*endpoints)
     # print(hex(streams[0]))
@@ -104,6 +104,7 @@ class USBConnector:
     if stream_id is not None: libusb.libusb_transfer_set_stream_id(transfer, stream_id)
   
   def _send_ops_and_wait(self, *cmds):
+    # st = time.perf_counter()
     for x in cmds: libusb.libusb_submit_transfer(x)
 
     while True:
@@ -116,7 +117,10 @@ class USBConnector:
         elif transfer.contents.status != libusb.LIBUSB_TRANSFER_COMPLETED:
           if transfer.contents.status != 0xff: return False
           all_complete = False
-      if all_complete: return True
+      if all_complete:
+        # en = time.perf_counter()
+        # print("run in s: ", (en - st), "s", "kb/s", 0xff / (en - st) / 1024)
+        return True
 
   # def _send_with_stream(self, cdb, ret_len=0):
   #   pass
@@ -146,7 +150,7 @@ class USBConnector:
       self.setup_transfer(self.stat_transfers[emm], 0x83, emm + 1, self.read_statuses[emm], 64)
       self.setup_transfer(self.cmd_transfers[emm], 0x04, None, self.read_cmds[emm], len(self.read_cmds[emm]))
       ops_sub += [self.stat_transfers[emm], self.cmd_transfers[emm]]
-      if i + 1 == len(cdbs) or len(ops_sub) == 16:
+      if i + 1 == len(cdbs) or len(ops_sub) == self.max_parallel * 2:
         self._send_ops_and_wait(*ops_sub)
         ops_sub = []
 
@@ -165,8 +169,8 @@ class USBConnector:
 
         transfers = []
         if ret_len > 0: transfers.append(self.res_transfer)
-        if in_data is not None: transfers.append(self.in_transfer)
         transfers += [self.stat_transfer, self.cmd_transfer]
+        if in_data is not None: transfers.append(self.in_transfer)
         self._send_ops_and_wait(*transfers)
         return bytes(self.read_data[:])
       return None
@@ -212,9 +216,9 @@ class USBConnector:
       for j in range(buf_len): self.cached[current_addr + j] = data[i + j]
     return bytes(data[:read_len])
 
-  def write(self, start_addr, data, ignore_cache=False):
+  def write(self, start_addr, data, ignore_cache=True):
     if DEBUG >= 4: print("write", hex(start_addr))
-    
+
     cdbs = []
     for offset, value in enumerate(data):
       current_addr = start_addr + offset
@@ -305,12 +309,6 @@ class USBConnector:
     self.addrs.append(0xB210)
     self.ignores.append(False)
     self.datas.append(bytes([fmt_type]))
-
-    # Clear PCIe completion timeout status in PCIE_STATUS_REGISTER (0xB296)
-    # self.write(0xB296, bytes([0x04]), ignore_cache=True)
-    # self.addrs.append(0xB296)
-    # self.ignores.append(False)
-    # self.datas.append(bytes([0x04]))
 
     # Clear any existing PCIe errors before proceeding (PCIE_ERROR_CLEAR: 0xB254)
     # this appears to be the trigger

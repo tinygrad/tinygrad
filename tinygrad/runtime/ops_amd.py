@@ -677,7 +677,7 @@ class USBIface(PCIIface):
     doorbell_bar = AMUSBBar(self.bars[2], self.usb)
     mmio_bar = AMUSBBar(self.bars[5], self.usb)
 
-    AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
+    self.adev = AMDev("usb:0", vram_bar, doorbell_bar, mmio_bar)
     self.props = {'simd_count': 64, 'simd_per_cu': 2, 'array_count': 4, 'gfx_target_version': 110002, 'max_slots_scratch_cu': 32,
       'max_waves_per_simd': 16, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
@@ -692,7 +692,7 @@ class USBIface(PCIIface):
     #   am_mapping = self.adev.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
     #   return HCQBuffer(vaddr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
     am_mapping = self.adev.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contigous=cpu_access)
-    if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
+    # if cpu_access: self._map_pci_range(bar=0, off=am_mapping.paddrs[0][0], addr=am_mapping.va_addr, size=am_mapping.size)
     return HCQBuffer(am_mapping.va_addr, size, meta=AMAllocationMeta(self.dev, [self.dev], am_mapping))
 
 class AMDDevice(HCQCompiled):
@@ -723,8 +723,8 @@ class AMDDevice(HCQCompiled):
     if self.target//10000 == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
     debug_memory_size = round_up((self.max_cu_id + 1) * (self.max_wave_id + 1) * 32, 64)
 
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x8000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
-                                           eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+    # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x8000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+    #                                        eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x8000)
 

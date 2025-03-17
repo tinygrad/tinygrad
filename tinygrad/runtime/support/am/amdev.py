@@ -123,8 +123,8 @@ class AMPageTableEntry:
       | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if not table and self.lv != am.AMDGPU_VM_PTB else 0) \
       | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
       | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
-    self.adev.vram_bar.write(self.paddr + entry_id * 8, 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
-  def entry(self, entry_id:int) -> int: return self.adev.vram_bar.read(self.paddr + entry_id * 8, 8)
+    self.adev.vram.write(self.paddr + entry_id * 8, 8, (paddr & 0x0000FFFFFFFFF000) | f, 8)
+  def entry(self, entry_id:int) -> int: return self.adev.vram.read(self.paddr + entry_id * 8, 8)
 
 class AMPageTableTraverseContext:
   def __init__(self, adev, pt, vaddr, create_pts=False, free_pts=False):
@@ -291,6 +291,15 @@ class AMDev:
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
     self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000003)) and (getenv("AM_RESET", 0) != 1)
+
+    # self.reg("regSCRATCH_REG7").write(am_version)
+    # print(hex(self.reg("regSCRATCH_REG7").read()))
+
+    # print(self.partial_boot, hex(self.reg("regSCRATCH_REG7").read()))
+    # print(self.is_booting)
+    # exit(0)
+
+    # self.partial_boot = True
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)

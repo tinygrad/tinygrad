@@ -21,7 +21,15 @@ class AM_GMC(AM_IP):
 
     # Memory controller aperture
     self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
+    print(hex(self.mc_base))
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
+    # self.mc_end = self.mc_base + (256 << 20) - 1
+    # print(hex(self.mc_base))
+
+    self.aper_base = self.mc_base # (128 << 20) #+ self.adev.mm.vram_size+ (256 << 20)
+    self.aper_end = self.aper_base + (256 << 20) - 1
+
+    # self.adev.regMMMC_VM_FB_LOCATION_BASE.
 
     # VM aperture
     self.vm_base = self.adev.mm.va_allocator.base
