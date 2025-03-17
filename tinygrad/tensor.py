@@ -2594,7 +2594,7 @@ class Tensor(SimpleMathTrait):
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
 
-  def nonzero(self, as_tuple=False) -> Tensor:
+  def nonzero(self, as_tuple=False):
     """
     Returns the indices of the elements that are non-zero.
 
