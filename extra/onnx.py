@@ -303,9 +303,7 @@ def get_onnx_ops():
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
 
   # ***** Unary Ops (broadcasted) *****
-  def Add(x:Tensor,y:Tensor, broadcast=None, axis=None):
-    print(x.dtype, y.dtype)
-    return x + y if isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
+  def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
   def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
   def Less(x:Tensor,y:Tensor): return x < y
