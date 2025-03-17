@@ -101,7 +101,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_simplify_padded_const(self):
     a = Tensor.empty(1022).cummax(axis=0)
-    sched = a.schedule()
+    sched = check_schedule(a, 5)
     ast = sched[0].ast
     self.assertLessEqual(len([u for u in ast.toposort if u.op is Ops.WHERE]), 6)
 
