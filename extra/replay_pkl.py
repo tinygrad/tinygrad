@@ -2,7 +2,7 @@ import pickle, sys
 from dataclasses import replace
 from tinygrad import Device, Context
 from tinygrad.device import Buffer
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, BEAM
 from tinygrad.engine.jit import TinyJit
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import ProgramSpec
@@ -22,7 +22,11 @@ if __name__ == "__main__":
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
-        if not getenv("NOOPT"):
+        dsp_bufs = [Buffer("DSP", 1024+b.size*2, b.dtype).view(b.size, b.dtype, 512) for b in ei.bufs]
+        if BEAM:
+          from tinygrad.engine.search import beam_search
+          k = beam_search(k, dsp_bufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+        elif not getenv("NOOPT"):
           if knum in [6,7,9,11]:
             k.apply_opt(Opt(OptOps.PADTO, 1, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
@@ -50,6 +54,6 @@ if __name__ == "__main__":
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
         p2 = k.to_program()
-        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=[Buffer("DSP", 1024+b.size*2, b.dtype).view(b.size, b.dtype, 512) for b in ei.bufs])
+        new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
         new_ei.run()
       knum += 1
