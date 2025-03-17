@@ -117,7 +117,7 @@ class Ops(FastEnum):
   REDUCE_AXIS = auto()
 
   # helper ops
-  GEP = auto(); VECTORIZE = auto(); CAT = auto() # noqa: E702
+  GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
