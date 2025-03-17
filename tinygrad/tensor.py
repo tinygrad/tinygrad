@@ -2622,7 +2622,7 @@ class Tensor(SimpleMathTrait):
     coords.reverse()
     if as_tuple:
       return tuple(coords)
-    return coords[0].stack(*coords[1:], dim=-1)
+    return Tensor.stack(*coords, dim=-1)
 
   # ***** unary ops *****
 
