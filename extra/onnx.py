@@ -41,7 +41,6 @@ def attribute_parse(onnx_attribute: AttributeProto):
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
   dtype, shape = dtype_parse(onnx_tensor.data_type), tuple(onnx_tensor.dims)
-  print(onnx_tensor.data_type, onnx_tensor.name)
   if data := list(onnx_tensor.float_data) or list(onnx_tensor.int32_data) or list(onnx_tensor.int64_data) or list(onnx_tensor.double_data) or \
              list(onnx_tensor.uint64_data):
     if len(data) == 1: return Tensor(data[0], dtype=dtype).reshape(shape)
@@ -304,7 +303,9 @@ def get_onnx_ops():
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
 
   # ***** Unary Ops (broadcasted) *****
-  def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y if isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
+  def Add(x:Tensor,y:Tensor, broadcast=None, axis=None):
+    print(x.dtype, y.dtype)
+    return x + y if isinstance(x.dtype, ImageDType) else (x + y).cast(x.dtype)
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
   def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
   def Less(x:Tensor,y:Tensor): return x < y
