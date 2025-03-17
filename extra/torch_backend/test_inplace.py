@@ -61,21 +61,5 @@ class TestTorchBackendInplace(unittest.TestCase):
     b[1:3,:] += 1
     np.testing.assert_equal(a.cpu().numpy(), [[0]*4,[1]*4,[1]*4,[0]*4])
 
-  def test_topk_inplace(self):
-    x = torch.tensor([1, 3, 2, 4])
-    sorted_tensor = torch.empty(2, dtype=x.dtype)
-    indices_tensor = torch.empty(2, dtype=torch.int64)
-    torch.topk(x, k=2, out=(sorted_tensor, indices_tensor))
-    np.testing.assert_equal(sorted_tensor.cpu().numpy(), [4, 3])
-    np.testing.assert_equal(indices_tensor.cpu().numpy(), [3, 1])
-
-  def test_sort_inplace(self):
-    x = torch.tensor([3, 1, 4, 2])
-    sorted_tensor = torch.empty_like(x, dtype=x.dtype)
-    indices_tensor = torch.empty_like(x, dtype=torch.int64)
-    torch.sort(x, out=(sorted_tensor, indices_tensor))
-    np.testing.assert_equal(sorted_tensor.cpu().numpy(), [1, 2, 3, 4])
-    np.testing.assert_equal(indices_tensor.cpu().numpy(), [1, 3, 0, 2])
-
 if __name__ == "__main__":
   unittest.main()

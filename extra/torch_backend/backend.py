@@ -211,18 +211,18 @@ def cat_out(tensors, dim=0, out=None):
 
 @torch.library.impl("aten::topk.values", "privateuseone")
 @inplace_fn(["values", "indices"])
-def topk_values(input, k, dim=None, largest=True, sorted=True, **kwargs):
+def topk_values(input, k, dim=None, largest=True, sorted=True, values=None, indices=None):
   out_values, out_indices = unwrap(input).topk(k, dim if dim is not None else -1, largest, sorted)
-  unwrap(kwargs["values"]).assign(out_values)
-  unwrap(kwargs["indices"]).assign(out_indices.cast(dtypes.int64))
+  unwrap(values).assign(out_values)
+  unwrap(indices).assign(out_indices.cast(dtypes.int64))
   return wrap(out_values), wrap(out_indices)
 
 @torch.library.impl("aten::sort.values_stable", "privateuseone")
 @inplace_fn(["values", "indices"])
-def sort_values(input, dim=-1, descending=False, stable=True, **kwargs):
+def sort_values(input, dim=-1, descending=False, stable=True, values=None, indices=None):
   out_values, out_indices = unwrap(input).sort(dim, descending)
-  unwrap(kwargs["values"]).assign(out_values)
-  unwrap(kwargs["indices"]).assign(out_indices.cast(dtypes.int64))
+  unwrap(values).assign(out_values)
+  unwrap(indices).assign(out_indices.cast(dtypes.int64))
   return wrap(out_values), wrap(out_indices)
 
 # register some decompositions
