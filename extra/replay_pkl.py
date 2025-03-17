@@ -50,6 +50,10 @@ if __name__ == "__main__":
           elif knum == 3:
             k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
+          elif knum == 29:
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
+            k.apply_opt(Opt(OptOps.PADTO, 1, 128))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
           else:
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
