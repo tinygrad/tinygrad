@@ -3,15 +3,30 @@ from tinygrad import Tensor
 from tinygrad.ops import PatternMatcher, Ops, UPat, graph_rewrite
 
 class TestRewriteTrackedChildren(unittest.TestCase):
-  def test_simple_child(self):
+  def test_children_in_context(self):
+    def print_children(ctx, sink):
+      assert set([x.arg for x in ctx.children[sink.src[0].src[0].src[0]]]) == set((2,3))
+      ctx.update_children()
+      assert set([x.arg for x in ctx.children[sink.src[0].src[0].src[0]]]) == set((3,4))
     rewrite = PatternMatcher([
-      (UPat(Ops.CONST, arg=2, name="x"), lambda x: x.replace(arg=4))
+      (UPat(Ops.CONST, arg=2, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.SINK, name="sink"), print_children)
     ])
     a = Tensor(2)
-    view_w_child = a.lazydata.src[0]
+    b = Tensor(3)
+    c = a + b
+    sink = c.lazydata.sink()
+    sink = graph_rewrite(sink, rewrite, track_children=True)
+
+  def test_simple_child(self):
+    rewrite = PatternMatcher([
+      (UPat(Ops.CONST, arg=2, name="x"), lambda x: x.replace(arg=4)),
+    ])
+    a = Tensor(2)
     b = Tensor(3)
     c = a + b
     sink = c.lazydata
+    view_w_child = a.lazydata.src[0]
     print([x().arg for x in view_w_child.children])
     print([x.arg for x in sink.get_children_map()[view_w_child]])
     self.assertSetEqual(set([x.arg for x in sink.get_children_map()[view_w_child]]), set((2,3)))

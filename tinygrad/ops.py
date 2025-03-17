@@ -903,10 +903,19 @@ def launch_viz(env_str:str, data:str):
 # *** simple graph rewrite engine ***
 
 class RewriteContext:
-  def __init__(self, pm, ctx=None):
+  def __init__(self, pm, ctx=None, children=None):
     self.pm: PatternMatcher = pm
-    self.ctx = ctx
+    self.ctx = self if children is not None else ctx
     self.replace: dict[UOp, UOp] = {}
+    self.children = children
+  def update_children(self):
+    # TODO: is this always right?
+    for k,v in self.children.items():
+      new_child: dict[UOp, None] = {}
+      for tv in v:
+        while (nv:=self.replace.get(tv, None)) is not None and nv is not tv: tv = nv
+        new_child[tv] = None
+      self.children[k] = new_child
   def top_down_rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
     new_src = tuple([self.top_down_rewrite(x) for x in n.src])
@@ -921,15 +930,16 @@ class RewriteContext:
     self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
     return ret
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
     tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
-  return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).top_down_rewrite(sink)
+  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
+  return rewrite_ctx.bottom_up_rewrite(sink) if bottom_up else rewrite_ctx.top_down_rewrite(sink)
 
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> dict[UOp, UOp]:
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, track_children=False) -> dict[UOp, UOp]:
   if TRACK_MATCH_STATS >= 2 and len(tracked_ctxs) != 0:
     tracked_ctxs[-1].append(TrackedGraphRewrite(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up, name=name))
-  rewrite_ctx = RewriteContext(pm, ctx)
+  rewrite_ctx = RewriteContext(pm, ctx, children=sink.get_children_map() if track_children else None)
   return {k:(rewrite_ctx.bottom_up_rewrite(k) if bottom_up else rewrite_ctx.top_down_rewrite(k)) for k in list(sink.toposort)[::-1]}
 
 def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
