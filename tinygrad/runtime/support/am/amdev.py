@@ -238,7 +238,7 @@ class AMMemoryManager:
           # Try to allocate as long segment (power of 2) as possible
           cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
           while cont_seg_sz >= seg_size:
-            try: paddr = self.palloc(cont_seg_sz, zero=True)
+            try: paddr = self.palloc(cont_seg_sz, zero=False)
             except MemoryError: cont_seg_sz //= 2
             else: break
 
@@ -314,9 +314,10 @@ class AMDev:
     self.gfx:AM_GFX = AM_GFX(self)
     self.sdma:AM_SDMA = AM_SDMA(self)
 
-    # if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
-    #   if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
-    #   self.partial_boot = False
+    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0):
+      if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
+      self.fini()
+      # self.partial_boot = False
 
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()

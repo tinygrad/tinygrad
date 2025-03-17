@@ -3,7 +3,7 @@ from typing import Any, cast, ClassVar
 import os, ctypes, ctypes.util, struct, hashlib, functools, mmap, errno, array, contextlib, sys, select, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, HWInterface, HCQArgsState
 from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX, tqdm, trange
@@ -165,7 +165,7 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
-    self.bind_args_state(args_state)
+    # self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
 
@@ -333,15 +333,33 @@ class AMDCopyQueue(HWQueue):
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
-      assert False
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
-      ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
+      # ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
+      for i in range(zero_fill // 4): dev.sdma_queue.ring[(dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4 + i] = 0
+
       dev.sdma_queue.put_value += zero_fill
 
-      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
+      # dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
+      for i in range(rem_packet_cnt): dev.sdma_queue.ring[i] = cmds[tail_blit_dword + i]
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
     dev.sdma_queue.signal_doorbell(dev)
+
+class USBArgsState(HCQArgsState):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=(), prefix:list[int]|None=None):
+    super().__init__(ptr, prg, bufs, vals=vals)
+
+    # if prefix is not None: to_mv(self.ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
+
+    for i,b in enumerate(bufs):
+      off = ptr - self.prg.dev.kernargs_page.va_addr + self.prg.dev.kernargs_page.meta.mapping.paddrs[0][0] + i * 8
+      self.prg.dev.dev_iface.adev.vram.write(off, b.va_addr, 8)
+    for i,val in enumerate(vals):
+      off = ptr - self.prg.dev.kernargs_page.va_addr + self.prg.dev.kernargs_page.meta.mapping.paddrs[0][0] + len(bufs) * 8 + i * 4
+      self.prg.dev.dev_iface.adev.vram.write(off, val, 4)
+
+    # self.bind_sints_to_ptr(*[b.va_addr for b in bufs], ptr=self.ptr + len(prefix or []) * 4, fmt='Q')
+    # self.bind_sints_to_ptr(*vals, ptr=self.ptr + len(prefix or []) * 4 + len(bufs) * 8, fmt='I')
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -350,7 +368,8 @@ class AMDProgram(HCQProgram):
     self.name, self.lib = name, lib
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    # ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    dev.allocator._copyin(self.lib_gpu, image)
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
     assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
@@ -363,7 +382,7 @@ class AMDProgram(HCQProgram):
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
 
-    code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + rodata_entry) # NOTE: this is wrong, it's not this object
+    code = hsa.amd_kernel_code_t.from_buffer_copy(image[rodata_entry:]) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
@@ -379,7 +398,9 @@ class AMDProgram(HCQProgram):
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
-    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
+    print("dune")
+
+    super().__init__(USBArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
 
   def __del__(self):
@@ -782,14 +803,6 @@ class USBIface(PCIIface):
         self.usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=4)
       bar_off += 8 if bar_cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64 else 4
 
-    # print(self.bars)
-    # exit(0)
-
-    # print(hex(self.bars[0][0]))
-    # print(hex(self.bars[1][0]))
-    # print(hex(self.bars[3][0]))
-    # exit(0)
-
     # pm_state = self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=None, size=1)
     # self.usb.pcie_cfg_req(caps[0x1]+4, bus=gpu_bus, dev=0, fn=0, value=0x0, size=1)
     # print("PM cap now", pm_state)
@@ -837,6 +850,11 @@ class USBIface(PCIIface):
     wptr_mv = AMUSBBar((self.bars[0][0] + gart.meta.mapping.paddrs[0][0]+0x10, 8), self.usb)
     return AMDQueueDesc(ring=ring_mv.cast("I"), doorbell=db_mv.cast("Q"), read_ptr=rptr_mv.cast("Q"), write_ptr=wptr_mv.cast("Q"))
 
+class AMDUSBAllocator(AMDAllocator):
+  def __init__(self, dev:DeviceType):
+    vaddr = dev.dev_iface.adev.mm.alloc_vaddr(size=0x1000, align=0x1000)
+    self.b = [dev.dev_iface.adev.mm.map_range(vaddr, 0x1000, [(0x200000, 0x1000)], system=True, snooped=False, uncached=True)]
+    super().__init__(dev, batch_size=0x1000, batch_cnt=1, skip_alloc=True)
 
 class AMDDevice(HCQCompiled):
   devices: ClassVar[list[HCQCompiled]] = []
@@ -874,29 +892,43 @@ class AMDDevice(HCQCompiled):
     print("done queues init")
 
     the_sig = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
-    test_sig = AMDSignal(base_addr=the_sig.va_addr)
-    AMDComputeQueue().signal(test_sig, 0x1).submit(self)
-    time.sleep(1.0)
-    print("comp done??")
+    print("bef shit", hex(the_sig.va_addr), hex(the_sig.meta.mapping.paddrs[0][0]), hex(self.dev_iface.bars[0][0]))
+    spec_sig = AMDSignal(base_addr=the_sig.va_addr, value=0, timeline_for_device=self,
+                         create_mv=lambda x, y: AMUSBBar((self.dev_iface.bars[0][0] + the_sig.meta.mapping.paddrs[0][0], y), self.dev_iface.usb))
+    self.timeline_signal:SignalType = spec_sig
+    # self.timeline_signal.value = 2
+    # time.sleep(1.0)
+    # print(self.timeline_signal.value)
+    # print("comp done??")
 
-    print(self.dev_iface.adev.vram.read(the_sig.meta.mapping.paddrs[0][0], 4))
+    # print(self.dev_iface.adev.vram.read(the_sig.meta.mapping.paddrs[0][0], 4))
     
-    AMDCopyQueue().copy(self.dev_iface.system_mapping.va_addr, self.ring.va_addr, 0x1000).signal(test_sig, 0x1).submit(self)
-    time.sleep(1.0)
-    print("copy done??")
+    # AMDCopyQueue().copy(self.dev_iface.system_mapping.va_addr, self.ring.va_addr, 0x1000).signal(test_sig, 0x1).submit(self)
+    # time.sleep(1.0)
+    # print("copy done??")
 
-    print(self.dev_iface.adev.vram.read(the_sig.meta.mapping.paddrs[0][0], 4))
+    # print(self.dev_iface.adev.vram.read(the_sig.meta.mapping.paddrs[0][0], 4))
   
-    buf = self.dev_iface.usb.read(0xf000, 256)
-    from hexdump import hexdump
-    hexdump(buf)
+    # buf = self.dev_iface.usb.read(0xf000, 256)
+    # from hexdump import hexdump
+    # hexdump(buf)
 
-    print(hex(self.dev_iface.adev.reg("regSCRATCH_REG7").read()))
-    self.dev_iface.adev.fini()
-    exit(0)
+    # print(hex(self.dev_iface.adev.reg("regSCRATCH_REG7").read()))
+    # self.dev_iface.adev.fini()
+    # exit(0)
 
-    super().__init__(device, AMDAllocator(self), AMDRenderer(self.arch), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+    super().__init__(device, AMDUSBAllocator(self), AMDRenderer(self.arch), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
+
+    # print(hex(self.timeline_signal.value_addr))
+    # AMDComputeQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # self.synchronize()
+
+    # print(hex(self.dev_iface.adev.reg("regSCRATCH_REG7").read()))
+    # print(hex(self.timeline_signal.value_addr))
+    # self.dev_iface.adev.fini()
+    # exit(0)
 
     # Scratch setup
     self.max_private_segment_size = 0
