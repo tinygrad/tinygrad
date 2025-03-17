@@ -65,11 +65,6 @@ def inplace_fn(outvars: str|list[str]):
 
 # *** bad functions on CPU ***
 
-@torch.library.impl("aten::masked_select", "privateuseone")
-def masked_select(self, mask):
-  # err, bad
-  return wrap(Tensor(self.cpu().numpy()[mask.cpu().numpy()], device=_from_torch_device(self.device)))
-
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
 @inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
@@ -196,10 +191,9 @@ def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  if not transposed: return wrap(unwrap(input).conv2d(unwrap(weight), unwrap(bias) if bias is not None else None,
-                                   groups=groups, stride=stride, dilation=dilation, padding=padding))
-  return wrap(unwrap(input).conv_transpose2d(unwrap(weight), unwrap(bias) if bias is not None else None,
-                                   groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
+  input, weight, bias = unwrap(input), unwrap(weight), unwrap(bias) if bias is not None else None
+  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
@@ -236,13 +230,11 @@ def select_backward(grad_out, input_sizes, dim, index):
   return wrap(grad_input)
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
-  if stride == []: stride = None
-  return wrap(unwrap(self).avg_pool2d(kernel_size, stride, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
+  return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
 
 def avg_pool_backward(grad_out, self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
-  if stride == []: stride = None
   self, grad_out = unwrap(self), unwrap(grad_out)
-  out = Tensor.avg_pool2d(self, kernel_size, stride, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+  out = Tensor.avg_pool2d(self, kernel_size, stride if stride != [] else None, dilation=1, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
 for dim in [2, 3]:
@@ -510,6 +502,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.masked_fill_.Tensor": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
+  "aten.masked_select": Tensor.masked_select,
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
   "aten.acos": Tensor.acos,
@@ -537,7 +530,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
   "aten.expand": Tensor.expand,
-  "aten.ones_like": lambda self, **kwargs: Tensor.ones_like(self),
+  "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
+    self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
+                                        "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.t": Tensor.transpose,
   "aten.detach": Tensor.detach,
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
