@@ -40,7 +40,7 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   for opt in opts: k.apply_opt(opt)
   prg = k.to_program()
   if replace_src is not None:
-    old_name = prg.src.split("inscount();\n")[1].split("(")[0]
+    old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
     prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   for _ in range(run_count): ei.run(wait=True)
