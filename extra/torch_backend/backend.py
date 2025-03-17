@@ -308,12 +308,6 @@ def cumsum(self, dim):
   if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
   return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
 
-@torch.library.impl("aten::scatter_add", "privateuseone")
-def scatter_add(self, dim, index, src):
-  if unwrap(self).shape == (): return src
-  out = Tensor.scatter_reduce(unwrap(self), dim, unwrap(index), unwrap(src), reduce='sum')
-  return wrap(out)
-
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   realize = dest.is_tiny and maybe_realize_storage(dest)
