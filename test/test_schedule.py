@@ -98,7 +98,6 @@ class TestSchedule(unittest.TestCase):
     a.realize()
     assert not a.lazydata.is_realized
 
-  @unittest.expectedFailure
   def test_simplify_padded_const(self):
     a = Tensor.empty(1022).cummax(axis=0)
     sched = check_schedule(a, 5)
