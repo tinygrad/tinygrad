@@ -323,7 +323,6 @@ class Kernel:
           for opt in extra_opts: self.apply_opt(opt)
         else:
           if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-          # if use_tensor_cores in (1, 2, 3): return True
           # hand-coded TC opts
           for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
             szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
@@ -605,28 +604,23 @@ class Kernel:
             permaxis = list(range(wd)) \
               + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
               + [wd + x + (offset if x >= len(local_perm) else 0) for x in upcast_perm] + list(range(tcd + len(upcast_perm), len(shape)))
-            print(tuple(permaxis))
             return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
             if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(
-                s if (x >= self.global_dims and x < self.first_reduce) or (x >= (len(self.full_shape) - len(tc_upcast_axes[i])-2)) else 1
-                for x, s in enumerate(self.full_shape)
-              )
-              print(local_shape)
-              permuted_st = store_st = ShapeTracker.from_shape(local_shape)
+              local_shape = tuple(1 if x < self.global_dims else s for x, s in enumerate(self.output_shape))
+              store_st = load_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=store_st.real_size(), local=True), (), f"temp{i}")
-              if swizzle: permuted_st = get_tc_swizzle_st(local_shape, *swizzle)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
-              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, permuted_st.to_uop(), local_store))
+              if swizzle: load_st = get_tc_swizzle_st(local_shape, *swizzle)
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, load_st.to_uop(), local_store))
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
+            tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
