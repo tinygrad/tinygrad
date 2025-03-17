@@ -2595,7 +2595,7 @@ class Tensor(SimpleMathTrait):
         crossover_dim = dim + n_stages - stage - 1
         blue_box, green_box = x.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
-        x = blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)
+        x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
@@ -2607,7 +2607,7 @@ class Tensor(SimpleMathTrait):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     # compute indices for sorted values
-    idx = Tensor.arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    idx = Tensor.arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
     def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
@@ -2617,6 +2617,8 @@ class Tensor(SimpleMathTrait):
   def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True):
     """
     Computes the top-k elements of the tensor along the specified `dim`.
+
+    Order of indices for equivalent elements is always preserved.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
