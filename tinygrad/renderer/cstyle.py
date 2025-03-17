@@ -410,6 +410,7 @@ class AMDRenderer(CStyleLanguage):
 
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900
     self.arch = arch
+    # TODO: fix tensor cores for gfx1201
     self.tensor_cores = \
       AMDRenderer.tensor_cores_mfma if arch.split(":")[0] == "gfx942" else AMDRenderer.tensor_cores if arch.split(":")[0] != "gfx1201" else []
     if self.arch.split(":")[0] == "gfx942":
