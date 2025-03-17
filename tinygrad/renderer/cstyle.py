@@ -408,7 +408,7 @@ class AMDRenderer(CStyleLanguage):
     opts=("l0","l0","l0","l0","u1","u1","l1","l1"), swizzle=(((10,11,4,5,8,9),(0,1,2,3,6,7)),((0,1,2,3,8,9),(4,5,10,11,6,7))))
     for di,do in [(dtypes.half,dtypes.float)]]
 
-  def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900
+  def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     self.arch = arch
     # TODO: fix tensor cores for gfx1201
     self.tensor_cores = \
