@@ -3,7 +3,7 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, prod, flatten
+from tinygrad.helpers import getenv, flatten
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys, weakref
@@ -36,7 +36,8 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 
-#
+# track view metadata for in place operations
+# have to track as custom metadata on c++ tensorimpl since detach() creates a new tensor object
 def is_view(tensor: torch.Tensor): return "_tiny_base" in mod.get_meta(tensor)
 def canonical_base(view: torch.Tensor): return mod.get_meta(view).get("_tiny_base", view)
 def derived_views(base: torch.Tensor): return [t for tref in mod.get_meta(base).get("_tiny_views", set()) if (t:=tref()) is not None]
