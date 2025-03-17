@@ -402,7 +402,7 @@ class ScheduleItem:
 
 @track_rewrites(name_fxn=lambda r: f"Schedule {pluralize('Kernel', len(r[0]))}"+(f" (with_{pluralize('Var', len(r[1]))})" if len(r[1]) != 0 else ""))
 def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int], dict[UOp, UOp]]:
-  # merge_views + sym
+  # merge_views + sym + replace_contiguous
   tensor_map = graph_rewrite_map(big_sink, merge_views+sym+replace_contiguous, ctx={})
 
   # display the cleaned up tensor graph
