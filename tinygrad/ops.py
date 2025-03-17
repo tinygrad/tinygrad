@@ -281,6 +281,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return nodes
     return _toposort(self, cache=set())
 
+  # returns map of UOps to their children in the graph rooted by self
+  def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
+    ret: dict[UOp, dict[UOp, None]] = {}
+    for u in self.toposort:
+      for s in u.src: ret.setdefault(s, {})[u] = None
+    return ret
+
   @functools.cached_property
   def tuplize(self:UOp) -> tuple[int, Any, Optional[DType], tuple]: return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
