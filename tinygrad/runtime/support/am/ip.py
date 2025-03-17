@@ -9,7 +9,7 @@ class AM_IP:
   def fini(self): pass
   def set_clockgating_state(self): pass
 
-class AM_SOC21(AM_IP):
+class AM_SOC(AM_IP):
   def init(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
