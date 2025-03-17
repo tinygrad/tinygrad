@@ -1864,33 +1864,22 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
   def test_no_rewrite_elementwise(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
-    ld1 = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    ld2 = UOp(Ops.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((32, 32)).to_uop()))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
-    rsink = graph_rewrite(sink, view_right)
-    self.assertEqual(rsink.key, sink.key)
+    a = Tensor.empty(32, 32)
+    b = Tensor.empty(32, 32)
+    sink = (a+b).schedule()[0].ast
+    self.assertEqual(swizzle_cnt(sink), 0)
 
   def test_simple_store_reshape(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
-    r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    r = r + r.const_like(2).replace(src=(unwrap(r.st).to_uop(),))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
-    rsink = graph_rewrite(sink, view_right)
-    # this AST first needs to swizzle, but it doesn't have implicit movementops
-    self.assertEqual(swizzle_cnt(sink), 1)
-    verify_ast(rsink)
+    a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(32,1)
+    ast = a.schedule()[0].ast
+    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (32, 1))
 
   def test_no_reshape_reduceop(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
-    rsink = graph_rewrite(sink, view_right)
-    verify_ast(sink)
-    self.assertEqual(sink.key, rsink.key)
+    a = Tensor.empty(32, 32).sum(axis=(1,)).contiguous()
+    ast = a.schedule()[0].ast
+    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (32,))
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
