@@ -2594,8 +2594,18 @@ class Tensor(SimpleMathTrait):
     combined_indices = indices[0].cat(*indices[1:], dim=dim)
     return self.gather(dim, combined_indices), combined_indices
 
-  ...
-  def nonzero(self, as_tuple: bool = False) -> Tensor | tuple[Tensor, ...]:
+  def nonzero(self, as_tuple=False) -> Tensor:
+    """
+    Returns the indices of the elements that are non-zero.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0, 1, 0], [2, 0, 3]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero().numpy())
+    ```
+    """
     if self.numel() == 0:
       return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0,)
     if self.ndim == 0:
@@ -2606,9 +2616,9 @@ class Tensor(SimpleMathTrait):
     nz = cumsum[-1].item()
     if nz == 0:
       return Tensor([], device=self.device, dtype=dtypes.int32).reshape(0, self.ndim)
-    # Annotate coords as a list of Tensors.
+    idxs = (cumsum.unsqueeze(1) - Tensor.arange(1, nz + 1, device=self.device, dtype=dtypes.int32).unsqueeze(0)).abs().argmin(axis=0)
     coords: list[Tensor]
-    coords, _ = functools.reduce(lambda acc, s: (acc[0] + [acc[1] % s], acc[1] // s), self.shape[::-1], ([], cumsum[-1]))
+    coords, _ = functools.reduce(lambda acc, s: (acc[0] + [acc[1] % s], acc[1] // s), self.shape[::-1], ([], idxs))
     coords.reverse()
     if as_tuple:
       return tuple(coords)
