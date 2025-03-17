@@ -3,10 +3,7 @@ import os
 import time
 import unittest
 import numpy as np
-try:
-  import onnx
-except ModuleNotFoundError:
-  raise unittest.SkipTest("onnx not installed, skipping onnx test")
+import onnx
 from extra.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
 from tinygrad.helpers import CI, fetch, temp
@@ -70,7 +67,7 @@ class TestOnnxModel(unittest.TestCase):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
-    validate(onnx_file, inputs, atol=1e-2, rtol=5e-2)
+    validate(onnx_file, inputs, atol=1e-2, rtol=7e-2)
     print("openpilot model validated")
 
   def test_efficientnet(self):

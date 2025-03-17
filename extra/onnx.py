@@ -107,7 +107,7 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))            # prints debug information of op nodes
-limit = int(getenv("ONNXLIMIT", "-1"))           # returns early up to limit
+limit = int(getenv("ONNXLIMIT", "-1"))           # returns early up to a limit
 typed = getenv("ONNXTYPED", "1") and not IMAGE   # does runtime validation of input shapes and dtypes
 
 class OnnxRunner:
