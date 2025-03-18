@@ -81,7 +81,7 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     sched = out.schedule()
     names = []
-    for si, ei in zip(sched[:], lower_schedule(sched)):
+    for si, ei in lower_schedule(sched):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
     self.assertEqual(len(set(names)), 3), "function was relinearized"
