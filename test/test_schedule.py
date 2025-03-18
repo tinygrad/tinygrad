@@ -398,6 +398,14 @@ class TestSchedule(unittest.TestCase):
     img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
     check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
 
+  def test_fold_conv_nhwc(self):
+    with Context(NHWC=1):
+      img = Tensor.ones(1,4,8,8)
+      c1 = nn.Conv2d(4, 4, kernel_size=3)
+      c2 = nn.Conv2d(4, 4, kernel_size=3)
+      img_conv = img.sequential([c1, Tensor.relu, c2, Tensor.relu])
+      check_schedule(img_conv, 2, [*nn.state.get_parameters(c1), *nn.state.get_parameters(c2), img])
+
   def test_fold_conv_relu_nobias(self):
     img = Tensor.ones(1,4,8,8)
     c1 = nn.Conv2d(4, 4, kernel_size=3, bias=False)
