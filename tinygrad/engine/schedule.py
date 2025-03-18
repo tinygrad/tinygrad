@@ -119,6 +119,16 @@ def realize_before_view(view:UOp, tr:UOp) -> None:
   # realize before expand
   if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return tr.contiguous().view(st)
 
+def group_reduceop(x:UOp):
+  new_src = list(x.src)
+  for i,s in enumerate(new_src):
+    if s.op is Ops.VIEW:
+      if s.base.op is Ops.REDUCE_AXIS: new_src[i] = s.base.contiguous().view(s.arg)
+      continue
+    if s.op is not Ops.REDUCE_AXIS: continue
+    new_src[i] = s.contiguous()
+  if tuple(new_src) != x.src: return x.replace(src=tuple(new_src))
+
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"),
@@ -128,6 +138,8 @@ do_realize = PatternMatcher([
   # realize before COPY
   (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr")), name="copy"),
    lambda tr,copy: copy.replace(src=(copy.src[0], tr.contiguous()))),
+  # otherwise check if it has a reduceop parent
+  (UPat(GroupOp.All-{*DONT_PUSH_VIEWS, Ops.KERNEL}, name="x"), group_reduceop),
 ])
 
 # **** create kernels
