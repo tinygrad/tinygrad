@@ -599,21 +599,14 @@ def _optimizer_patched_init(self, *args, **kwargs):
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
 
 # NOTE: patches for multigpu
-# TODO: how would this look upstreamed?
-for m in ['torch._utils', 'torch.nn.parallel.data_parallel']:
-  sys.modules[m]._get_available_device_type = lambda: "tiny"
-
 _torch_scatter = torch.nn.parallel.comm.scatter
 def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0, streams=None):
-  if not self.is_tiny: return _torch_patched_scatter(self, devices, chunk_sizes, dim, streams)
-  #assert chunk_sizes is None, "not yet supported" # TODO: support it
-  # TODO: alternative?
-  # self = unwrap(self).shard([_to_tiny_device(torch.device("tiny", d)) for d in devices], dim)
-  # return [wrap(Tensor(src, device=d, requires_grad=self.requires_grad)) for src,d in zip(self.lazydata.src,self.device)]
+  if not self.is_tiny: return _torch_scatter(self, devices, chunk_sizes, dim, streams)
   self = unwrap(self)
-  devices = [_from_torch_device(torch.device("tiny", d)) for d in devices]
   # NOTE: copied from Tensor.shard, torch expects tuple of tensors
   sz = self.shape[dim] // len(devices)
+  assert chunk_sizes is None or all(s == sz for s in chunk_sizes), "uneven chunk sizes not supported"
+  devices = [_from_torch_device(torch.device("tiny", d)) for d in devices]
   sizes = [max(0, min(sz, self.shape[dim] - sz*i)) for i in range(len(devices))]
   lbs = []
   for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
@@ -629,8 +622,9 @@ def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
   return [[wrap(unwrap(x).to(_from_torch_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
 torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
 
+_torch_parallel_apply = torch.nn.parallel.parallel_apply
 def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
-  # TODO: only if tensors in tiny, check devices
+  if not inputs[0][0].is_tiny: return _torch_parallel_apply(modules, inputs, kwargs_tup, devices)
   if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
   if devices is None: devices = (torch.device("tiny"),) * len(modules)
   return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
@@ -640,7 +634,7 @@ for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']
 
 _torch_gather = torch.nn.parallel.comm.gather
 def _torch_patched_gather(tensors, dim, dest_index):
-  if not tensors[0].is_tiny: return _torch_patched_gather(tensors, dim, dest_index)
+  if not tensors[0].is_tiny: return _torch_gather(tensors, dim, dest_index)
   return wrap(Tensor.cat(*(unwrap(x).to(_from_torch_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
 torch.nn.parallel.comm.gather = _torch_patched_gather
 
