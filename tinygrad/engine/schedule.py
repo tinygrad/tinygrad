@@ -111,10 +111,18 @@ replace_contiguous = PatternMatcher([
 
 DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
 
+def check_dims(u:UOp):
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in u.toposort if x.op not in {*DONT_PUSH_VIEWS, Ops.KERNEL} and x.st is not None])]
+  if not all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims): return u.replace(src=tuple(s.contiguous() for s in u.src))
+
 insert_contiguous = PatternMatcher([
+  # always realize sinked ops
   (UPat(Ops.SINK, name="s"),
    lambda s: s.replace(src=new_src) if (new_src:=tuple(x if x.base.op in DONT_PUSH_VIEWS else x.contiguous() for x in s.src)) != s.src else None),
+  # always realize views we can't push through
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="x"),), name="view"), lambda x,view: x.contiguous().view(view.arg)),
+  # can only have one dim per sink
+  (UPat(GroupOp.All-{Ops.SINK}, name="u"), check_dims),
 ])
 
 # **** create kernels
