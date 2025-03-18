@@ -3,16 +3,16 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, flatten
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect
+import torch, pathlib, math, operator, functools, inspect, itertools, collections, sys, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
-def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or torch.tiny.current_device()}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
@@ -24,30 +24,60 @@ def unwrap(x:torch.Tensor) -> Tensor:
 class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
-  def current_device(self): return 0
+  def current_device(self): return 0 # TODO:
   def _is_in_bad_fork(self): return False
   def manual_seed_all(self, seed: int): Tensor.manual_seed(seed)
   def device_count(self): return getenv("GPUS", 1) # TODO: device count in tiny?
+  def get_device_properties(self, i):
+    # TODO: stub
+    props = {"total_memory": 1, "multi_processor_count": 1}
+    return collections.namedtuple("props", props)(**props)
 torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
+# track view metadata for in place operations
+# have to track as custom metadata on c++ tensorimpl since detach() creates a new tensor object
+def is_view(tensor: torch.Tensor): return "_tiny_base" in mod.get_meta(tensor)
+def canonical_base(view: torch.Tensor): return mod.get_meta(view).get("_tiny_base", view)
+def derived_views(base: torch.Tensor): return [t for tref in mod.get_meta(base).get("_tiny_views", set()) if (t:=tref()) is not None]
+def wrap_view_op(fn):
+  def _wrap(*args,**kwargs):
+    base = args[0]
+    ret = wrap(fn(unwrap(base),*args[1:],**kwargs))
+    mod.get_meta(ret)["_tiny_base"] = base = canonical_base(base)
+    mod.get_meta(base).setdefault("_tiny_views", set()).add(weakref.ref(unwrap(ret)))
+    return ret
+  return _wrap
+
+view_ops = {
+  "aten.view": Tensor.reshape,
+  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
+  "aten.view.dtype": lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.expand": Tensor.expand,
+  "aten.t": Tensor.transpose,
+  "aten.squeeze.dim": Tensor.squeeze,
+  "aten.unsqueeze": Tensor.unsqueeze,
+  "aten.repeat": Tensor.repeat,
+  "aten.detach": Tensor.detach,
+}
+
+for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
+
 # in place operations with views
-def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is not None
 def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
   assert self.is_tiny
   self = unwrap(self)
   if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
   for v in views:
-    v = unwrap(v)
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
 def maybe_realize_storage(self: torch.Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views(self._base, [self]) # TODO: other views could exist
+  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
   return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
@@ -137,14 +167,15 @@ def cached_to_movement_ops(shape, st) -> list:
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+@wrap_view_op
+def as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # TODO: this is heavyweight
   st = ShapeTracker((View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)))
-  ret = unwrap(tensor)
-  if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
+  ret = tensor
+  #if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
   for mo in cached_to_movement_ops(tuple(tensor.shape), st): ret = apply_mop(ret, mo)
-  return wrap(ret)
+  return ret
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -177,15 +208,15 @@ def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, k
 
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::arange.start", "privateuseone")
 def arange_start(start, end, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::arange.start_step", "privateuseone")
 def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
-  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
+  return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)))
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
 def convolution_overrideable(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
@@ -238,6 +269,7 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
+@inplace_fn("out")
 def scatter_add(self, dim, index, src, out):
   self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
   if self.shape == (): return wrap(out.assign(src))
@@ -427,19 +459,13 @@ def wrap_out(f):
   return _wrap_out
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
-  "aten.view": Tensor.reshape,
-  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
-  "aten.floor_divide_.Tensor": inplace_fn("x")(lambda x,y: x.assign(x//y)),
   # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__ilshift__.Scalar": inplace_fn("x")(lambda x,y: x.assign(x*(2**y))),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
-  "aten.__irshift__.Scalar": inplace_fn("x")(lambda x,y: x.assign(x//(2**y))),
   # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
-  "aten.relu_": inplace_fn("x")(lambda x: x.assign(x.relu())),
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
@@ -459,19 +485,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
-  "aten.random_": inplace_fn("self")(lambda self:
-    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype))),
-  "aten.random_.from": inplace_fn("self")(lambda self, from_, to:
-    self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype))),
-  "aten.uniform_": inplace_fn("self")(lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high))),
-  "aten.normal_": inplace_fn("self")(lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std))),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": inplace_fn("x")(lambda x, y: x.assign(x | y)),
   "aten.multinomial": Tensor.multinomial,
-  "aten.masked_fill_.Scalar": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
-  "aten.masked_fill_.Tensor": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.masked_select": Tensor.masked_select,
@@ -488,25 +505,19 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": Tensor.full, # TODO: looks wrong
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
-  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True),
+  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True), # TODO: inplace view op, here?
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
-  "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.topk": Tensor.topk,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
-  "aten.squeeze.dim": Tensor.squeeze,
-  "aten.unsqueeze": Tensor.unsqueeze,
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
-  "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
-  "aten.expand": Tensor.expand,
   "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
-  "aten.t": Tensor.transpose,
-  "aten.detach": Tensor.detach,
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
 }}
 
@@ -521,11 +532,31 @@ def wrap_fxn(k,f):
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
+  @functools.wraps(f)
   def nf2(*args, **kwargs):
     return inplace_fn("out")(nf)(*args, **kwargs) if "out" in kwargs else nf(*args, **kwargs)
   return nf2
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
+
+tiny_backend_inplace = {
+  "aten.floor_divide_.Tensor": lambda self,y: self.assign(self//y),
+  # TODO: use tinygrad methods, but they require x to be unsigned
+  "aten.__ilshift__.Scalar": lambda self,y: self.assign(self*(2**y)),
+  "aten.__irshift__.Scalar": lambda self,y: self.assign(self//(2**y)),
+  "aten.relu_": lambda self: self.assign(self.relu()),
+  "aten.random_": lambda self:
+    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
+  "aten.random_.from": lambda self, from_, to:
+    self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype)),
+  "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high)),
+  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std)),
+  "aten.logical_or_": lambda self, y: self.assign(self | y),
+  "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
+  "aten.masked_fill_.Tensor": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
+}
+
+for k,v in tiny_backend_inplace.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(inplace_fn("self")(wrap_fxn(k,v)))
 
 if TORCH_DEBUG:
   from torch.utils._python_dispatch import TorchDispatchMode
@@ -537,7 +568,6 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
 def get_real_tinygrad_buffers():
@@ -567,3 +597,73 @@ def _optimizer_patched_init(self, *args, **kwargs):
   _optimizer_init(self, *args, **kwargs)
   self.register_step_post_hook(realize_optimizer_step)
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
+
+# NOTE: patches for multigpu
+# TODO: how would this look upstreamed?
+for m in ['torch._utils', 'torch.nn.parallel.data_parallel']:
+  sys.modules[m]._get_available_device_type = lambda: "tiny"
+
+_torch_scatter = torch.nn.parallel.comm.scatter
+def _torch_patched_scatter(self: torch.Tensor, devices, chunk_sizes=None, dim=0, streams=None):
+  if not self.is_tiny: return _torch_patched_scatter(self, devices, chunk_sizes, dim, streams)
+  #assert chunk_sizes is None, "not yet supported" # TODO: support it
+  # TODO: alternative?
+  # self = unwrap(self).shard([_to_tiny_device(torch.device("tiny", d)) for d in devices], dim)
+  # return [wrap(Tensor(src, device=d, requires_grad=self.requires_grad)) for src,d in zip(self.lazydata.src,self.device)]
+  self = unwrap(self)
+  devices = [_from_torch_device(torch.device("tiny", d)) for d in devices]
+  # NOTE: copied from Tensor.shard, torch expects tuple of tensors
+  sz = self.shape[dim] // len(devices)
+  sizes = [max(0, min(sz, self.shape[dim] - sz*i)) for i in range(len(devices))]
+  lbs = []
+  for sz,off in zip(sizes, itertools.accumulate(sizes, initial=0)):
+    lbs.append(self.shrink(tuple((0,s) if i != dim else (off,off+sz) for i,s in enumerate(self.shape))))
+  sharded_lbs = [wrap(lb.to(d)) for lb,d in zip(lbs, devices)]
+  return tuple(sharded_lbs)
+torch.nn.parallel.comm.scatter = _torch_patched_scatter
+
+_torch_broadcast_coalesced = torch.nn.parallel.comm.broadcast_coalesced
+def _torch_patched_broadcast_coalesced(tensors, devices, buffer_size=10485760):
+  if tensors and not tensors[0].is_tiny: return _torch_broadcast_coalesced(tensors, devices, buffer_size)
+  # NOTE: ignoring buffer_size and straightforward broadcast
+  return [[wrap(unwrap(x).to(_from_torch_device(torch.device("tiny", i)))) for x in tensors] for i in devices]
+torch.nn.parallel.comm.broadcast_coalesced = _torch_patched_broadcast_coalesced
+
+def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
+  # TODO: only if tensors in tiny, check devices
+  if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
+  if devices is None: devices = (torch.device("tiny"),) * len(modules)
+  return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
+torch.nn.parallel.data_parallel.parallel_apply = _torch_patched_parallel_apply
+for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']:
+  sys.modules[m].parallel_apply = _torch_patched_parallel_apply
+
+_torch_gather = torch.nn.parallel.comm.gather
+def _torch_patched_gather(tensors, dim, dest_index):
+  if not tensors[0].is_tiny: return _torch_patched_gather(tensors, dim, dest_index)
+  return wrap(Tensor.cat(*(unwrap(x).to(_from_torch_device(torch.device("tiny", dest_index))) for x in tensors), dim=dim))
+torch.nn.parallel.comm.gather = _torch_patched_gather
+
+class TinyDistributedBackend:
+  rank = 0
+  size = 1
+  # TODO: move these off CPU
+  def allreduce(self, tensors, opts):
+    tensors_cpu = [x.cpu() for x in tensors]
+    for a,b in zip(tensors, tensors_cpu):
+      assert a.device.index == self.rank
+      torch.distributed.all_reduce(b, op=opts.reduceOp)
+      a.copy_(b)
+  def broadcast(self, tensors, opts):
+    tensors_cpu = [x.cpu() for x in tensors]
+    for a,b in zip(tensors, tensors_cpu):
+      assert a.device.index == self.rank
+      torch.distributed.broadcast(b, src=opts.rootRank)
+      a.copy_(b)
+  def allgather(self, outputs, inputs, opts):
+    inputs_cpu = [x.cpu() for x in inputs]
+    outputs_cpu = [[torch.empty_like(x) for _ in range(self.size)] for x in inputs_cpu]
+    for a,b in zip(outputs_cpu,inputs_cpu): torch.distributed.all_gather(a,b)
+    for a,b in zip(flatten(outputs),flatten(outputs_cpu)): a.copy_(b)
+
+mod.register_dist_backend(TinyDistributedBackend)

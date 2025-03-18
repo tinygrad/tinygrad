@@ -54,6 +54,7 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
     return Stream(Stream::DEFAULT, Device(D, 0));
   }
   DeviceIndex deviceCount() const noexcept override {
+    // TODO: stub
     return 1;
   }
   // Event-related functions
@@ -84,6 +85,12 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
 C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
 }
 
+class TinyLazyStorageImpl : public c10::StorageImpl {
+public:
+  TinyLazyStorageImpl(c10::Device device) :
+    c10::StorageImpl(c10::StorageImpl::use_byte_size_t(), 0, at::DataPtr(nullptr, device), nullptr, /*resizable=*/false) {
+  }
+};
 template <typename OpaqueHandle>
 struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   TinyOpaqueTensorImpl(
@@ -93,8 +100,76 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       OpaqueHandle opaque_handle,
       c10::IntArrayRef sizes,
       c10::IntArrayRef strides)
-      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes)
-        { this->sizes_and_strides_.set_strides(strides); }
+      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
+    {
+      py::gil_scoped_acquire gil;
+      this->meta_handle_ = std::make_shared<c10::SafePyObject>(py::dict().release().ptr(), getPyInterpreter());
+    }
+    this->sizes_and_strides_.set_strides(strides);
+    this->storage_ = c10::Storage(c10::make_intrusive<TinyLazyStorageImpl>(device));
+    TensorImpl::storage_access_should_throw_ = false; // TODO: a hack around is_alias_of checks
+  }
+
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion version_counter,
+      bool allow_tensor_metadata_change) const {
+    auto impl = c10::make_intrusive<TinyOpaqueTensorImpl>(
+        this->key_set(),
+        this->dtype(),
+        this->device(),
+        this->opaque_handle(),
+        this->sizes_and_strides_.sizes_arrayref(),
+        this->sizes_and_strides_.strides_arrayref());
+    this->copy_tensor_metadata(
+        /*src_opaque_impl=*/this,
+        /*dest_opaque_impl=*/impl.get(),
+        /*version_counter=*/std::forward<VariableVersion>(version_counter),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->refresh_numel();
+    return impl;
+  }
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const override {
+    return this->shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+  }
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    return this->shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
+  }
+
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+    AT_ASSERT(this->has_compatible_shallow_copy_type(impl->key_set()));
+    auto opaque_impl =
+        static_cast<const TinyOpaqueTensorImpl<OpaqueHandle>*>(impl.get());
+    this->copy_tensor_metadata(
+        /*src_impl=*/opaque_impl,
+        /*dest_impl=*/this,
+        /*version_counter=*/this->version_counter(),
+        /*allow_tensor_metadata_change=*/this->allow_tensor_metadata_change());
+    this->refresh_numel();
+  }
+
+  template <typename VariableVersion>
+  static void copy_tensor_metadata(
+    const TinyOpaqueTensorImpl<OpaqueHandle>* src_opaque_impl,
+    TinyOpaqueTensorImpl<OpaqueHandle>* dest_opaque_impl,
+    VariableVersion version_counter,
+    bool allow_tensor_metadata_change) {
+    OpaqueTensorImpl<OpaqueHandle>::copy_tensor_metadata(
+        src_opaque_impl,
+        dest_opaque_impl,
+        std::forward<VariableVersion>(version_counter),
+        allow_tensor_metadata_change);
+    dest_opaque_impl->meta_handle_ = src_opaque_impl->meta_handle_;
+  }
+  std::shared_ptr<c10::SafePyObject> meta_handle_;
 };
 }
 
@@ -139,7 +214,99 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
 
+// NOTE: Distributed pytorch
+#include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <pybind11/chrono.h>
+
+class WorkShim : public c10d::Work {
+public:
+  WorkShim(c10d::OpType opType, c10::intrusive_ptr<c10::ivalue::Future> future)
+    : c10d::Work(-1, opType), future_(std::move(future)) {}
+  bool isCompleted() override {
+    return future_->completed();
+  }
+  bool isSuccess() const override {
+    return future_->hasValue();
+  }
+  bool wait(std::chrono::milliseconds timeout = c10d::kUnsetTimeout) override {
+    future_->wait();
+    return true;
+  }
+  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+    return future_;
+  }
+private:
+  c10::intrusive_ptr<c10::ivalue::Future> future_;
+};
+
+class PyDistBackend : public c10d::Backend {
+public:
+  PyDistBackend(int rank, int size, py::object py_backend)
+    : c10d::Backend(rank, size), py_backend_(py_backend) {}
+
+  virtual const std::string getBackendName() const override { return "tiny"; }
+
+  c10::intrusive_ptr<c10d::Work> allreduce(std::vector<at::Tensor>& tensors, const c10d::AllreduceOptions& opts) override {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("allreduce")(tensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::TensorType::get()));
+    fut->markCompleted(c10::IValue(tensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLREDUCE, std::move(fut));
+  }
+
+  c10::intrusive_ptr<c10d::Work> broadcast(std::vector<at::Tensor>& tensors, const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) override {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("broadcast")(tensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::TensorType::get()));
+    fut->markCompleted(c10::IValue(tensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::BROADCAST, std::move(fut));
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
+    py::gil_scoped_acquire gil;
+    py::object py_result = py_backend_.attr("allgather")(outputTensors, inputTensors, opts);
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+    fut->markCompleted(c10::IValue(outputTensors));
+    return c10::make_intrusive<WorkShim>(c10d::OpType::ALLGATHER, std::move(fut));
+  }
+private:
+  py::object py_backend_;
+};
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+  m.def("get_meta", [](const at::Tensor& tensor) {
+    auto* impl = tensor.unsafeGetTensorImpl();
+    auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+    std::shared_ptr<c10::SafePyObject> meta = opaque_impl->meta_handle_;
+  return py::reinterpret_borrow<py::object>(meta->ptr(getPyInterpreter()));
+  });
+  m.def("register_dist_backend", [](py::object backendcls) {
+    auto factory = [backendcls](const c10::intrusive_ptr<c10d::Store>& /*store*/,
+                             int rank, int size, const std::chrono::duration<float>& /*timeout*/) -> c10::intrusive_ptr<c10d::Backend> {
+        py::object backend = backendcls();
+        backend.attr("rank") = rank;
+        backend.attr("size") = size;
+        return c10::make_intrusive<PyDistBackend>(rank, size, backend);
+    };
+    py::object torch_distributed = py::module::import("torch.distributed");
+    py::object backend_class = torch_distributed.attr("Backend");
+    py::list devices; devices.append("tiny");
+    backend_class.attr("register_backend")("tiny", py::cpp_function(factory), false, devices);
+  });
+}
+
+// TODO: do we need autograd for these?
+TORCH_LIBRARY_IMPL(c10d, AutogradPrivateUse1, m) {
+  m.impl("allgather_", torch::CppFunction::makeFallthrough());
+  m.impl("broadcast_", torch::CppFunction::makeFallthrough());
+  m.impl("allreduce_", torch::CppFunction::makeFallthrough());
 }
