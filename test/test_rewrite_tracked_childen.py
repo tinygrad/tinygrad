@@ -55,7 +55,7 @@ class TestRewriteTrackedChildren(unittest.TestCase):
     extra = PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="r"), print_children)])
     a = Tensor.empty(3, 3)
     r = (a+0).sum()
-    s = graph_rewrite(r.lazydata, merge_views+sym+extra, track_children=True)
+    graph_rewrite(r.lazydata, merge_views+sym+extra, track_children=True)
 
 if __name__ == '__main__':
   unittest.main()
