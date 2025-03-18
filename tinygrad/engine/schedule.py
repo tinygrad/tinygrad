@@ -161,9 +161,8 @@ def apply_swizzle(u:UOp) -> UOp:
 
 def swizzle_reduceop(ctx, r:UOp, src:UOp, view:UOp):
   ctx.update_children()
-  # NOTE: if the reduceop is not an arange and has more than one path, we realize it
-  # if it's an arange just recompute it
-  if r in ctx.children and len(ctx.children[r]) > 1 and src.base.op is not Ops.CONST: return r.contiguous().view(view.arg)
+  # NOTE: if the reduceop has more than one path, we realize it
+  if r in ctx.children and len(ctx.children[r]) > 1: return r.contiguous().view(view.arg)
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
