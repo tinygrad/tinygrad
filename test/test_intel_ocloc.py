@@ -1,18 +1,22 @@
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.codegen.kernel import Kernel
-from tinygrad import intel_offline_compiler as ioc
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.runtime.ops_gpu import CLDevice, CLProgram, CLAllocator
 from tinygrad.device import BufferSpec
+from tinygrad.device import Device
+
 
 # TODO: skip if not intel hardware
 class TestIntelOcloc(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT != "INTEL", f"no support on {Device.DEFAULT}")
   def test_simple_compilation(self):
     cl_kernel = """__kernel void test(__global int* data0) {
                       int gidx0 = get_group_id(0);
                       *(data0+gidx0) =  get_group_id(0);
                     }"""
+
+    from tinygrad import intel_offline_compiler as ioc
 
     def compile(src, ioc_compile_func):
       device = CLDevice()
