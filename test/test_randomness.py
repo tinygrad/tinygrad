@@ -99,7 +99,7 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(getenv("PTX"), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
-    for ei in lower_schedule(Tensor.rand(20).schedule()):
+    for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
         for u in ei.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
