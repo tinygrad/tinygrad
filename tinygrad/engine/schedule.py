@@ -107,25 +107,9 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-# **** UOp realization
+# **** create kernels
 
 DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
-
-def check_dims(u:UOp):
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in u.toposort if x.op not in {*DONT_PUSH_VIEWS, Ops.KERNEL} and x.st is not None])]
-  if not all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims): return u.replace(src=tuple(s.contiguous() for s in u.src))
-
-insert_contiguous = PatternMatcher([
-  # always realize sinked ops
-  (UPat(Ops.SINK, name="s"),
-   lambda s: s.replace(src=new_src) if (new_src:=tuple(x if x.base.op in DONT_PUSH_VIEWS else x.contiguous() for x in s.src)) != s.src else None),
-  # always realize views we can't push through
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="x"),), name="view"), lambda x,view: x.contiguous().view(view.arg)),
-  # can only have one dim per sink
-  (UPat(GroupOp.All-{Ops.SINK}, name="u"), check_dims),
-])
-
-# **** create kernels
 
 @dataclass(frozen=True)
 class Kernel:
@@ -163,6 +147,9 @@ create_kernels = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
+  # always put sinked ops in a kernel
+  (UPat(Ops.SINK, name="x"),
+   lambda x: x.replace(src=new_src) if (new_src:=tuple(s if s.base.op in DONT_PUSH_VIEWS else s.contiguous() for s in x.src)) != x.src else None),
   # remove downstream reshapes from SINK
   (UPat(Ops.SINK, name="x"), lambda x:x.replace(src=tuple(s.base for s in x.src)) if any(s.op is Ops.VIEW for s in x.src) else None),
 ])
@@ -309,7 +296,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # swizzler + create_kernels
   view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left, name="view_left")
   view_right_map = graph_rewrite_map(vl_sink:=view_left_map[sink], view_right, track_children=True, name="view_right")
-  contiguous_map = graph_rewrite_map(vr_sink:=view_right_map[vl_sink], merge_views+insert_contiguous+create_kernels, ctx=KernelContext({}))
+  contiguous_map = graph_rewrite_map(vr_sink:=view_right_map[vl_sink], merge_views+create_kernels, ctx=KernelContext({}))
   # map sink sources back to the kernel op
   assert len(vr_sink.src) == len(contiguous_map[vr_sink].src)
   for vs,ks in zip(vr_sink.src, contiguous_map[vr_sink].src): contiguous_map[vs] = ks
