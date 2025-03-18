@@ -18,7 +18,7 @@ class MixtureFeedForward:
     assert x.shape[1] == 1, "only length=1"
     g = self.gate(x).float().softmax(-1)
 
-    g = g.squeeze() # removes the BS and length dims
+    g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
     # run MoE
