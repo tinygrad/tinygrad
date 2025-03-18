@@ -51,6 +51,7 @@ class TestRewriteTrackedChildren(unittest.TestCase):
   @unittest.expectedFailure
   def test_child_after_parent_update(self):
     def print_children(ctx, r):
+      ctx.update_children()
       print(ctx.children[r])
     extra = PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="r"), print_children)])
     a = Tensor.empty(3, 3)
