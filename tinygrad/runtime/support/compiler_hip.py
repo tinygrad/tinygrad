@@ -1,6 +1,7 @@
-import ctypes, subprocess
+import ctypes
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.device import Compiler, CompileError
+from tinygrad.helpers import amdgpu_disassemble
 
 def check(status):
   if status != 0:
@@ -63,6 +64,4 @@ class AMDCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text')
     except RuntimeError as e: raise CompileError(e) from e
-  def disassemble(self, lib:bytes):
-    asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-    print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+  def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
