@@ -414,7 +414,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_tensor_dtype_errors(self):
     with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
-    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+    with self.assertRaises(AttributeError): Tensor([3], dtype=(dtypes.int,))
 
   def test_tensor_bytes(self):
     data = b"abc123"
