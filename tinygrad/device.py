@@ -155,10 +155,10 @@ class Buffer:
       return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.nbytes)))
-  def as_typed_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+  def as_typed_buffer(self, shape=None, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
-    return self.as_buffer(allow_zero_copy, force_zero_copy).cast(self.dtype.base.fmt)
+    return self.as_buffer(allow_zero_copy, force_zero_copy).cast(self.dtype.base.fmt, shape if shape is not None else (self.size,))
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
     assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"

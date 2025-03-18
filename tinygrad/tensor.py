@@ -298,7 +298,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self.contiguous().realize().lazydata.buffer.as_typed_buffer().cast(self.dtype.base.fmt, self.shape)
+    return self.contiguous().realize().lazydata.buffer.as_typed_buffer(self.shape)
 
   def item(self) -> ConstType:
     """
