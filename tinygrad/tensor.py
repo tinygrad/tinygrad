@@ -11,7 +11,7 @@ from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -288,6 +288,9 @@ class Tensor(SimpleMathTrait):
     """
     return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
+  def _buffer(self) -> Buffer: return self.contiguous().to("CPU").realize().lazydata.buffer
+  def _data(self) -> memoryview: return self._buffer().as_buffer()
+
   def data(self) -> memoryview:
     """
     Returns the data of this tensor as a memoryview.
@@ -297,9 +300,9 @@ class Tensor(SimpleMathTrait):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt, cast(tuple[int, ...], self.shape))
+    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self.contiguous().realize().lazydata.buffer.as_typed_buffer(self.shape)
+    return self._buffer().as_typed_buffer(self.shape)
 
   def item(self) -> ConstType:
     """
@@ -344,7 +347,7 @@ class Tensor(SimpleMathTrait):
     import numpy as np
     if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
     if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
-    return self.contiguous().realize().lazydata.buffer.numpy().reshape(self.shape)
+    return self._buffer().numpy().reshape(self.shape)
 
   def clone(self) -> Tensor:
     """
