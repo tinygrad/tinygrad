@@ -183,7 +183,7 @@ def reduceop_view_right(src:UOp, v:UOp, r:UOp):
 def elementwise_view_right(root:UOp):
   if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in DONT_PUSH_VIEWS]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
-  if swizzles[0].base.size != root.size: return None
+  if swizzles[0].base.size != root.size: return root.replace(src=tuple(s.base.contiguous().view(s.arg) if s.op is Ops.VIEW else s for s in root.src))
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
