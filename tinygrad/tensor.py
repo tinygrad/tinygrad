@@ -288,7 +288,7 @@ class Tensor(SimpleMathTrait):
     """
     return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return self.contiguous().to("CPU").realize().lazydata.buffer
+  def _buffer(self) -> Buffer: return self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
