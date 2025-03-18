@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex, ParamSpec, TypeVar
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -11,7 +11,7 @@ from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
-from tinygrad.device import Device, BufferSpec
+from tinygrad.device import Device
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -288,15 +288,6 @@ class Tensor(SimpleMathTrait):
     """
     return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
-  def _data(self) -> memoryview:
-    if 0 in self.shape: return memoryview(bytearray(0))
-    # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.base).contiguous().to("CPU").realize()
-    buf = cpu.lazydata.base.realized
-    assert buf is not None, f"{cpu.lazydata.base} was not realized"
-    if self.device != "CPU": buf.options = BufferSpec(nolru=True)
-    return buf.as_buffer(allow_zero_copy=True if self.device != "CPU" else False)
-
   def data(self) -> memoryview:
     """
     Returns the data of this tensor as a memoryview.
@@ -306,10 +297,8 @@ class Tensor(SimpleMathTrait):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.base.fmt != "e"
-    return self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape)
+    return self.contiguous().realize().lazydata.buffer.as_typed_buffer().cast(self.dtype.base.fmt, self.shape)
 
   def item(self) -> ConstType:
     """
@@ -350,11 +339,9 @@ class Tensor(SimpleMathTrait):
     print(repr(t.numpy()))
     ```
     """
-    import numpy as np
     if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
-    assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)
+    return self.contiguous().realize().lazydata.buffer.numpy().reshape(self.shape)
 
   def clone(self) -> Tensor:
     """
