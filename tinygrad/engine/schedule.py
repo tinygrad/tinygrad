@@ -276,13 +276,12 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("glbl"), UPat.var("view"))), check_load_st),
 ])
 
+replace_assign = PatternMatcher([(UPat(Ops.ASSIGN, name="x"), lambda ctx,x: x.src[0] if x.buf_uop in ctx else None),])
+
 def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
   # substitute kernel sources for the target buffer + apply reshapes
-  parents_rep: dict[UOp, UOp] = {}
-  for s in k.src:
-    if s.op is Ops.ASSIGN: parents_rep[s] = s.buf_uop.view(unwrap(s.src[1].arg.ast.st))
-  ast = k.arg.ast.substitute(parents_rep)
+  ast = graph_rewrite(k.arg.ast, replace_assign, ctx=[s.buf_uop for s in k.src if s.op is Ops.ASSIGN], bottom_up=True)
   # push views to edges
   ast = graph_rewrite(graph_rewrite(ast, view_left), view_right)
   # add buffer ops + fix_kernel_ops
