@@ -1,9 +1,9 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os
+import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -175,6 +175,15 @@ class AMMemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20)) # per device
     self.root_page_table = AMPageTableEntry(self.adev, self.palloc(0x1000, zero=not self.adev.smi_dev, boot=True), lv=am.AMDGPU_VM_PDB1)
 
+  def _frag_size(self, va, sz, must_cover=True):
+    """
+    Calculate the tlb fragment size for a given virtual address and size.
+    If must_cover is True, the fragment size must cover the size, otherwise the biggest fragment size that fits the size is returned.
+    Fragment 0 is 4KB, 1 is 8KB and so on.
+    """
+    va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
+    return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
+
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False) -> AMMapping:
     if AM_DEBUG >= 2: print(f"am {self.adev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
@@ -185,8 +194,8 @@ class AMMemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
         for pte_off in range(pte_cnt):
           assert pt.entries[pte_idx + pte_off] & am.AMDGPU_PTE_VALID == 0, f"PTE already mapped: {pt.entries[pte_idx + pte_off]:#x}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers,
-            uncached=uncached, system=system, snooped=snooped, frag=0 if pte_covers == 0x1000 else 0x9, valid=True)
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
+                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     # Invalidate TLB after mappings.
     self.adev.gmc.flush_tlb(ip='GC', vmid=0)
@@ -212,12 +221,21 @@ class AMMemoryManager:
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       paddrs = []
-      try:
-        ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
-        for _, _, _, seg_cnt, seg_size in ctx.next(size): paddrs += [(self.palloc(seg_size, zero=False), seg_size) for _ in range(seg_cnt)]
-      except MemoryError:
-        for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-        raise
+      ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
+      for off, _, _, seg_cnt, seg_size in ctx.next(size):
+        while seg_cnt > 0:
+          # Try to allocate as long segment (power of 2) as possible
+          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
+          while cont_seg_sz >= seg_size:
+            try: paddr = self.palloc(cont_seg_sz, zero=True)
+            except MemoryError: cont_seg_sz //= 2
+            else: break
+
+          if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
+          else:
+            for paddr, _ in paddrs: self.pa_allocator.free(paddr)
+            raise MemoryError(f"Failed to allocate contigous {cont_seg_sz=:#x} bytes (size={size:#x})")
+          seg_cnt, off = seg_cnt - cont_seg_sz // seg_size, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
@@ -268,7 +286,7 @@ class AMDev:
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
-    self.soc21:AM_SOC21 = AM_SOC21(self)
+    self.soc:AM_SOC = AM_SOC(self)
     self.gmc:AM_GMC = AM_GMC(self)
     self.ih:AM_IH = AM_IH(self)
     self.psp:AM_PSP = AM_PSP(self)
@@ -282,7 +300,7 @@ class AMDev:
 
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
-      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
         ip.init()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
@@ -295,7 +313,7 @@ class AMDev:
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     self.smu.set_clocks(level=-1) # last level, max perf.
-    self.gfx.set_clockgating_state()
+    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
@@ -373,16 +391,18 @@ class AMDev:
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(bhdr) + bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
-  def _ip_module(self, prefix:str, hwip):
+  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""):
     version = [self.ip_versions[hwip]//10000, (self.ip_versions[hwip]//100)%100, self.ip_versions[hwip]%100]
     for ver in [version, version[:2]+[0], version[:1]+[0, 0]]:
-      try: return __import__(f"tinygrad.runtime.autogen.am.{prefix}_{ver[0]}_{ver[1]}_{ver[2]}", fromlist=[f"{prefix}_{ver[0]}_{ver[1]}_{ver[2]}"])
+      try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
       except ImportError: pass
     raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
 
   def _build_regs(self):
     mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
-      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP))]
+      ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
+      ("HDP", self._ip_module("hdp", am.HDP_HWIP))]
+
     for base, module in mods:
       rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
       reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))

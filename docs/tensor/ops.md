@@ -34,6 +34,8 @@
 ::: tinygrad.Tensor.interpolate
 ::: tinygrad.Tensor.scatter
 ::: tinygrad.Tensor.scatter_reduce
+::: tinygrad.Tensor.sort
+::: tinygrad.Tensor.topk
 
 ## Neural Network (functional)
 

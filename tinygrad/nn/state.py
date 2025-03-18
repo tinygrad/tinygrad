@@ -124,7 +124,7 @@ def get_parameters(obj) -> list[Tensor]:
   """
   return list(get_state_dict(obj).values())
 
-def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=True, consume=False) -> None:
+def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=True, consume=False, realize=True) -> None:
   """
   Loads a `state_dict` into a model.
 
@@ -140,7 +140,8 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
   ```
   """
   start_mem_used = GlobalCounters.mem_used
-  with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
+  with Timing("loaded weights in ",
+              lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s", enabled=verbose):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
@@ -152,9 +153,10 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       if v.shape != state_dict[k].shape:
         raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance(v.device, tuple):
-        if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k]).realize()
-        else: v.replace(state_dict[k].shard(v.device, v.lazydata.axis)).realize()
-      else: v.replace(state_dict[k].to(v.device)).realize()
+        if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
+        else: v.replace(state_dict[k].shard(v.device, v.lazydata.axis))
+      else: v.replace(state_dict[k].to(v.device))
+      if realize: v.realize()
       if consume: del state_dict[k]
 
 @accept_filename

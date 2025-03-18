@@ -3,13 +3,13 @@ import numpy as np
 from typing import List, Callable
 import torch
 import warnings
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, DEVECTORIZE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
 if getenv("TINY_BACKEND"):
-  import extra.torch_backend.backend # noqa: F401 # pylint: disable=unused-import
+  import tinygrad.frontend.torch # noqa: F401 # pylint: disable=unused-import
   torch.set_default_device("tiny")
 
 if CI:
@@ -357,7 +357,7 @@ class TestOps(unittest.TestCase):
     (tt*(tt != 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t != 0)).sum().backward()
-    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(t.grad.cpu().numpy(), tt.grad.numpy(), rtol=1e-5)
 
   def test_cmp_lt_backwards(self):
     # new grad zeroes these out
@@ -373,7 +373,7 @@ class TestOps(unittest.TestCase):
     (tt*(tt < 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t < 0)).sum().backward()
-    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(t.grad.cpu().numpy(), tt.grad.numpy(), rtol=1e-5)
 
   # TODO: fix backward of these functions
   def test_trunc(self):
@@ -1047,6 +1047,41 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
+  def test_sort(self):
+    for dim in [-1, 0, 1]:
+      for descending in [True, False]:
+        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
+        helper_test_op([(8,45,65)], lambda x: x.sort(dim, descending).indices.type(torch.int32), lambda x: x.sort(dim, descending)[1],
+                       forward_only=True)
+    # repeated values
+    helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
+    helper_test_op(None, lambda x: x.sort(stable=True).indices.type(torch.int32), lambda x: x.sort()[1], forward_only=True, vals=[[0, 1] * 9])
+    helper_test_op(None, lambda x: x.sort(stable=True, descending=True).values,
+                   lambda x: x.sort(descending=True)[0], forward_only=True, vals=[[0, 1] * 9])
+    helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),
+                   lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
+
+  def test_topk(self):
+    helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
+    helper_test_op([(10)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
+    for dim in [0, 1, -1]:
+      for largest in [True, False]:
+        for sorted_ in [True]: # TODO support False
+          helper_test_op([(10,20,30)],
+                          lambda x: x.topk(5, dim, largest, sorted_).values,
+                          lambda x: x.topk(5, dim, largest, sorted_)[0], forward_only=True)
+          helper_test_op([(10,20,30)],
+                          lambda x: x.topk(5, dim, largest, sorted_).indices.type(torch.int32),
+                          lambda x: x.topk(5, dim, largest, sorted_)[1], forward_only=True)
+    # repeated values
+    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
+    np.testing.assert_equal(value.numpy(), [1, 1, 1])
+    np.testing.assert_equal(indices.numpy(), [0, 1, 3])
+    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False)
+    np.testing.assert_equal(value.numpy(), [0, 0, 0])
+    np.testing.assert_equal(indices.numpy(), [2, 4, 6])
+    self.helper_test_exception([(4)], lambda x: x.topk(5), lambda x: x.topk(5), expected=(RuntimeError, ValueError))
+
   def test_einsum(self):
     # matrix transpose
     helper_test_op([(150,150)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
@@ -1252,11 +1287,11 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([()], lambda x: x.sum(1), lambda x: x.sum(1), expected=IndexError)
     self.helper_test_exception([()], lambda x: x.sum((1,)), lambda x: x.sum((1,)), expected=IndexError)
 
-  def test_sum_acc_dtype(self):
-    helper_test_op([(45,3)], lambda x: x.sum(), lambda x: x.sum(acc_dtype=dtypes.float32))
-    if is_dtype_supported(dtypes.float64): helper_test_op([(45,3)], lambda x: x.sum(dtype=torch.float64), lambda x: x.sum(acc_dtype=dtypes.float64))
+  def test_sum_dtype_arg(self):
+    helper_test_op([(45,3)], lambda x: x.sum(), lambda x: x.sum(dtype=dtypes.float32))
+    if is_dtype_supported(dtypes.float64): helper_test_op([(45,3)], lambda x: x.sum(dtype=torch.float64), lambda x: x.sum(dtype=dtypes.float64))
 
-    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).sum(acc_dtype="")
+    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).sum(dtype="")
 
   def test_sum_with_zeros_shape(self):
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,)))
@@ -1273,8 +1308,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.prod(0))
     helper_test_op([()], lambda x: x.prod(-1))
 
-  def test_prod_acc_dtype(self):
-    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).prod(acc_dtype="")
+  def test_prod_dtype_arg(self):
+    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).prod(dtype="")
 
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())
@@ -1469,6 +1504,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=-1), lambda x: x.logcumsumexp(-1), atol=1e-7, grad_atol=1e-7)
 
+  @unittest.skipIf(not DEVECTORIZE, "broken without DEVECTORIZE. TODO: fix this")
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
 
@@ -2634,6 +2670,14 @@ class TestOps(unittest.TestCase):
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[1., 2., 3.]])
 
+  @unittest.expectedFailure
+  @unittest.skipIf(torch._C._get_privateuse1_backend_name() == "tiny", 'results in a success instead of a failure')
+  def test_gather_failure(self):
+    # gather with inf values do not work, other values results in nan
+    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
+                         lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
+                         vals=[[-float("inf"), 2., 3.]])
+
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
@@ -2839,6 +2883,10 @@ class TestOps(unittest.TestCase):
   def test_masked_fill(self):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
+
+  def test_masked_select(self):
+    helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
+    helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
 
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):

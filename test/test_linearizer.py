@@ -28,7 +28,7 @@ def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
-  r = a.matmul(b, acc_dtype=dtype_out)
+  r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
   run_schedule(sched)
@@ -47,7 +47,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
 def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
-  r = a.matmul(b, acc_dtype=dtype_out)
+  r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule()
   realized_ast = sched[-1].ast
   k = Kernel(realized_ast)
@@ -71,7 +71,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    lowered = list(lower_schedule(c.schedule()))
+    lowered = [x[1] for x in lower_schedule(c.schedule())]
     for ei in lowered: ei.run()
     rawbufs = lowered[-1].bufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
@@ -1050,11 +1050,11 @@ class TestLinearizer(unittest.TestCase):
     for tensor_dtype, acc_dtype, expected_dtype in tests:
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype) and is_dtype_supported(expected_dtype):
         a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
-        helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
-        helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
-        helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, acc_dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(a.sum(dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(a.matmul(b, dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, dtype=acc_dtype), expected_dtype)
         d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
-        helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
+        helper_arg_acc_dtype(d.conv2d(w, dtype=acc_dtype), expected_dtype)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
@@ -1101,7 +1101,7 @@ class TestLinearizer(unittest.TestCase):
       for axis in range(9):
         a = Tensor.rand(16, 16, 29, 29, dtype=tc.dtype_in).realize()
         b = Tensor.rand(32, 16, 16, 16, dtype=tc.dtype_in).realize()
-        c = a.conv2d(b, padding=1, acc_dtype=tc.dtype_out)
+        c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
         k = Kernel(realized_ast)
@@ -1130,7 +1130,7 @@ class TestLinearizer(unittest.TestCase):
   def test_tensor_cores_unroll_phi(self):
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
-    r = x.matmul(y, acc_dtype=tc.dtype_out)
+    r = x.matmul(y, dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is Ops.WMMA:
@@ -1141,7 +1141,7 @@ class TestLinearizer(unittest.TestCase):
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
-    r = x.matmul(y, acc_dtype=tc.dtype_out)
+    r = x.matmul(y, dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is Ops.WMMA:
@@ -1154,7 +1154,7 @@ class TestLinearizer(unittest.TestCase):
     # all ASSIGN children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
-    r = x.matmul(y, acc_dtype=tc.dtype_out).relu()
+    r = x.matmul(y, dtype=tc.dtype_out).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in k.uops:
       if u.op is Ops.WMMA:
@@ -2000,7 +2000,7 @@ class TestKernelOpts(unittest.TestCase):
       # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
       if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
-      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      r = a.matmul(b, dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
       helper_linearizer_opt(r, [
         [],
@@ -2027,7 +2027,7 @@ class TestKernelOpts(unittest.TestCase):
       # bf16 buffer returns float32 numpy outputs so test would fail. testing opt with half suffices.
       if tc.dtype_in != dtypes.half and tc.dtype_out != dtypes.half: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
-      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      r = a.matmul(b, dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
       helper_linearizer_opt(r, [
         [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
@@ -2093,10 +2093,10 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      helper_linearizer_opt(b.sum(dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
       if Device.DEFAULT != "WEBGPU":
-        helper_linearizer_opt(b.sum(0, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-        helper_linearizer_opt(b.sum(1, acc_dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+        helper_linearizer_opt(b.sum(0, dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+        helper_linearizer_opt(b.sum(1, dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
 
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
