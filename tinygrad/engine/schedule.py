@@ -130,12 +130,6 @@ do_realize = PatternMatcher([
    lambda tr,copy: copy.replace(src=(copy.src[0], tr.contiguous()))),
 ])
 
-def group_reduceop(ctx, r:UOp) -> UOp|None:
-  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  ctx.update_children()
-  pass
-group_reduceops = PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="r"), group_reduceop)])
-
 # **** create kernels
 
 @dataclass(frozen=True)
@@ -317,8 +311,8 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   sink = tensor_map[big_sink]
   # map tensor metadata to simplified ops
   ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
-  # merge_views + sym + do_realize + group_reduceops + create_kernels
-  kernel_map = graph_rewrite_map(sink, merge_views+sym+do_realize+group_reduceops+create_kernels, track_children=True)
+  # merge_views + sym + do_realize + create_kernels
+  kernel_map = graph_rewrite_map(sink, merge_views+sym+do_realize+create_kernels, track_children=True)
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
