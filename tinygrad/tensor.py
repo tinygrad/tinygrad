@@ -297,6 +297,7 @@ class Tensor(SimpleMathTrait):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
+    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt, self.shape)
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self.contiguous().realize().lazydata.buffer.as_typed_buffer(self.shape)
 
@@ -339,7 +340,9 @@ class Tensor(SimpleMathTrait):
     print(repr(t.numpy()))
     ```
     """
+    import numpy as np
     if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
+    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self.contiguous().realize().lazydata.buffer.numpy().reshape(self.shape)
 
