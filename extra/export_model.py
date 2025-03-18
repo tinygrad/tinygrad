@@ -143,6 +143,7 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
 }};\n""" if not stream_weights else ""
   return f"""
+await new Promise(resolve => setTimeout(resolve, 8000));
 const {model_name} = (() => {{
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
