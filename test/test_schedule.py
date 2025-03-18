@@ -31,7 +31,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
     assert isinstance(t, UOp), f"can't schedule {t}"
     sched, _, __ = create_schedule_with_vars(t.sink())
   # test lowering all the ScheduleItems to ExecItems
-  lowered = list(lower_schedule(sched.copy()))
+  lowered = [x[1] for x in lower_schedule(sched.copy())]
   if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -1614,7 +1614,7 @@ class TestIndexing(unittest.TestCase):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
-      lowered = list(lower_schedule(s.copy()))
+      lowered = [x[1] for x in lower_schedule(s.copy())]
       kernels = [ei for ei in list(lowered) if isinstance(ei.prg, CompiledRunner)]
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
       for ei in lowered: ei.run(do_update_stats=True)
