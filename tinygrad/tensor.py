@@ -2158,7 +2158,7 @@ class Tensor(SimpleMathTrait):
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
-                 ceil_mode=False):
+                 ceil_mode=False, return_indices=False):
     """
     Applies max pooling over a tensor.
 
@@ -2191,9 +2191,20 @@ class Tensor(SimpleMathTrait):
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    pads = self._resolve_pool_pads(padding, len(k_ := make_tuple(kernel_size, 2)))
-    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
-    return self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
+    k_ = make_tuple(kernel_size, 2); s_ = make_tuple(stride, 2) if stride is not None else k_; d_ = make_tuple(dilation, 2)
+    pads = self._resolve_pool_pads(padding, 2)
+    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, s_, d_)
+    pools = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, s_, d_)
+    maxpool = pools.max(tuple(range(-len(k_), 0)))
+    if return_indices:
+        def cartesian_prod(xs, dim): return Tensor.stack(*map(lambda x: x.flatten(), Tensor.meshgrid(*xs)), dim=dim)
+        kernel_offsets = cartesian_prod([Tensor.arange(k_i, dtype=dtypes.int64) * d_i for k_i, d_i in zip(k_, d_)], dim=1)
+        pool_starts_2d = cartesian_prod([Tensor.arange(pools.shape[-4]), Tensor.arange(pools.shape[-3])], dim=0).transpose() * Tensor(s_)
+        pooled_idxs_2d = ((kernel_offsets.reshape(1,-1,len(k_)) + pool_starts_2d.reshape(-1,1,len(k_))) * Tensor([self.shape[-1],1])).sum(-1) 
+        pooled_idxs = pooled_idxs_2d.repeat(prod(self.shape[:-len(k_)]), 1, 1).reshape(pools.shape) 
+        maxpool_idxs = pooled_idxs.flatten(start_dim=-len(k_)).gather(dim=-1, index=pools.flatten(start_dim=-len(k_)).argmax(-1, keepdim=True)).squeeze(-1) 
+        return maxpool, maxpool_idxs - (pads[0] + pads[2] * self.shape[-1]) 
+    return maxpool
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
              dtype:DTypeLike|None=None) -> Tensor:
