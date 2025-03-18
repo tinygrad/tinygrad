@@ -18,23 +18,13 @@ class MixtureFeedForward:
     assert x.shape[1] == 1, "only length=1"
     g = self.gate(x).float().softmax(-1)
 
+    g = g.squeeze() # removes the BS and length dims
     probs, sel = g.topk(self.activated_experts)
 
     # run MoE
-    x_up_gate = x.dot(self.gate_proj[sel].transpose(-1,-2)).silu() * x.dot(self.up_proj[sel].transpose(-1,-2))
-    x_down = x_up_gate.dot(self.down_proj[sel].transpose(-1,-2)).squeeze(-2)
-    return (x_down * probs.unsqueeze(-1)).sum(axis=2)
-
-    # # TODO: don't go to CPU here
-    # choice = g.data().tolist()[0][0]
-    # top = sorted(enumerate(choice), key=lambda x: -x[1])[:self.activated_experts]
-    # sel, probs = Tensor([x[0] for x in top]), Tensor([x[1] for x in top])
-    # #print(sel.numpy(), probs.numpy())
-
-    # # run MoE
-    # x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
-    # x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
-    # return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
+    x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
+    return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
 
 # model is bf16, 1.3B active, 6.9B total
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
@@ -81,7 +71,6 @@ if __name__ == "__main__":
   toks = [12092]
   start_pos = 0
   for i in range(count):
-    # tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), temperature).item()
     tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
     toks.append(tok)
     start_pos += 1
