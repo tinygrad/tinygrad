@@ -139,6 +139,10 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
       if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(metadata)))
 
+def check_dims(u:UOp):
+  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in u.toposort if x.op not in {*DONT_PUSH_VIEWS, Ops.KERNEL} and x.st is not None])]
+  if not all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims): return u.replace(src=tuple(s.contiguous() for s in u.src))
+
 create_kernels = PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
@@ -152,6 +156,8 @@ create_kernels = PatternMatcher([
    lambda x: x.replace(src=new_src) if (new_src:=tuple(s if s.base.op in DONT_PUSH_VIEWS else s.contiguous() for s in x.src)) != x.src else None),
   # remove downstream reshapes from SINK
   (UPat(Ops.SINK, name="x"), lambda x:x.replace(src=tuple(s.base for s in x.src)) if any(s.op is Ops.VIEW for s in x.src) else None),
+  # can only have one dim per kernel
+  (UPat(GroupOp.All-{Ops.SINK}, name="u"), check_dims),
 ])
 
 # **** swizzler
@@ -191,8 +197,8 @@ def elementwise_view_right(root:UOp):
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
 def merge_double_reduce(root:UOp, first_reduce:UOp):
-  assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
-  return first_reduce.replace(arg=(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
+  if root.arg[0] == first_reduce.arg[0]:
+    return first_reduce.replace(arg=(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([
