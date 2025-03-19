@@ -700,7 +700,7 @@ jobs:
         run: test -s extra/huggingface_onnx/huggingface_repos.yaml || echo "Metadata not found in cache."
       - name: Collect HuggingFace Metadata
         if: steps.hf_metadata_cache.outputs.cache-hit != 'true'
-        run: PYTHONPATH=. python extra/huggingface_onnx/collect_metadata.py --limit 100
+        run: PYTHONPATH=. python extra/huggingface_onnx/collect_metadata.py --limit 90
 
       - name: Restore HuggingFace Models Cache
         uses: actions/cache@v3
