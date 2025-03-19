@@ -15,7 +15,7 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
-  @unittest.skipIf(not is_dtype_supported(dtypes.float16), "openpilot model specifies float16 inputs")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "openpilot model specifies float16 inputs")
   def test_benchmark_openpilot_model(self):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = OnnxRunner(onnx_model)
@@ -49,7 +49,7 @@ class TestOnnxModel(unittest.TestCase):
       ps = stats.sort_stats(pstats.SortKey.TIME)
       ps.print_stats(30)
 
-  @unittest.skipIf(not is_dtype_supported(dtypes.float16), "openpilot model specifies float16 inputs")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "openpilot model specifies float16 inputs")
   def test_openpilot_model(self):
     onnx_file = fetch(OPENPILOT_MODEL)
     onnx_model = onnx.load(onnx_file)
