@@ -96,6 +96,7 @@ class TestRealWorld(unittest.TestCase):
       with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need dtypes.bfloat16")
   def test_olmoe(self):
     args_tiny = {"dim": 2048, "hidden_dim": 1024, "n_heads": 16, "n_layers": 16, "norm_eps": 1e-5, "qk_norm": 1e-5, "max_context": 1024,
                  "vocab_size": 50304, "feed_forward": functools.partial(OLMoEFF, 64, 8)}
