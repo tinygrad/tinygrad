@@ -522,7 +522,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
-    if self.op is Ops.BUFFER: return self
+    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return self
     assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
     return self.src[0].base
   @property
@@ -530,8 +530,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self is not self.base:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
-    assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
+    assert self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}, f"must be BUFFER or BUFFER_VIEW {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
+    if self.op is Ops.BUFFER_VIEW:
+      buffers[self] = ret = self.src[0].buffer.view(self.size, self.dtype, self.arg[1]*self.src[0].dtype.itemsize)
+      return ret
     from tinygrad.device import Buffer
     assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
