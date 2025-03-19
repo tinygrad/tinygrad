@@ -2257,12 +2257,11 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
   def test_max_pool2d_indices(self):
-    x, xt = prepare_test_op(-2,2,[(32,2,110,28)], None)
     for ksz in [(2,2), (3,3), 2, 3, (3,2), (5,5), (5,1)]:
-      with self.subTest(padding=ksz):
-        _, torch_idxs = torch.nn.functional.max_pool2d(*x, kernel_size=ksz, return_indices=True)
-        _, tiny_idxs = Tensor.max_pool2d(*xt, kernel_size=ksz, return_indices=True)
-        helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs)
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, return_indices=True)[1].to(torch.int32),
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, return_indices=True)[1], forward_only=True)
 
   def test_max_pool2d_padding(self):
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
@@ -2275,13 +2274,12 @@ class TestOps(unittest.TestCase):
                    lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
   def test_max_pool2d_indices_padding(self):
-    x, xt = prepare_test_op(-2,2,[(32,2,110,28)], None)
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
       for p in [1, (1,0), (0,1)]:
-        with self.subTest(padding=p):
-          _, torch_idxs = torch.nn.functional.max_pool2d(*x, kernel_size=ksz, padding=p, return_indices=True)
-          _, tiny_idxs = Tensor.max_pool2d(*xt, kernel_size=ksz, padding=p, return_indices=True)
-          helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs)
+        with self.subTest(kernel_size=ksz, padding=p):
+          helper_test_op([(32,2,110,28)],
+            lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=p, return_indices=True)[1].to(torch.int32),
+            lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=p, return_indices=True)[1], forward_only=True)
 
   def test_max_pool2d_asymmetric_padding(self):
     shape = (32,2,111,28)
@@ -2305,12 +2303,11 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
   def test_max_pool2d_indices_bigger_stride(self):
-    x, xt = prepare_test_op(-2,2,[(32,2,110,28)], None)
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
-        _, torch_idxs = torch.nn.functional.max_pool2d(*x, kernel_size=(2,2), stride=stride, return_indices=True)
-        _, tiny_idxs = Tensor.max_pool2d(*xt, kernel_size=(2,2), stride=stride, return_indices=True)
-        helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs)
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, return_indices=True)[1].to(torch.int32),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, return_indices=True)[1], forward_only=True)
 
   def test_max_pool2d_bigger_stride_dilation(self):
     for stride, dilation in zip([(2,3), (3,2), 2, 3, 4], [(3,2), (2,3), 2, 3, 6]):
@@ -2320,12 +2317,11 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation))
 
   def test_max_pool2d_indices_bigger_stride_dilation(self):
-    x, xt = prepare_test_op(-2,2,[(32,2,110,28)], None)
     for stride, dilation in zip([(2,3), (3,2), 2, 3, 4], [(3,2), (2,3), 2, 3, 6]):
       with self.subTest(stride=stride):
-        _, torch_idxs = torch.nn.functional.max_pool2d(*x, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)
-        _, tiny_idxs = Tensor.max_pool2d(*xt, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)
-        helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs)
+        helper_test_op([(32,2,110,28)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)[1].to(torch.int32),
+          lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)[1], forward_only=True)
 
   @unittest.skipIf( Device.DEFAULT in {"CUDA", "NV"}, "CUDA fails on this")
   def test_max_pool2d_unit_stride(self):
@@ -2371,9 +2367,9 @@ class TestOps(unittest.TestCase):
   def text_max_pool2d_indices_repeated_elements(self):
     xt = Tensor.ones(3,5,5)
     x = torch.tensor(xt.numpy())
-    _, torch_idxs = torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True)
-    _, tiny_idxs = Tensor.max_pool2d(xt, kernel_size=(2,2), return_indices=True)
-    helper_test_op([], lambda: torch_idxs, lambda: tiny_idxs)
+    helper_test_op([],
+                   lambda: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True)[1].to(torch.int32),
+                   lambda: Tensor.max_pool2d(xt, kernel_size=(2,2), return_indices=True)[1], forward_only=True)
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
