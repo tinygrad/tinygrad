@@ -2198,7 +2198,7 @@ class Tensor(SimpleMathTrait):
     maxpool = pools.max(tuple(range(-len(k_), 0)))
     if return_indices:
       def cartesian_prod(xs, dim): return Tensor.stack(*map(lambda x: x.flatten(), Tensor.meshgrid(*xs)), dim=dim)
-      kernel_offsets = cartesian_prod([Tensor.arange(k_i, dtype=dtypes.int64) * d_i for k_i, d_i in zip(k_, d_)], dim=1)
+      kernel_offsets = cartesian_prod([Tensor.arange(k_i) * d_i for k_i, d_i in zip(k_, d_)], dim=1)
       pool_starts_2d = cartesian_prod([Tensor.arange(pools.shape[-4]), Tensor.arange(pools.shape[-3])], dim=0).transpose() * Tensor(s_)
       pooled_idxs_2d = ((kernel_offsets.reshape(1,-1,len(k_)) + pool_starts_2d.reshape(-1,1,len(k_))) * Tensor([self.shape[-1],1])).sum(-1)
       pooled_idxs = pooled_idxs_2d.repeat(prod(self.shape[:-len(k_)]), 1, 1).reshape(pools.shape)
