@@ -1,5 +1,5 @@
 import yaml, argparse, time
-from requests.exceptions import ConnectionError, Timeout
+from requests.exceptions import ConnectionError, ReadTimeout, Timeout
 from pathlib import Path
 from huggingface_hub import snapshot_download
 
@@ -8,7 +8,7 @@ def snapshot_with_retries(model_id, allow_patterns, cache_dir, retries=3, timeou
     try:
       snapshot_path = snapshot_download(repo_id=model_id, allow_patterns=allow_patterns, cache_dir=cache_dir)
       return snapshot_path
-    except ConnectionError as e:
+    except (ConnectionError, ReadTimeout) as e:
       exception = e
       print(f"Encountered timeout while downloading `{model_id}` with patterns {allow_patterns}, retrying.")
       time.sleep(timeout)
