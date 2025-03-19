@@ -45,10 +45,12 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
-def validate_index(idx:UOp):
-  if len(idx.src) == 2:
-    assert (vmin:=idx.src[1].vmin) >= 0, f"unmasked load accessing below 0, {vmin}"
-    assert (vmax:=idx.src[1].vmax) < (sz:=cast(PtrDType, idx.src[0].dtype).size), f"unmasked load accessing above size {sz}, {vmax}"
+def validate_index(idx:UOp, mask:UOp|None=None):
+  if mask is None:
+    vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
+    if vmin < 0 or vmax >= sz:
+      print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}")
+      return False
   return True
 
 # this is the matcher for the final rendered UOps
@@ -81,6 +83,7 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat()), name="idx"), validate_index),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(name="mask")), name="idx"), validate_index),
 
   # LOAD takes a <bufidx, alt?, gate?, barrier?>
   (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)),)), lambda: True),
