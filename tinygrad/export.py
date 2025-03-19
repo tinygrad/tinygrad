@@ -56,7 +56,7 @@ def dtype_to_js_type(dtype: DType) -> str:
   return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
 
 def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs:Sequence[Any], js_outfile:Optional[str]=None,
-                  state_dict:Optional[dict[str,Tensor]]=None, model_name="model", save_weights=True) -> tuple[str, dict[str, Tensor]]:
+                  state_dict:Optional[dict[str,Tensor]]=None, model_name="model", save_weights=True, fix_contiguous=True) -> tuple[str, dict[str, Tensor]]:
   """
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
@@ -69,7 +69,7 @@ def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs
   # torch_load sometimes loads non-contiguous tensors, which when saved with safe_save, can cause exported WebGPU inference to fail
   # TODO: investigate contiguity in torch_load, and in safe_save/safe_load cycle (which enforces contiguity)
   _state_dict = get_state_dict(weights_holder)
-  if _state_dict:
+  if _state_dict and fix_contiguous:
     for k,v in _state_dict.items():
       _state_dict[k] = v.contiguous().to("WEBGPU").realize()
     load_state_dict(weights_holder, _state_dict)
@@ -87,6 +87,9 @@ def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs
   max_buf_nbytes = max(v[0] for k,v in bufs.items())
   input_names = [name for _,name in special_names.items() if "input" in name]
   output_names = [name for _,name in special_names.items() if "output" in name]
+
+  # set(sum((ji.prg.p.vars for ji in run.jit_cache), []))
+  # self.simplify().render()
 
   # handle symbolic variables; TODO: refactor to fix some of this stuff upstream in tinygrad
   symbolic_vars = OrderedDict()
@@ -140,7 +143,8 @@ const adapter = await navigator.gpu.requestAdapter();
 const device = await adapter.requestDevice({{
 	requiredFeatures: adapter.features.has("shader-f16") ? ["shader-f16"] : [],
 	powerPreference: "high-performance",
-  requiredLimits: {{maxStorageBufferBindingSize: {max_buf_nbytes}, maxBufferSize: {max_buf_nbytes}}},
+  requiredLimits: {{maxStorageBufferBindingSize: {max_buf_nbytes}, maxBufferSize: {max_buf_nbytes},
+    maxComputeInvocationsPerWorkgroup: adapter.limits.maxComputeInvocationsPerWorkgroup}},
 }});
 
 const {model_name} = (() => {{
@@ -219,7 +223,7 @@ const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) =>
       }});
   }}))
 
-    return async ({",".join([f"_{input_name}" for input_name in input_names])}) => {{
+    return [async ({",".join([f"_{input_name}" for input_name in input_names])}) => {{
         const commandEncoder = device.createCommandEncoder();
         {input_writers}
         {kernel_calls}
@@ -229,9 +233,9 @@ const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) =>
 
         {output_readers}
         return {output_return};
-    }}
+    }}, device]
 }}
-const load = async (weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(new Uint8Array(x))); }}
+const load = async (weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(new Uint8Array(x))).then(x => x[0]); }}
 return {{ load, setupNet }};
 }})();
 export default {model_name};

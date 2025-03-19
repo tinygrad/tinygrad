@@ -1,5 +1,6 @@
 import os, json, hashlib, math
 from extra.export_model import export_model
+from tinygrad.export import export_webgpu
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad import Device, Variable, Tensor, dtypes, TinyJit
@@ -142,8 +143,9 @@ if __name__=="__main__":
   metadata = prepare_browser_chunks(model) # export weights to disk
 
   with Context(BEAM=3):
-    prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *model_input(), model_name=model_name, stream_weights=True)
+    #prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *model_input(), model_name=model_name, stream_weights=True)
+    js_code, state_dict = export_webgpu(model.forward, model_input(), model_name=model_name, save_weights=False, fix_contiguous=False)
     # ensure consistency with exported weights
-    prg = prg.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale")
+    js_code = js_code.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale")
 
-  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as f: f.write(prg)
+  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as f: f.write(js_code)
