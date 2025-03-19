@@ -2331,15 +2331,33 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
 
   def test_max_pool2d_return_indices(self):
-    helper_test_op([(1,1,6,6)],
-      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1].type(torch.int32),
-      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1], forward_only=True)
-
-  def test_max_pool2d_return_indices_overlapping_elements(self):
+    # batch and multi-channel
+    helper_test_op([(2,3,6,6)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), return_indices=True)[1], forward_only=True)
+    # dilation
+    helper_test_op([(1,1,10,10)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,2), dilation=(2,3), return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,2), dilation=(2,3), return_indices=True)[1], forward_only=True)
+    # padding
+    helper_test_op([(1,1,5,5)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), padding=1, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), padding=1, return_indices=True)[1], forward_only=True)
+    # ceil mode padding
+    helper_test_op([(1, 1, 7, 7)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3, 3), stride=(2, 2), ceil_mode=True, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3, 3), stride=(2, 2), ceil_mode=True, return_indices=True)[1],
+      forward_only=True)
+    # global maxpool
+    helper_test_op([(1,1,12,13)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(12, 13), return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(12, 13), return_indices=True)[1],
+      forward_only=True)
+    # multiple identical values in one window and overlapping windows
     helper_test_op(None,
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1].type(torch.int32),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1],
-      vals=[[[[[0]*6]*6]]], forward_only=True)
+      vals=[[[[[1]*6]*6]]], forward_only=True)  # Tensor.ones(1,1,6,6)
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
