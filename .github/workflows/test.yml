@@ -679,7 +679,7 @@ jobs:
   
   osxhuggingface:
     name: HuggingFace ONNX Models
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -688,7 +688,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: huggingface
-          deps: testing
+          pydeps: "onnx==1.16.0 onnxruntime pillow huggingface_hub"
       - name: Restore HuggingFace Metadata Cache
         uses: actions/cache@v3
         id: hf_metadata_cache
