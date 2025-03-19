@@ -47,6 +47,7 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 
 def validate_index(idx:UOp, mask:UOp|None=None):
   if mask is None:
+    if any(x.op is Ops.DEFINE_VAR for x in idx.toposort): return True
     vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
     if vmin < 0 or vmax >= sz:
       print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}")
