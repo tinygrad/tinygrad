@@ -2353,7 +2353,7 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(12, 13), return_indices=True)[1].type(torch.int32),
       lambda x: Tensor.max_pool2d(x, kernel_size=(12, 13), return_indices=True)[1],
       forward_only=True)
-    # multiple identical values in one window and overlapping windows
+    # multiple identical values in same window and overlapping windows
     helper_test_op(None,
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1].type(torch.int32),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1],
