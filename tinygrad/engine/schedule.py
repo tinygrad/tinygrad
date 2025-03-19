@@ -1,12 +1,11 @@
 import sys, atexit, pickle
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from tinygrad.ops import UOp, Variable, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, track_rewrites, buffers
-from tinygrad.ops import identity_element, resolve, view_left, merge_views
+from tinygrad.ops import can_pad, identity_element, resolve, view_left, merge_views
 from tinygrad.codegen.symbolic import symbolic_simple
-from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, getenv, pluralize
-#from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
-from tinygrad.helpers import DEBUG, CAPTURE_PROCESS_REPLAY, SPLIT_REDUCEOP
+from tinygrad.helpers import Context, ContextVar, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, unwrap, flatten, getenv, pluralize
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, CAPTURE_PROCESS_REPLAY, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -111,16 +110,10 @@ replace_contiguous = PatternMatcher([
 
 DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
 
-def check_dims(u:UOp):
-  shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in u.toposort if x.op not in {*DONT_PUSH_VIEWS, Ops.KERNEL} and x.st is not None])]
-  if not all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims): return u.replace(src=tuple(s.contiguous() for s in u.src))
-
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=new_src)
     if (new_src:=tuple(x if x.base.op in DONT_PUSH_VIEWS else x.contiguous() for x in s.src)) != s.src else None),
-  # can only have one dim per kernel
-  (UPat(GroupOp.All-{Ops.SINK}, name="u"), check_dims),
 ])
 
 # **** create kernels
@@ -189,12 +182,11 @@ def swizzle_reduceop(ctx, r:UOp, src:UOp, view:UOp):
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
-  return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if resolve(s != u))).view(ShapeTracker.from_shape(r.shape))
+  return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u)).view(ShapeTracker.from_shape(r.shape))
 
 def elementwise_view_right(root:UOp):
   if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in DONT_PUSH_VIEWS]): return None
   assert all_same([x.base.size for x in swizzles]), f"swizzle inputs must have the same size {swizzles}"
-  if swizzles[0].base.size != root.size: return root.replace(src=tuple(s.base.contiguous().view(s.arg) if s.op is Ops.VIEW else s for s in root.src))
   # place view after applying the elementwise op
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(x.arg+new_st) if x.op is Ops.VIEW else x.view(new_st)) for x in root.src]
@@ -202,8 +194,8 @@ def elementwise_view_right(root:UOp):
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
 def merge_double_reduce(root:UOp, first_reduce:UOp):
-  if root.arg[0] == first_reduce.arg[0]:
-    return first_reduce.replace(arg=(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
+  if root.arg[0] != first_reduce.arg[0]: return None
+  return first_reduce.replace(arg=(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([
@@ -235,7 +227,7 @@ def unbind_variable(ctx:tuple[dict[Variable, int], tuple[UOp, ...]], var:UOp, va
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x:UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx[1].index(x)), x.st.to_uop(), dtype=x.dtype)),
-  (UPat(Ops.ASSIGN, name="x"), lambda x:x.src[0]),
+  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[0]),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   # partial assign can store to a non-contiguous ShapeTracker
