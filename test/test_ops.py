@@ -3,7 +3,7 @@ import numpy as np
 from typing import List, Callable
 import torch
 import warnings
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, DEVECTORIZE
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, DEVECTORIZE, OSX
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -1234,8 +1234,7 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
-  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"] or IMAGE \
-    or Device.DEFAULT == "WEBGPU", "not supported on these in CI/IMAGE")
+  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"] or IMAGE, "not supported on these in CI/IMAGE")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
@@ -2681,7 +2680,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,((2,),(1,),(0,)),c,(2,1,0)], lambda x: x[i,((2,),(1,),(0,)),k,(2,1,0)])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,(2,1,0),None,c,(2,1,0),e], lambda x: x[1,(2,1,0),None,k,(2,1,0),p])
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_slice_fancy_indexing_list_with_tensors(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a]], lambda x: x[[i]])
@@ -2770,7 +2769,7 @@ class TestOps(unittest.TestCase):
     if Device.DEFAULT != "WEBGPU":
       helper_test_op([(4,5,6)],
         lambda x: x.scatter(1, b, float("nan"), reduce="add"),
-        lambda x: x.scatter(1, a, float("nan"), reduce="add"), forward_only=True,)
+        lambda x: x.scatter(1, a, float("nan"), reduce="add"), forward_only=True)
 
   def test_scatter_mul(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2782,7 +2781,7 @@ class TestOps(unittest.TestCase):
     if Device.DEFAULT != "WEBGPU":
       helper_test_op([(4,5,6)],
         lambda x: x.scatter(1, b, float("nan"), reduce="multiply"),
-        lambda x: x.scatter(1, a, float("nan"), reduce="multiply"), forward_only=True,)
+        lambda x: x.scatter(1, a, float("nan"), reduce="multiply"), forward_only=True)
 
   def test_scatter_no_reduce_tensor_src(self):
     with self.assertRaises(TypeError):
