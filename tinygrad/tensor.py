@@ -2193,8 +2193,7 @@ class Tensor(SimpleMathTrait):
     """
     pads = self._resolve_pool_pads(padding, len(k_ := make_tuple(kernel_size, 2)))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
-    padded = self.pad(pads, value=dtypes.min(self.dtype))
-    pooled = padded._pool(k_, stride if stride is not None else k_, dilation)
+    pooled = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
     if not return_indices: return pooled.max(tuple(range(-len(k_), 0)))
     m = pooled == pooled.max(tuple(range(-len(k_), 0)), keepdim=True)
     image_shape = self.shape[-len(k_):]
