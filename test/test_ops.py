@@ -2342,8 +2342,8 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), padding=1, return_indices=True)[1], forward_only=True)
     # ceil mode padding
     helper_test_op([(1, 1, 7, 7)],
-      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3, 3), stride=(2, 2), ceil_mode=True, return_indices=True)[1].type(torch.int32),
-      lambda x: Tensor.max_pool2d(x, kernel_size=(3, 3), stride=(2, 2), ceil_mode=True, return_indices=True)[1],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2, 2), stride=(2, 2), ceil_mode=True, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2, 2), stride=(2, 2), ceil_mode=True, return_indices=True)[1],
       forward_only=True)
     # global maxpool
     helper_test_op([(1,1,12,13)],

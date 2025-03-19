@@ -2191,15 +2191,16 @@ class Tensor(SimpleMathTrait):
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    pads = self._resolve_pool_pads(padding, len(k_ := make_tuple(kernel_size, 2)))
+    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    pads = self._resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
     pooled = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
-    if not return_indices: return pooled.max(tuple(range(-len(k_), 0)))
+    if not return_indices: return pooled.max(axis)
     spatial_sz = math.prod(spatial_shape := self.shape[-len(k_):])
-    idx = Tensor.arange(spatial_sz,0,-1).reshape(spatial_shape).pad(pads, value=dtypes.min(dtypes.int32))
-    m = pooled == pooled.max(tuple(range(-len(k_), 0)), keepdim=True)
-    idx = m * idx._pool(k_, stride if stride is not None else k_, dilation)
-    return pooled.max(tuple(range(-len(k_), 0))), (spatial_sz - idx.max(tuple(range(-len(k_), 0)))).cast(dtypes.int32)
+    idx = Tensor.arange(spatial_sz,0,-1, requires_grad=False, device=self.device).reshape(spatial_shape)
+    m = pooled == pooled.max(axis, keepdim=True)
+    idx = m * idx.pad(pads, value=dtypes.min(idx.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    return pooled.max(axis), spatial_sz - idx.max(axis)
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
              dtype:DTypeLike|None=None) -> Tensor:
@@ -2627,7 +2628,8 @@ class Tensor(SimpleMathTrait):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     # compute indices for sorted values
-    idx = Tensor.arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
+    idx = idx.expand(x.shape)
     def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
