@@ -2191,8 +2191,8 @@ class Tensor(SimpleMathTrait):
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    k_ = make_tuple(kernel_size, 2); s_ = make_tuple(stride, 2) if stride is not None else k_; d_ = make_tuple(dilation, 2)
-    pads = self._resolve_pool_pads(padding, 2)
+    k_ = make_tuple(kernel_size, 2); s_ = make_tuple(stride, len(k_)) if stride is not None else k_; d_ = make_tuple(dilation, len(k_))
+    pads = self._resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, s_, d_)
     pools = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, s_, d_)
     maxpool = pools.max(tuple(range(-len(k_), 0)))
