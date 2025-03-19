@@ -2369,6 +2369,14 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
 
+  def text_max_pool2d_repeated_elements(self):
+    xt = Tensor.ones(3,5,5)
+    x = torch.tensor(xt.numpy())
+    _, torch_idxs = torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True)
+    _, tiny_idxs = Tensor.max_pool2d(xt, kernel_size=(2,2), return_indices=True)
+    helper_test_op([], lambda: torch_idxs, lambda: tiny_idxs)
+
+
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
