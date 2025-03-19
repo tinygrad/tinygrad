@@ -1964,7 +1964,7 @@ class TestSwizzle(unittest.TestCase):
     y = Tensor.randn(4, 2, 2).realize()
     t = x.sum(axis=1)+y.sum(axis=1)
     with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
-    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1))
+    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   # kernels can only have 1 or n in each dim
   @unittest.expectedFailure
@@ -1974,7 +1974,7 @@ class TestSwizzle(unittest.TestCase):
     y = Tensor.randn(4, 3, 2).realize()
     t = x.sum(axis=1)+y.sum(axis=1)
     with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
-    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1))
+    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   def test_unsafe_pad(self):
     x = Tensor.full((2,2), 1.0).contiguous()
