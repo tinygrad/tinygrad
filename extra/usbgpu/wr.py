@@ -5,6 +5,62 @@ from tinygrad.runtime.autogen import pci
 
 usb = USBConnector("")
 
+def flash_read(start_addr, read_len, stride=128):
+  data = bytearray(read_len)
+
+  for i in range(0, read_len, stride):
+    remaining = read_len - i
+    buf_len = min(stride, remaining)
+
+    flash_addr = start_addr + i
+    flash_addr_lo = flash_addr & 0xff
+    flash_addr_md = (flash_addr >> 8) & 0xff
+    flash_addr_hi = (flash_addr >> 16) & 0xff
+
+    # Set FLASH_CON_MODE to read, with normal I/O config.
+    usb.write(0xC8AD, bytes([0x00]))
+
+    # Set FLASH_CON_BUF_OFFSET to zero.
+    usb.write(0xC8AE, struct.pack('>H', 0x0000))
+
+    # Set FLASH_CON_ADDR_LEN_MAYBE to 3.
+    usb.write(0xC8AC, bytes([0x03]))
+
+    # Set the flash address.
+    usb.write(0xC8A1, bytes([flash_addr_lo]))
+    usb.write(0xC8A2, bytes([flash_addr_md]))
+    usb.write(0xC8AB, bytes([flash_addr_hi]))
+
+    # Set FLASH_CON_DATA_LEN to the number of bytes to read.
+    usb.write(0xC8A3, struct.pack('>H', buf_len))
+
+    # Set FLASH_CON_CSR bit 0 to start the read.
+    usb.write(0xC8A9, bytes([0x01]))
+
+    # Wait for read to finish.
+    while usb.read(0xC8A9, 1)[0] & 1:
+      continue
+
+    buf = usb.read(0x7000, buf_len)
+
+    data[i:i+buf_len] = buf
+
+  return bytes(data)
+
+
+cfg = flash_read(0x0, 0x80)
+print(cfg)
+
+wrbuf = (ctypes.c_uint8 * 0x80)()
+for i in range(0x80): wrbuf[i] = cfg[i]
+
+usb.wrcfg(wrbuf)
+exit(0)
+
+usb.write(0x64b, bytes([4]))
+wrbuf = (ctypes.c_uint8 * 512)()
+for i in range(512): wrbuf[i] = i
+usb.scsi_write(wrbuf)
 
 print(usb.read(0x2, 1))
 print(usb.read(0xc426, 2))

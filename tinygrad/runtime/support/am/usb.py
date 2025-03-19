@@ -190,16 +190,12 @@ class USBConnector:
     assert len(buf) == 128
     cdb = struct.pack('>B15x', 0xe1)
     self._send(cdb, in_data=buf)
-    # for i in range(0, read_len, stride):
-    #   remaining = read_len - i
-    #   buf_len = min(stride, remaining)
-    #   current_addr = (start_addr + i)
-    #   assert current_addr >> 17 == 0
-    #   current_addr &= 0x01ffff
-    #   current_addr |= 0x500000
-    #   cdb = struct.pack('>BBBHB', 0xe4, buf_len, current_addr >> 16, current_addr & 0xffff, 0x00)
-    #   data[i:i+buf_len] = self._send(cdb, buf_len)
-    # return bytes(data[:read_len])
+
+  def rdcfg(self, sz):
+    if DEBUG >= 4: print("rdcfg", hex(sz))
+    assert sz == 128
+    cdb = struct.pack('>BBI', 0xe0, 0, 0)
+    return self._send(cdb)
 
   def read(self, start_addr, read_len, stride=255):
     if DEBUG >= 4: print("read", hex(start_addr))
