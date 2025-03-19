@@ -395,7 +395,7 @@ class AMDev:
     for ver in [self.ip_ver[hwip], self.ip_ver[hwip][:2]+(0,), self.ip_ver[hwip][:1]+(0, 0)]:
       try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
       except ImportError: pass
-    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
+    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {self.ip_ver[hwip]}")
 
   def _build_regs(self):
     mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
