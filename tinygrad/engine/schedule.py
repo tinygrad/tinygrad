@@ -421,13 +421,15 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   for k,v in tensor_map.items():
     # ASSIGN always becomes the target buffer
     if v.op is Ops.ASSIGN: becomes_map[k] = v.src[0]
+    elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.BUFFER_VIEW:
+      becomes_map[k] = a.buf_uop.replace(src=(a.src[0].buf_uop,)).view(unwrap(v.st))
     # if we created a new buffer for this tensor, map it to the assigned buffer
     elif (a:=kernel_map.get(v.base)) is not None and (a:=a.base).op is Ops.ASSIGN:
       becomes_map[k] = a.src[0] if a.src[0].st == v.st else a.src[0].view(unwrap(v.st))
     # tensors can also simplify to an existing buffer/const
     else:
       if k is v: continue
-      if v.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: becomes_map[k] = v
+      if v.base.op is Ops.BUFFER: becomes_map[k] = v
       if v.base.op is Ops.CONST and all_int(v.shape): becomes_map[k] = v
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
