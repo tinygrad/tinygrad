@@ -46,10 +46,13 @@ tensor_uop_spec = buffer_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, mask:UOp|None=None):
+  # this checks for out of bounds access. it is not complete but should catch some issues
   if mask is None:
-    if any(x.op is Ops.DEFINE_VAR for x in idx.toposort): return True
+    # WEBGPU has a BITCAST in the index. TODO: fix
+    if any(x.op in {Ops.DEFINE_VAR, Ops.BITCAST} or (x.op is Ops.SPECIAL and any(not isinstance(y, int) for y in x.arg[1:])) for x in idx.toposort):
+      return True
     vmin, vmax, sz = idx.src[1].vmin, idx.src[1].vmax, cast(PtrDType, idx.src[0].dtype).size
-    if vmin < 0 or vmax >= sz:
+    if sz != -1 and (vmin < 0 or vmax >= sz):
       print(f"OUT OF BOUNDS ACCESS in INDEX {vmin} - {vmax} not in 0 - {sz}")
       return False
   return True

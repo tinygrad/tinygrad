@@ -249,8 +249,8 @@ load_store_indexing = PatternMatcher([
                                   UPat.var("val"))), delete_redundant_gates),
 ])
 
-def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:UOp|None=None) -> UOp:
-  if len(x.src) >= 3 and x.src[2] is mask: return None
+def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:UOp|None=None) -> UOp|None:
+  if len(x.src) >= 3 and x.src[2] is mask: return None  # already moved
   # this moves the mask from the indexing to the load/store op for rendering
   return UOp.load(x.src[0], x.const_like(0), mask, *x.src[1:], dtype=x.dtype) if x.op is Ops.LOAD else UOp.store(x.src[0], x.src[1], mask, *x.src[2:])
 
