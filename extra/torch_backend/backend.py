@@ -259,10 +259,7 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
 @torch.library.impl("aten::cumsum", "privateuseone")
-def cumsum(self, dim):
-  from tinygrad.ops import Ops
-  if (unwrap(self).shape == () and dim == 0) or (0 in unwrap(self).shape): return self
-  return wrap(unwrap(self)._cumalu(dim, Ops.ADD))
+def cumsum(self, dim): return wrap(unwrap(self).cumsum(dim).contiguous())
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 def scatter_add(self, dim, index, src, out):
