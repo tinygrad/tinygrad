@@ -1,7 +1,10 @@
-import ctypes
+import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
 from tinygrad.device import Compiler, CompileError
-from tinygrad.helpers import amdgpu_disassemble
+
+def amdgpu_disassemble(lib:bytes):
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
 def check(status):
   if status != 0:
@@ -57,7 +60,7 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
   check(comgr.amd_comgr_destroy_action_info(action_info))
   return ret
 
-class AMDCompiler(Compiler):
+class HIPCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
