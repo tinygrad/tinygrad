@@ -2320,7 +2320,8 @@ class TestOps(unittest.TestCase):
     for stride, dilation in zip([(2,3), (3,2), 2, 3, 4], [(3,2), (2,3), 2, 3, 6]):
       with self.subTest(stride=stride):
         helper_test_op([(32,2,110,28)],
-          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)[1].to(torch.int32),
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)[1]
+                       .to(torch.int32),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride, dilation=dilation, return_indices=True)[1], forward_only=True)
 
   @unittest.skipIf( Device.DEFAULT in {"CUDA", "NV"}, "CUDA fails on this")
@@ -2351,12 +2352,12 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True))
 
   def test_max_pool2d_indices_ceil_mode(self):
-    x, xt = prepare_test_op(-2,2,[(1,1,6,6)], None)
     for ksz in [(3,3), 3, (3,2), 4]:
       with self.subTest(kernel_size=ksz):
-        _, torch_idxs = torch.nn.functional.max_pool2d(*x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, return_indices=True)
-        _, tiny_idxs = Tensor.max_pool2d(*xt, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, return_indices=True)
-        helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs)
+        helper_test_op([(1,1,6,6)],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, return_indices=True)[1]
+                       .to(torch.int32),
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, return_indices=True)[1], forward_only=True)
 
   def test_max_pool2d_ceil_mode_output_size_reduce_by_one(self):
     # sliding window ignored from end region
