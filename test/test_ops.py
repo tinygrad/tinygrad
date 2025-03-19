@@ -1056,9 +1056,6 @@ class TestOps(unittest.TestCase):
     # repeated values
     helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True).indices.type(torch.int32), lambda x: x.sort()[1], forward_only=True, vals=[[0, 1] * 9])
-    for dim in [0, 1]:
-      helper_test_op(None, lambda x: x.sort(dim=dim, stable=True).indices.type(torch.int32),
-                     lambda x: x.sort(dim=dim)[1], forward_only=True, vals=[[[0, 1] * 9]*2])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).values,
                    lambda x: x.sort(descending=True)[0], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),

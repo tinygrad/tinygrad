@@ -169,7 +169,7 @@ def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stri
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
   if stride is not None and len(stride) == 0: stride = None
   # TODO: utilize input indices once they are correct
-  # TODO: implement maxunpool, also fix onnx maxunpool
+  # TODO: implement maxunpool
   self_ = unwrap(self)
   out = Tensor.max_pool2d(self_, kernel_size, stride, dilation, padding, ceil_mode)
   return wrap(out.gradient(self_, gradient=unwrap(grad_out))[0])
