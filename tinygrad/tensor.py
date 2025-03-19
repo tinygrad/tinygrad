@@ -2202,7 +2202,8 @@ class Tensor(SimpleMathTrait):
       pool_starts_2d = cartesian_prod([Tensor.arange(pools.shape[-4]), Tensor.arange(pools.shape[-3])], dim=0).transpose() * Tensor(s_)
       pooled_idxs_2d = ((kernel_offsets.reshape(1,-1,len(k_)) + pool_starts_2d.reshape(-1,1,len(k_))) * Tensor([self.shape[-1],1])).sum(-1)
       pooled_idxs = pooled_idxs_2d.repeat(prod(self.shape[:-len(k_)]), 1, 1).reshape(pools.shape)
-      maxpool_idxs = pooled_idxs.flatten(start_dim=-len(k_)).gather(dim=-1, index=pools.flatten(start_dim=-len(k_)).argmax(-1, keepdim=True)).squeeze(-1)
+      pools_argmax = pools.flatten(start_dim=-len(k_)).argmax(-1, keepdim=True)
+      maxpool_idxs = pooled_idxs.flatten(start_dim=-len(k_)).gather(dim=-1, index=pools_argmax).squeeze(-1)
       return maxpool, maxpool_idxs - (pads[0] + pads[2] * self.shape[-1])
     return maxpool
 
