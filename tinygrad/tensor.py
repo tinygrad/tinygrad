@@ -2191,11 +2191,6 @@ class Tensor(SimpleMathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.max_pool2d(padding=1).numpy())
     ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    pooled, indices = t.max_pool2d(return_indices=True)
-    print(pooled.numpy())
-    print(indices.numpy())
-    ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
     pads = self._resolve_pool_pads(padding, len(k_))
