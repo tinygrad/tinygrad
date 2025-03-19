@@ -1,10 +1,10 @@
 # https://arxiv.org/pdf/2409.02060
 import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
-import functools, collections, json
-from tinygrad import Tensor, nn, Device
-from tinygrad.helpers import tqdm, CI, Profiling, Timing, fetch, getenv
-from extra.models.llama import Transformer, Variable, convert_from_huggingface
+import functools
+from tinygrad import Tensor, nn, Device, GlobalCounters
+from tinygrad.helpers import Timing, getenv
+from extra.models.llama import Transformer, convert_from_huggingface
 
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
@@ -18,11 +18,8 @@ class MixtureFeedForward:
     assert x.shape[1] == 1, "only length=1"
     g = self.gate(x).float().softmax(-1)
 
-    # TODO: don't go to CPU here
-    choice = g.data().tolist()[0][0]
-    top = sorted(enumerate(choice), key=lambda x: -x[1])[:self.activated_experts]
-    sel, probs = Tensor([x[0] for x in top]), Tensor([x[1] for x in top])
-    #print(sel.numpy(), probs.numpy())
+    g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
+    probs, sel = g.topk(self.activated_experts)
 
     # run MoE
     x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
@@ -52,7 +49,7 @@ if __name__ == "__main__":
 
   with Timing("create model: "):
     model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
-                        vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8), jit=False)
+                        vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8))
     model_state_dict = nn.state.get_state_dict(model)
     del model_state_dict['freqs_cis']
 
@@ -74,13 +71,15 @@ if __name__ == "__main__":
   toks = [12092]
   start_pos = 0
   for i in range(count):
-    tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), temperature).item()
+    GlobalCounters.reset()
+    tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
     toks.append(tok)
     start_pos += 1
     print(toks)
     print(tokenizer.decode(toks))
 
-  # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
-  assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
-                  247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
+  if temperature == 0:
+    # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
+    assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
+                    247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
 

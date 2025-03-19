@@ -31,7 +31,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
     assert isinstance(t, UOp), f"can't schedule {t}"
     sched, _, __ = create_schedule_with_vars(t.sink())
   # test lowering all the ScheduleItems to ExecItems
-  lowered = list(lower_schedule(sched.copy()))
+  lowered = [x[1] for x in lower_schedule(sched.copy())]
   if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -1614,7 +1614,7 @@ class TestIndexing(unittest.TestCase):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
-      lowered = list(lower_schedule(s.copy()))
+      lowered = [x[1] for x in lower_schedule(s.copy())]
       kernels = [ei for ei in list(lowered) if isinstance(ei.prg, CompiledRunner)]
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
       for ei in lowered: ei.run(do_update_stats=True)
@@ -1957,6 +1957,24 @@ class TestSwizzle(unittest.TestCase):
     b_reduce = b.sum(axis=(0,))
     t = a_reduce+b_reduce
     with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
+
+  def test_parallel_reduce_possible(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 2, 2).realize()
+    y = Tensor.randn(4, 2, 2).realize()
+    t = x.sum(axis=1)+y.sum(axis=1)
+    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
+    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
+
+  # kernels can only have 1 or n in each dim
+  @unittest.expectedFailure
+  def test_dont_parallelize_different_n(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 2, 2).realize()
+    y = Tensor.randn(4, 3, 2).realize()
+    t = x.sum(axis=1)+y.sum(axis=1)
+    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
+    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   def test_unsafe_pad(self):
     x = Tensor.full((2,2), 1.0).contiguous()
