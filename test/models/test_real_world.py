@@ -1,4 +1,4 @@
-import unittest, time, gc
+import unittest, time, gc, functools
 import numpy as np
 from tinygrad.device import is_dtype_supported
 from tinygrad.nn import optim
@@ -13,6 +13,7 @@ from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_M
 from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer
 from examples.stable_diffusion import UNetModel, unet_params
+from examples.olmoe import Transformer as OLMoETransformer, MixtureFeedForward as OLMoEFF
 from extra.models.unet import ResBlock
 
 global_mem_used = 0
@@ -94,6 +95,15 @@ class TestRealWorld(unittest.TestCase):
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
+
+  def test_olmoe(self):
+    args_tiny = {"dim": 2048, "hidden_dim": 1024, "n_heads": 16, "n_layers": 16, "norm_eps": 1e-5, "qk_norm": 1e-5, "max_context": 1024,
+                 "vocab_size": 50304, "feed_forward": functools.partial(OLMoEFF, 64, 8)}
+    model = OLMoETransformer(**args_tiny)
+    derandomize_model(model)
+    @TinyJit
+    def test(t): return model(t, 0).realize()
+    helper_test("test_olmoe", lambda: (Tensor([[1,]]),), test, 100.0, 1000, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
