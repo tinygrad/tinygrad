@@ -701,6 +701,12 @@ jobs:
       - name: Collect HuggingFace Metadata
         if: steps.hf_metadata_cache.outputs.cache-hit != 'true'
         run: PYTHONPATH=. python extra/huggingface_onnx/collect_metadata.py --limit 90
+      - name: Save HuggingFace Metadata Cache
+        if: steps.hf_metadata_cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v3
+        with:
+          path: extra/huggingface_onnx/huggingface_repos.yaml
+          key: huggingface-metadata-yaml
 
       - name: Restore HuggingFace Models Cache
         uses: actions/cache@v3
