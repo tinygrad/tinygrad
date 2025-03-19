@@ -551,9 +551,7 @@ torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_
 
 from torch.nn.modules import Module
 def backward_hook(model:Module, _grad_input, _grad_out):
-  for p in model.parameters():
-    if p.grad is not None:
-      Tensor.realize(unwrap(p.grad))
+  Tensor.realize(*[unwrap(p.grad) for p in model.parameters() if p.grad is not None])
 def module_hook(module:Module, _name, _submodule): module.register_backward_hook(backward_hook)
 torch.nn.modules.module.register_module_module_registration_hook(module_hook)
 
