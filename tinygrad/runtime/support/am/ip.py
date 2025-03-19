@@ -16,7 +16,7 @@ class AM_SOC(AM_IP):
   def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
 
   def doorbell_enable(self, port, awid=0, awaddr_31_28_value=0, offset=0, size=0):
-    self.adev.reg(f"regS2A_DOORBELL_ENTRY_{port}_CTRL").update(**{f"s2a_doorbell_port{port}_enable": 1, f"s2a_doorbell_port{port}_awid": 0x0,
+    self.adev.reg(f"regS2A_DOORBELL_ENTRY_{port}_CTRL").update(**{f"s2a_doorbell_port{port}_enable": 1, f"s2a_doorbell_port{port}_awid": awid,
       f"s2a_doorbell_port{port}_awaddr_31_28_value": awaddr_31_28_value, f"s2a_doorbell_port{port}_range_offset": offset,
       f"s2a_doorbell_port{port}_range_size": size})
 
