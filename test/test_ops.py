@@ -2331,15 +2331,15 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
 
   def test_max_pool2d_return_indices(self):
-    helper_test_op([(1,1,4,4)],
+    helper_test_op([(1,1,6,6)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1].type(torch.int32),
       lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1], forward_only=True)
 
-  def test_max_pool2d_return_indices_repeated_elements(self):
+  def test_max_pool2d_return_indices_overlapping_elements(self):
     helper_test_op(None,
-      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1].type(torch.int32),
-      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1],
-      vals=[[[[0]*6]*6]], forward_only=True)
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1],
+      vals=[[[[[0]*6]*6]]], forward_only=True)
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)

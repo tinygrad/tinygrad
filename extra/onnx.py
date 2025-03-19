@@ -411,7 +411,7 @@ def get_onnx_ops():
               storage_order:int=0, strides:list[int]|int=1):
     pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
     ret, idx = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True)
-    return ret, (idx.transpose(-2, -1)).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
+    return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
           kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):

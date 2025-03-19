@@ -2195,11 +2195,11 @@ class Tensor(SimpleMathTrait):
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
     pooled = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
     if not return_indices: return pooled.max(tuple(range(-len(k_), 0)))
+    spatial_sz = math.prod(spatial_shape := self.shape[-len(k_):])
+    idx = Tensor.arange(spatial_sz,0,-1).reshape(spatial_shape).pad(pads, value=dtypes.min(dtypes.int32))
     m = pooled == pooled.max(tuple(range(-len(k_), 0)), keepdim=True)
-    image_shape = self.shape[-len(k_):]
-    idx = Tensor.arange(math.prod(image_shape),0,-1).reshape(image_shape).pad(pads, value=dtypes.min(dtypes.int32))
     idx = m * idx._pool(k_, stride if stride is not None else k_, dilation)
-    return pooled.max(tuple(range(-len(k_), 0))), (math.prod(image_shape) - idx.max(tuple(range(-len(k_), 0)))).cast(dtypes.int32)
+    return pooled.max(tuple(range(-len(k_), 0))), (spatial_sz - idx.max(tuple(range(-len(k_), 0)))).cast(dtypes.int32)
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
              dtype:DTypeLike|None=None) -> Tensor:
