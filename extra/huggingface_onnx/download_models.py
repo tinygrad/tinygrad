@@ -6,7 +6,7 @@ from huggingface_hub import snapshot_download
 def snapshot_with_retries(model_id, allow_patterns, cache_dir, retries=3, timeout=5):
   for _ in range(retries):
     try:
-      snapshot_path = snapshot_download(repo_id=model_id, resume_download=True, allow_patterns=allow_patterns, cache_dir=cache_dir)
+      snapshot_path = snapshot_download(repo_id=model_id, allow_patterns=allow_patterns, cache_dir=cache_dir)
       return snapshot_path
     except ConnectionError as e:
       exception = e
