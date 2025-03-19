@@ -2158,7 +2158,7 @@ class Tensor(SimpleMathTrait):
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
-                 ceil_mode=False):
+                 ceil_mode=False, return_indices=False):
     """
     Applies max pooling over a tensor.
 
@@ -2193,7 +2193,14 @@ class Tensor(SimpleMathTrait):
     """
     pads = self._resolve_pool_pads(padding, len(k_ := make_tuple(kernel_size, 2)))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
-    return self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
+    padded = self.pad(pads, value=dtypes.min(self.dtype))
+    pooled = padded._pool(k_, stride if stride is not None else k_, dilation)
+    if not return_indices: return pooled.max(tuple(range(-len(k_), 0)))
+    m = pooled == pooled.max(tuple(range(-len(k_), 0)), keepdim=True)
+    image_shape = self.shape[-len(k_):]
+    idx = Tensor.arange(math.prod(image_shape),0,-1).reshape(image_shape).pad(pads, value=dtypes.min(dtypes.int32))
+    idx = m * idx._pool(k_, stride if stride is not None else k_, dilation)
+    return pooled.max(tuple(range(-len(k_), 0))), (math.prod(image_shape) - idx.max(tuple(range(-len(k_), 0)))).cast(dtypes.int32)
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
              dtype:DTypeLike|None=None) -> Tensor:

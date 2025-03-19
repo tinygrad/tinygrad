@@ -1056,6 +1056,9 @@ class TestOps(unittest.TestCase):
     # repeated values
     helper_test_op(None, lambda x: x.sort(stable=True).values, lambda x: x.sort()[0], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True).indices.type(torch.int32), lambda x: x.sort()[1], forward_only=True, vals=[[0, 1] * 9])
+    for dim in [0, 1]:
+      helper_test_op(None, lambda x: x.sort(dim=dim, stable=True).indices.type(torch.int32),
+                     lambda x: x.sort(dim=dim)[1], forward_only=True, vals=[[[0, 1] * 9]*2])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).values,
                    lambda x: x.sort(descending=True)[0], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),
@@ -2326,6 +2329,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,1,5,5)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
+
+  def test_max_pool2d_return_indices(self):
+    helper_test_op([(1,1,4,4)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1], forward_only=True)
+
+  def test_max_pool2d_return_indices_repeated_elements(self):
+    helper_test_op(None,
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=2, return_indices=True)[1],
+      vals=[[[[0]*6]*6]], forward_only=True)
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
