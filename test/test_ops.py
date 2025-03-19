@@ -2262,7 +2262,7 @@ class TestOps(unittest.TestCase):
       with self.subTest(padding=ksz):
         _, torch_idxs = torch.nn.functional.max_pool2d(*x, kernel_size=ksz, return_indices=True)
         _, tiny_idxs = Tensor.max_pool2d(*xt, kernel_size=ksz, return_indices=True)
-        helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs) 
+        helper_test_op([], lambda: torch_idxs.to(torch.int32), lambda: tiny_idxs)
 
   def test_max_pool2d_padding(self):
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
