@@ -2375,7 +2375,6 @@ class TestOps(unittest.TestCase):
     _, tiny_idxs = Tensor.max_pool2d(xt, kernel_size=(2,2), return_indices=True)
     helper_test_op([], lambda: torch_idxs, lambda: tiny_idxs)
 
-
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
