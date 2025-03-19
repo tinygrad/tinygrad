@@ -98,6 +98,15 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(out.values.cpu().numpy(), [4, 3])
     np.testing.assert_equal(out.indices.cpu().numpy(), [3, 1])
 
+  def test_masked_select(self):
+    a = torch.tensor([4, 3, 2, 1], device=device)
+    mask = torch.tensor([True, False, True, False], device=device)
+    out = torch.masked_select(a, mask)
+    np.testing.assert_equal(out.cpu().numpy(), [4, 2])
+    mask = torch.tensor(True, device=device)
+    out = torch.masked_select(a, mask)
+    np.testing.assert_equal(out.cpu().numpy(), [4, 3, 2, 1])
+
   @unittest.skip("meh")
   def test_str(self):
     a = torch.ones(4, device=device)
