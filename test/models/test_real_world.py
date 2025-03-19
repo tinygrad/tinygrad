@@ -104,7 +104,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    helper_test("test_olmoe", lambda: (Tensor([[1,]]),), test, 10.67, 858, all_jitted=True)
+    helper_test("test_olmoe", lambda: (Tensor([[1,]]),), test, 0.0, 858, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
