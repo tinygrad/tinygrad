@@ -695,7 +695,7 @@ jobs:
         id: hf_metadata_cache
         with:
           path: extra/huggingface_onnx/huggingface_repos.yaml
-          key: huggingface-metadata-v1
+          key: huggingface-metadata-yaml
       - name: Verify Metadata Exists
         run: test -s extra/huggingface_onnx/huggingface_repos.yaml || echo "Metadata not found in cache."
       - name: Collect HuggingFace Metadata
