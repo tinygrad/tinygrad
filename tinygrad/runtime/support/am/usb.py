@@ -255,6 +255,11 @@ class USBConnector:
     cdb = struct.pack('>BBIHB', 0x2a, 0, 0, len(buf) // 512, 0)
     return self._send(cdb, in_data=buf)
 
+  def scsi_read(self, ret_len):
+    # scsi read 0x8a packet
+    cdb = struct.pack('>BBIHB', 0x8a, 0, 0, ret_len // 512, 0)
+    return self._send(cdb, ret_len=ret_len)
+
   def pcie_write_request_fw(self, address, value):
     cdb = struct.pack('>BII', 0x03, address, value)
     self._send(cdb)    

@@ -892,7 +892,6 @@ class AMDDevice(HCQCompiled):
     print("done queues init")
 
     the_sig = self.dev_iface.alloc(0x1000, uncached=True, cpu_access=True)
-    print("bef shit", hex(the_sig.va_addr), hex(the_sig.meta.mapping.paddrs[0][0]), hex(self.dev_iface.bars[0][0]))
     spec_sig = AMDSignal(base_addr=the_sig.va_addr, value=0, timeline_for_device=self,
                          create_mv=lambda x, y: AMUSBBar((self.dev_iface.bars[0][0] + the_sig.meta.mapping.paddrs[0][0], y), self.dev_iface.usb))
     self.timeline_signal:SignalType = spec_sig
@@ -997,5 +996,6 @@ class AMDDevice(HCQCompiled):
     super()._at_profile_finalize()
 
   def finalize(self):
-    self.synchronize()
+    try: self.synchronize() # Try to finalize device in any case.
+    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
     if hasattr(self.dev_iface, 'device_fini'): self.dev_iface.device_fini()
