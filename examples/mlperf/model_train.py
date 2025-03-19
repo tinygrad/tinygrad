@@ -345,7 +345,7 @@ def train_resnet():
 def train_retinanet():
   from contextlib import redirect_stdout
   from examples.mlperf.dataloader import batch_load_retinanet
-  from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform, Conv2dHeNormal
+  from examples.mlperf.initializers import FrozenBatchNorm2d, Conv2dNormal, Conv2dKaimingUniform, Conv2dHeNormal, Linear, Conv2d
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models import resnet
   from extra.lr_scheduler import LambdaLR
@@ -429,7 +429,8 @@ def train_retinanet():
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
-  resnet.Conv2d = Conv2dHeNormal # NOTE: overriding to support float32 weights when training float16
+  resnet.Linear = Linear
+  resnet.Conv2d = Conv2d
 
   retinanet.ConvHead = Conv2dNormal
   retinanet.ConvClassificationHeadLogits = functools.partial(Conv2dNormal, prior_prob=0.01)
@@ -482,8 +483,6 @@ def train_retinanet():
 
   for e in range(start_epoch, EPOCHS):
     # ** training loop **
-    BEAM.value = TRAIN_BEAM
-
     train_dataloader = batch_load_retinanet(train_dataset, False, Path(BASE_DIR), batch_size=BS, seed=SEED)
     it = iter(tqdm(train_dataloader, total=steps_in_train_epoch, desc=f"epoch {e}", disable=BENCHMARK))
     i, proc = 0, _data_get(it)

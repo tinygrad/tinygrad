@@ -68,17 +68,22 @@ class LayerNormBert:
     return (xn * self.weight.cast(dtypes.default_float) + self.bias.cast(dtypes.default_float))
 
 class FrozenBatchNorm2d(nn.BatchNorm2d):
-  def __init__(self, num_features:int, affine:bool=True, track_running_stats:bool=True):
-    super().__init__(num_features)
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+    self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    if affine:
-      self.weight = self.weight.cast(dtypes.float32)
-      self.bias = self.weight.cast(dtypes.float32)
+    self.weight = Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False) if affine else None
+    self.bias = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False) if affine else None
 
-      self.weight.requires_grad = False
-      self.bias.requires_grad = False
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False), Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.long, requires_grad=False)
 
-    if track_running_stats: self.running_mean, self.running_var = self.running_mean.cast(dtypes.float32), self.running_var.cast(dtypes.float32)
+  def __call__(self, x:Tensor) -> Tensor:
+    batch_mean, batch_var = super().calc_stats(x.cast(dtypes.float32))
+    if self.track_running_stats and Tensor.training:
+      self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
+      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach().cast(self.running_var.dtype))
+      self.num_batches_tracked += 1
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt()).cast(x.dtype)
 
 class Conv2dNormal(nn.Conv2d):
   def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
@@ -107,3 +112,16 @@ class Conv2dKaimingUniform(nn.Conv2d):
   def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
                     groups=self.groups, stride=self.stride, padding=self.padding)
+
+class Conv2d(nn.Conv2d):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
+               stride:int=1, padding:int|tuple[int, ...]|str=0, dilation:int=1, groups:int=1,
+               bias:bool=True):
+    super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+    scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
+    self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale, dtype=dtypes.float32)
+    self.bias: Tensor|None = Tensor.uniform(out_channels, low=-scale, high=scale, dtype=dtypes.float32) if bias else None
+
+  def __call__(self, x:Tensor) -> Tensor:
+    return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
+                    groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
