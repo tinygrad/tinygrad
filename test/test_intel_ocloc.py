@@ -1,4 +1,5 @@
 import unittest
+from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
@@ -6,10 +7,8 @@ from tinygrad.runtime.ops_gpu import CLDevice, CLProgram, CLAllocator
 from tinygrad.device import BufferSpec
 from tinygrad.device import Device
 
-
-# TODO: skip if not intel hardware
 class TestIntelOcloc(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT != "INTEL", f"no support on {Device.DEFAULT}")
+  @unittest.skipIf(getenv("INTEL") != 1, "only supported on intel gpus")
   def test_simple_compilation(self):
     cl_kernel = """__kernel void test(__global int* data0) {
                       int gidx0 = get_group_id(0);
