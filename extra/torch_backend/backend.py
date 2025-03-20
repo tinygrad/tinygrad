@@ -162,15 +162,14 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
 def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False):
   # TODO: supprt stride [] in tinygrad?
   if stride is not None and len(stride) == 0: stride = None
-  # TODO: support return_indices in tinygrad
-  ret = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode)
-  # TODO: this is wrong
-  return (wrap(ret), wrap(Tensor.zeros_like(ret, dtype=dtypes.int64)))
+  ret, idx = unwrap(self).max_pool2d(kernel_size, stride, dilation, padding, ceil_mode, return_indices=True)
+  return (wrap(ret), wrap(idx.cast(dtypes.int64)))
 
 @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
   if stride is not None and len(stride) == 0: stride = None
   # TODO: utilize input indices once they are correct
+  # TODO: implement maxunpool
   self_ = unwrap(self)
   out = Tensor.max_pool2d(self_, kernel_size, stride, dilation, padding, ceil_mode)
   return wrap(out.gradient(self_, gradient=unwrap(grad_out))[0])
