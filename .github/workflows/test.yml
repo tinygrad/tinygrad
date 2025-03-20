@@ -166,7 +166,7 @@ jobs:
         sudo apt install -y --no-install-recommends ninja-build
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff
+        pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
@@ -311,7 +311,7 @@ jobs:
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff
+        pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
