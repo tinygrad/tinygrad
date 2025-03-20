@@ -2356,6 +2356,17 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1],
       vals=[[[[[1]*6]*6]]], forward_only=True)  # Tensor.ones(1,1,6,6)
 
+  def test_max_unpool2d(self):
+    ksz = (2,2)
+    helper_test_op([(8,3,7,6)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, kernel_size=ksz, return_indices=True), kernel_size=ksz),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, kernel_size=ksz, return_indices=True), kernel_size=ksz), forward_only=True)
+
+    # beautiful_mnist_torch
+    # helper_test_op([(512,32,20,20)],
+    #   lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=(2,2), dilation=1, padding=0, return_indices=True), kernel_size=(2,2), stride=(2,2), padding=0),
+    #   lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, kernel_size=(2,2), stride=(2,2), dilation=1, padding=0, return_indices=True), kernel_size=(2,2), stride=(2,2), padding=0))
+
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:

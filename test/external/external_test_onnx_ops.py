@@ -48,6 +48,16 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_maxunpool(self):
+    # with_output_shape test failure
+    xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
+    xI = np.array([[[[5, 7], [13, 15]]]], dtype=np.int64)
+    output_shape = np.array((1, 1, 5, 5), dtype=np.int64)
+    inputs = {"x": xT, "indices": xI, "output_shape": output_shape}
+    attributes = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [0, 0, 0, 0]}
+    outputs = ["y"]
+    self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
+
   def test_quantize_linear(self):
     test_cases = [
       {"test_case": "round_half_to_even", "qdtype": np.int8, "qzero_point": 0, "x": [-1.5, -0.5, 0.5, 1.5], "scale": 1.0},
