@@ -32,12 +32,23 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
   dt2 = a1.src[0].dtype.scalar().vec(128)
   m0 = UOp(Ops.CAT, dt1, src=(a0.src[0],b0.src[0],c0.src[0],d0.src[0])).gep(swizzle)
   m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
+  simp_m1 = m1.simplify()
+  if simp_m1.op is Ops.GEP and simp_m1.arg == (0,1,2,3)*32:
+    scalar_m1 = simp_m1.src[0].bitcast(dtypes.uint)
+    if acc is not None:
+      return UOp(Ops.CUSTOM, dtypes.int.vec(32), (acc, m0, scalar_m1), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+    else:
+      return UOp(Ops.CUSTOM, dtypes.int.vec(32), (m0, scalar_m1), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
   if acc is not None:
     return UOp(Ops.CUSTOM, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
   else:
     return UOp(Ops.CUSTOM, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_128B({0}, {1})")
 
 dsp_pm = gep_pushing+PatternMatcher([
+  # GEP on REDUCE
+  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'),
+   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
+     tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) else None),
   # no swizzle down convert
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
@@ -55,11 +66,17 @@ dsp_pm = gep_pushing+PatternMatcher([
    UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
   (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
    UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
-  # VECTORIZE on same GEP
-  (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
+
 ])
 
+def add_to_mul(c:UOp, x:UOp):
+  if not c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"): return None
+  return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+
 dsp_pm_late = PatternMatcher([
+  (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),
+   lambda ld, bc: ld.src[0].src[0].cast(bc.dtype.ptr(ld.src[0].dtype.size)).load(dtype=bc.dtype)),
+  (UPat(Ops.CUSTOM, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
   (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
     "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
   (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),

@@ -61,7 +61,7 @@ base_rewrite = PatternMatcher([
 extra_pm = PatternMatcher([
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(Ops.BITCAST, name="x"),
-   lambda x: UOp(Ops.BITCAST, x.dtype, (UOp(Ops.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not Ops.NOOP else None),
+   lambda x: UOp(Ops.BITCAST, x.dtype, (UOp(Ops.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op not in {Ops.NOOP, Ops.LOAD} else None),
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   # devectorize any bools

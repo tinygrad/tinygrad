@@ -114,7 +114,7 @@ class Ops(FastEnum):
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
-  REDUCE_AXIS = auto()
+  REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
 
   # helper ops
   GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702

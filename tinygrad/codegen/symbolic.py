@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType
-from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten
+from tinygrad.helpers import partition, all_same, prod, getenv, DEBUG, flatten, get_single_element
 from tinygrad.codegen.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -185,6 +185,8 @@ gep_pushing = PatternMatcher([
   # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
   (UPat(Ops.CAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
     if not isinstance(x.dtype, PtrDType) else None),
+  # VECTORIZE on same GEP
+  (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
