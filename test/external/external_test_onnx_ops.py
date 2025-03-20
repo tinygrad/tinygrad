@@ -49,7 +49,7 @@ class TestMainOnnxOps(TestOnnxOps):
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
   def test_maxunpool(self):
-    # with_output_shape test failure
+    # test_maxunpool_export_with_output_shape_cpu
     xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
     xI = np.array([[[[5, 7], [13, 15]]]], dtype=np.int64)
     output_shape = np.array((1, 1, 5, 5), dtype=np.int64)
