@@ -7,8 +7,6 @@ gpu_arch: xe-hpc(Max 1100), acm-g10(A770) (for more information see ocloc compil
 @brief: TODO
 """
 class IntelOfflineCompiler:
-  def __init__(self):
-   pass
   def compile(self, cl_kernel:str, gpu_arch:str) -> bytes:
     # prepare ocoloc paramter and cast to proper ctype object for function call
     ocloc_arguments = [b"ocloc", b"compile", b"-file", b"kernel.cl", b"-device", gpu_arch.encode('utf-8'), b"-o", b"kernel.bin"]
