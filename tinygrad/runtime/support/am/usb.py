@@ -10,7 +10,7 @@ class USBConnector:
     if ret != 0: raise Exception(f"Failed to init libusb: {ret}")
 
     if DEBUG >= 6: libusb.libusb_set_option(self.usb_ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
-    
+
     # Open device
     self.handle = libusb.libusb_open_device_with_vid_pid(self.usb_ctx, 0x174c, 0x2463)
     if not self.handle: raise Exception("Failed to open device")
@@ -102,7 +102,7 @@ class USBConnector:
     transfer.contents.buffer = data
     transfer.contents.num_iso_packets = 0
     if stream_id is not None: libusb.libusb_transfer_set_stream_id(transfer, stream_id)
-  
+
   def _send_ops_and_wait(self, *cmds):
     # st = time.perf_counter()
     for x in cmds: libusb.libusb_submit_transfer(x)
@@ -112,6 +112,7 @@ class USBConnector:
 
       all_complete = True
       for transfer in cmds:
+        print("poll", transfer.contents.endpoint, transfer.contents.status)
         if transfer.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED:
           continue
         elif transfer.contents.status != libusb.LIBUSB_TRANSFER_COMPLETED:
@@ -235,7 +236,7 @@ class USBConnector:
 
   def write_batch(self, start_addrs, datas, ignores):
     if DEBUG >= 4: print("write", hex(start_addr))
-    
+
     cdbs = []
     for start_addr, data, ignore_cache in zip(start_addrs, datas, ignores):
       for offset, value in enumerate(data):
@@ -250,19 +251,34 @@ class USBConnector:
         # self._send(cdb)
     self._send_batch(cdbs, [0] * len(cdbs))
 
-  def scsi_write(self, buf):
-    # scsi write 0x28 packet
-    cdb = struct.pack('>BBIHB', 0x2a, 0, 0, len(buf) // 512, 0)
+  def scsi_write(self, lba, buf):
+    assert len(buf) % 512 == 0, "buf length must be multiple of 512"
+
+    # scsi write 0x8a packet
+    cdb = struct.pack('>BBQIBB',
+      0x8A,             # WRITE(16) opcode
+      0,                # flags
+      lba,              # 64-bit LBA
+      len(buf) // 512,  # number of blocks
+      0,                # group number
+      0                 # control
+    )
     return self._send(cdb, in_data=buf)
 
-  def scsi_read(self, ret_len):
-    # scsi read 0x8a packet
-    cdb = struct.pack('>BBIHB', 0x8a, 0, 0, ret_len // 512, 0)
-    return self._send(cdb, ret_len=ret_len)
+  def scsi_read(self, lba, num_blocks):
+    cdb = struct.pack('>BBQIBB',
+      0x88,            # READ(16) opcode
+      0,               # flags (RDPROTECT, DPO, FUA, etc. all zero here)
+      lba,             # 64-bit logical block address
+      num_blocks,      # 32-bit transfer length in blocks
+      0,               # group number
+      0                # control
+    )
+    return self._send(cdb, ret_len=num_blocks * 512)
 
   def pcie_write_request_fw(self, address, value):
     cdb = struct.pack('>BII', 0x03, address, value)
-    self._send(cdb)    
+    self._send(cdb)
 
   def pcie_request(self, fmt_type, address, value=None, size=4, cnt=10):
     assert fmt_type >> 8 == 0
@@ -288,7 +304,7 @@ class USBConnector:
     byte_enable = ((1 << size) - 1) << offset
 
     self.addrs, self.datas, self.ignores = [], [], []
-    
+
     if value is not None:
       assert value >> (8 * size) == 0, f"{value}"
       shifted_value = value << (8 * offset)

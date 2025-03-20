@@ -1,4 +1,4 @@
-import array, time
+import array, time, ctypes
 from hexdump import hexdump
 from tinygrad.runtime.support.am.usb import USBConnector
 from tinygrad.runtime.autogen import pci
@@ -33,7 +33,21 @@ def rescan_bus(bus, gpu_bus):
   usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
 
 print_cfg(0, 0)
-#exit(0)
+
+xxx = (ctypes.c_uint8 * 512)()
+for i in range(512): xxx[i] = 0x5b
+usb.scsi_write(0xaaaa, xxx)
+
+hexdump(usb.scsi_read(0xaaaa, 1))
+exit(0)
+
+print("dump")
+hexdump(usb.read(0xa000, 0x100))
+print("")
+hexdump(usb.read(0xb000, 0x100))
+#print(usb.scsi_read(0x10))
+
+exit(0)
 
 rescan_bus(0, gpu_bus=4)
 
