@@ -249,11 +249,6 @@ load_store_indexing = PatternMatcher([
                                   UPat.var("val"))), delete_redundant_gates),
 ])
 
-def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:UOp|None=None) -> UOp:
-  # this moves the mask from the indexing to the load/store op for rendering
-  nidx = buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx)
-  return UOp.load(nidx, x.const_like(0), mask, *x.src[1:], dtype=x.dtype) if x.op is Ops.LOAD else UOp.store(nidx, x.src[1], mask, *x.src[2:])
-
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
@@ -261,12 +256,11 @@ pm_render = PatternMatcher([
   (UPat(Ops.VCONST, name='c'), lambda c: UOp(Ops.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
   (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
-  # move masks of loads/stores
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask"))),
-                                               masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
+  # give any loads that are masked an alt value
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), name="x"), lambda x: x.replace(src=x.src+(x.const_like(0),))),
   # gate any stores that aren't gated with ifs
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
-    lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
+    lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
 # *** uop graph ***
