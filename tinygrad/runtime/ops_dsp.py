@@ -82,7 +82,7 @@ def add_to_mul(c:UOp, x:UOp):
 dsp_pm_late = PatternMatcher([
   # prefetch L1
   (UPat(Ops.LOAD, dtype=dtypes.uchar.vec(8), name="ld"),
-   lambda ld: ld.replace(src=ld.src+(UOp(Ops.CUSTOM, dtypes.void, src=(ld.src[0].src[0],),
+   lambda ld: ld.replace(src=ld.src+(UOp(Ops.CUSTOM, dtypes.void, src=(ld.src[0].src[0].src[0].index(ld.src[0].src[0].src[1]+8),),
                                          arg="__builtin_HEXAGON_Y2_dcfetch({0});"),)) if ld.src[-1].op is not Ops.CUSTOM else None),
 
   (UPat(Ops.CUSTOM, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
