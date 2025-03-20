@@ -80,7 +80,9 @@ if __name__ == "__main__":
           elif knum == 13:
             # 784x144 * 144x32 -> 784x32
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 2))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
             pass
           elif knum == 35:

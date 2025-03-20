@@ -70,12 +70,16 @@ dsp_pm = gep_pushing+PatternMatcher([
 ])
 
 def add_to_mul(c:UOp, x:UOp):
-  if not c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"): return None
-  return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+  if c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+  elif c.arg.startswith("__builtin_HEXAGON_V6_vrmpybusv_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  else:
+    return None
 
 dsp_pm_late = PatternMatcher([
-  (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),
-   lambda ld, bc: ld.src[0].src[0].cast(bc.dtype.ptr(ld.src[0].dtype.size)).load(dtype=bc.dtype)),
+  #(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),
+  # lambda ld, bc: ld.src[0].src[0].cast(bc.dtype.ptr(ld.src[0].dtype.size)).load(dtype=bc.dtype)),
   (UPat(Ops.CUSTOM, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
   (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
     "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
