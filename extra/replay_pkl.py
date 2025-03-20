@@ -64,8 +64,18 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 16))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 128//16))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 256//16))
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
             pass
+          elif knum == 4:
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
+            k.apply_opt(Opt(OptOps.PADTO, 0, 3))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 3))
+            pass
+          elif knum == 24:
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
           else:
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))

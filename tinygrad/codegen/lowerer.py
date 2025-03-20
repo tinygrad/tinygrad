@@ -118,6 +118,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ret = x.src[0]
   # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+  if len(x.src) > 1: acc = acc + x.src[1]
   ctx.acc_num += 1
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
@@ -227,6 +228,8 @@ pm_quant = symbolic+PatternMatcher([
   (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
   (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
   (UPat(Ops.IGNORE, src=(UPat(Ops.REDUCE_AXIS, name="r"),), name="ig"), ignore_on_reduce),
+  # put add in REDUCE
+  #(UPat(Ops.REDUCE_AXIS, name="r")+UPat.var("x"), lambda r,x: r.replace(src=(r.src[0], (r.src[1]+x) if len(r.src) == 2 else x))),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:

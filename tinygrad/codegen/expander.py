@@ -111,6 +111,8 @@ def create_gate(root:UOp) -> UOp|None:
 migrate_indexing = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(Ops.STORE, name="root"), create_gate),
+  # add on LOAD goes first
+  #(UPat.var('x')+UPat.var('y')+UPat(Ops.LOAD, name='z'), lambda x,y,z: (z+x)+y),
 ])
 
 def expand_rewrite(sink:UOp) -> UOp:
