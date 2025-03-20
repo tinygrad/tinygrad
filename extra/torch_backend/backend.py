@@ -167,10 +167,9 @@ def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stri
 
 @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
-    # if stride is not None and len(stride) == 0: stride = None
-  self_ = unwrap(self)
-  # TODO is output_size always determined by self_.shape?
-  out = Tensor.max_unpool2d(unwrap(grad_out), unwrap(indices), output_size=self_.shape)
+  # if stride is not None and len(stride) == 0: stride = None
+  # TODO can I always use output_size for shape?
+  out = Tensor.max_unpool2d(unwrap(grad_out), unwrap(indices), output_size=unwrap(self).shape)
   return wrap(out)
 
 @torch.library.impl("aten::arange", "privateuseone")
