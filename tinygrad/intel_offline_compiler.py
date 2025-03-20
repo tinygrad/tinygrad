@@ -1,3 +1,4 @@
+from tinygrad.device import CompileError
 from tinygrad.runtime.autogen import intel_ocloc as ocloc
 import ctypes
 
