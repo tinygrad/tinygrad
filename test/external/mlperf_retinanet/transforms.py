@@ -55,7 +55,8 @@ class Compose(object):
         for t in self.transforms:
             image, target = t(image, target)
         return image, target
-    
+
+
 class RandomHorizontalFlip(T.RandomHorizontalFlip):
     def forward(self, image: Tensor,
                 target: Optional[Dict[str, Tensor]] = None) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:

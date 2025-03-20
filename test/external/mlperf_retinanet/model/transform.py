@@ -17,11 +17,6 @@ def _resize_image_and_masks(image: Tensor,
                             target: Optional[Dict[str, Tensor]] = None,
                             image_size: Optional[Tuple[int, int]] = None,
                             ) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
-    if torchvision._is_tracing():
-        im_shape = _get_shape_onnx(image)
-    else:
-        im_shape = torch.tensor(image.shape[-2:])
-
     image = torch.nn.functional.interpolate(image[None], size=image_size, scale_factor=None, mode='bilinear',
                                             recompute_scale_factor=None, align_corners=False)[0]
 
@@ -58,7 +53,7 @@ class GeneralizedRCNNTransform(nn.Module):
                 images: List[Tensor],
                 targets: Optional[List[Dict[str, Tensor]]] = None
                 ) -> Tuple[ImageList, Optional[List[Dict[str, Tensor]]]]:
-        images = [img for img in images]
+        images = list(img for img in images)
         if targets is not None:
             # make a copy of targets to avoid modifying it in-place
             # once torchscript supports dict comprehension
