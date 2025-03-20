@@ -1,18 +1,63 @@
-# export a computational graph for use outside of tinygrad, including references to state
+# export a model for use outside of tinygrad: including data, transforms, and runtime wrapper
 
 # TODO: is there a better place in tinygrad for this?
 # TODO: refactor in progress, simplify everything
 
-from tinygrad import Tensor, dtypes, TinyJit, Device
+from typing import Callable, Sequence, Union, Any, Optional, cast
+from dataclasses import dataclass
+from collections import OrderedDict
+import types
+from tinygrad import Tensor, dtypes, TinyJit, Device, Variable, UOp
 from tinygrad.engine.jit import _prepare_jit_inputs
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, Variable
 from tinygrad.renderer import ProgramSpec
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save, get_parameters
 from tinygrad.helpers import Context
 from tinygrad.dtype import DType
-from typing import Callable, Sequence, Any, Optional, cast
-import types
-from collections import OrderedDict
+from tinygrad.device import Buffer
+
+gidxT = Union[int, UOp]
+
+@dataclass(frozen=True)
+class KernelCall:
+  kernel_name: str
+  args: list[Union[Buffer, Variable]]
+  global_size: Optional[tuple[gidxT, gidxT, gidxT]]=None
+  local_size: Optional[tuple[int, int, int]]=None
+
+@dataclass(frozen=True)
+class ExportSpec:
+  inputs: list[Union[Buffer, Variable]]
+  outputs: list[Buffer]
+  empty_bufs: set[Buffer]
+  weight_bufs: set[Buffer]
+  kernels: dict[str, str]
+  kernel_calls: list[KernelCall]
+
+def extract_model(model: Callable, args: Sequence) -> ExportSpec:
+  @TinyJit
+  def run(args) -> list[Tensor]:
+    out:list[Tensor]|tuple[Tensor] = returned if isinstance((returned := model(*args)), (list, tuple)) else [returned]
+    assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
+    return [t.realize() for t in out] # TODO: or if we allow non-tensors, change to nn.state.get_parameters and then realize
+
+  for _ in range(2): run(args)
+  input_bufs, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(tuple(args), {}) # TODO: enable kwargs?
+  for (j,i),idx in run.captured.input_replace.items(): run.jit_cache[j].bufs[i] = input_bufs[idx]
+  output_bufs: list[Buffer] = [t.lazydata.base.realized for t in cast(list[Tensor], run.captured.ret)]
+  
+  kernels, empty_bufs, weight_bufs, seen, kernel_calls = {}, set(), set(), set(input_bufs + output_bufs), []
+  for ei in run.jit_cache:
+    fxn: ProgramSpec = ei.prg.p
+    kernels[fxn.function_name] = fxn.src
+    for i, buf in enumerate(ei.bufs):
+      if buf not in seen and i==0: empty_bufs.add(buf)
+      elif buf not in seen: weight_bufs.add(buf)
+      seen.add(buf)
+    kernel_calls.append(KernelCall(fxn.function_name, ei.bufs + fxn.vars, fxn.global_size, fxn.local_size))
+
+  resolve = lambda x: x if isinstance(x, Variable) else cast(Tensor, x).lazydata.base.realized
+  return ExportSpec([resolve(x) for x in args if isinstance(x, (Variable, Tensor))], output_bufs, empty_bufs, weight_bufs, kernels, kernel_calls)
 
 def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str], list[tuple[str,list[str],list[int]]], dict[str,tuple[int,DType,int]]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
@@ -35,9 +80,9 @@ def compile_net(run:TinyJit, special_names:dict[int,str]) -> tuple[dict[str,str]
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 
-def jit_model(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], *args) -> tuple[TinyJit,dict[int,str]]:
+def jit_model(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], args) -> tuple[TinyJit,dict[int,str]]:
   @TinyJit
-  def run(*x) -> list[Tensor]:
+  def run(x) -> list[Tensor]:
     out:list[Tensor]|tuple[Tensor] = returned if isinstance((returned := model(*x)), (list, tuple)) else [returned]
     # TODO do we want this assertion? the non-Tensor ret values aren't modified, and may be tricky to export - are they ever useful?
     assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
@@ -60,7 +105,6 @@ def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs
   """
   Exports a javascript WebGPU implementation of a tinygrad model.
   """
-
   if isinstance(model, types.MethodType): weights_holder = model.__self__
   elif hasattr(model, "__call__") and not isinstance(model, types.FunctionType): weights_holder = model
   else: weights_holder = None
@@ -73,11 +117,12 @@ def export_webgpu(model:Callable[..., Tensor|list[Tensor]|tuple[Tensor]], inputs
     for k,v in _state_dict.items():
       _state_dict[k] = v.contiguous().to("WEBGPU").realize()
     load_state_dict(weights_holder, _state_dict)
-
   if not state_dict: state_dict = _state_dict
 
-  with Context(JIT=2): run, special_names = jit_model(model, *inputs)
-  functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
+  with Context(JIT=2): ex = extract_model(model, inputs)
+  # TODO: broken hereafter; refactor to wrap state/compute from ex in JS runtime
+  #with Context(JIT=2): run, special_names = jit_model(model, *inputs)
+  #functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
 
   # TODO: if user passes incomplete state_dict, make it still work by filling in gaps with bufs_to_save
   if state_dict:
