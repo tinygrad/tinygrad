@@ -39,14 +39,14 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
 
 dsp_pm = gep_pushing+PatternMatcher([
   # no swizzle down convert
-  #(((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
-  # lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
-  #   arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
+  (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
+   lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
+     arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
 
   # swizzle down convert
-  (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
-   lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+128, 4))) for i in range(0, 4)),
-     arg="__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))))")),
+  #(((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
+  # lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+128, 4))) for i in range(0, 4)),
+  #   arg="__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))))")),
 
   #(UPat(Ops.CAST, name="x") * UPat(Ops.CAST, name="y"), lambda x,y: (x.src[0]*y.src[0]).cast(x.dtype)),
   #(UPat(Ops.GEP, name="g").cast().named("cast"),
@@ -61,7 +61,7 @@ dsp_pm = gep_pushing+PatternMatcher([
 
 dsp_pm_late = PatternMatcher([
   (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:3d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
+    "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
   (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),

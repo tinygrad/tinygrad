@@ -230,6 +230,8 @@ pm_quant = symbolic+PatternMatcher([
   (UPat(Ops.IGNORE, src=(UPat(Ops.REDUCE_AXIS, name="r"),), name="ig"), ignore_on_reduce),
   # put add in REDUCE
   #(UPat(Ops.REDUCE_AXIS, name="r")+UPat.var("x"), lambda r,x: r.replace(src=(r.src[0], (r.src[1]+x) if len(r.src) == 2 else x))),
+  # distribute on casted MUL
+  #((UPat(Ops.CAST, name="v1")+UPat.cvar("c")) * UPat(Ops.CAST, name="v2"), lambda v1,v2,c: (v1*v2)+(c*v2)),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
