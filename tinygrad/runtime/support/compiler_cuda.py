@@ -4,8 +4,6 @@ from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.device import Compiler, CompileError
-from extra.sass.assembler.CubinFile import CubinFile
-from extra.sass.assembler.CuAsmParser import CuAsmParser
 
 PTX = getenv("PTX")  # this shouldn't be here, in fact, it shouldn't exist
 
@@ -90,6 +88,8 @@ class SASSCompiler(Compiler):
     super().__init__(f"compile_{cache_key}_{self.arch}")
   
   def compile(self, src: str):
+    from extra.sass.assembler.CubinFile import CubinFile
+    from extra.sass.assembler.CuAsmParser import CuAsmParser
     with NamedTemporaryFile() as cuda_file, NamedTemporaryFile() as ptx_file, NamedTemporaryFile() as ptxas_cubin_file, \
       NamedTemporaryFile() as cuasm_file, NamedTemporaryFile() as cuasm_cubin_file: 
       with open(cuda_file.name, "w") as f: f.write(src)
