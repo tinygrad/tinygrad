@@ -5,24 +5,63 @@ from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAll
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
 from tinygrad.codegen.symbolic import gep_pushing
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.ops import PatternMatcher, UPat
 
+def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  swizzle = tuple(swizzle)
+  assert a0.op is Ops.CAST
+  assert b0.op is Ops.CAST
+  assert c0.op is Ops.CAST
+  assert d0.op is Ops.CAST
+  assert a1.op is Ops.CAST
+  assert b1.op is Ops.CAST
+  assert c1.op is Ops.CAST
+  assert d1.op is Ops.CAST
+  dt1 = a0.src[0].dtype.scalar().vec(128)
+  dt2 = a1.src[0].dtype.scalar().vec(128)
+  m0 = UOp(Ops.CAT, dt1, src=(a0.src[0],b0.src[0],c0.src[0],d0.src[0])).gep(swizzle)
+  m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
+  if acc is not None:
+    return UOp(Ops.CUSTOM, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOM, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_128B({0}, {1})")
+
 dsp_pm = gep_pushing+PatternMatcher([
+  # no swizzle down convert
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
-  (UPat(Ops.GEP, name="g").cast().named("cast"),
-   lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
+
+  # swizzle down convert
+  #(((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
+  # lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+128, 4))) for i in range(0, 4)),
+  #   arg="__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))))")),
+
+  #(UPat(Ops.CAST, name="x") * UPat(Ops.CAST, name="y"), lambda x,y: (x.src[0]*y.src[0]).cast(x.dtype)),
+  #(UPat(Ops.GEP, name="g").cast().named("cast"),
+  # lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+  # VECTORIZE on same GEP
+  (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
 ])
 
 dsp_pm_late = PatternMatcher([
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+    "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:2d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
   (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),

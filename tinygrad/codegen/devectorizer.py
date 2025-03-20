@@ -149,7 +149,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
     # we really want stores to be 128 for fast casting
-    if ls.op is Ops.LOAD: lengths = [1024,512,256]+lengths
+    #if ls.op is Ops.LOAD: lengths = [1024,512,256]+lengths
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
@@ -287,5 +287,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
 
   # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
+  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+extra_matcher+pm_render)
   return sink
