@@ -264,8 +264,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # move masks of loads/stores
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask"))),
-                                               masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("mask")))
+                                               .or_casted("cast"),), allow_any_len=True, name="x"), move_mask),
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
     lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),

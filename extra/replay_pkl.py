@@ -27,6 +27,8 @@ if __name__ == "__main__":
           from tinygrad.engine.search import beam_search
           k = beam_search(k, dsp_bufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
         elif not getenv("NOOPT"):
+          # only NCHW
+          """
           if knum in [6,7,9,11]:
             k.apply_opt(Opt(OptOps.PADTO, 1, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
@@ -55,6 +57,15 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.PADTO, 1, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 256))
             #k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+          else:
+            k.hand_coded_optimizations()
+          """
+          if knum == 3:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 16))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 128//16))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
+            pass
           else:
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
