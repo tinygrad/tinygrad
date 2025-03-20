@@ -28,7 +28,7 @@ class TestIntelOcloc(unittest.TestCase):
       device.allocator._free(buf, BufferSpec(host=True, cpu_access=True))
       return res, binary, list(bytearray(mv_array))
     cl_time, cl_binary, cl_result = cl_compile(cl_kernel, None)
-    ioc_time, ioc_binary, ioc_result = cl_compile(cl_kernel, lambda x: ioc.IntelOfflineCompiler().compile(x, "xe"))
+    ioc_time, ioc_binary, ioc_result = cl_compile(cl_kernel, lambda x: ioc.IntelOfflineCompiler().compile(x, "adl-p"))
     assert cl_result == ioc_result
 
 if __name__ == '__main__':
