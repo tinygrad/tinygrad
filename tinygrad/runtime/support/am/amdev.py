@@ -3,7 +3,7 @@ import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
 from tinygrad.runtime.support.allocator import TLSFAllocator
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -33,7 +33,7 @@ class AMRegister:
 
 class AMFirmware:
   def __init__(self, adev):
-    def fmt_ver(hwip): return f"{adev.ip_versions[hwip]//10000}_{(adev.ip_versions[hwip]//100)%100}_{adev.ip_versions[hwip]%100}"
+    def fmt_ver(hwip): return '_'.join(map(str, adev.ip_ver[hwip]))
 
     # Load SOS firmware
     self.sos_fw = {}
@@ -286,7 +286,7 @@ class AMDev:
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
-    self.soc21:AM_SOC21 = AM_SOC21(self)
+    self.soc:AM_SOC = AM_SOC(self)
     self.gmc:AM_GMC = AM_GMC(self)
     self.ih:AM_IH = AM_IH(self)
     self.psp:AM_PSP = AM_PSP(self)
@@ -300,7 +300,7 @@ class AMDev:
 
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
-      for ip in [self.soc21, self.gmc, self.ih, self.psp, self.smu]:
+      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
         ip.init()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
@@ -313,7 +313,7 @@ class AMDev:
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     self.smu.set_clocks(level=-1) # last level, max perf.
-    for ip in [self.soc21, self.gfx]: ip.set_clockgating_state()
+    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(am_version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
@@ -372,7 +372,7 @@ class AMDev:
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
     self.regs_offset:dict[int, dict[int, list]] = collections.defaultdict(dict)
-    self.ip_versions:dict[int, int] = {}
+    self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
     for num_die in range(ihdr.num_dies):
       dhdr = am.struct_die_header.from_address(ctypes.addressof(bhdr) + ihdr.die_info[num_die].die_offset)
@@ -384,7 +384,7 @@ class AMDev:
         for hw_ip in range(1, am.MAX_HWIP):
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
             self.regs_offset[hw_ip][ip.instance_number] = list(ba)
-            self.ip_versions[hw_ip] = int(f"{ip.major:02d}{ip.minor:02d}{ip.revision:02d}")
+            self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
@@ -392,11 +392,10 @@ class AMDev:
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
 
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""):
-    version = [self.ip_versions[hwip]//10000, (self.ip_versions[hwip]//100)%100, self.ip_versions[hwip]%100]
-    for ver in [version, version[:2]+[0], version[:1]+[0, 0]]:
+    for ver in [self.ip_ver[hwip], self.ip_ver[hwip][:2]+(0,), self.ip_ver[hwip][:1]+(0, 0)]:
       try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{prefix}_{prever_prefix}{ver[0]}_{ver[1]}_{ver[2]}")
       except ImportError: pass
-    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {version}")
+    raise ImportError(f"am {self.devfmt}: failed to load {prefix} module with version {self.ip_ver[hwip]}")
 
   def _build_regs(self):
     mods = [("MP0", self._ip_module("mp", am.MP0_HWIP)), ("NBIO", self._ip_module("nbio", am.NBIO_HWIP)), ("GC", self._ip_module("gc", am.GC_HWIP)),
