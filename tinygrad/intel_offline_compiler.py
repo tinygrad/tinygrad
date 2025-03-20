@@ -32,7 +32,7 @@ class IntelOfflineCompiler:
     # compile and check result/output
     ocloc_retcode = ocloc.oclocInvoke(ocloc_arguments_len_param, ocloc_arguments_param, ctypes.c_uint32(1),
                             cl_kernel_param, cl_kernel_len_param, provided_kernels_param,
-                            0, None, None, None, ctypes.byref(num_outputs_param), ctypes.byref(data_outputs_param),
+                            0, None, None, None, None, ctypes.byref(data_outputs_param),
                             ctypes.byref(len_outputs_param), ctypes.byref(name_outputs_param))
     if ocloc_retcode != ocloc.OCLOC_SUCCESS:
       raise CompileError(f"Intel OpenCL Offline Compiler (ocloc) Error\n\n{ocloc._ocloc_error_t__enumvalues[ocloc_retcode]}")
