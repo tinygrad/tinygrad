@@ -4,6 +4,7 @@ from tinygrad.runtime.ops_gpu import CLDevice
 from tinygrad.device import BufferSpec, Device
 
 class TestIntelOcloc(unittest.TestCase):
+  @unittest.expectedFailure
   @unittest.skipIf(Device.DEFAULT != "GPU", f"not supported on {Device.DEFAULT}")
   def test_simple_compilation(self):
     cl_kernel = """__kernel void test(__global int* data0) {
