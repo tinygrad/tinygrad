@@ -23,6 +23,8 @@ if __name__ == "__main__":
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
         if not getenv("NOOPT"):
+          # only NCHW
+          """
           if knum in [6,7,9,11]:
             k.apply_opt(Opt(OptOps.PADTO, 1, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
@@ -46,6 +48,15 @@ if __name__ == "__main__":
           elif knum == 3:
             k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
+          else:
+            k.hand_coded_optimizations()
+          """
+          if knum == 3:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 16))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 128//16))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
+            pass
           else:
             k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
