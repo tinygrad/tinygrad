@@ -33,8 +33,8 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
   m0 = UOp(Ops.CAT, dt1, src=(a0.src[0],b0.src[0],c0.src[0],d0.src[0])).gep(swizzle)
   m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
   simp_m1 = m1.simplify()
-  if simp_m1.op is Ops.GEP and simp_m1.arg == (0,1,2,3)*32:
-    scalar_m1 = simp_m1.src[0].bitcast(dtypes.uint)
+  if simp_m1.op is Ops.GEP and simp_m1.arg == simp_m1.arg[0:4]*32:
+    scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4]).bitcast(dtypes.uint)
     if acc is not None:
       return UOp(Ops.CUSTOM, dtypes.int.vec(32), (acc, m0, scalar_m1), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
     else:
