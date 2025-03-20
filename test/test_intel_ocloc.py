@@ -1,5 +1,4 @@
 import unittest
-from tinygrad.helpers import getenv
 from tinygrad.runtime.ops_gpu import CLDevice
 from tinygrad.device import BufferSpec, Device
 
