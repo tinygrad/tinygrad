@@ -3,7 +3,7 @@ from tinygrad.runtime.ops_gpu import CLDevice
 from tinygrad.device import BufferSpec, Device
 
 class TestIntelOcloc(unittest.TestCase):
-  @unittest.expectedFailure # we can only test on Intel GPUs
+  @unittest.expectedFailure # we can only test on Intel GPUs (CI is AMD machine)
   @unittest.skipIf(Device.DEFAULT != "GPU", f"not supported on {Device.DEFAULT}")
   def test_simple_compilation(self):
     cl_kernel = """__kernel void test(__global int* data0) {
@@ -11,7 +11,7 @@ class TestIntelOcloc(unittest.TestCase):
                       *(data0+gidx0) =  get_group_id(0);
                     }"""
 
-    from tinygrad import intel_offline_compiler as ioc
+    from tinygrad.runtime.support import compiler_clintel as ioc
 
     def cl_compile(src, ioc_compile_func):
       device = CLDevice()
