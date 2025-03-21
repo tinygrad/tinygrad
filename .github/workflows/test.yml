@@ -157,7 +157,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_minimal,linting
+        deps: testing_minimal
         pydeps: "pillow torchvision expecttest"
         llvm: 'true'
     - name: Install ninja
@@ -165,7 +165,9 @@ jobs:
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
     - name: Lint with ruff
-      run: python3 -m ruff check extra/torch_backend/backend.py
+      run: |
+        pip3 install --upgrade --force-reinstall ruff==0.11.0
+        python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
@@ -308,7 +310,9 @@ jobs:
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
-      run: python3 -m ruff check .
+      run: |
+        pip3 install --upgrade --force-reinstall ruff==0.11.0
+        python3 -m ruff check .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
