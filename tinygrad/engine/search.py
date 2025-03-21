@@ -95,8 +95,8 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   rawbufs: list[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
     buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].src[0].dtype, ImageDType) else max(y.st_arg.real_size() for y in lx)
+    if buf_size == 0: raise RuntimeError(f"getting buf_size 0 from {lin}")
     assert isinstance(dtype, (PtrDType, ImageDType))
-    if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
     buf_dtype = dtype if isinstance(dtype, ImageDType) else dtype.base
     rawbufs[k] = Buffer(lin.opts.device, buf_size, buf_dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, buf_dtype)
   assert all(r is not None for r in rawbufs)
