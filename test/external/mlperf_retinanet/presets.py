@@ -1,7 +1,6 @@
-# https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/presets.py
+# https://github.com/mlcommons/training/blob/637c82f9e699cd6caf108f92efb2c1d446b630e0/single_stage_detector/ssd/presets.py
 
 from test.external.mlperf_retinanet import transforms as T
-
 
 class DetectionPresetTrain:
     def __init__(self, data_augmentation, hflip_prob=0.5, mean=(123., 117., 104.)):

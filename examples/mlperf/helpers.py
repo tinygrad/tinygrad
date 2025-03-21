@@ -269,10 +269,10 @@ def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
   inter, union = _box_inter_union(boxes1, boxes2)
   return inter / union
 
-def generate_anchors(input_size:tuple[int, int], batch_size:int = 1, scales:Optional[tuple[Tensor, ...]] = None, aspect_ratios:Optional[tuple[Tensor, ...]] = None) -> list[np.ndarray]:
+def generate_anchors(input_size:tuple[int, int], scales:Optional[tuple[Tensor, ...]]=None, aspect_ratios:Optional[tuple[Tensor, ...]]=None) -> list[np.ndarray]:
   def _compute_grid_sizes(input_size:tuple[int, int]) -> np.ndarray:
     return np.ceil(np.array(input_size)[None, :] / 2 ** np.arange(3, 8)[:, None])
-  
+
   scales = tuple((i, int(i * 2 ** (1/3)), int(i * 2 ** (2/3))) for i in 2 ** np.arange(5, 10)) if scales is None else scales
   aspect_ratios = ((0.5, 1.0, 2.0),) * len(scales) if aspect_ratios is None else aspect_ratios
   aspect_ratios = tuple(ar for ar in aspect_ratios)
@@ -294,7 +294,6 @@ def generate_anchors(input_size:tuple[int, int], batch_size:int = 1, scales:Opti
     shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
     anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
 
-  if batch_size > 1: return [np.concatenate(anchors)] * batch_size
   return anchors
 
 
