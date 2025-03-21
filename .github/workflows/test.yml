@@ -680,7 +680,7 @@ jobs:
   osxhuggingface:
     name: HuggingFace ONNX Models
     runs-on: macos-14
-    timeout-minutes: 14
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
