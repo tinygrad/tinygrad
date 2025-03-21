@@ -1,6 +1,3 @@
-# export a model for use outside of tinygrad: including data, transforms, and runtime wrapper
-# TODO: refactor in progress, simplify everything
-
 from typing import Callable, Sequence, Union, Optional, cast
 from dataclasses import dataclass
 import types
@@ -8,7 +5,6 @@ from tinygrad import Tensor, dtypes, TinyJit, UOp
 from tinygrad.engine.jit import _prepare_jit_inputs
 from tinygrad.renderer import ProgramSpec
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save
-from tinygrad.helpers import Context
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 
@@ -79,42 +75,46 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
     load_state_dict(weights_holder, _state_dict)
   if not state_dict: state_dict = _state_dict
 
-  with Context(JIT=2): ex = extract_model(model, inputs)
+  # Extract model data/transforms, sufficient for export to external runtime
+  ex: ExportSpec = extract_model(model, inputs)
 
-  if state_dict:
-    weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()}
-  #else:
-    #weight_names = {id(buf): name for name, buf in bufs_to_save.items()}
+  if state_dict: weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()}
+  #else: #weight_names = {id(buf): name for name, buf in bufs_to_save.items()}
 
   # TODO: validate symbolic var ranges against input args at runtime in JS?
   # TODO: init rand seeds in JS? random seeds (buffer of two uint32) were included in ex.weight_bufs, but are not in the state_dict
   for i, buf in enumerate(ex.weight_bufs):
     if buf not in weight_names: ex.empty_bufs.append(ex.weight_bufs.pop(i))
 
-  max_buf_nbytes = max(buf.nbytes for buf in ex.weight_bufs + ex.empty_bufs)
-  kernel_declarations = '\n\n'.join([f"const {name} = `{code.replace(name, 'main')}`;" for name, code in ex.kernels.items()])
+  # Render model data
   buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
-
-  resolve_gidx = lambda x: x.simplify().render() if isinstance(x, UOp) else str(x)
-  kernel_calls = [f"""addComputePass(device, commandEncoder, pipelines[{i}], [{', '.join(buf_names[arg] for arg in kc.args)}],
-    [{','.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2);""" for i, kc in enumerate(ex.kernel_calls)]
   empty_bufs = [f"const {buf_names[b]} = createEmptyBuf(device, {b.nbytes});" for b in ex.inputs+ex.outputs+ex.empty_bufs if isinstance(b, Buffer)]
   symbolic_bufs = [f"const {buf_names[var]} = createUniformBuf(device, {var.dtype.itemsize});" for var in ex.inputs if isinstance(var, UOp)]
   map_wt = lambda buf: f"state_dict['{weight_names[buf]}']" if not save_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[buf]}'])"
   weight_bufs = [f"const {buf_names[buf]} = createWeightBuf(device, {buf.nbytes}, {map_wt(buf)});" for buf in ex.weight_bufs]
+
+  # Render model transforms
+  kernel_declarations = '\n\n'.join([f"const {name} = `{code.replace(name, 'main')}`;" for name, code in ex.kernels.items()])
+  resolve_gidx = lambda x: x.simplify().render() if isinstance(x, UOp) else str(x)
+  kernel_calls = [f"""addComputePass(device, commandEncoder, pipelines[{i}], [{', '.join(buf_names[arg] for arg in kc.args)}],
+    [{','.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2);""" for i, kc in enumerate(ex.kernel_calls)]
+
+  # Render runtime-specific operations
   input_writer_bufs = [f"""const gpuWriteBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size,
                 usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});""" for i,buf in enumerate(ex.inputs)]
   input_writers = [f"""
 device.queue.writeBuffer(gpuWriteBuffer{i}, 0, {f"_input{i}" if isinstance(var, Buffer) else f"new {dtype_to_js_type(var.dtype)}([{var.arg[0]}])"});
 commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {buf_names[var]}, 0, gpuWriteBuffer{i}.size);""" for i, var in enumerate(ex.inputs)]
-  outbuf_copies = [f"commandEncoder.copyBufferToBuffer({buf_names[buf]}, 0, gpuReadBuffer{i}, 0, {buf.nbytes});" for i,buf in enumerate(ex.outputs)]
-  output_buffer_types = [dtype_to_js_type(buf.dtype) for buf in ex.outputs]
+
   output_reader_bufs = [f"""const gpuReadBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size,
                         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ}});""" for i,buf in enumerate(ex.outputs)]
+  output_buffer_types = [dtype_to_js_type(buf.dtype) for buf in ex.outputs]
   output_readers = [f"""await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);
 const resultBuffer{i} = new {output_buffer_types[i]}(gpuReadBuffer{i}.size/{buf.dtype.itemsize});
 resultBuffer{i}.set(new {output_buffer_types[i]}(gpuReadBuffer{i}.getMappedRange()));
 gpuReadBuffer{i}.unmap();""" for i,buf in enumerate(ex.outputs)]
+
+  outbuf_copies = [f"commandEncoder.copyBufferToBuffer({buf_names[buf]}, 0, gpuReadBuffer{i}, 0, {buf.nbytes});" for i,buf in enumerate(ex.outputs)]
   output_return = '[{}]'.format(",".join([f'resultBuffer{i}' for i in range(len(ex.outputs))]))
 
   getTensorMetadata = f"""\nconst getTensorMetadata = (safetensorBuffer) => {{
@@ -123,6 +123,7 @@ gpuReadBuffer{i}.unmap();""" for i,buf in enumerate(ex.outputs)]
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(
       ([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
 }};\n""" if save_weights else ""
+  max_buf_nbytes = max(buf.nbytes for buf in ex.weight_bufs + ex.empty_bufs)
 
   j = lambda to_join, num_indents: ("\n" + num_indents * "  ").join(to_join)
   prg = f"""
@@ -171,8 +172,7 @@ const {model_name} = (() => {{
   {kernel_declarations}
   const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not not save_weights else ""}
-    {j(symbolic_bufs + empty_bufs + weight_bufs, 2)}
-    {j(input_writer_bufs + output_reader_bufs, 2)}
+    {j(symbolic_bufs + empty_bufs + weight_bufs + input_writer_bufs + output_reader_bufs, 2)}
     const kernels = [{",".join(kc.kernel_name for kc in ex.kernel_calls)}];
     const pipelines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{
       layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
