@@ -133,7 +133,7 @@ if __name__ == "__main__":
             out_strides = k.sts[0].real_strides()
             if len(out_strides) == 3:
               if full_shape[1] < 128:
-                if full_shape[2] <= 32: k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+                if full_shape[2] <= 16: k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
                 else: k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
                 k.apply_opt(Opt(OptOps.UPCAST, 1, full_shape[1]))
                 if out_strides[0] < 128:
