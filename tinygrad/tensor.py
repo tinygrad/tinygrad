@@ -2204,18 +2204,37 @@ class Tensor(SimpleMathTrait):
     return pooled.max(axis), spatial_sz - idx.max(axis)
 
   def max_unpool2d(self, indices:Tensor, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0, output_size=None):
-    # TODO: clean up and think of edge cases
-    k_ = make_tuple(kernel_size, 2)
-    s_ = make_tuple(stride, len(k_)) if stride is not None else kernel_size
-    d_ = make_tuple(dilation, len(k_))
-    pads = self._resolve_pool_pads(padding, len(k_))
-    p_ = _flat_to_grouped(pads)
-    bs,ch,*spatial_shape = self.shape
-    # inverse of relationship 15 in section 5.1 of https://arxiv.org/pdf/1603.07285
-    # ackshuuuallly output_size should be input_size and i_ should be o_ cuz inverse
-    if output_size is None: output_size = (bs,ch) + tuple((i-1)*s - (pB+pA) + (d*(k-1)+1) for i,k,s,d,(pA,pB) in zip(spatial_shape,k_,s_,d_,p_))
-    ret = (indices.reshape(bs,ch,1,-1)._one_hot_along_dim(prod(output_size[2:]), -2) * self.reshape(bs,ch,1,-1)).sum(-1)
-    return ret.reshape(output_size)
+    """
+    Reconstructs the input shape by placing values from the `self` tensor at positions specified by `indices`.
+
+    Typically used to reverse a `max_pool2d` operation with `return_indices=True`.
+
+    When `output_size` is provided, the output shape resolves to the provided shape.
+
+    NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 17).reshape(1, 1, 4, 4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    output, indices = Tensor.max_pool2d(t, return_indices=True)
+    print(output.numpy())
+    print(indices.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.max_unpool2d(output, indices).numpy())
+    ```
+    """
+    bs,c,*spatial_shape = self.shape
+    if output_size is None:
+      k_,d_,s_ = (make_tuple(x, len(spatial_shape)) for x in (kernel_size, dilation, stride if stride is not None else kernel_size))
+      p_ = _flat_to_grouped(self._resolve_pool_pads(padding, len(spatial_shape)))
+      # inverse of relationship 15 in section 5.1 of https://arxiv.org/pdf/1603.07285
+      output_size = tuple((i-1)*s - (pB+pA) + (d*(k-1)+1) for i,k,d,s,(pA,pB) in zip(spatial_shape,k_,d_,s_,p_))
+    else: output_size = output_size[-len(spatial_shape):]
+    ret = (indices.reshape(bs,c,1,-1)._one_hot_along_dim(prod(output_size), 2) * self.reshape(bs,c,1,-1)).sum(3)
+    return ret.reshape(bs,c,*output_size)
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
              dtype:DTypeLike|None=None) -> Tensor:
