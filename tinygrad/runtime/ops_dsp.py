@@ -20,6 +20,9 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
     swizzle.append(64+i)
     swizzle.append(96+i)
   swizzle = tuple(swizzle)
+  if a0.op is not Ops.CAST: return None
+  if d0.op is not Ops.CAST: return None
+  if a1.op is not Ops.CAST: return None
   assert a0.op is Ops.CAST
   assert b0.op is Ops.CAST
   assert c0.op is Ops.CAST

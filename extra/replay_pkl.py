@@ -60,6 +60,7 @@ if __name__ == "__main__":
           else:
             k.hand_coded_optimizations()
           """
+          """
           if knum == 3:
             # 12544x32 * 32x16 -> 12544x16
 
@@ -69,12 +70,15 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 256//16))
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
             pass
+          elif knum == 6:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 0))
           elif knum == 4:
             # 12544x16 * 16x96 -> 12544x96
             # (with the biased add)
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
-            k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             #k.apply_opt(Opt(OptOps.PADTO, 0, 3))
             pass
           elif knum == 13:
@@ -100,8 +104,25 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+          """
+          if False:
+            pass
           else:
-            k.hand_coded_optimizations()
+            full_shape = k.full_shape
+            out_shape = k.sts[0].shape
+            out_strides = k.sts[0].real_strides()
+            if len(out_strides) == 3:
+              if full_shape[2] <= 32: k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+              else: k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
+              k.apply_opt(Opt(OptOps.UPCAST, 1, out_strides[0]))
+              if out_strides[0] < 128:
+                upcast_0 = 128//out_strides[0]
+                if out_shape[0]%upcast_0 == 0 and upcast_0 != 1: k.apply_opt(Opt(OptOps.UPCAST, 0, upcast_0))
+            elif len(out_strides) == 1:
+              assert full_shape[0]%128 == 0
+              k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
+              #print("here", out_shape, out_strides, k.name)
+            #k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
