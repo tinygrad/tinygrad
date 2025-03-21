@@ -79,12 +79,17 @@ def add_to_mul(c:UOp, x:UOp):
   else:
     return None
 
+def prefetch_l1(ld:UOp):
+  if ld.src[-1].op is Ops.CUSTOM: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  first = ld.src[0].src[0].substitute({ranges[-1]: ranges[-1].src[0]})
+  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(ld.src[0].src[0].index(UOp.const(dtypes.int, ld.dtype.count*2)),), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
+  x2 = UOp(Ops.CUSTOM, dtypes.void, src=(first,), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
+  return ld.replace(src=ld.src+(x1,x2))
+
 dsp_pm_late = PatternMatcher([
   # prefetch L1
-  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"),
-   lambda ld: ld.replace(src=ld.src+(UOp(Ops.CUSTOM, dtypes.void, src=(ld.src[0].src[0].index(UOp.const(dtypes.int, ld.dtype.count*2)),),
-                                         arg="__builtin_HEXAGON_Y2_dcfetch({0});"),)) if ld.src[-1].op is not Ops.CUSTOM else None),
-
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"), prefetch_l1),
   (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
 
   #(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),

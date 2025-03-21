@@ -297,11 +297,66 @@ class TestDSPCache(unittest.TestCase):
       k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
       for opt in opts: k.apply_opt(opt)
       prg = k.to_program()
-    src = prg.src
-    src = src.replace("128))) data3) {\n", "128))) data3) {\n  __builtin_HEXAGON_Y4_l2fetch(data2, 6144);\n")
-    src = src.replace("int32 acc3 = cast0;\n", "int32 acc3 = cast0;\n    __builtin_HEXAGON_Y4_l2fetch(data1+(ridx0*768), 768);\n    #pragma nounroll\n")
-    print(src)
-    prg = replace(prg, src=src)
+      print(prg.src)
+
+    new_src = """
+typedef int int32 __attribute__((aligned(128),vector_size(128)));         
+typedef signed char signed_char128 __attribute__((aligned(128),vector_size(128)));                               
+typedef unsigned char unsigned_char8 __attribute__((aligned(8),vector_size(8)));                                 
+typedef unsigned char unsigned_char4 __attribute__((aligned(4),vector_size(4)));
+typedef unsigned char unsigned_char128 __attribute__((aligned(128),vector_size(128)));
+__attribute__((noinline)) void r_196_24_8_32_4(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(
+128))) data2, int* restrict __attribute__((align_value(128))) data3) {
+  int32 cast0 = (int32){0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  int32 val0 = *((int32*)((data3+0)));                                                                           
+  for (int ridx0 = 0; ridx0 < 196; ridx0++) {                                                                    
+    int32 acc0 = cast0;                                                                                          
+    int32 acc1 = cast0;                                                                                          
+    int32 acc2 = cast0;                                                                                          
+    int32 acc3 = cast0;                                                                                          
+    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768);
+    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768+192);
+    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768+384);
+    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768+576);
+    for (int ridx1 = 0; ridx1 < 24; ridx1++) {                                                                   
+      signed_char128 val1 = *((signed_char128*)((data2+(ridx1<<8))));        
+      signed_char128 val2 = *((signed_char128*)((data2+((1+(ridx1<<1))<<7))));
+
+      int alu0 = ((ridx0*768)+(ridx1<<3));                                                                       
+
+      unsigned_char8 val3 = *((unsigned_char8*)((data1+alu0)));               
+      __builtin_HEXAGON_Y2_dcfetch(((data1+alu0)+16));                                                           
+      unsigned_char8 val4 = *((unsigned_char8*)((data1+(alu0+192))));        
+      __builtin_HEXAGON_Y2_dcfetch(((data1+(alu0+192))+16));                 
+      unsigned_char8 val5 = *((unsigned_char8*)((data1+(alu0+384))));         
+      __builtin_HEXAGON_Y2_dcfetch(((data1+(alu0+384))+16));                   
+      unsigned_char8 val6 = *((unsigned_char8*)((data1+(alu0+576))));      
+      __builtin_HEXAGON_Y2_dcfetch(((data1+(alu0+576))+16));              
+
+      unsigned_char4 alu5 = __builtin_shufflevector(val3, val3,    0,   1,   2,   3);
+      unsigned_char4 alu6 = __builtin_shufflevector(val4, val4,    0,   1,   2,   3);
+      unsigned_char4 alu7 = __builtin_shufflevector(val5, val5,    0,   1,   2,   3);                            
+      unsigned_char4 alu8 = __builtin_shufflevector(val6, val6,    0,   1,   2,   3);
+      acc0 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc0, val1, (*((unsigned int*)&alu5)));
+      acc1 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc1, val1, (*((unsigned int*)&alu6)));
+      acc2 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc2, val1, (*((unsigned int*)&alu7)));
+      acc3 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc3, val1, (*((unsigned int*)&alu8)));
+
+      unsigned_char4 alu9 = __builtin_shufflevector(val3, val3,    4,   5,   6,   7);
+      unsigned_char4 alu10 = __builtin_shufflevector(val4, val4,    4,   5,   6,   7);
+      unsigned_char4 alu11 = __builtin_shufflevector(val5, val5,    4,   5,   6,   7);
+      unsigned_char4 alu12 = __builtin_shufflevector(val6, val6,    4,   5,   6,   7);
+      acc0 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc0, val2, (*((unsigned int*)&alu9)));                                                              
+      acc1 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc1, val2, (*((unsigned int*)&alu10)));                                                             
+      acc2 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc2, val2, (*((unsigned int*)&alu11)));                                                             
+      acc3 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc3, val2, (*((unsigned int*)&alu12)));                                                             
+    }                                                                                                            
+    unsigned_char128 alu18 = __builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B((((((acc3+val0)*203)+32767)/65536)+136), (((((acc2+val0)*203)+32767)/65536)+136)), __builtin_HEXAGON_V6_vpackwh_sat_128B((((((acc1+val0)*203)+32767)/65536)+136), (((((acc0+val0)*203)+32767)/65536)+136)));                             
+    *((unsigned_char128*)((data0+(ridx0<<7)))) = alu18;                                                          
+  }                                                                                                              
+}      
+"""
+    prg = replace(prg, src=new_src+prg.src.split("/* DSP boilerplate */ ")[1])
     rt = CompiledRunner(prg)
     Device.default.compiler.disassemble(rt.lib)
     ei = ExecItem(rt, bufs_from_lin(k))
