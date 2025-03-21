@@ -412,11 +412,9 @@ def get_onnx_ops():
 
   def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
               storage_order:int=0, strides:list[int]|int=1):
-    ret = X.max_pool2d(kernel_shape, strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad), ceil_mode=ceil_mode)
-    # tests expect indices with int64 dtype
-    # TODO: if there are repeated values, this is wrong
-    indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
-    return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
+    pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
+    ret, idx = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True)
+    return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
           kernel_shape:list[int]|None=None, pads:list[int]|int=0, strides:list[int]|int=1):
@@ -731,7 +729,14 @@ def get_onnx_ops():
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
-    return _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype).contiguous()
+    if out_dtype == dtypes.uchar:
+      # this appears to work in practice, at least for uchar out_dtype. it folds with the quantize stuff
+      ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
+    else:
+      ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
+    # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
+    if getenv("NHWC") and len(ret.shape) == 4: return ret.permute(0,2,3,1).contiguous().permute(0,3,1,2)
+    return ret.contiguous()
 
   def DynamicQuantizeLinear(x: Tensor):
     # only support uint8
