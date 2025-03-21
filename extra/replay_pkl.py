@@ -112,6 +112,10 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+          elif knum == 6:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 16))
           elif knum == 37:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 384))

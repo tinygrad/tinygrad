@@ -188,10 +188,10 @@ gep_pushing = PatternMatcher([
   # VECTORIZE on same GEP
   (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
   # CAST on multi GEP
-  (UPat(Ops.CAST, src=(UPat(Ops.GEP, name="g"),), name="c"),
-   lambda c,g: g.src[0].gep(g.arg[0]).cast(c.dtype.scalar()).broadcast(len(g.arg)) if len(g.arg) > 1 and all_same(g.arg) else None),
+  #(UPat(Ops.CAST, src=(UPat(Ops.GEP, name="g"),), name="c"),
+  # lambda c,g: g.src[0].gep(g.arg[0]).cast(c.dtype.scalar()).broadcast(len(g.arg)) if len(g.arg) > 1 and all_same(g.arg) else None),
   # VECTORIZE/CONST
-  (UPat(Ops.VECTORIZE, src=UPat.var("x"))+UPat.cvar("c", vec=False), lambda x,c: (x+c.arg).broadcast(c.dtype.count)),
+  #(UPat(Ops.VECTORIZE, src=UPat.var("x"))+UPat.cvar("c", vec=False), lambda x,c: (x+c.arg).broadcast(c.dtype.count)),
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
