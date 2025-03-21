@@ -264,3 +264,5 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
     (exponent < 0).where(-exponent, exponent).cast_vec(dtypes.int32).mod(2).cast_vec(dtypes.bool).where(ret.const_like(-1), ret.const_like(1)))
   # fix 0 ** 0 = 1
   return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * (base < 0).where(adj, ret.const_like(1)))
+
+def xsqrt(d: UOp) -> UOp: return xpow(d, d.const_like(0.5))

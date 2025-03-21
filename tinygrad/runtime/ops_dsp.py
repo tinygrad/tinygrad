@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
+from tinygrad.codegen.transcendental import xsqrt, xlog2, xexp2
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
@@ -25,6 +26,9 @@ dsp_pm_late = PatternMatcher([
   (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat(Ops.DEFINE_ACC, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
+  ((UPat(Ops.SQRT, name="x"), lambda x: xsqrt(x.src[0]))),
+  ((UPat(Ops.LOG2, name="x"), lambda x: xlog2(x.src[0]))),
+  ((UPat(Ops.EXP2, name="x"), lambda x: xexp2(x.src[0]))),
 ])
 
 # NOTE: this just increases readability of the generated code
