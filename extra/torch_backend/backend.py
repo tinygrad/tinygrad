@@ -628,7 +628,6 @@ def _torch_patched_parallel_apply(modules, inputs, kwargs_tup=None, devices=None
   if kwargs_tup is None: kwargs_tup = ({},) * len(modules)
   if devices is None: devices = (torch.device("tiny"),) * len(modules)
   return [m(*i, **k) for m,i,k,d in zip(modules, inputs, kwargs_tup, devices)]
-torch.nn.parallel.data_parallel.parallel_apply = _torch_patched_parallel_apply
 for m in ['torch.nn.parallel.parallel_apply', 'torch.nn.parallel.data_parallel']:
   sys.modules[m].parallel_apply = _torch_patched_parallel_apply
 
