@@ -98,9 +98,7 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
   # TODO: validate symbolic var ranges against input args at runtime in js?
   buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
   resolve_gidx = lambda x: x.simplify().render() if isinstance(x, UOp) else str(x)
-  kernel_calls = "\n        ".join(f"""
-addComputePass(device, commandEncoder, pipelines[{i}], infinityBuf, [{', '.join(buf_names[arg] for arg in kc.args)}], [{', '.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2); 
-""" for i, kc in enumerate(ex.kernel_calls))
+  kernel_calls = "\n        ".join(f"""addComputePass(device, commandEncoder, pipelines[{i}], [{', '.join(buf_names[arg] for arg in kc.args)}], [{', '.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2);""" for i, kc in enumerate(ex.kernel_calls))
   empty_bufs = '\n    '.join(f"const {buf_names[buf]} = createEmptyBuf(device, {buf.nbytes});" for buf in ex.inputs + ex.outputs + ex.empty_bufs if isinstance(buf, Buffer))
   sym_bufs = '\n    '.join(f"const {buf_names[var]} = createUniformBuf(device, {var.dtype.itemsize});" for var in ex.inputs if isinstance(var, UOp))
   map_to_external_weight = lambda _key: f"state_dict['{weight_names[_key]}']" if not save_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[_key]}'])"
@@ -151,17 +149,8 @@ const createUniformBuf = (device, size) => {{
   return device.createBuffer({{size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST}})
 }}
 
-const createInfinityUniformBuf = (device) => {{
-  const size = 4;
-  const buf = device.createBuffer({{
-    mappedAtCreation: true,
-    size,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
-  }});
-  new Float32Array(buf.getMappedRange())[0] = Infinity;
-  buf.unmap();
-  return buf;
-}};
+const infinityBuf = createUniformBuf(device, 4);
+device.queue.writeBuffer(infinityBuf, 0, new Float32Array([Infinity]));
 
 const createWeightBuf = (device, size, data) => {{
   const buf = device.createBuffer({{ size, usage: GPUBufferUsage.STORAGE{" | GPUBufferUsage.COPY_DST" if not save_weights else ", mappedAtCreation: true"} }});
@@ -169,9 +158,9 @@ const createWeightBuf = (device, size, data) => {{
   return buf;
 }};
 
-const addComputePass = (device, commandEncoder, pipeline, infinityUniformBuf, bufs, workgroup, useInfinity) => {{
+const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup, useInfinity) => {{
   const entries = [];
-  if (useInfinity) entries.push({{ binding: 0, resource: {{ buffer: infinityUniformBuf }} }});
+  if (useInfinity) entries.push({{ binding: 0, resource: {{ buffer: infinityBuf }} }});
   entries.push(...bufs.map((buffer, index) => ({{
     binding: index + 1,
     resource: {{ buffer }}
@@ -192,7 +181,6 @@ const addComputePass = (device, commandEncoder, pipeline, infinityUniformBuf, bu
 
 const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not not save_weights else ""}
-    const infinityBuf = createInfinityUniformBuf(device);
     {sym_bufs + empty_bufs + weight_bufs}
 
     {(nl+'    ').join(f"const gpuWriteBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});" for i,buf in enumerate(ex.inputs))}
