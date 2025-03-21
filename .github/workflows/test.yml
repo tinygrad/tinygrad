@@ -683,7 +683,7 @@ jobs:
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
   
   osxhuggingface:
-    name: HuggingFace ONNX Models
+    name: Models Huggingface ONNX
     runs-on: macos-15
     timeout-minutes: 20
     steps:
