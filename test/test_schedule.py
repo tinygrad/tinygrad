@@ -1,7 +1,6 @@
 # this will be the new test_ops for the next level
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
-# ruff: noqa: E501
 
 import unittest
 import numpy as np
@@ -12,11 +11,10 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
 from tinygrad.ops import PatternMatcher, UOp, Ops, UPat, graph_rewrite, track_rewrites, merge_views, GroupOp
 from tinygrad.codegen.symbolic import symbolic_simple
 from tinygrad.spec import type_verify, shape_spec
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, unwrap, all_same, temp
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars, view_right, view_left, sym
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from extra.models.llama import precompute_freqs_cis
@@ -33,7 +31,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealiz
     assert isinstance(t, UOp), f"can't schedule {t}"
     sched, _, __ = create_schedule_with_vars(t.sink())
   # test lowering all the ScheduleItems to ExecItems
-  lowered = list(lower_schedule(sched.copy()))
+  lowered = [x[1] for x in lower_schedule(sched.copy())]
   if filter_sink: sched = [s for s,ei in zip(sched, lowered) if isinstance(ei.prg, CompiledRunner)]
   if len(sched) != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
@@ -99,6 +97,12 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     a.realize()
     assert not a.lazydata.is_realized
+
+  def test_simplify_padded_const(self):
+    a = Tensor.empty(1022).cummax(axis=0)
+    sched = check_schedule(a, 5)
+    ast = sched[0].ast
+    self.assertLessEqual(len([u for u in ast.toposort if u.op is Ops.WHERE]), 6)
 
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
@@ -1610,7 +1614,7 @@ class TestIndexing(unittest.TestCase):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
-      lowered = list(lower_schedule(s.copy()))
+      lowered = [x[1] for x in lower_schedule(s.copy())]
       kernels = [ei for ei in list(lowered) if isinstance(ei.prg, CompiledRunner)]
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
       for ei in lowered: ei.run(do_update_stats=True)
@@ -1853,44 +1857,31 @@ class TestIndexing(unittest.TestCase):
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
-    ast = a.schedule()[0].ast
-    swizzle = ast.src[0].src[2].reshape((4, 1))
-    new_uop = swizzle_rewrite(swizzle)
+    new_uop = swizzle_rewrite(a.lazydata.reshape((4, 1)))
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
   def test_no_rewrite_elementwise(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
-    ld1 = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    ld2 = UOp(Ops.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((32, 32)).to_uop()))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((32, 32)).to_uop(), ld1+ld2)),))
-    rsink = graph_rewrite(sink, view_right)
-    self.assertEqual(rsink.key, sink.key)
+    a = Tensor.empty(32, 32)
+    b = Tensor.empty(32, 32)
+    sink = (a+b).schedule()[0].ast
+    self.assertEqual(swizzle_cnt(sink), 0)
 
   def test_simple_store_reshape(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
-    r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    r = r + r.const_like(2).replace(src=(unwrap(r.st).to_uop(),))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
-    rsink = graph_rewrite(sink, view_right)
-    # this AST first needs to swizzle, but it doesn't have implicit movementops
-    self.assertEqual(swizzle_cnt(sink), 1)
-    verify_ast(rsink)
+    a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(1,32)
+    ast = a.schedule()[0].ast
+    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (1, 32))
 
   def test_no_reshape_reduceop(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
-    rsink = graph_rewrite(sink, view_right)
-    verify_ast(sink)
-    self.assertEqual(sink.key, rsink.key)
+    a = Tensor.empty(32, 32).sum(axis=(1,)).contiguous()
+    ast = a.schedule()[0].ast
+    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(a.lazydata.shape, (32,))
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0])
+def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op is not Ops.BUFFER])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -1958,47 +1949,42 @@ class TestSwizzle(unittest.TestCase):
     t_np = (x.numpy()*y.numpy()).sum(axis=(0, 2)).reshape(1, 4, 1).transpose(0, 2, 1)+z.numpy()
     np.testing.assert_allclose(t.numpy(), t_np, atol=1e-6, rtol=1e-3)
 
-  @unittest.skip("this swizzle can't be decided after the ADD")
+  @unittest.skip("TODO: this swizzle isn't resolvable when there's a mask")
   def test_swizzle_failure_permute(self):
-    sink = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.BUFFER, dtypes.float, arg=(20, 65), src=(UOp(Ops.DEVICE, arg="METAL"),)),
-        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 65), strides=(0, 1), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(Ops.ADD, dtypes.float, arg=None, src=(
-          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
-            UOp(Ops.ADD, dtypes.float, arg=None, src=(
-              x6:=UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                  UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                    UOp(Ops.BUFFER, dtypes.float, arg=(8, 2925), src=(UOp(Ops.DEVICE, arg="METAL"),)),
-                    x10:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(65, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
-                  UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                    x12:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
-                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
-                    UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),
-                    x15:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),)),)),
-                UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                   x12,
-                  UOp(Ops.CONST, dtypes.float, arg=0.0003418803389649838, src=()),
-                   x15,)),)),
-               x6,)),)),
-          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
-            UOp(Ops.MUL, dtypes.float, arg=None, src=(
-              UOp(Ops.WHERE, dtypes.float, arg=None, src=(
-                 x12,
-                UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
-                 x15,)),
-              UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                  UOp(Ops.BUFFER, dtypes.float, arg=(2, 2925), src=(UOp(Ops.DEVICE, arg="METAL"),)),
-                   x10,)),
-                UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(1, 89), offset=44, mask=None, contiguous=False),)), src=(
-                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
-                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                      UOp(Ops.BUFFER, dtypes.float, arg=(4, 2925), src=(UOp(Ops.DEVICE, arg="METAL"),)),
-                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(65, 45, 90), strides=(1, 0, 65), offset=0, mask=((0, 65), (0, 45), (0, 45)), contiguous=False), View(shape=(65, 4094), strides=(4050, 1), offset=0, mask=((0, 65), (0, 4050)), contiguous=False), View(shape=(1, 65, 46, 89), strides=(0, 4094, 89, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),)),)),)),))
-    ret = swizzle_rewrite(sink)
-    self.assertEqual(swizzle_cnt(ret), 0)
+    a = Tensor.empty(45,65).T.reshape(65,1,45).pad((None,None,(0,45))).expand(65,45,90)
+    b = Tensor.empty(45,65)
+    a_reduce = a.sum(axis=(2,), keepdim=True).sum(axis=(1,))
+    b_reduce = b.sum(axis=(0,))
+    t = a_reduce+b_reduce
+    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
+
+  def test_parallel_reduce_possible(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 2, 2).realize()
+    y = Tensor.randn(4, 2, 2).realize()
+    t = x.sum(axis=1)+y.sum(axis=1)
+    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
+    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
+
+  # kernels can only have 1 or n in each dim
+  @unittest.expectedFailure
+  def test_dont_parallelize_different_n(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 2, 2).realize()
+    y = Tensor.randn(4, 3, 2).realize()
+    t = x.sum(axis=1)+y.sum(axis=1)
+    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
+    np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
+
+  def test_unsafe_pad(self):
+    x = Tensor.full((2,2), 1.0).contiguous()
+    y = x*x.sum((1,)).reciprocal()
+    t = y.pad(((0,1),None)).contiguous()
+    swizzled = swizzle_rewrite(t.lazydata)
+    sched = check_schedule(swizzled.sink(), 3)
+    output_buffer = sched[-1].bufs[0]
+    run_schedule(sched)
+    self.assertListEqual(output_buffer.as_buffer().cast("f").tolist(), [0.5, 0.5, 0.5, 0.5, 0., 0.])
 
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 zero_pm = UPat(Ops.CONST, arg=0)
@@ -2561,6 +2547,13 @@ class TestUOpBecome(unittest.TestCase):
     b.realize()
     assert b.lazydata.is_realized
     assert b.lazydata.base.buffer._base is None
+
+  def test_setitem_offset(self):
+    a = Tensor.full((16,), 0.).contiguous().realize()
+    b = Tensor.full((16,), 1.).contiguous().realize()
+    a_view = a[4:].reshape(3, 4).shrink(((0,2),(0,2))).reshape((4,))
+    b.shrink(((0,4),)).assign(a_view).realize()
+    self.assertListEqual(b.tolist(), [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
