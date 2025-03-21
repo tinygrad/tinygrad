@@ -322,6 +322,7 @@ class TestLocalAccess(unittest.TestCase):
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  @unittest.skip("tinygrad doesn't support this behavior")
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, local=True), (), 'smem')

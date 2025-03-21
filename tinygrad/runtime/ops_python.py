@@ -17,7 +17,7 @@ def _load(m, i):
   return m[i]
 
 def load(inp, j=0):
-  if len(inp) == 3: return [_load(m, x+j if x is not None else None) if gate else default for (m,x),default,gate in zip(*inp)]
+  if len(inp) == 2: return [_load(m, x+j if x is not None else None) if gate else default for (m,x,gate),default in zip(*inp)]
   return [_load(m, x+j if x is not None else None) for m,x in inp[0]]
 
 def _store(m, i, v):
@@ -80,13 +80,14 @@ class PythonProgram:
         elif uop is Ops.DEFINE_ACC:
           ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is Ops.INDEX:
-          ret = []
+          ret:list = []
           if isinstance(dtp[0], ImageDType):
             for m,ox,oy in zip(inp[0], inp[1][0], inp[1][1]):
               if ox < 0 or ox >= dtp[0].shape[1] or oy < 0 or oy >= dtp[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*dtp[0].shape[1]*4))
           else:
             for m,o in zip(inp[0], inp[1]): ret.append((m,o))
+          if len(inp) == 3: ret = [(m,o,g) for (m,o),g in zip(ret, inp[2])] # set the gate last
           ul[i] = ret
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
