@@ -172,6 +172,15 @@ def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, k
   out = Tensor.max_unpool2d(unwrap(grad_out), unwrap(indices), output_size=unwrap(self).shape)
   return wrap(out)
 
+# @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
+# def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
+#   if stride is not None and len(stride) == 0: stride = None
+#   # TODO: utilize input indices once they are correct
+#   # TODO: implement maxunpool
+#   self_ = unwrap(self)
+#   out = Tensor.max_pool2d(self_, kernel_size, stride, dilation, padding, ceil_mode)
+#   return wrap(out.gradient(self_, gradient=unwrap(grad_out))[0])
+
 @torch.library.impl("aten::arange", "privateuseone")
 def arange(end, dtype=None, device=None, pin_memory=None):
   return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))

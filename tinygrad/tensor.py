@@ -2214,7 +2214,7 @@ class Tensor(SimpleMathTrait):
     # inverse of relationship 15 in section 5.1 of https://arxiv.org/pdf/1603.07285
     # ackshuuuallly output_size should be input_size and i_ should be o_ cuz inverse
     if output_size is None: output_size = (bs,ch) + tuple((i-1)*s - (pB+pA) + (d*(k-1)+1) for i,k,s,d,(pA,pB) in zip(spatial_shape,k_,s_,d_,p_))
-    ret = (indices.reshape(bs,ch,-1,1)._one_hot_along_dim(prod(output_size[2:])) * self.reshape(bs,ch,-1,1)).sum(2)
+    ret = (indices.reshape(bs,ch,1,-1)._one_hot_along_dim(prod(output_size[2:]), -2) * self.reshape(bs,ch,1,-1)).sum(-1)
     return ret.reshape(output_size)
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
