@@ -726,7 +726,7 @@ def get_onnx_ops():
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     out_dtype = y_zero_point.dtype if isinstance(y_zero_point, Tensor) else dtype_parse(output_dtype) if output_dtype else dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
-    if out_dtype == dtypes.uchar and False:
+    if out_dtype == dtypes.uchar:
       # this appears to work in practice, at least for uchar out_dtype. it folds with the quantize stuff
       ret = _clamp_cast((x / y_scale + 0.4999999 + y_zero_point).int(), out_dtype)
     else:
@@ -749,8 +749,7 @@ def get_onnx_ops():
       # DSP swizzle memory
       x = x.reshape(x.shape[0], x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(1,0,2).contiguous().permute(1,0,2).reshape(x.shape)
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
-    ret = ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
-    return ret
+    return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
   def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
                   y_zero_point: Tensor|int, B:Tensor|None=None, **opts):

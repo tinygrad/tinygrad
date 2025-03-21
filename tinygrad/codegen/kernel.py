@@ -386,7 +386,7 @@ class Kernel:
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.first_upcast, "can't upcasted already upcasted")
-      #check(amt <= 32, "don't unroll more than 32")
+      check(amt <= 32, "don't unroll more than 32")
       # TODO: fix upcast_count to put purples before yellows. broken because of METAL tensor cores
       #upcast_count = sum(x == y for x,y in zip(self.full_shape[-self.upcasted:], self.output_shape[-self.upcasted:])) if self.upcasted else 0
       #self.shift_to(axis, amt, insert_before=None if upcast_count == 0 else self.shape_len-upcast_count)
@@ -668,7 +668,6 @@ class Kernel:
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
         print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
-    if DEBUG >= 5: print(self.ast)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
