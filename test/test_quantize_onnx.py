@@ -298,7 +298,7 @@ class TestDSPCache(unittest.TestCase):
       k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
       for opt in opts: k.apply_opt(opt)
       prg = k.to_program()
-      print(prg.src)
+      #print(prg.src)
 
     new_src = """
 typedef int int32 __attribute__((aligned(128),vector_size(128)));
@@ -359,7 +359,7 @@ __attribute__((noinline)) void r_196_24_8_32_4(unsigned char* restrict __attribu
 """
     prg = replace(prg, src=new_src+prg.src.split("/* DSP boilerplate */ ")[1])
     rt = CompiledRunner(prg)
-    Device.default.compiler.disassemble(rt.lib)
+    #Device.default.compiler.disassemble(rt.lib)
     ei = ExecItem(rt, bufs_from_lin(k))
     tm = ei.run(wait=True)
     print(f"final time {tm*1e6:.2f} us")
