@@ -95,6 +95,20 @@ replace_contiguous = PatternMatcher([
 
 # reorder view
 
+def reorder_expand(view:UOp, alu:UOp):
+  if resolve(prod(alu.shape) < view.arg.real_size()): return
+  q = list(view.src)
+  while len(q) != 0:
+    u = q.pop()
+    if u.base.op in {Ops.CONST, Ops.BUFFER}: continue
+    if u.op is Ops.REDUCE_AXIS: break
+    if u.op is Ops.VIEW: break
+    if u.dtype.itemsize < alu.dtype.itemsize:
+      with Context(TRACK_MATCH_STATS=0):
+        ret = graph_rewrite(view, view_left, ctx=u)
+      return ret
+    q.extend(u.src)
+
 reorder_view = PatternMatcher([
   # put CAST to smaller dtype before EXPAND
   (UPat(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="vm"),)), lambda cast,vm: vm.base.cast(cast.dtype).view(vm.st)
@@ -106,6 +120,8 @@ reorder_view = PatternMatcher([
   # put UnaryOps before EXPANDs
   (UPat(GroupOp.Unary, src=UPat(Ops.VIEW, src=(UPat.var("inp"),), name="v"), name="alu"),
    lambda inp,v,alu: inp.alu(alu.op).view(v.st) if resolve(prod(alu.shape) > v.st.real_size()) else None),
+  # reorder expand
+  (UPat(Ops.VIEW, src=(UPat(GroupOp.ALU, name="alu"),), name="view"), reorder_expand),
   # put CAST after expanding BUFFER
   (UPat(Ops.VIEW, src=(UPat(Ops.CAST, src=(UPat.var("x"),)),), name="v"), lambda x,v: x.view(x.st+v.st).cast(v.dtype) if getenv("CAST_AFTER_EXPAND")
     and x.base.op is Ops.BUFFER and resolve(prod(v.shape) > prod(x.shape)) else None),
