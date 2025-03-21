@@ -220,6 +220,7 @@ class AMMemoryManager:
 
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
+      # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       paddrs = []
       ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
