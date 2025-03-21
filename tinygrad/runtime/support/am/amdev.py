@@ -220,13 +220,15 @@ class AMMemoryManager:
 
     if contigous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
+      # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       paddrs = []
       ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
-        while seg_cnt > 0:
+        rem_len = seg_cnt * seg_size
+        while rem_len > 0:
           # Try to allocate as long segment (power of 2) as possible
-          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
-          while cont_seg_sz >= seg_size:
+          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
+          while cont_seg_sz >= 0x1000:
             try: paddr = self.palloc(cont_seg_sz, zero=True)
             except MemoryError: cont_seg_sz //= 2
             else: break
@@ -234,8 +236,8 @@ class AMMemoryManager:
           if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
           else:
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate contigous {cont_seg_sz=:#x} bytes (size={size:#x})")
-          seg_cnt, off = seg_cnt - cont_seg_sz // seg_size, off + cont_seg_sz
+            raise MemoryError(f"Failed to allocate contigous a page. (allocation size={size:#x})")
+          rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
@@ -298,10 +300,14 @@ class AMDev:
       if DEBUG >= 2: print(f"am {self.devfmt}: MEC is active. Issue a full reset.")
       self.partial_boot = False
 
+    # Init sw for all IP blocks
+    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
+
+    # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
       for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
-        ip.init()
+        ip.init_hw()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # Booting done
@@ -309,7 +315,7 @@ class AMDev:
 
     # Re-initialize main blocks
     for ip in [self.gfx, self.sdma]:
-      ip.init()
+      ip.init_hw()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     self.smu.set_clocks(level=-1) # last level, max perf.
@@ -319,7 +325,7 @@ class AMDev:
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
-    for ip in [self.sdma, self.gfx]: ip.fini()
+    for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
