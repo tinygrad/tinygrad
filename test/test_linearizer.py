@@ -71,7 +71,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    lowered = list(lower_schedule(c.schedule()))
+    lowered = [x[1] for x in lower_schedule(c.schedule())]
     for ei in lowered: ei.run()
     rawbufs = lowered[-1].bufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
@@ -2037,7 +2037,7 @@ class TestKernelOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if (CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]) or Device.DEFAULT == "WEBGPU":
+    if (CI and Device.DEFAULT in ["AMD", "NV", "CUDA"]):
       self.skipTest("super slow on CUDA and AMD because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
@@ -2094,6 +2094,7 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
       helper_linearizer_opt(b.sum(dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
+      # TODO: why?
       if Device.DEFAULT != "WEBGPU":
         helper_linearizer_opt(b.sum(0, dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
         helper_linearizer_opt(b.sum(1, dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
@@ -2139,7 +2140,6 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "max dimensions exceeded on WebGPU")
   def test_padto_where(self):
     Tensor.manual_seed(0)
     N = 17 * 17
@@ -2149,7 +2149,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "max dimensions exceeded on WebGPU")
   def test_padto_where_multioutput(self):
     Tensor.manual_seed(0)
     N = 17 * 17

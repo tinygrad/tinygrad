@@ -99,7 +99,7 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(getenv("PTX"), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
-    for ei in lower_schedule(Tensor.rand(20).schedule()):
+    for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
         for u in ei.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
@@ -122,8 +122,23 @@ class TestRandomness(unittest.TestCase):
                    0.27904558181762695, 0.9150195121765137, 0.48057758808135986, 0.23821306228637695, 0.7676635980606079], dtype=np.float32)
 
     r = Tensor.rand(20).numpy()
-
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
+
+    # next 20, np.arange(20, 40, dtype=np.uint32)
+    jr = np.array([0.7444133758544922, 0.7713677883148193, 0.8233780860900879, 0.43871235847473145, 0.517757773399353,
+                   0.6437174081802368, 0.967403769493103, 0.26167726516723633, 0.6825339794158936, 0.14966607093811035,
+                   0.28920769691467285, 0.017063498497009277, 0.2627382278442383, 0.9525482654571533, 0.9351049661636353,
+                   0.43904995918273926, 0.043945908546447754, 0.6616791486740112, 0.6667773723602295, 0.5228077173233032], dtype=np.float32)
+    r = Tensor.rand(20).numpy()
+    np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
+
+    # next 10, np.arange(40, 50, dtype=np.uint32)
+    jr = np.array([0.9614430665969849, 0.059279561042785645, 0.01909029483795166, 0.47882091999053955, 0.9677121639251709,
+                   0.36863112449645996, 0.3102607727050781, 0.06608951091766357, 0.35329878330230713, 0.26518797874450684], dtype=np.float32)
+    r = Tensor.rand(10).numpy()
+    # TODO: this failed because increment happened before _threefry_random_bits
+    with self.assertRaises(AssertionError):
+      np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
   @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL", "NV"), "no GPU CI")
   def test_threefry_tensors_cnt(self):

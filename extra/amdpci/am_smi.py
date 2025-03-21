@@ -5,7 +5,7 @@ from tinygrad.helpers import to_mv, DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import smu_v13_0_0
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_VERSION = 0xA0000002
 SMU_11_0_GFX_BUSY_THRESHOLD = 15
@@ -73,7 +73,7 @@ class AMSMI(AMDev):
     self.mm = AMMemoryManager(self, self.vram_size)
 
     # Initialize IP blocks
-    self.soc21:AM_SOC21 = AM_SOC21(self)
+    self.soc:AM_SOC = AM_SOC(self)
     self.gmc:AM_GMC = AM_GMC(self)
     self.ih:AM_IH = AM_IH(self)
     self.psp:AM_PSP = AM_PSP(self)
