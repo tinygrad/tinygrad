@@ -668,6 +668,7 @@ class Kernel:
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
         print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
+    if DEBUG >= 5: print(self.ast)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
