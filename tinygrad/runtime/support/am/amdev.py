@@ -223,19 +223,20 @@ class AMMemoryManager:
       paddrs = []
       ctx = AMPageTableTraverseContext(self.adev, self.root_page_table, va, create_pts=True)
       for off, _, _, seg_cnt, seg_size in ctx.next(size):
-        while seg_cnt > 0:
+        rem_len = seg_cnt * seg_size
+        while rem_len > 0:
           # Try to allocate as long segment (power of 2) as possible
-          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, seg_cnt*seg_size) + 12), None
-          while cont_seg_sz >= seg_size:
-            try: paddr = self.palloc(cont_seg_sz, zero=True)
+          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
+          while cont_seg_sz >= 0x1000:
+            try: paddr = self.palloc(cont_seg_sz, zero=False)
             except MemoryError: cont_seg_sz //= 2
             else: break
 
           if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
           else:
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate contigous {cont_seg_sz=:#x} bytes (size={size:#x})")
-          seg_cnt, off = seg_cnt - cont_seg_sz // seg_size, off + cont_seg_sz
+            raise MemoryError(f"Failed to allocate contigous {cont_seg_sz=:#x} {seg_size=:#x} bytes (size={size:#x})")
+          rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
