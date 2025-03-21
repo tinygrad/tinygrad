@@ -76,7 +76,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
       sched = run_onnx({"input":inp})["output"].schedule()
       ei = lower_schedule_item(sched[-2])
       daccs = [u for u in ei.prg.p.uops if u.op is Ops.DEFINE_ACC]
-      assert all(u.dtype.scalar() is dtypes.int for u in daccs)
+      assert all(u.dtype.scalar() == dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):
