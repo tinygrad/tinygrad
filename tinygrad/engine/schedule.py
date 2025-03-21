@@ -115,112 +115,11 @@ reorder_view = PatternMatcher([
 
 DONT_PUSH_VIEWS = {Ops.BUFFER, Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.ASSIGN, Ops.SINK, Ops.CONTIGUOUS, Ops.COPY}
 
-@dataclass(frozen=True)
-class GrouperContext:
-  assigns: dict[UOp, UOp]                     # maps realized buffers to assigns
-  realizes: dict[UOp, None]                   # all the simplified tensor uops we realize
-  children: defaultdict[UOp, dict[UOp, None]] # children graph of tensor uops
-
-def realize(ctx:GrouperContext, tr:UOp) -> None: ctx.realizes[tr] = None
-
-def realize_before_view(ctx:GrouperContext, view:UOp, tr:UOp) -> None:
-  st = unwrap(view.st)
-  # awlays realize unsafe pad ops before masked view
-  if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx.realizes, cache=dict()): return realize(ctx, tr)
-  # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(tr.shape) and resolve(prod(tr.shape) >= prod([y-x for x,y in m])): return
-  # realize before expand
-  if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, tr)
-
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.realizes.update((x, None) for x in s.src if x.op not in DONT_PUSH_VIEWS)),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
-  # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, name="view", src=(UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"),)), realize_before_view),
-  # realize before COPY
-  (UPat(Ops.COPY, src=(UPat(), UPat(GroupOp.All-DONT_PUSH_VIEWS, name="tr"))), realize),
+  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=new_src)
+    if (new_src:=tuple(x if x.base.op in DONT_PUSH_VIEWS else x.contiguous() for x in s.src)) != s.src else None),
 ])
-
-def append_uop(ctx:GrouperContext, u:UOp) -> None:
-  if u.op is Ops.ASSIGN: ctx.assigns[u.buf_uop] = u
-  for s in u.src: ctx.children[s.base][u] = None
-create_ctx = PatternMatcher([(UPat(GroupOp.All-{Ops.SINK, Ops.VIEW}, name="u"), append_uop)])
-
-def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:defaultdict[UOp, dict[UOp, None]], realizes:dict[UOp, None],
-                    reduce_for_op:dict[UOp, UOp], group:dict[UOp, None], cache:dict[tuple[UOp, ShapeTracker], None]) -> None:
-  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
-  if (tr, st) in cache: return
-  cache.setdefault((tr, st))
-  rsize = unwrap(r.st).size
-  if tr in realizes and tr is not r:
-    # can only fuse contiguous
-    # max one reduceop per kernel
-    if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
-    return group.setdefault(tr)
-  for tr_next in children[tr]:
-    # max one reduceop per kernel
-    if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
-    # can only fuse contiguous
-    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next.src if x.base == tr)) > 1: return group.setdefault(r)
-    recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
-
-def group_realizes(sink:UOp) -> dict[UOp, None]:
-  # start by adding uops that always realize
-  sink = graph_rewrite(sink, do_realize+create_ctx, ctx:=GrouperContext({}, {}, defaultdict(dict)))
-  if DONT_GROUP_REDUCES: return ctx.realizes
-  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: dict[UOp, UOp] = {}
-  double_reduces: list[UOp] = []
-  for r in sink.toposort:
-    if r.op is not Ops.REDUCE_AXIS: continue
-    if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
-    if r in ctx.realizes: continue
-    group: dict[UOp, None] = {}
-    recursive_group(r, unwrap(r.st), r, ctx.children, ctx.realizes, reduce_for_op, group, cache={})
-    # max one reduceop per kernel
-    can_chase = all(tr not in reduce_for_op for tr in group)
-    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = r in group
-    # can only have one output
-    if not forced_realize and len(group) > 1: forced_realize = True
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is Ops.ASSIGN for x in group):
-      parents = deque((r, *group))
-      while parents and not forced_realize:
-        p = parents.pop().base
-        if (assign:=ctx.assigns.get(p)) is not None and assign not in group: forced_realize, can_chase = True, False
-        if p in ctx.realizes: continue
-        parents.extend(p.src)
-    if forced_realize or not group:
-      tr = r
-      if can_chase:
-        # can chase this down to contiguous children
-        st = unwrap(tr.st)
-        while len(ctx.children[tr]) == 1:
-          tr_next = next(iter(ctx.children[tr]))
-          st_childs = dedup(unwrap(s.st) for s in tr_next.src if s.base is tr)
-          if len(st_childs) > 1: break
-          if st.size != st_childs[0].size: break
-          st = st + st_childs[0]
-          if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
-          tr = tr_next
-        # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is Ops.CAST and tr.dtype.itemsize > tr.src[0].dtype.itemsize:
-          tr = tr.src[0].base
-      group = {tr: None}
-      ctx.realizes[tr] = None
-    reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op is Ops.CONST:
-      # maybe fuse arange with its children
-      if len(flatten(ctx.children[tr] for tr in group)) != 0:
-        for tr in group: del ctx.realizes[tr]
-  # fuse double reduces with no other child
-  for reduceop in double_reduces:
-    top_reduce = reduceop.src[0].base
-    if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
-  return ctx.realizes
 
 # **** create kernels
 
@@ -233,7 +132,6 @@ class Kernel:
 
 @dataclass(frozen=True)
 class KernelContext:
-  realizes: dict[UOp, None]
   ops_metadata: dict[UOp, Metadata]
 
 def create_kernel(ctx:KernelContext, x:UOp, b:UOp):
@@ -247,7 +145,7 @@ def append_to_kernel(ctx:KernelContext, x:UOp):
   new_srcs: list[UOp] = []
   metadata = dict.fromkeys(x.arg.metadata)
   for s in x.src:
-    if s.op in DONT_PLACE_IN_KERNEL or s in ctx.realizes: new_srcs.append(s)
+    if s.op in DONT_PLACE_IN_KERNEL: new_srcs.append(s)
     else:
       new_srcs.extend(s.src)
       if (m:=ctx.ops_metadata.get(s)) is not None: metadata[m] = None
@@ -259,9 +157,6 @@ create_kernels = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype))),
   # create a buffer for COPY on the new device
   (UPat(Ops.COPY, src=(UPat(Ops.DEVICE, name="d"), UPat()), name="x"), lambda ctx,d,x: create_kernel(ctx, x, UOp.new_buffer(d.arg, x.size, x.dtype))),
-  # otherwise check the context if we're realizing this UOp
-  (UPat(GroupOp.All-DONT_PLACE_IN_KERNEL, name="x"),
-   lambda ctx,x: create_kernel(ctx, x, UOp.new_buffer(x.device, x.size, x.dtype)) if x in ctx.realizes else None),
   # walk back the local graph until we reach a buffer/assign parent
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # remove downstream reshapes from SINK
@@ -273,7 +168,10 @@ create_kernels = PatternMatcher([
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
-def swizzle_reduceop(r:UOp, src:UOp, view:UOp):
+def swizzle_reduceop(ctx, r:UOp, src:UOp, view:UOp):
+  ctx.update_children()
+  # NOTE: if the reduceop has more than one path, we realize it
+  if r in ctx.children and len(ctx.children[r]) > 1: return r.contiguous().view(view.arg)
   if (st:=unwrap(view.st)).contiguous: return None
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -301,8 +199,7 @@ def elementwise_view_right(root:UOp):
   return root.replace(src=tuple(new_src)).reshape(root.shape)
 
 def merge_double_reduce(root:UOp, first_reduce:UOp):
-  assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
-  assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.src[0].toposort), "can't merge more than two reduceops at a time"
+  if root.arg[0] != first_reduce.arg[0]: return None
   return first_reduce.replace(arg=(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 # push VIEW to children
@@ -335,6 +232,7 @@ def unbind_variable(ctx:tuple[dict[Variable, int], tuple[UOp, ...]], var:UOp, va
 add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x:UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx[1].index(x)), x.st.to_uop(), dtype=x.dtype)),
+  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[0]),
   # STORE (except for COPY/BUFFER_VIEW)
   (UPat(Ops.SINK, src=(UPat((Ops.COPY, Ops.BUFFER_VIEW), name="x"),)), lambda x:x),
   # partial assign can store to a non-contiguous ShapeTracker
@@ -375,16 +273,8 @@ fix_kernel_ops = PatternMatcher([
 
 def fix_kernel_ast(k:UOp, var_vals:dict[Variable, int]) -> UOp:
   assert k.op is Ops.KERNEL, f"kernel isn't kernel, it's {k}"
-  # substitute kernel sources for the target buffer + apply reshapes
-  parents_rep: dict[UOp, UOp] = {}
-  for s in k.src:
-    if s.op is Ops.ASSIGN:
-      for out in s.src[1].arg.ast.src: parents_rep[out] = s.buf_uop.view(unwrap(out.st))
-  ast = k.arg.ast.substitute(parents_rep)
-  # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left), view_right)
   # add buffer ops + fix_kernel_ops
-  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(var_vals, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
+  ast = graph_rewrite(k.arg.ast, merge_views+add_buffer_ops+fix_kernel_ops, ctx=(var_vals, bufs:=tuple(s.buf_uop for s in k.src)), bottom_up=True)
   if ast.op is Ops.SINK and not all_same(dev:=[x.device for x in bufs]): raise RuntimeError(f"all buffers must be on the same device: {dev}")
   # create subbuffer (TODO: this does not belong here)
   if ast.op is Ops.BUFFER_VIEW: buffers[bufs[0]] = (base:=bufs[1].buffer).view(ast.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
@@ -412,13 +302,22 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[big_sink], PatternMatcher([]), name="View Tensor Graph")
 
-  # get realizes
-  sink = tensor_map[big_sink]
-  realize_map = group_realizes(sink)
-  # map tensor metadata to simplified ops
-  ops_metadata = {v:k.metadata for k,v in tensor_map.items() if k.base.op not in {Ops.CONST, Ops.DEVICE} and isinstance(k.metadata, Metadata)}
-  # merge_views + create_kernels
-  kernel_map = graph_rewrite_map(sink, merge_views+create_kernels, ctx=KernelContext(realize_map, ops_metadata), bottom_up=True)
+  # swizzler + create_kernels
+  view_left_map = graph_rewrite_map(sink:=tensor_map[big_sink], view_left, name="view_left")
+  view_right_map = graph_rewrite_map(vl_sink:=view_left_map[sink], view_right, track_children=True, name="view_right")
+  contiguous_map = graph_rewrite_map(vr_sink:=view_right_map[vl_sink], merge_views+do_realize+create_kernels, ctx=KernelContext({}))
+  # map sink sources back to the kernel op
+  assert len(vr_sink.src) == len(contiguous_map[vr_sink].src)
+  for vs,ks in zip(vr_sink.src, contiguous_map[vr_sink].src): contiguous_map[vs] = ks
+  # walk the maps forward and map tensors to kernels
+  # childless tensors won't have a key in one of the maps, this is fine, just skip those
+  kernel_map: dict[UOp, UOp] = {}
+  for k,v in view_left_map.items():
+    if v not in view_right_map: continue
+    vr = view_right_map[v]
+    if vr not in contiguous_map: continue
+    ct = contiguous_map[vr]
+    kernel_map[k] = ct
   sched_sink = kernel_map[sink]
   type_verify(list(sched_sink.toposort), kernel_spec)
 
