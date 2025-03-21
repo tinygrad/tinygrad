@@ -5,12 +5,13 @@ from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
-  def init(self): raise NotImplementedError("IP block init must be implemeted")
-  def fini(self): pass
-  def set_clockgating_state(self): pass
+  def init_sw(self): pass # Prepare sw/allocations for this IP
+  def init_hw(self): pass # Initialize hw for this IP
+  def fini_hw(self): pass # Finalize hw for this IP
+  def set_clockgating_state(self): pass # Set clockgating state for this IP
 
 class AM_SOC(AM_IP):
-  def init(self):
+  def init_hw(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
@@ -21,9 +22,7 @@ class AM_SOC(AM_IP):
       f"s2a_doorbell_port{port}_range_size": size})
 
 class AM_GMC(AM_IP):
-  def __init__(self, adev):
-    super().__init__(adev)
-
+  def init_sw(self):
     # Memory controller aperture
     self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
@@ -39,7 +38,7 @@ class AM_GMC(AM_IP):
     self.dummy_page_paddr = self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True)
     self.hub_initted = {"MM": False, "GC": False}
 
-  def init(self): self.init_hub("MM")
+  def init_hw(self): self.init_hub("MM")
 
   def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
@@ -116,12 +115,11 @@ class AM_GMC(AM_IP):
       if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {va:#x}")
 
 class AM_SMU(AM_IP):
-  def __init__(self, adev):
-    super().__init__(adev)
+  def init_sw(self):
     self.smu_mod = self.adev._ip_module("smu", am.MP1_HWIP, prever_prefix='v')
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=not self.adev.partial_boot, boot=True)
 
-  def init(self):
+  def init_hw(self):
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), poll=True)
     self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0, poll=True)
@@ -165,7 +163,7 @@ class AM_SMU(AM_IP):
     return self.adev.mmMP1_SMN_C2PMSG_82.read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
-  def init(self):
+  def init_hw(self):
     # Wait for RLC autoload to complete
     while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read(bootload_complete=1) != 0: pass
 
@@ -202,7 +200,7 @@ class AM_GFX(AM_IP):
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.05)
 
-  def fini(self):
+  def fini_hw(self):
     self._grbm_select(me=1, pipe=0, queue=0)
     self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
     self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1)
@@ -274,24 +272,13 @@ class AM_GFX(AM_IP):
     _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=4, me=1)
 
 class AM_IH(AM_IP):
-  def __init__(self, adev):
-    super().__init__(adev)
+  def init_sw(self):
     self.ring_size = 512 << 10
     def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=not self.adev.partial_boot, boot=True),
                                     self.adev.mm.palloc(0x1000, zero=not self.adev.partial_boot, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
 
-  def interrupt_handler(self):
-    _, rwptr_vm, suf, _ = self.rings[0]
-    wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
-
-    if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
-      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
-    self.adev.regIH_RB_RPTR.write(wptr % self.ring_size)
-
-  def init(self):
+  def init_hw(self):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
 
@@ -315,7 +302,33 @@ class AM_IH(AM_IP):
 
     self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
 
+  def interrupt_handler(self):
+    _, rwptr_vm, suf, _ = self.rings[0]
+    wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
+
+    if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
+      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
+    self.adev.regIH_RB_RPTR.write(wptr % self.ring_size)
+
 class AM_SDMA(AM_IP):
+  def init_hw(self):
+    for pipe in range(2):
+      self.adev.reg(f"regSDMA{pipe}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
+      self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
+      self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
+      self.adev.reg(f"regSDMA{pipe}_F32_CNTL").update(halt=0, th1_reset=0)
+      self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
+    self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
+
+  def fini_hw(self):
+    self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
+    self.adev.regSDMA0_QUEUE0_IB_CNTL.update(ib_enable=0)
+    self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
+    time.sleep(0.01)
+    self.adev.regGRBM_SOFT_RESET.write(0x0)
+
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Setup the ring
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_MINOR_PTR_UPDATE").write(0x1)
@@ -331,26 +344,8 @@ class AM_SDMA(AM_IP):
       f32_wptr_poll_enable=1, rb_size=(ring_size//4).bit_length()-1, rb_enable=1, rb_priv=1)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
-  def init(self):
-    for pipe in range(2):
-      self.adev.reg(f"regSDMA{pipe}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
-      self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
-      self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, llc_noalloc=1) # rd=noa, wr=bypass
-      self.adev.reg(f"regSDMA{pipe}_F32_CNTL").update(halt=0, th1_reset=0)
-      self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
-    self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
-
-  def fini(self):
-    self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
-    self.adev.regSDMA0_QUEUE0_IB_CNTL.update(ib_enable=0)
-    self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
-    time.sleep(0.01)
-    self.adev.regGRBM_SOFT_RESET.write(0x0)
-
 class AM_PSP(AM_IP):
-  def __init__(self, adev):
-    super().__init__(adev)
-
+  def init_sw(self):
     self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=not self.adev.partial_boot, boot=True)
     self.cmd_paddr = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
     self.fence_paddr = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE, zero=not self.adev.partial_boot, boot=True)
@@ -361,8 +356,7 @@ class AM_PSP(AM_IP):
     self.max_tmr_size = 0x1300000
     self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=not self.adev.partial_boot, boot=True)
 
-  def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
-  def init(self):
+  def init_hw(self):
     sos_components_load_order = [
       (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
       (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
@@ -382,6 +376,8 @@ class AM_PSP(AM_IP):
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
+
+  def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
 
   def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 

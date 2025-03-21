@@ -157,7 +157,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_minimal
+        deps: testing_minimal,linting
         pydeps: "pillow torchvision expecttest"
         llvm: 'true'
     - name: Install ninja
@@ -165,9 +165,7 @@ jobs:
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
     - name: Lint with ruff
-      run: |
-        pip3 install --upgrade --force-reinstall ruff
-        python3 -m ruff check extra/torch_backend/backend.py
+      run: python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
@@ -310,9 +308,7 @@ jobs:
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
-      run: |
-        pip3 install --upgrade --force-reinstall ruff
-        python3 -m ruff check .
+      run: python3 -m ruff check .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
@@ -553,6 +549,7 @@ jobs:
           deps: testing_minimal${{matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}
           opencl: ${{ matrix.backend == 'gpu' && 'true' }}
           amd: ${{ matrix.backend == 'amd' && 'true' }}
+          llvm: ${{ (matrix.backend == 'amd' || matrix.backend == 'llvm') && 'true' }}
           cuda: ${{ (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nNV=1\nMOCKGPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'amd' && 'AMD=1\nMOCKGPU=1\nFORWARD_ONLY=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
@@ -569,6 +566,9 @@ jobs:
       - name: Run pytest (amd)
         if: matrix.backend=='amd'
         run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/imported/test_indexing.py test/test_hcq.py test/external/external_test_am.py --durations=20
+      - name: Run pytest (amd with llvm backend)
+        if: matrix.backend=='amd'
+        run: python -m pytest -n=auto test/test_amd_llvm.py --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -592,6 +592,7 @@ jobs:
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
+        llvm: 'true'
     - name: Run real world test
       run: JIT=2 METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
@@ -619,6 +620,12 @@ jobs:
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
+    - name: Run pytest (amd with llvm backend)
+      env:
+        MOCKGPU: 1
+        AMD: 1
+      run: |
+        python -m pytest -n=auto test/test_amd_llvm.py --durations=20
     - name: Run pytest (ptx)
       env:
         MOCKGPU: 1
