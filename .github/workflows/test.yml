@@ -684,13 +684,37 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+      - name: Restore cached HuggingFace models
+        id: hf-cache
+        uses: actions/cache@v3
+        with:
+          # The directory you want to cache
+          path: extra/huggingface_onnx/models
+          # The cache key can include the OS and a hash of your YAML
+          # so that changes to huggingface_repos.yaml bust the cache
+          key: ${{ runner.os }}-hf-models-${{ hashFiles('extra/huggingface_onnx/huggingface_repos.yaml') }}
+          # Fallback restore keys to allow partial matches
+          restore-keys: |
+            ${{ runner.os }}-hf-models-
+
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
           key: huggingface
           pydeps: "onnx==1.16.0 onnxruntime pillow huggingface_hub"
+
       - name: Download ONNX Models
         run: python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/huggingface_repos.yaml
+      
+      # 3) If we had a cache miss, save the updated directory.
+      #    This ensures any new models get cached.
+      - name: Update HuggingFace model cache
+        if: steps.hf-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v3
+        with:
+          path: extra/huggingface_onnx/models
+          key: ${{ runner.os }}-hf-models-${{ hashFiles('extra/huggingface_onnx/huggingface_repos.yaml') }}
+
       - name: Validate HuggingFace Models
         run: PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --validate
 
