@@ -493,7 +493,7 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=min
     - name: Run test_tiny on DSP
-      run: DEBUG=2 DSP=1 python test/test_tiny.py
+      run: CC=clang-19 DEBUG=2 DSP=1 python test/test_tiny.py
     - name: Test quantize onnx
       run: PYTHONPATH="." DEBUG=2 DSP=1 python3 test/test_quantize_onnx.py
     - name: Test LLVM=1 DEVECTORIZE=0
