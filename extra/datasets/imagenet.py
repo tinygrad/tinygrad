@@ -31,10 +31,7 @@ else:
 
 @functools.lru_cache(None)
 def get_val_files():
-  if not (files:=glob.glob(p:=str(BASEDIR / "val/*/*"))):
-    if not getenv("IMAGENETMOCK"): raise FileNotFoundError(f"No validation files in {p}")
-    from extra.datasets.fake_imagenet_from_mnist import create_fake_mnist_imagenet
-    create_fake_mnist_imagenet(BASEDIR)
+  if not (files:=glob.glob(p:=str(BASEDIR / "val/*/*"))): raise FileNotFoundError(f"No validation files in {p}")
   return files
 
 def image_resize(img, size, interpolation):
