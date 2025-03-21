@@ -229,7 +229,7 @@ class AMMemoryManager:
           # Try to allocate as long segment (power of 2) as possible
           cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
           while cont_seg_sz >= 0x1000:
-            try: paddr = self.palloc(cont_seg_sz, zero=False)
+            try: paddr = self.palloc(cont_seg_sz, zero=True)
             except MemoryError: cont_seg_sz //= 2
             else: break
 
