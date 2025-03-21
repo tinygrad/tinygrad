@@ -733,7 +733,7 @@ def get_onnx_ops():
       ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
     # you need both NHWC=1 DONT_GROUP_REDUCES=1 for this to work
     if getenv("NHWC") and len(ret.shape) == 4: return ret.permute(0,2,3,1).contiguous().permute(0,3,1,2)
-    return ret.contiguous()
+    return ret
 
   def DynamicQuantizeLinear(x: Tensor):
     # only support uint8
