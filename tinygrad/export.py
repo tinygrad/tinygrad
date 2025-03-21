@@ -50,7 +50,7 @@ def extract_model(model: Callable, args: Sequence) -> ExportSpec:
       seen.add(buf)
     kernel_calls.append(KernelCall(fxn.function_name, ei.bufs + fxn.vars, fxn.global_size))
 
-  res = lambda x: x.unbind()[0] if isinstance(x, UOp) else cast(Tensor, x).lazydata.base.realized
+  def res(x): return x.unbind()[0] if isinstance(x, UOp) else cast(Tensor, x).lazydata.base.realized
   return ExportSpec([res(x) for x in args if isinstance(x, (UOp, Tensor))], output_bufs, list(empty_bufs), list(weight_bufs), kernels, kernel_calls)
 
 def dtype_to_js_type(dtype: DType) -> str:
@@ -90,12 +90,12 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
   buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
   empty_bufs = [f"const {buf_names[b]} = createEmptyBuf(device, {b.nbytes});" for b in ex.inputs+ex.outputs+ex.empty_bufs if isinstance(b, Buffer)]
   symbolic_bufs = [f"const {buf_names[var]} = createUniformBuf(device, {var.dtype.itemsize});" for var in ex.inputs if isinstance(var, UOp)]
-  map_wt = lambda buf: f"state_dict['{weight_names[buf]}']" if not save_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[buf]}'])"
+  def map_wt(buf): return f"state_dict['{weight_names[buf]}']" if not save_weights else f"getTensorBuffer(safetensor,metadata['{weight_names[buf]}'])"
   weight_bufs = [f"const {buf_names[buf]} = createWeightBuf(device, {buf.nbytes}, {map_wt(buf)});" for buf in ex.weight_bufs]
 
   # Render model transforms
   kernel_declarations = '\n\n'.join([f"const {name} = `{code.replace(name, 'main')}`;" for name, code in ex.kernels.items()])
-  resolve_gidx = lambda x: x.simplify().render() if isinstance(x, UOp) else str(x)
+  def resolve_gidx(x): return x.simplify().render() if isinstance(x, UOp) else str(x)
   kernel_calls = [f"""addComputePass(device, commandEncoder, pipelines[{i}], [{', '.join(buf_names[arg] for arg in kc.args)}],
     [{','.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2);""" for i, kc in enumerate(ex.kernel_calls)]
 
@@ -117,15 +117,15 @@ gpuReadBuffer{i}.unmap();""" for i,buf in enumerate(ex.outputs)]
   outbuf_copies = [f"commandEncoder.copyBufferToBuffer({buf_names[buf]}, 0, gpuReadBuffer{i}, 0, {buf.nbytes});" for i,buf in enumerate(ex.outputs)]
   output_return = '[{}]'.format(",".join([f'resultBuffer{i}' for i in range(len(ex.outputs))]))
 
-  getTensorMetadata = f"""\nconst getTensorMetadata = (safetensorBuffer) => {{
+  getTensorMetadata = """\nconst getTensorMetadata = (safetensorBuffer) => {
     const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
     const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(
-      ([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
-}};\n""" if save_weights else ""
+      ([k, v]) => [k, {...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}]));
+};\n""" if save_weights else ""
   max_buf_nbytes = max(buf.nbytes for buf in ex.weight_bufs + ex.empty_bufs)
 
-  j = lambda to_join, num_indents: ("\n" + num_indents * "  ").join(to_join)
+  def j(to_join, num_indents): return ("\n" + num_indents * "  ").join(to_join)
   prg = f"""
 if (!navigator.gpu) throw new Error("WebGPU not supported.");
 const adapter = await navigator.gpu.requestAdapter();
