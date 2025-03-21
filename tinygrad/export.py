@@ -56,7 +56,7 @@ def extract_model(model: Callable, args: Sequence) -> ExportSpec:
       seen.add(buf)
     kernel_calls.append(KernelCall(fxn.function_name, ei.bufs + fxn.vars, fxn.global_size))
 
-  res = lambda x: x if isinstance(x, UOp) else cast(Tensor, x).lazydata.base.realized
+  res = lambda x: x.unbind()[0] if isinstance(x, UOp) else cast(Tensor, x).lazydata.base.realized
   return ExportSpec([res(x) for x in args if isinstance(x, (UOp, Tensor))], output_bufs, list(empty_bufs), list(weight_bufs), kernels, kernel_calls)
 
 def dtype_to_js_type(dtype: DType) -> str:
@@ -83,25 +83,32 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
 
   with Context(JIT=2): ex = extract_model(model, inputs)
 
-  # TODO: if user passes incomplete state_dict, make it still work by filling in gaps with bufs_to_save
   if state_dict:
     weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()}
   #else:
     #weight_names = {id(buf): name for name, buf in bufs_to_save.items()}
+
+  # random seeds (buffer of two uint32) were included in ex.weight_bufs, but are not in the state_dict: TODO: init rand seeds in JS?
+  for i, buf in enumerate(ex.weight_bufs):
+    if buf not in weight_names: ex.empty_bufs.append(ex.weight_bufs.pop(i))
+
   max_buf_nbytes = max(buf.nbytes for buf in ex.weight_bufs + ex.empty_bufs)
   kernel_code = '\n\n'.join([f"const {name} = `{code.replace(name, 'main')}`;" for name, code in ex.kernels.items()])
 
-  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs) if isinstance(buf, Buffer)}
+  # TODO: validate symbolic var ranges against input args at runtime in js?
+  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
+  resolve_gidx = lambda x: x.simplify().render() if isinstance(x, UOp) else str(x)
   kernel_calls = "\n        ".join(f"""
-addComputePass(device, commandEncoder, pipelines[{i}], infinityBuf, [{', '.join(buf_names[arg] for arg in kc.args)}], [{', '.join(str(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2); 
+addComputePass(device, commandEncoder, pipelines[{i}], infinityBuf, [{', '.join(buf_names[arg] for arg in kc.args)}], [{', '.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split("INFINITY").length > 2); 
 """ for i, kc in enumerate(ex.kernel_calls))
   empty_bufs = '\n    '.join(f"const {buf_names[buf]} = createEmptyBuf(device, {buf.nbytes});" for buf in ex.inputs + ex.outputs + ex.empty_bufs if isinstance(buf, Buffer))
+  sym_bufs = '\n    '.join(f"const {buf_names[var]} = createUniformBuf(device, {var.dtype.itemsize});" for var in ex.inputs if isinstance(var, UOp))
   map_to_external_weight = lambda _key: f"state_dict['{weight_names[_key]}']" if not save_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[_key]}'])"
   weight_bufs = '\n    '.join(f"const {buf_names[buf]} = createWeightBuf(device, {buf.nbytes}, {map_to_external_weight(buf)});" for i,buf in enumerate(ex.weight_bufs))
   input_writers = "\n".join(f"""
-  device.queue.writeBuffer(gpuWriteBuffer{i}, 0, _input{i});
-  commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {buf_names[buf]}, 0, gpuWriteBuffer{i}.size);
-  """ for i, buf in enumerate(ex.inputs) if isinstance(buf, Buffer))
+  device.queue.writeBuffer(gpuWriteBuffer{i}, 0, {f"_input{i}" if isinstance(var, Buffer) else f"new {dtype_to_js_type(var.dtype)}([{var.arg[0]}])"});
+  commandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, {buf_names[var]}, 0, gpuWriteBuffer{i}.size);
+  """ for i, var in enumerate(ex.inputs))
   outbuf_copies = '\n        '.join([f"commandEncoder.copyBufferToBuffer({buf_names[buf]}, 0, gpuReadBuffer{i}, 0, {buf.nbytes});" for i,buf in enumerate(ex.outputs)])
 
   output_buffer_types = [dtype_to_js_type(buf.dtype) for buf in ex.outputs]
@@ -186,16 +193,16 @@ const addComputePass = (device, commandEncoder, pipeline, infinityUniformBuf, bu
 const setupNet = async ({"state_dict" if not save_weights else "safetensor"}) => {{
     {"const metadata = getTensorMetadata(safetensor);" if not not save_weights else ""}
     const infinityBuf = createInfinityUniformBuf(device);
-    {empty_bufs + weight_bufs}
+    {sym_bufs + empty_bufs + weight_bufs}
 
-    {(nl+'    ').join(f"const gpuWriteBuffer{i} = device.createBuffer({{size:{buf.nbytes}, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});" for i,buf in enumerate(ex.inputs) if isinstance(buf, Buffer))}
-    {(nl+'    ').join(f"const gpuReadBuffer{i} = device.createBuffer({{size:{buf.nbytes}, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ}});" for i,buf in enumerate(ex.outputs))}
+    {(nl+'    ').join(f"const gpuWriteBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});" for i,buf in enumerate(ex.inputs))}
+    {(nl+'    ').join(f"const gpuReadBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ}});" for i,buf in enumerate(ex.outputs))}
 
     const kernels = [{",".join(kc.kernel_name for kc in ex.kernel_calls)}];
     const pipelines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{
       layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
-    return [async ({",".join([f"_input{i}" for i in range(len(ex.inputs))])}) => {{
+    return [async ({",".join(f"_input{i}" if isinstance(var, Buffer) else f"{var.arg[0]}" for i,var in enumerate(ex.inputs))}) => {{
         const commandEncoder = device.createCommandEncoder();
         {input_writers}
         {kernel_calls}
@@ -216,7 +223,7 @@ export default {model_name};
   if js_outfile:
     with open(js_outfile, "w") as f: f.write(prg)
     if not state_dict:
-      state_dict = {name: Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize() for name, buf in bufs_to_save.items()}
+      state_dict = {name: Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize() for name, buf in ex.weight_bufs}
     safe_save(state_dict, f"{js_outfile}.safetensors")
 
   return prg, state_dict
