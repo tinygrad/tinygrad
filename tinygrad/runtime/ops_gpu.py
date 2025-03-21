@@ -88,6 +88,7 @@ class CLAllocator(LRUAllocator):
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
   def __init__(self, device:str=""):
+    self.device_ip = None
     if CLDevice.device_ids is None:
       check(cl.clGetPlatformIDs(0, None, num_platforms := ctypes.c_uint32()))
       check(cl.clGetPlatformIDs(num_platforms.value, platform_ids := (cl.cl_platform_id * num_platforms.value)(), None))
@@ -104,6 +105,7 @@ class CLDevice(Compiled):
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, status), status)
     self.pending_copyin: list[memoryview] = []
     self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 4096, ctypes.byref(buf := ctypes.create_string_buffer(4096)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
+    self.device_ip =  (cl.clGetDeviceInfo(self.device_id, 0x106A, 16, ctypes.byref(buf := ctypes.create_string_buffer(16)), ctypes.byref(total := ctypes.c_size_t())), int.from_bytes(ctypes.string_at(ctypes.addressof(buf)+2, size=2), byteorder="little"))[1] # noqa: E501
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
     renderer = IntelRenderer() if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts and getenv("INTEL") else OpenCLRenderer()
     super().__init__(device, CLAllocator(self), renderer, CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
