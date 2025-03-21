@@ -692,7 +692,7 @@ jobs:
       - name: Download ONNX Models
         run: python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/huggingface_repos.yaml
       - name: Validate HuggingFace Models
-        run: PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --validate
+        run: PYTHONPATH=. python -u extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --validate
 
 
 # ****** Windows Tests ******
