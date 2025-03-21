@@ -292,16 +292,18 @@ class TestDSPCache(unittest.TestCase):
               UOp(Ops.CONST, dtypes.int, arg=-256, src=(
                 x36,)),)),
             x41,)),)),)),))""")
-    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     with Context(DEVECTORIZE=0, QUANTIZE=1):
       k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
       for opt in opts: k.apply_opt(opt)
       prg = k.to_program()
     src = prg.src
-    src = src.replace("int32 acc3 = cast0;\n", "int32 acc3 = cast0;\n    __builtin_HEXAGON_Y4_l2fetch(data2, 6144);\n")
+    src = src.replace("128))) data3) {\n", "128))) data3) {\n  __builtin_HEXAGON_Y4_l2fetch(data2, 6144);\n")
+    src = src.replace("int32 acc3 = cast0;\n", "int32 acc3 = cast0;\n    __builtin_HEXAGON_Y4_l2fetch(data1+(ridx0*768), 768);\n    #pragma nounroll\n")
     print(src)
     prg = replace(prg, src=src)
     rt = CompiledRunner(prg)
+    Device.default.compiler.disassemble(rt.lib)
     ei = ExecItem(rt, bufs_from_lin(k))
     tm = ei.run(wait=True)
     print(f"final time {tm*1e6:.2f} us")
