@@ -2,13 +2,23 @@ import yaml, argparse, time, asyncio
 from requests.exceptions import ConnectionError, ReadTimeout, Timeout
 from pathlib import Path
 from huggingface_hub import snapshot_download, errors
+import threading
+
+class DummyTqdm:
+  _lock = threading.Lock()
+  @classmethod
+  def set_lock(cls, lock): cls._lock = lock
+  def __init__(self, iterable, **kwargs): self.iterable = iterable
+  def __iter__(self): return iter(self.iterable)
+  def update(self, n): pass
+  def close(self): pass
 
 async def snapshot_with_retries(model_id, allow_patterns, cache_dir, retries=3, timeout=5):
   for _ in range(retries):
     try:
       # Run snapshot_download in a separate thread
       snapshot_path = await asyncio.to_thread(
-        snapshot_download, repo_id=model_id, allow_patterns=allow_patterns, cache_dir=cache_dir
+        snapshot_download, repo_id=model_id, allow_patterns=allow_patterns, cache_dir=cache_dir, tqdm_class=DummyTqdm
       )
       return snapshot_path
     except (ConnectionError, ReadTimeout, errors.LocalEntryNotFoundError) as e:
