@@ -52,12 +52,22 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
   else:
     return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_128B({0}, {1})")
 
-dsp_pm = gep_pushing+PatternMatcher([
-  # GEP on REDUCE
-  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'),
-   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
+# __builtin_HEXAGON_A2_vraddub_acc
+
+def gep_on_reduce(gep, alu):
+  if gep.dtype.vcount == 1: return None
+  return UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
      tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) and \
-      alu.dtype.count >= gep.dtype.count else None),
+      alu.dtype.count >= gep.dtype.count else None
+
+def multi_add_int2(a0, a1, a2, a3):
+  arg = "__builtin_HEXAGON_A2_vraddub({0}, {1})"
+  print(a0.op, a1.op, a2.op, a3.op)
+  return None
+
+dsp_pm = PatternMatcher([
+  # GEP on REDUCE
+  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'), gep_on_reduce),
   # no swizzle down convert
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
@@ -76,7 +86,12 @@ dsp_pm = gep_pushing+PatternMatcher([
   (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
    UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
 
-])
+  # REDUCE int4 -> 2xint2
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r)))),
+
+  (UPat(dtype=dtypes.int.vec(2), name="a0") + UPat(name="a1") + UPat(name="a2") + UPat(name="a3"), multi_add_int2),
+])+gep_pushing
 
 def add_to_mul(c:UOp, x:UOp):
   if c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"):
