@@ -351,7 +351,7 @@ def train_retinanet():
   from extra.lr_scheduler import LambdaLR
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
-  from tinygrad.helpers import colored, Context, DEBUG
+  from tinygrad.helpers import colored, Context
   from tinygrad.nn.optim import Optimizer
   from typing import Iterator
   import extra.models.retinanet as retinanet
@@ -419,7 +419,7 @@ def train_retinanet():
   config["epochs"] = EPOCHS = getenv("EPOCHS", 4)
   config["train_beam"] = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["eval_beam"] = EVAL_BEAM = getenv("EVAL_BEAM", BEAM.value)
-  config["lr"] = lr = getenv("LR", 0.0001 * (BS / 256))
+  config["lr"] = lr = getenv("LR", 0.00001 * (BS / 256))
   config["lr_warmup_epochs"] = lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 1)
   config["lr_warmup_factor"] = lr_warmup_factor = getenv("LR_WARMUP_FACTOR", 1e-3)
   config["loss_scaler"] = loss_scaler = getenv("LOSS_SCALER", 256.0 if dtypes.default_float == dtypes.float16 else 1.0)

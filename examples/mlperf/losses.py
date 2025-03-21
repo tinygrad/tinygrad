@@ -1,5 +1,3 @@
-from typing import Optional
-
 from examples.mlperf.metrics import dice_score
 from tinygrad import Tensor
 
