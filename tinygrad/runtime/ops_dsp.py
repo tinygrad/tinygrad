@@ -36,11 +36,13 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
   m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
   simp_m1 = m1.simplify()
   if simp_m1.op is Ops.GEP and simp_m1.arg == simp_m1.arg[0:4]*32:
-    scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4]).bitcast(dtypes.uint)
+    # Vx32.w+=vrmpy(Vu32.ub,Rt32.b) -> __builtin_HEXAGON_V6_vrmpybus_acc
+    # Vx32.uw+=vrmpy(Vu32.ub,Rt32.ub) -> __builtin_HEXAGON_V6_vrmpyub_acc
+    scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4])
     if acc is not None:
-      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
     else:
-      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
   if acc is not None:
     return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
   else:
