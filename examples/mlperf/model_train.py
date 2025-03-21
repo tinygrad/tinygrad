@@ -581,6 +581,9 @@ def train_retinanet():
         proc, next_proc = next_proc, None
         i += 1
 
+        if i == BENCHMARK:
+          return
+
         et = time.time()
         eval_times.append(et - st)
 
