@@ -35,7 +35,6 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 extra/huggingface_onnx/models/*
-extra/huggingface_onnx/*.yaml
 extra/weights
 venv
 examples/**/net.*[js,json]

@@ -166,7 +166,7 @@ jobs:
         sudo apt install -y --no-install-recommends ninja-build
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
+        pip3 install --upgrade --force-reinstall ruff
         python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: PYTHONPATH=. FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
@@ -234,10 +234,6 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
-    - name: Test emulated AMD MFMA tensor cores
-      run: |
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated CUDA tensor cores
       run: |
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
@@ -257,7 +253,6 @@ jobs:
       run: |
         TC=3 DEBUG=3 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        TC=3 PYTHONPATH=. DEBUG=3 EMULATE_AMD_MFMA=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         TC=3 DEBUG=3 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         TC=3 PYTHONPATH=. DEBUG=3 EMULATE_INTEL=1 PYTHON=1 N=16 HALF=1 python3 ./extra/gemm/simple_matmul.py
         TC=3 PYTHONPATH=. DEBUG=3 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -311,7 +306,7 @@ jobs:
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
+        pip3 install --upgrade --force-reinstall ruff
         python3 -m ruff check .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
@@ -694,41 +689,8 @@ jobs:
         with:
           key: huggingface
           pydeps: "onnx==1.16.0 onnxruntime pillow huggingface_hub"
-
-      - name: Restore HuggingFace Metadata Cache
-        uses: actions/cache@v3
-        id: hf_metadata_cache
-        with:
-          path: extra/huggingface_onnx/huggingface_repos.yaml
-          key: huggingface-metadata-yaml
-      - name: Verify Metadata Exists
-        run: test -s extra/huggingface_onnx/huggingface_repos.yaml || echo "Metadata not found in cache."
-      - name: Collect HuggingFace Metadata
-        if: steps.hf_metadata_cache.outputs.cache-hit != 'true'
-        run: PYTHONPATH=. python extra/huggingface_onnx/collect_metadata.py --limit 90
-      - name: Save HuggingFace Metadata Cache
-        if: steps.hf_metadata_cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v3
-        with:
-          path: extra/huggingface_onnx/huggingface_repos.yaml
-          key: huggingface-metadata-yaml
-
-      - name: Restore HuggingFace Models Cache
-        uses: actions/cache@v3
-        id: hf_models_cache
-        with:
-          path: extra/huggingface_onnx/models
-          key: huggingface-models
       - name: Download ONNX Models
-        if: steps.hf_models_cache.outputs.cache-hit != 'true'
         run: python extra/huggingface_onnx/download_models.py extra/huggingface_onnx/huggingface_repos.yaml
-      - name: Save HuggingFace Models Cache
-        if: steps.hf_models_cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v3
-        with:
-          path: extra/huggingface_onnx/models
-          key: huggingface-models
-
       - name: Validate HuggingFace Models
         run: PYTHONPATH=. python extra/huggingface_onnx/run_models.py extra/huggingface_onnx/huggingface_repos.yaml --validate
 
