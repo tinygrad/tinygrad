@@ -25,697 +25,697 @@ repositories:
       size: 90.33MB
     - file: onnx/model_O3.onnx
       size: 90.33MB
-  sentence-transformers/all-mpnet-base-v2:
-    url: https://huggingface.co/sentence-transformers/all-mpnet-base-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.83MB
-    - file: onnx/model_O1.onnx
-      size: 435.73MB
-    - file: onnx/model_O2.onnx
-      size: 435.67MB
-    - file: onnx/model_O3.onnx
-      size: 435.67MB
-  sentence-transformers/multi-qa-MiniLM-L6-cos-v1:
-    url: https://huggingface.co/sentence-transformers/multi-qa-MiniLM-L6-cos-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 90.41MB
-    - file: onnx/model_O1.onnx
-      size: 90.36MB
-    - file: onnx/model_O2.onnx
-      size: 90.33MB
-    - file: onnx/model_O3.onnx
-      size: 90.33MB
-  openai-community/gpt2:
-    url: https://huggingface.co/openai-community/gpt2
-    download_path: null
-    files:
-    - file: onnx/decoder_model.onnx
-      size: 653.67MB
-    - file: onnx/decoder_with_past_model.onnx
-      size: 653.67MB
-  WhereIsAI/UAE-Large-V1:
-    url: https://huggingface.co/WhereIsAI/UAE-Large-V1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1336.85MB
-  sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2:
-    url: https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 470.30MB
-    - file: onnx/model_O1.onnx
-      size: 470.21MB
-    - file: onnx/model_O2.onnx
-      size: 470.15MB
-    - file: onnx/model_O3.onnx
-      size: 470.15MB
-  FacebookAI/xlm-roberta-base:
-    url: https://huggingface.co/FacebookAI/xlm-roberta-base
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 1881.47MB
-  FacebookAI/roberta-large:
-    url: https://huggingface.co/FacebookAI/roberta-large
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 1628.09MB
-  trpakov/vit-face-expression:
-    url: https://huggingface.co/trpakov/vit-face-expression
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 343.48MB
-  sentence-transformers/paraphrase-MiniLM-L6-v2:
-    url: https://huggingface.co/sentence-transformers/paraphrase-MiniLM-L6-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 90.41MB
-    - file: onnx/model_O1.onnx
-      size: 90.36MB
-    - file: onnx/model_O2.onnx
-      size: 90.33MB
-    - file: onnx/model_O3.onnx
-      size: 90.33MB
-  distilbert/distilbert-base-uncased-finetuned-sst-2-english:
-    url: https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 267.96MB
-  dslim/bert-base-NER:
-    url: https://huggingface.co/dslim/bert-base-NER
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 431.17MB
-  google-t5/t5-small:
-    url: https://huggingface.co/google-t5/t5-small
-    download_path: null
-    files:
-    - file: onnx/decoder_model.onnx
-      size: 232.47MB
-    - file: onnx/decoder_with_past_model.onnx
-      size: 219.87MB
-    - file: onnx/encoder_model.onnx
-      size: 141.40MB
-  sentence-transformers/all-MiniLM-L12-v2:
-    url: https://huggingface.co/sentence-transformers/all-MiniLM-L12-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 133.13MB
-    - file: onnx/model_O1.onnx
-      size: 133.04MB
-    - file: onnx/model_O2.onnx
-      size: 132.97MB
-    - file: onnx/model_O3.onnx
-      size: 132.97MB
-  sentence-transformers/paraphrase-mpnet-base-v2:
-    url: https://huggingface.co/sentence-transformers/paraphrase-mpnet-base-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.83MB
-    - file: onnx/model_O1.onnx
-      size: 435.73MB
-    - file: onnx/model_O2.onnx
-      size: 435.67MB
-    - file: onnx/model_O3.onnx
-      size: 435.67MB
-  patrickjohncyh/fashion-clip:
-    url: https://huggingface.co/patrickjohncyh/fashion-clip
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 605.80MB
-  mattmdjaga/segformer_b2_clothes:
-    url: https://huggingface.co/mattmdjaga/segformer_b2_clothes
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 110.04MB
-  colbert-ir/colbertv2.0:
-    url: https://huggingface.co/colbert-ir/colbertv2.0
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 436.19MB
-  Alibaba-NLP/gte-large-en-v1.5:
-    url: https://huggingface.co/Alibaba-NLP/gte-large-en-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1745.60MB
-  BAAI/bge-small-en-v1.5:
-    url: https://huggingface.co/BAAI/bge-small-en-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 133.09MB
-  thenlper/gte-small:
-    url: https://huggingface.co/thenlper/gte-small
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 133.13MB
-  microsoft/layoutlmv3-base:
-    url: https://huggingface.co/microsoft/layoutlmv3-base
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 501.60MB
-  sentence-transformers/paraphrase-multilingual-mpnet-base-v2:
-    url: https://huggingface.co/sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1110.07MB
-    - file: onnx/model_O1.onnx
-      size: 1109.96MB
-    - file: onnx/model_O2.onnx
-      size: 1109.85MB
-    - file: onnx/model_O3.onnx
-      size: 1109.85MB
-  Alibaba-NLP/gte-base-en-v1.5:
-    url: https://huggingface.co/Alibaba-NLP/gte-base-en-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 555.85MB
-  WinKawaks/vit-small-patch16-224:
-    url: https://huggingface.co/WinKawaks/vit-small-patch16-224
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 88.46MB
-  answerdotai/answerai-colbert-small-v1:
-    url: https://huggingface.co/answerdotai/answerai-colbert-small-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 133.16MB
-    - file: vespa_colbert.onnx
-      size: 133.26MB
-  BAAI/bge-m3:
-    url: https://huggingface.co/BAAI/bge-m3
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 0.72MB
-    - file: onnx/model.onnx_data
-      size: 2266.82MB
-  intfloat/multilingual-e5-small:
-    url: https://huggingface.co/intfloat/multilingual-e5-small
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 470.27MB
-  mixedbread-ai/mxbai-embed-large-v1:
-    url: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1336.85MB
-  distilbert/distilbert-base-multilingual-cased:
-    url: https://huggingface.co/distilbert/distilbert-base-multilingual-cased
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 909.17MB
-  intfloat/multilingual-e5-large:
-    url: https://huggingface.co/intfloat/multilingual-e5-large
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 0.55MB
-    - file: onnx/model.onnx_data
-      size: 2235.36MB
-  BAAI/bge-large-en-v1.5:
-    url: https://huggingface.co/BAAI/bge-large-en-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1336.85MB
-  sentence-transformers/distiluse-base-multilingual-cased-v2:
-    url: https://huggingface.co/sentence-transformers/distiluse-base-multilingual-cased-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 539.05MB
-    - file: onnx/model_O1.onnx
-      size: 539.03MB
-    - file: onnx/model_O2.onnx
-      size: 538.96MB
-    - file: onnx/model_O3.onnx
-      size: 538.96MB
-  intfloat/e5-large-v2:
-    url: https://huggingface.co/intfloat/e5-large-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1336.92MB
-  sentence-transformers/multi-qa-mpnet-base-dot-v1:
-    url: https://huggingface.co/sentence-transformers/multi-qa-mpnet-base-dot-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.83MB
-    - file: onnx/model_O1.onnx
-      size: 435.73MB
-    - file: onnx/model_O2.onnx
-      size: 435.67MB
-    - file: onnx/model_O3.onnx
-      size: 435.67MB
-  jinaai/jina-clip-v1:
-    url: https://huggingface.co/jinaai/jina-clip-v1
-    download_path: null
-    files:
-    - file: onnx/text_model.onnx
-      size: 547.53MB
-    - file: onnx/vision_model.onnx
-      size: 343.87MB
-  sentence-transformers/bert-base-nli-mean-tokens:
-    url: https://huggingface.co/sentence-transformers/bert-base-nli-mean-tokens
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.84MB
-    - file: onnx/model_O1.onnx
-      size: 435.76MB
-    - file: onnx/model_O2.onnx
-      size: 435.69MB
-    - file: onnx/model_O3.onnx
-      size: 435.69MB
-  BAAI/bge-base-en-v1.5:
-    url: https://huggingface.co/BAAI/bge-base-en-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.81MB
-  jinaai/jina-embeddings-v3:
-    url: https://huggingface.co/jinaai/jina-embeddings-v3
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1.51MB
-    - file: onnx/model.onnx_data
-      size: 2291.34MB
-  llava-hf/llava-onevision-qwen2-0.5b-ov-hf:
-    url: https://huggingface.co/llava-hf/llava-onevision-qwen2-0.5b-ov-hf
-    download_path: null
-    files:
-    - file: onnx/embed_tokens.onnx
-      size: 544.77MB
-    - file: onnx/vision_encoder.onnx
-      size: 1598.93MB
-  distil-whisper/distil-large-v3:
-    url: https://huggingface.co/distil-whisper/distil-large-v3
-    download_path: null
-    files:
-    - file: onnx/decoder_model.onnx
-      size: 477.85MB
-    - file: onnx/decoder_with_past_model.onnx
-      size: 451.60MB
-    - file: onnx/encoder_model.onnx
-      size: 0.65MB
-    - file: onnx/encoder_model.onnx_data
-      size: 2547.88MB
-  sentence-transformers/all-roberta-large-v1:
-    url: https://huggingface.co/sentence-transformers/all-roberta-large-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1417.75MB
-    - file: onnx/model_O1.onnx
-      size: 1417.54MB
-    - file: onnx/model_O2.onnx
-      size: 1417.31MB
-    - file: onnx/model_O3.onnx
-      size: 1417.31MB
-  sentence-transformers/distiluse-base-multilingual-cased-v1:
-    url: https://huggingface.co/sentence-transformers/distiluse-base-multilingual-cased-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 539.05MB
-    - file: onnx/model_O1.onnx
-      size: 539.03MB
-    - file: onnx/model_O2.onnx
-      size: 538.96MB
-    - file: onnx/model_O3.onnx
-      size: 538.96MB
-  nomic-ai/nomic-embed-text-v1:
-    url: https://huggingface.co/nomic-ai/nomic-embed-text-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 547.55MB
-  sentence-transformers/stsb-xlm-r-multilingual:
-    url: https://huggingface.co/sentence-transformers/stsb-xlm-r-multilingual
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1110.07MB
-    - file: onnx/model_O1.onnx
-      size: 1109.96MB
-    - file: onnx/model_O2.onnx
-      size: 1109.85MB
-    - file: onnx/model_O3.onnx
-      size: 1109.85MB
-  openai-community/gpt2-large:
-    url: https://huggingface.co/openai-community/gpt2-large
-    download_path: null
-    files:
-    - file: onnx/decoder_model.onnx
-      size: 2.65MB
-    - file: onnx/decoder_model.onnx_data
-      size: 3353.44MB
-    - file: onnx/decoder_with_past_model.onnx
-      size: 2.67MB
-    - file: onnx/decoder_with_past_model.onnx_data
-      size: 3353.44MB
-  BAAI/bge-reranker-base:
-    url: https://huggingface.co/BAAI/bge-reranker-base
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1112.46MB
-  answerdotai/ModernBERT-base:
-    url: https://huggingface.co/answerdotai/ModernBERT-base
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 599.00MB
-  BAAI/bge-reranker-large:
-    url: https://huggingface.co/BAAI/bge-reranker-large
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 0.62MB
-    - file: onnx/model.onnx_data
-      size: 2239.57MB
-  nomic-ai/nomic-embed-text-v1.5:
-    url: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 547.31MB
-  Xenova/bge-base-en-v1.5:
-    url: https://huggingface.co/Xenova/bge-base-en-v1.5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.81MB
-  intfloat/multilingual-e5-large-instruct:
-    url: https://huggingface.co/intfloat/multilingual-e5-large-instruct
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 0.69MB
-    - file: onnx/model.onnx_data
-      size: 2235.37MB
-  lxyuan/distilbert-base-multilingual-cased-sentiments-student:
-    url: https://huggingface.co/lxyuan/distilbert-base-multilingual-cased-sentiments-student
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 541.42MB
-  intfloat/multilingual-e5-base:
-    url: https://huggingface.co/intfloat/multilingual-e5-base
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1110.06MB
-  sentence-transformers/stsb-roberta-base:
-    url: https://huggingface.co/sentence-transformers/stsb-roberta-base
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 496.48MB
-    - file: onnx/model_O1.onnx
-      size: 496.37MB
-    - file: onnx/model_O2.onnx
-      size: 496.26MB
-    - file: onnx/model_O3.onnx
-      size: 496.26MB
-  SmilingWolf/wd-vit-large-tagger-v3:
-    url: https://huggingface.co/SmilingWolf/wd-vit-large-tagger-v3
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 1260.65MB
-  FacebookAI/xlm-roberta-large-finetuned-conll03-english:
-    url: https://huggingface.co/FacebookAI/xlm-roberta-large-finetuned-conll03-english
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 0.62MB
-    - file: onnx/model.onnx_data
-      size: 2235.40MB
-  jinaai/jina-embeddings-v2-small-en:
-    url: https://huggingface.co/jinaai/jina-embeddings-v2-small-en
-    download_path: null
-    files:
-    - file: model-w-mean-pooling.onnx
-      size: 129.80MB
-    - file: model.onnx
-      size: 129.81MB
-  Maykeye/TinyLLama-v0:
-    url: https://huggingface.co/Maykeye/TinyLLama-v0
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 18.70MB
-  shibing624/text2vec-base-chinese:
-    url: https://huggingface.co/shibing624/text2vec-base-chinese
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 406.95MB
-  jonathandinu/face-parsing:
-    url: https://huggingface.co/jonathandinu/face-parsing
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 340.32MB
-  mixedbread-ai/mxbai-rerank-base-v1:
-    url: https://huggingface.co/mixedbread-ai/mxbai-rerank-base-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 738.56MB
-  sentence-transformers/LaBSE:
-    url: https://huggingface.co/sentence-transformers/LaBSE
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1881.62MB
-  briaai/RMBG-1.4:
-    url: https://huggingface.co/briaai/RMBG-1.4
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 176.15MB
-  sentence-transformers/paraphrase-MiniLM-L3-v2:
-    url: https://huggingface.co/sentence-transformers/paraphrase-MiniLM-L3-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 69.04MB
-    - file: onnx/model_O1.onnx
-      size: 69.02MB
-    - file: onnx/model_O2.onnx
-      size: 69.00MB
-    - file: onnx/model_O3.onnx
-      size: 69.00MB
-  sentence-transformers/all-distilroberta-v1:
-    url: https://huggingface.co/sentence-transformers/all-distilroberta-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 326.24MB
-    - file: onnx/model_O1.onnx
-      size: 326.19MB
-    - file: onnx/model_O2.onnx
-      size: 326.13MB
-    - file: onnx/model_O3.onnx
-      size: 326.13MB
-  sentence-transformers/roberta-base-nli-mean-tokens:
-    url: https://huggingface.co/sentence-transformers/roberta-base-nli-mean-tokens
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 496.48MB
-    - file: onnx/model_O1.onnx
-      size: 496.37MB
-    - file: onnx/model_O2.onnx
-      size: 496.26MB
-    - file: onnx/model_O3.onnx
-      size: 496.26MB
-  Marqo/marqo-fashionSigLIP:
-    url: https://huggingface.co/Marqo/marqo-fashionSigLIP
-    download_path: null
-    files:
-    - file: onnx/text_model.onnx
-      size: 441.36MB
-    - file: onnx/vision_model.onnx
-      size: 371.72MB
-  sentence-transformers/msmarco-distilbert-base-v4:
-    url: https://huggingface.co/sentence-transformers/msmarco-distilbert-base-v4
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 265.56MB
-    - file: onnx/model_O1.onnx
-      size: 265.55MB
-    - file: onnx/model_O2.onnx
-      size: 265.47MB
-    - file: onnx/model_O3.onnx
-      size: 265.47MB
-  thenlper/gte-large:
-    url: https://huggingface.co/thenlper/gte-large
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1336.85MB
-  sentence-transformers/distilbert-base-nli-mean-tokens:
-    url: https://huggingface.co/sentence-transformers/distilbert-base-nli-mean-tokens
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 265.56MB
-    - file: onnx/model_O1.onnx
-      size: 265.55MB
-    - file: onnx/model_O2.onnx
-      size: 265.47MB
-    - file: onnx/model_O3.onnx
-      size: 265.47MB
-  Snowflake/snowflake-arctic-embed-m:
-    url: https://huggingface.co/Snowflake/snowflake-arctic-embed-m
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.81MB
-  openai-community/gpt2-medium:
-    url: https://huggingface.co/openai-community/gpt2-medium
-    download_path: null
-    files:
-    - file: onnx/decoder_model.onnx
-      size: 1627.13MB
-    - file: onnx/decoder_with_past_model.onnx
-      size: 1627.14MB
-  intfloat/e5-base-v2:
-    url: https://huggingface.co/intfloat/e5-base-v2
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.81MB
-  oliverguhr/german-sentiment-bert:
-    url: https://huggingface.co/oliverguhr/german-sentiment-bert
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 436.63MB
-  mixedbread-ai/mxbai-rerank-xsmall-v1:
-    url: https://huggingface.co/mixedbread-ai/mxbai-rerank-xsmall-v1
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 284.19MB
-  thenlper/gte-base:
-    url: https://huggingface.co/thenlper/gte-base
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 435.81MB
-  MoritzLaurer/mDeBERTa-v3-base-mnli-xnli:
-    url: https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1116.12MB
-  madhurjindal/autonlp-Gibberish-Detector-492513457:
-    url: https://huggingface.co/madhurjindal/autonlp-Gibberish-Detector-492513457
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 267.96MB
-  jinaai/jina-reranker-v2-base-multilingual:
-    url: https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 1114.04MB
-  distilbert/distilbert-base-cased:
-    url: https://huggingface.co/distilbert/distilbert-base-cased
-    download_path: null
-    files:
-    - file: model.onnx
-      size: 260.88MB
-  oliverguhr/fullstop-punctuation-multilang-large:
-    url: https://huggingface.co/oliverguhr/fullstop-punctuation-multilang-large
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 0.62MB
-    - file: onnx/model.onnx_data
-      size: 2235.39MB
-  HuggingFaceTB/SmolLM-135M:
-    url: https://huggingface.co/HuggingFaceTB/SmolLM-135M
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 539.01MB
-  sentence-transformers/msmarco-distilbert-cos-v5:
-    url: https://huggingface.co/sentence-transformers/msmarco-distilbert-cos-v5
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 265.56MB
-    - file: onnx/model_O1.onnx
-      size: 265.55MB
-    - file: onnx/model_O2.onnx
-      size: 265.47MB
-    - file: onnx/model_O3.onnx
-      size: 265.47MB
-  sentence-transformers/distilbert-base-nli-stsb-mean-tokens:
-    url: https://huggingface.co/sentence-transformers/distilbert-base-nli-stsb-mean-tokens
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 265.56MB
-    - file: onnx/model_O1.onnx
-      size: 265.55MB
-    - file: onnx/model_O2.onnx
-      size: 265.47MB
-    - file: onnx/model_O3.onnx
-      size: 265.47MB
-  Supabase/gte-small:
-    url: https://huggingface.co/Supabase/gte-small
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 133.09MB
-  HuggingFaceTB/SmolLM-135M-Instruct:
-    url: https://huggingface.co/HuggingFaceTB/SmolLM-135M-Instruct
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 539.01MB
-  Snowflake/snowflake-arctic-embed-xs:
-    url: https://huggingface.co/Snowflake/snowflake-arctic-embed-xs
-    download_path: null
-    files:
-    - file: onnx/model.onnx
-      size: 90.39MB
+  # sentence-transformers/all-mpnet-base-v2:
+  #   url: https://huggingface.co/sentence-transformers/all-mpnet-base-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.83MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 435.73MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 435.67MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 435.67MB
+  # sentence-transformers/multi-qa-MiniLM-L6-cos-v1:
+  #   url: https://huggingface.co/sentence-transformers/multi-qa-MiniLM-L6-cos-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 90.41MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 90.36MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 90.33MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 90.33MB
+  # openai-community/gpt2:
+  #   url: https://huggingface.co/openai-community/gpt2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/decoder_model.onnx
+  #     size: 653.67MB
+  #   - file: onnx/decoder_with_past_model.onnx
+  #     size: 653.67MB
+  # WhereIsAI/UAE-Large-V1:
+  #   url: https://huggingface.co/WhereIsAI/UAE-Large-V1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1336.85MB
+  # sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2:
+  #   url: https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 470.30MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 470.21MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 470.15MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 470.15MB
+  # FacebookAI/xlm-roberta-base:
+  #   url: https://huggingface.co/FacebookAI/xlm-roberta-base
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 1881.47MB
+  # FacebookAI/roberta-large:
+  #   url: https://huggingface.co/FacebookAI/roberta-large
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 1628.09MB
+  # trpakov/vit-face-expression:
+  #   url: https://huggingface.co/trpakov/vit-face-expression
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 343.48MB
+  # sentence-transformers/paraphrase-MiniLM-L6-v2:
+  #   url: https://huggingface.co/sentence-transformers/paraphrase-MiniLM-L6-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 90.41MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 90.36MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 90.33MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 90.33MB
+  # distilbert/distilbert-base-uncased-finetuned-sst-2-english:
+  #   url: https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 267.96MB
+  # dslim/bert-base-NER:
+  #   url: https://huggingface.co/dslim/bert-base-NER
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 431.17MB
+  # google-t5/t5-small:
+  #   url: https://huggingface.co/google-t5/t5-small
+  #   download_path: null
+  #   files:
+  #   - file: onnx/decoder_model.onnx
+  #     size: 232.47MB
+  #   - file: onnx/decoder_with_past_model.onnx
+  #     size: 219.87MB
+  #   - file: onnx/encoder_model.onnx
+  #     size: 141.40MB
+  # sentence-transformers/all-MiniLM-L12-v2:
+  #   url: https://huggingface.co/sentence-transformers/all-MiniLM-L12-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 133.13MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 133.04MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 132.97MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 132.97MB
+  # sentence-transformers/paraphrase-mpnet-base-v2:
+  #   url: https://huggingface.co/sentence-transformers/paraphrase-mpnet-base-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.83MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 435.73MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 435.67MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 435.67MB
+  # patrickjohncyh/fashion-clip:
+  #   url: https://huggingface.co/patrickjohncyh/fashion-clip
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 605.80MB
+  # mattmdjaga/segformer_b2_clothes:
+  #   url: https://huggingface.co/mattmdjaga/segformer_b2_clothes
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 110.04MB
+  # colbert-ir/colbertv2.0:
+  #   url: https://huggingface.co/colbert-ir/colbertv2.0
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 436.19MB
+  # Alibaba-NLP/gte-large-en-v1.5:
+  #   url: https://huggingface.co/Alibaba-NLP/gte-large-en-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1745.60MB
+  # BAAI/bge-small-en-v1.5:
+  #   url: https://huggingface.co/BAAI/bge-small-en-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 133.09MB
+  # thenlper/gte-small:
+  #   url: https://huggingface.co/thenlper/gte-small
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 133.13MB
+  # microsoft/layoutlmv3-base:
+  #   url: https://huggingface.co/microsoft/layoutlmv3-base
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 501.60MB
+  # sentence-transformers/paraphrase-multilingual-mpnet-base-v2:
+  #   url: https://huggingface.co/sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1110.07MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 1109.96MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 1109.85MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 1109.85MB
+  # Alibaba-NLP/gte-base-en-v1.5:
+  #   url: https://huggingface.co/Alibaba-NLP/gte-base-en-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 555.85MB
+  # WinKawaks/vit-small-patch16-224:
+  #   url: https://huggingface.co/WinKawaks/vit-small-patch16-224
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 88.46MB
+  # answerdotai/answerai-colbert-small-v1:
+  #   url: https://huggingface.co/answerdotai/answerai-colbert-small-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 133.16MB
+  #   - file: vespa_colbert.onnx
+  #     size: 133.26MB
+  # BAAI/bge-m3:
+  #   url: https://huggingface.co/BAAI/bge-m3
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 0.72MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2266.82MB
+  # intfloat/multilingual-e5-small:
+  #   url: https://huggingface.co/intfloat/multilingual-e5-small
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 470.27MB
+  # mixedbread-ai/mxbai-embed-large-v1:
+  #   url: https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1336.85MB
+  # distilbert/distilbert-base-multilingual-cased:
+  #   url: https://huggingface.co/distilbert/distilbert-base-multilingual-cased
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 909.17MB
+  # intfloat/multilingual-e5-large:
+  #   url: https://huggingface.co/intfloat/multilingual-e5-large
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 0.55MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2235.36MB
+  # BAAI/bge-large-en-v1.5:
+  #   url: https://huggingface.co/BAAI/bge-large-en-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1336.85MB
+  # sentence-transformers/distiluse-base-multilingual-cased-v2:
+  #   url: https://huggingface.co/sentence-transformers/distiluse-base-multilingual-cased-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 539.05MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 539.03MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 538.96MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 538.96MB
+  # intfloat/e5-large-v2:
+  #   url: https://huggingface.co/intfloat/e5-large-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1336.92MB
+  # sentence-transformers/multi-qa-mpnet-base-dot-v1:
+  #   url: https://huggingface.co/sentence-transformers/multi-qa-mpnet-base-dot-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.83MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 435.73MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 435.67MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 435.67MB
+  # jinaai/jina-clip-v1:
+  #   url: https://huggingface.co/jinaai/jina-clip-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/text_model.onnx
+  #     size: 547.53MB
+  #   - file: onnx/vision_model.onnx
+  #     size: 343.87MB
+  # sentence-transformers/bert-base-nli-mean-tokens:
+  #   url: https://huggingface.co/sentence-transformers/bert-base-nli-mean-tokens
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.84MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 435.76MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 435.69MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 435.69MB
+  # BAAI/bge-base-en-v1.5:
+  #   url: https://huggingface.co/BAAI/bge-base-en-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.81MB
+  # jinaai/jina-embeddings-v3:
+  #   url: https://huggingface.co/jinaai/jina-embeddings-v3
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1.51MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2291.34MB
+  # llava-hf/llava-onevision-qwen2-0.5b-ov-hf:
+  #   url: https://huggingface.co/llava-hf/llava-onevision-qwen2-0.5b-ov-hf
+  #   download_path: null
+  #   files:
+  #   - file: onnx/embed_tokens.onnx
+  #     size: 544.77MB
+  #   - file: onnx/vision_encoder.onnx
+  #     size: 1598.93MB
+  # distil-whisper/distil-large-v3:
+  #   url: https://huggingface.co/distil-whisper/distil-large-v3
+  #   download_path: null
+  #   files:
+  #   - file: onnx/decoder_model.onnx
+  #     size: 477.85MB
+  #   - file: onnx/decoder_with_past_model.onnx
+  #     size: 451.60MB
+  #   - file: onnx/encoder_model.onnx
+  #     size: 0.65MB
+  #   - file: onnx/encoder_model.onnx_data
+  #     size: 2547.88MB
+  # sentence-transformers/all-roberta-large-v1:
+  #   url: https://huggingface.co/sentence-transformers/all-roberta-large-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1417.75MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 1417.54MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 1417.31MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 1417.31MB
+  # sentence-transformers/distiluse-base-multilingual-cased-v1:
+  #   url: https://huggingface.co/sentence-transformers/distiluse-base-multilingual-cased-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 539.05MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 539.03MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 538.96MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 538.96MB
+  # nomic-ai/nomic-embed-text-v1:
+  #   url: https://huggingface.co/nomic-ai/nomic-embed-text-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 547.55MB
+  # sentence-transformers/stsb-xlm-r-multilingual:
+  #   url: https://huggingface.co/sentence-transformers/stsb-xlm-r-multilingual
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1110.07MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 1109.96MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 1109.85MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 1109.85MB
+  # openai-community/gpt2-large:
+  #   url: https://huggingface.co/openai-community/gpt2-large
+  #   download_path: null
+  #   files:
+  #   - file: onnx/decoder_model.onnx
+  #     size: 2.65MB
+  #   - file: onnx/decoder_model.onnx_data
+  #     size: 3353.44MB
+  #   - file: onnx/decoder_with_past_model.onnx
+  #     size: 2.67MB
+  #   - file: onnx/decoder_with_past_model.onnx_data
+  #     size: 3353.44MB
+  # BAAI/bge-reranker-base:
+  #   url: https://huggingface.co/BAAI/bge-reranker-base
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1112.46MB
+  # answerdotai/ModernBERT-base:
+  #   url: https://huggingface.co/answerdotai/ModernBERT-base
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 599.00MB
+  # BAAI/bge-reranker-large:
+  #   url: https://huggingface.co/BAAI/bge-reranker-large
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 0.62MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2239.57MB
+  # nomic-ai/nomic-embed-text-v1.5:
+  #   url: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 547.31MB
+  # Xenova/bge-base-en-v1.5:
+  #   url: https://huggingface.co/Xenova/bge-base-en-v1.5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.81MB
+  # intfloat/multilingual-e5-large-instruct:
+  #   url: https://huggingface.co/intfloat/multilingual-e5-large-instruct
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 0.69MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2235.37MB
+  # lxyuan/distilbert-base-multilingual-cased-sentiments-student:
+  #   url: https://huggingface.co/lxyuan/distilbert-base-multilingual-cased-sentiments-student
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 541.42MB
+  # intfloat/multilingual-e5-base:
+  #   url: https://huggingface.co/intfloat/multilingual-e5-base
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1110.06MB
+  # sentence-transformers/stsb-roberta-base:
+  #   url: https://huggingface.co/sentence-transformers/stsb-roberta-base
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 496.48MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 496.37MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 496.26MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 496.26MB
+  # SmilingWolf/wd-vit-large-tagger-v3:
+  #   url: https://huggingface.co/SmilingWolf/wd-vit-large-tagger-v3
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 1260.65MB
+  # FacebookAI/xlm-roberta-large-finetuned-conll03-english:
+  #   url: https://huggingface.co/FacebookAI/xlm-roberta-large-finetuned-conll03-english
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 0.62MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2235.40MB
+  # jinaai/jina-embeddings-v2-small-en:
+  #   url: https://huggingface.co/jinaai/jina-embeddings-v2-small-en
+  #   download_path: null
+  #   files:
+  #   - file: model-w-mean-pooling.onnx
+  #     size: 129.80MB
+  #   - file: model.onnx
+  #     size: 129.81MB
+  # Maykeye/TinyLLama-v0:
+  #   url: https://huggingface.co/Maykeye/TinyLLama-v0
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 18.70MB
+  # shibing624/text2vec-base-chinese:
+  #   url: https://huggingface.co/shibing624/text2vec-base-chinese
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 406.95MB
+  # jonathandinu/face-parsing:
+  #   url: https://huggingface.co/jonathandinu/face-parsing
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 340.32MB
+  # mixedbread-ai/mxbai-rerank-base-v1:
+  #   url: https://huggingface.co/mixedbread-ai/mxbai-rerank-base-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 738.56MB
+  # sentence-transformers/LaBSE:
+  #   url: https://huggingface.co/sentence-transformers/LaBSE
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1881.62MB
+  # briaai/RMBG-1.4:
+  #   url: https://huggingface.co/briaai/RMBG-1.4
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 176.15MB
+  # sentence-transformers/paraphrase-MiniLM-L3-v2:
+  #   url: https://huggingface.co/sentence-transformers/paraphrase-MiniLM-L3-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 69.04MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 69.02MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 69.00MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 69.00MB
+  # sentence-transformers/all-distilroberta-v1:
+  #   url: https://huggingface.co/sentence-transformers/all-distilroberta-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 326.24MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 326.19MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 326.13MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 326.13MB
+  # sentence-transformers/roberta-base-nli-mean-tokens:
+  #   url: https://huggingface.co/sentence-transformers/roberta-base-nli-mean-tokens
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 496.48MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 496.37MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 496.26MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 496.26MB
+  # Marqo/marqo-fashionSigLIP:
+  #   url: https://huggingface.co/Marqo/marqo-fashionSigLIP
+  #   download_path: null
+  #   files:
+  #   - file: onnx/text_model.onnx
+  #     size: 441.36MB
+  #   - file: onnx/vision_model.onnx
+  #     size: 371.72MB
+  # sentence-transformers/msmarco-distilbert-base-v4:
+  #   url: https://huggingface.co/sentence-transformers/msmarco-distilbert-base-v4
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 265.56MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 265.55MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 265.47MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 265.47MB
+  # thenlper/gte-large:
+  #   url: https://huggingface.co/thenlper/gte-large
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1336.85MB
+  # sentence-transformers/distilbert-base-nli-mean-tokens:
+  #   url: https://huggingface.co/sentence-transformers/distilbert-base-nli-mean-tokens
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 265.56MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 265.55MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 265.47MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 265.47MB
+  # Snowflake/snowflake-arctic-embed-m:
+  #   url: https://huggingface.co/Snowflake/snowflake-arctic-embed-m
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.81MB
+  # openai-community/gpt2-medium:
+  #   url: https://huggingface.co/openai-community/gpt2-medium
+  #   download_path: null
+  #   files:
+  #   - file: onnx/decoder_model.onnx
+  #     size: 1627.13MB
+  #   - file: onnx/decoder_with_past_model.onnx
+  #     size: 1627.14MB
+  # intfloat/e5-base-v2:
+  #   url: https://huggingface.co/intfloat/e5-base-v2
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.81MB
+  # oliverguhr/german-sentiment-bert:
+  #   url: https://huggingface.co/oliverguhr/german-sentiment-bert
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 436.63MB
+  # mixedbread-ai/mxbai-rerank-xsmall-v1:
+  #   url: https://huggingface.co/mixedbread-ai/mxbai-rerank-xsmall-v1
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 284.19MB
+  # thenlper/gte-base:
+  #   url: https://huggingface.co/thenlper/gte-base
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 435.81MB
+  # MoritzLaurer/mDeBERTa-v3-base-mnli-xnli:
+  #   url: https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1116.12MB
+  # madhurjindal/autonlp-Gibberish-Detector-492513457:
+  #   url: https://huggingface.co/madhurjindal/autonlp-Gibberish-Detector-492513457
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 267.96MB
+  # jinaai/jina-reranker-v2-base-multilingual:
+  #   url: https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 1114.04MB
+  # distilbert/distilbert-base-cased:
+  #   url: https://huggingface.co/distilbert/distilbert-base-cased
+  #   download_path: null
+  #   files:
+  #   - file: model.onnx
+  #     size: 260.88MB
+  # oliverguhr/fullstop-punctuation-multilang-large:
+  #   url: https://huggingface.co/oliverguhr/fullstop-punctuation-multilang-large
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 0.62MB
+  #   - file: onnx/model.onnx_data
+  #     size: 2235.39MB
+  # HuggingFaceTB/SmolLM-135M:
+  #   url: https://huggingface.co/HuggingFaceTB/SmolLM-135M
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 539.01MB
+  # sentence-transformers/msmarco-distilbert-cos-v5:
+  #   url: https://huggingface.co/sentence-transformers/msmarco-distilbert-cos-v5
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 265.56MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 265.55MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 265.47MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 265.47MB
+  # sentence-transformers/distilbert-base-nli-stsb-mean-tokens:
+  #   url: https://huggingface.co/sentence-transformers/distilbert-base-nli-stsb-mean-tokens
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 265.56MB
+  #   - file: onnx/model_O1.onnx
+  #     size: 265.55MB
+  #   - file: onnx/model_O2.onnx
+  #     size: 265.47MB
+  #   - file: onnx/model_O3.onnx
+  #     size: 265.47MB
+  # Supabase/gte-small:
+  #   url: https://huggingface.co/Supabase/gte-small
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 133.09MB
+  # HuggingFaceTB/SmolLM-135M-Instruct:
+  #   url: https://huggingface.co/HuggingFaceTB/SmolLM-135M-Instruct
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 539.01MB
+  # Snowflake/snowflake-arctic-embed-xs:
+  #   url: https://huggingface.co/Snowflake/snowflake-arctic-embed-xs
+  #   download_path: null
+  #   files:
+  #   - file: onnx/model.onnx
+  #     size: 90.39MB
 total_size: 110.53GB
 created_at: '2025-03-21T10:27:57Z'
