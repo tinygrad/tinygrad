@@ -78,14 +78,13 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
   # Extract model data/transforms, sufficient for export to external runtime
   ex: ExportSpec = extract_model(model, inputs)
 
-  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
-  if state_dict: weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()}
-  else: weight_names = {buf: buf_names[buf] for buf in ex.weight_bufs}
-
-  # TODO: validate symbolic var ranges against input args at runtime in JS?
+  # Map buffers to their names in the state_dict and handle weight buffers that are missing from the state_dict
   # TODO: init rand seeds in JS? random seeds (buffer of two uint32) were included in ex.weight_bufs, but are not in the state_dict
-  for i, buf in enumerate(ex.weight_bufs):
-    if buf not in weight_names: ex.empty_bufs.append(ex.weight_bufs.pop(i))
+  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
+  weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()} if state_dict else buf_names
+  for buf in ex.weight_bufs:
+    name = weight_names[buf] = weight_names.get(buf, buf_names[buf])
+    state_dict[name] = state_dict.get(name, Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize())
 
   # Render model data
   empty_bufs = [f"const {buf_names[b]} = createEmptyBuf({b.nbytes});" for b in ex.inputs+ex.outputs+ex.empty_bufs if isinstance(b, Buffer)]
@@ -100,6 +99,7 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
     f"[{', '.join(resolve_gidx(x) for x in kc.global_size)}], kernels[{i}].split('INFINITY').length > 2);" for i, kc in enumerate(ex.kernel_calls)]
 
   # Render runtime-specific operations
+  # TODO: validate symbolic var ranges against input args at runtime in JS?
   input_writer_bufs = [f"""const gpuWriteBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size,
                 usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});""" for i,buf in enumerate(ex.inputs)]
   input_writers = [f"""
@@ -184,8 +184,6 @@ export default {model_name};
 
   if js_outfile:
     with open(js_outfile, "w") as f: f.write(prg)
-    if not state_dict:
-      state_dict = {buf_names[buf]: Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize() for buf in ex.weight_bufs}
     safe_save(state_dict, f"{js_outfile}.safetensors")
 
   return prg, state_dict
