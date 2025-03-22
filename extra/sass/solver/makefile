@@ -1,5 +1,7 @@
-ARCH=sm_89
+ARCH=sm_86
 LIBS := libcublasLt.txt libcublas.txt
+TINY_GEN_DIR=tiny_gen
+
 
 find_%:
 	find /usr/local/cuda/ -name "*${*}*"
@@ -8,20 +10,18 @@ stdlibs/%.so:
 	mkdir -p stdlibs
 	cp /usr/local/cuda/targets/x86_64-linux/lib/${*}.so $@
 
-tinygrad_gen/%:
-	mkdir -p tinygrad_gen && \
-	export DUMP_CUDA_DIR=$$(pwd)/tinygrad_gen && \
+${TINY_GEN_DIR}/%_cu:
+	mkdir -p ${TINY_GEN_DIR} && \
+	export DUMP_CUDA_DIR=$$(pwd)/${TINY_GEN_DIR} && \
 	export DUMP_CUDA_PREFIX=${*} && \
 	cd ../../.. && \
 	export PYTHONPATH="." && \
 	NV=1 python test/${*}.py
 
-# do nvcc --ptx -arch ${ARCH} -o ${@}/$${cufile} $${cufile}; \
-	
-tinygrad_gen/%.txt:
-	export dir=tinygrad_gen;\
+${TINY_GEN_DIR}/%_txt:
+	export dir=${TINY_GEN_DIR};\
 	export PYTHONPATH="/home/alvy/gbin/tinygrad"; \
-	for cufile in tinygrad_gen/${*}_*.cu; \
+	for cufile in ${TINY_GEN_DIR}/${*}_*.cu; \
 		do \
 			echo $${cufile};\
 			filename_ext=$$(basename -- $${cufile}); \
@@ -31,7 +31,9 @@ tinygrad_gen/%.txt:
 			python disasm.py -a ${ARCH} -o $${dir}/$${base}.sass $${dir}/$${base}.cubin; \
 			python solve.py -a ${ARCH} -s $${dir}/$${base}.sass -d $${dir}/$${base}.txt; \
 		done; \
-	python merge.py ${*}.txt $${dir}/*.txt
+
+tiny_%.txt:
+	python merge.py ${*}.txt ${TINY_GEN_DIR}/*.txt
 
 %.sass: cubins/%.cubin
 	python disasm.py -a ${ARCH} ${<} -o ${@}
@@ -39,7 +41,7 @@ tinygrad_gen/%.txt:
 %.sass: stdlibs/%.so 
 	python disasm.py -a ${ARCH} ${<} -o ${@}
 
-%.txt: %.sass
+stdlib_%.txt: %.sass
 	python solve.py -s ${<} -d ${@} -a ${ARCH}
 	
 backup_%:

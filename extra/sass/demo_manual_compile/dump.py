@@ -1,5 +1,5 @@
 import argparse
-from CuAsm import CubinFile, CuAsmParser
+from extra.sass.assembler.CubinFile import CubinFile
 
 
 parser = argparse.ArgumentParser()

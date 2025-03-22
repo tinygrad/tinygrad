@@ -1,17 +1,17 @@
-ARCH=sm_80
+ARCH=sm_86
 .PHONY: clean
 clean:
 	-rm *.cuasm *.cubin *.ptx
 	-rm addHost
 	
 %Host: %Host.cu
-	nvcc -arch sm_80 -o ${@} ${<} -lcuda	-lcublas
+	nvcc -arch ${ARCH} -o ${@} ${<} -lcuda	-lcublas
 
 %.ptx: %.cu
-	nvcc -o ${@} --ptx ${<}
+	nvcc -arch ${ARCH} -o ${@} --ptx ${<}
 
 dumped.%.cubin: %.ptx
-	ptxas -arch=${ARCH} -m64 ${<} -o ${@}
+	ptxas -arch ${ARCH} -m64 ${<} -o ${@}
 
 %.cuasm: dumped.%.cubin
 	python dump.py -i ${<} -o ${@}

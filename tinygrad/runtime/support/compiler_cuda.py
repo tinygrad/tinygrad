@@ -81,10 +81,7 @@ class NVPTXCompiler(PTXCompiler):
 
 class SASSCompiler(Compiler):
   def __init__(self, arch:str, cache_key="sass"):
-    sm = os.environ.get("SM")
-    assert sm, "set an SM version (80, 89)"
-    self.arch = f"sm_{sm}"
-
+    self.arch = arch
     super().__init__(f"compile_{cache_key}_{self.arch}")
   
   def compile(self, src: str):
