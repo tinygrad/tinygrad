@@ -116,6 +116,11 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 16))
+          elif knum == 9:
+            # same as 6
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 16))
           elif knum in [7,11]:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 144))
@@ -128,6 +133,15 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+            pass
+          elif knum == 1:
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+          elif knum == 26:
+            #k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            #k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
             pass
           #elif knum == 18:
           #  k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
