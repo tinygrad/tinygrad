@@ -21,7 +21,7 @@ class TestIntelOcloc(unittest.TestCase):
       binary = device.compiler.compile(cl_kernel) if ioc_compile_func is False \
                else ioc.IntelOfflineCompiler().compile(cl_kernel, "0x"+format(device.device_ip, "x"))
       prog = device.runtime("test", binary)
-      res = prog(buf, global_size = (array_len,1,1), local_size=(4,1,1), wait=True)
+      res = prog(buf, global_size = (array_len,1,1), local_size=(1,1,1), wait=True)
       # read out results and free cl buffer
       array = bytearray(array_len*4)
       mv_array = memoryview(array)
