@@ -168,8 +168,18 @@ if __name__ == "__main__":
               elif full_shape[1] % 128 == 0:
                 k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
                 k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
+              elif full_shape[1] % 64 == 0:
+                # this is suboptimal
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+                k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
+              elif full_shape[1] % 32 == 0:
+                # this is even more suboptimal
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+                k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
             elif len(out_strides) == 1:
               if full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
+              elif full_shape[0]%64 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 64))
+              elif full_shape[0]%32 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 32))
             #print("here", out_shape, out_strides, k.name)
             #k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
