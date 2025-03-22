@@ -7,9 +7,8 @@ from tinygrad import Device, Variable, Tensor, dtypes, TinyJit
 from tinygrad.helpers import fetch, Context
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 
-def prepare_browser_chunks(model):
+def prepare_browser_chunks(state_dict):
   # split weights into browser-friendly chunks
-  state_dict = get_state_dict(model)
   del state_dict['output.weight'], state_dict['output.scale'] # same as tok_embeddings; ensures consistency with model export
   chunk_size = 16 * 1024 * 1024 # small chunks based on iphone browser constraints
   metadata = {}
@@ -39,7 +38,7 @@ def prepare_browser_chunks(model):
     if not placed:
       files.append([info])
 
-  tinygrad_dtypes = {dtypes.float32: "float32", dtypes.float16: "float16", dtypes.int8: "int8", dtypes.int32: "int32"}
+  tinygrad_dtypes = {dtypes.float32: "float32", dtypes.float16: "float16", dtypes.int8: "int8", dtypes.int32: "int32", dtypes.uint: "uint32"}
   for i, file in enumerate(files):
     cursor = 0
     with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.chunk'), "wb+") as writer:
@@ -140,11 +139,11 @@ if __name__=="__main__":
   model.output.weight, model.output.scale = model.tok_embeddings.weight, model.tok_embeddings.scale
 
   validate_model(model, tokenizer)
-  metadata = prepare_browser_chunks(model) # export weights to disk
 
   with Context(BEAM=3):
     #prg, input_sizes, output_sizes, state = export_model(model, "webgpu", *model_input(), model_name=model_name, stream_weights=True)
     js_code, state_dict = export_webgpu(model.forward, model_input(), model_name=model_name, save_weights=False, fix_contiguous=False)
+    prepare_browser_chunks(state_dict) # export weights to disk
     # ensure consistency with exported weights
     js_code = js_code.replace("output.weight", "tok_embeddings.weight").replace("output.scale", "tok_embeddings.scale")
 
