@@ -116,8 +116,16 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
+  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+    ret = (functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)]),)
+  else:
+    ret = (ret,)
+  return UOp(Ops.REDUCE, x.dtype, ret+tuple(reduce_range), alu_op)
+  """
   # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+  if len(x.src) > 1: acc = acc + x.src[1]
   ctx.acc_num += 1
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
@@ -127,6 +135,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   if not len(reduce_range): return ret
   # create ACC and assign
   return acc.assign(ret)
+  """
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -169,6 +178,17 @@ def view_to_mask(x:UOp):
   if st.views[-1].mask is None: return None
   return ShapeTracker((View(st.shape, (0,)*len(st.shape), 0, st.views[-1].mask, False),))
 
+def ignore_on_reduce(r:UOp, ig:UOp):
+  in_shape = r.src[0].shape
+  from tinygrad.shape.shapetracker import ShapeTracker, View
+  st = cast(ShapeTracker, ig.arg)
+  new_mask = []
+  for s1, s2, om in zip(in_shape, st.shape, st.views[-1].mask):
+    if s1 != s2: new_mask.append((0,s1))
+    else: new_mask.append(om)
+  new_st = ShapeTracker((View(in_shape, (0,)*len(st.shape), 0, tuple(new_mask), False),))
+  return r.replace(src=(UOp(Ops.IGNORE, r.dtype, r.src, arg=new_st),))
+
 FP = (1 << 16)
 pm_quant = symbolic+PatternMatcher([
   # cast after add/mul
@@ -176,6 +196,9 @@ pm_quant = symbolic+PatternMatcher([
    lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))+y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
   (UPat.var("x").cast(dtypes.float32) * UPat.var("y").cast(dtypes.float32),
    lambda x,y: (x.cast(least_upper_dtype(x.dtype, y.dtype))*y.cast(least_upper_dtype(x.dtype, y.dtype))).cast(dtypes.float32)),
+  # masked MUL after masked ADD (new, might be wrong)
+  #((UPat.var("x") + UPat.var("v").where(UPat.var('cadd'), UPat(Ops.CONST, arg=0))) * UPat.var("v").where(UPat.var('cmul'), UPat(Ops.CONST, arg=0)),
+  # lambda x,v,cadd,cmul: x*v.where(cmul, 0)+v.where(cadd*cmul, 0)),
   # MUL after reduce
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x") * UPat.cvar("c"),), name="r"), lambda x,c,r: r.replace(src=(x,))*c),
   # CAST after reduce (doesn't work if it's a size change)
@@ -212,6 +235,16 @@ pm_quant = symbolic+PatternMatcher([
    lambda ig,alu: alu.replace(src=tuple(UOp(Ops.IGNORE, x.dtype, (x,), ig.arg) for x in alu.src))),
   (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
   (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
+  (UPat(Ops.IGNORE, src=(UPat(Ops.REDUCE_AXIS, name="r"),), name="ig"), ignore_on_reduce),
+  # put add in REDUCE
+  #(UPat(Ops.REDUCE_AXIS, name="r")+UPat.var("x"), lambda r,x: r.replace(src=(r.src[0], (r.src[1]+x) if len(r.src) == 2 else x))),
+  # distribute on casted MUL
+  #((UPat(Ops.CAST, name="v1")+UPat.cvar("c")) * UPat(Ops.CAST, name="v2"), lambda v1,v2,c: (v1*v2)+(c*v2)),
+
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.cvar("c1")) * UPat(Ops.CAST, name="v2",), name="r"),
+    lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.cvar("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.cvar("c2")), name="r"),
+    lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,))),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:

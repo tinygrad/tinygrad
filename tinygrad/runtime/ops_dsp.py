@@ -4,22 +4,148 @@ assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.codegen.symbolic import gep_pushing
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.ops import PatternMatcher, UPat
 
+def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  swizzle = tuple(swizzle)
+  if a0.op is not Ops.CAST:
+    #print("rejected on a0")
+    return None
+  if a1.op is not Ops.CAST:
+    #print("rejected on a1")
+    return None
+  assert a0.op is Ops.CAST
+  assert b0.op is Ops.CAST
+  assert c0.op is Ops.CAST
+  assert d0.op is Ops.CAST
+  assert a1.op is Ops.CAST
+  assert b1.op is Ops.CAST
+  assert c1.op is Ops.CAST
+  assert d1.op is Ops.CAST
+  dt1 = a0.src[0].dtype.scalar().vec(128)
+  dt2 = a1.src[0].dtype.scalar().vec(128)
+  m0 = UOp(Ops.CAT, dt1, src=(a0.src[0],b0.src[0],c0.src[0],d0.src[0])).gep(swizzle)
+  m1 = UOp(Ops.CAT, dt2, src=(a1.src[0],b1.src[0],c1.src[0],d1.src[0])).gep(swizzle)
+  simp_m1 = m1.simplify()
+  if simp_m1.op is Ops.GEP and simp_m1.arg == simp_m1.arg[0:4]*32:
+    # Vx32.w+=vrmpy(Vu32.ub,Rt32.b) -> __builtin_HEXAGON_V6_vrmpybus_acc
+    # Vx32.uw+=vrmpy(Vu32.ub,Rt32.ub) -> __builtin_HEXAGON_V6_vrmpyub_acc
+    scalar_m1 = simp_m1.src[0].gep(simp_m1.arg[0:4])
+    if acc is not None:
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+    else:
+      return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, scalar_m1.bitcast(dtypes.uint)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, m1), "__builtin_HEXAGON_V6_vrmpybusv_128B({0}, {1})")
+
+# __builtin_HEXAGON_A2_vraddub_acc
+
+def gep_on_reduce(gep, alu):
+  if gep.dtype.vcount == 1: return None
+  return UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count),
+     tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) and \
+      alu.dtype.count >= gep.dtype.count else None
+
+def multi_add_int32(**aa):
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  swizzle = tuple(swizzle)
+  m0 = UOp(Ops.CAT, dtypes.int.vec(128), src=tuple(x.src[0] for x in aa.values())).gep(swizzle)
+  return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+
+def multi_add_int2(**aa):
+  r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(0) for x in aa.values()))
+  r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(1) for x in aa.values()))
+  return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)), arg="__builtin_HEXAGON_A2_vraddub({0}, {1})")
+
 dsp_pm = PatternMatcher([
+  # GEP on REDUCE
+  (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'), gep_on_reduce),
+  # no swizzle down convert
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
    lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
-  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
-    "__builtin_shufflevector({0}, {1}, "+','.join([str(y) for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
-])
+
+  # swizzle down convert
+  #(((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
+  # lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+128, 4))) for i in range(0, 4)),
+  #   arg="__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vshuffb_128B(__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))))")),
+
+  #(UPat(Ops.CAST, name="x") * UPat(Ops.CAST, name="y"), lambda x,y: (x.src[0]*y.src[0]).cast(x.dtype)),
+  #(UPat(Ops.GEP, name="g").cast().named("cast"),
+  # lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+
+  # REDUCE int4 -> 2xint2, int8 -> 4xint2
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r)))),
+  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
+   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
+                                    gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
+
+  # build __builtin_HEXAGON_V6_vrmpybus_128B
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+
+  # build __builtin_HEXAGON_A2_vraddub
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
+   UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a4")+UPat(Ops.CAST,name="a5")+UPat(Ops.CAST,name="a6")+UPat(Ops.CAST,name="a7"), multi_add_int2),
+])+gep_pushing
+
+def add_to_mul(c:UOp, x:UOp):
+  if c.arg.startswith("__builtin_HEXAGON_V6_vrmpybus_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+  elif c.arg.startswith("__builtin_HEXAGON_V6_vrmpybusv_128B"):
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (x, c.src[0], c.src[1]), "__builtin_HEXAGON_V6_vrmpybusv_acc_128B({0}, {1}, {2})")
+  elif 'acc' in c.arg and x.op is not Ops.CUSTOM:
+    return c.replace(src=(x+c.src[0], c.src[1], c.src[2]))
+  else:
+    return None
+
+def prefetch_l1(ld:UOp):
+  if ld.src[-1].op is Ops.CUSTOM: return None
+  ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
+  first = ld.src[0].src[0].substitute({ranges[-1]: ranges[-1].src[0]})
+  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(ld.src[0].src[0].index(UOp.const(dtypes.int, ld.dtype.count*2)),), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
+  x2 = UOp(Ops.CUSTOM, dtypes.void, src=(first,), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
+  return ld.replace(src=ld.src+(x1,x2))
 
 dsp_pm_late = PatternMatcher([
+  # prefetch L1
+  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"), prefetch_l1),
+
+  # __builtin_HEXAGON_V6_vrmpybus_acc_128B
+  (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
+
+  # add acc to __builtin_HEXAGON_A2_vraddub (must be after the reduce expansion)
+  (UPat(Ops.CUSTOMI, name="cu", arg="__builtin_HEXAGON_A2_vraddub({0}, {1})") + UPat.var("x"),
+   lambda x,cu: cu.replace(dtype=dtypes.int64, src=(x.bitcast(dtypes.int64), cu.src[0], cu.src[1]),
+                           arg="__builtin_HEXAGON_A2_vraddub_acc({0}, {1}, {2})").bitcast(dtypes.int.vec(2))),
+
+  #(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"),
+  # lambda ld, bc: ld.src[0].src[0].cast(bc.dtype.ptr(ld.src[0].dtype.size)).load(dtype=bc.dtype)),
+  (UPat(Ops.GEP, name="x"), lambda x: UOp(Ops.CUSTOM, x.dtype, x.src+x.src,
+    "__builtin_shufflevector({0}, {1}, "+','.join([f'{y:4d}' for y in x.arg])+")") if len(x.arg) > 1 and x.src[0].dtype.count > 1 else None),
   (UPat.var("x")+UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")*UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")//UPat(Ops.VECTORIZE,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
@@ -27,9 +153,10 @@ dsp_pm_late = PatternMatcher([
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:])),
 ])
 
-# NOTE: this just increases readability of the generated code
-dsp_string = PatternMatcher([
-  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
+pretty_render = PatternMatcher([
+  # makes rendering nicer
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST, dtype=(dtypes.uint8, dtypes.int8)), name="v"),
+   lambda v: UOp(Ops.VECTORIZE, v.dtype, src=tuple(UOp(Ops.CUSTOMI, x.dtype, src=(UOp.const(dtypes.int, x.arg),), arg="{0}") for x in v.src))),
 ])
 
 class DSPRenderer(ClangRenderer):
@@ -38,8 +165,7 @@ class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
-  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
-  string_rewrite = dsp_string+ClangRenderer.string_rewrite
+  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 

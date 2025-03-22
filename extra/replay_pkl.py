@@ -109,14 +109,29 @@ if __name__ == "__main__":
             # alignment issue?
             #pass
           if knum == 4:
-            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+          elif knum == 5:
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 96))
+            # this breaks something
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+          elif knum in [8, 12]:
+            # 3x3 dwconv w 144 chans
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 144))
+          elif knum in [15, 19]:
+            # 3x3 dwconv w 192 chans
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 192))
           elif knum == 6:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 16))
-          elif knum == 11:
+          elif knum == 9:
+            # same as 6
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 16))
+          elif knum in [7,11]:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 144))
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
@@ -124,26 +139,79 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 192))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+          elif knum == 40:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+            pass
+          elif knum == 1:
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+          elif knum == 26:
+            #k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            #k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
+            pass
+          #elif knum == 18:
+          #  k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+          #  k.apply_opt(Opt(OptOps.UPCAST, 1, 192))
+          #  k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+          #elif knum == 33:
+            # 196x64 * 64x384 -> 196x384
+            # automatic gets this now
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
+          #elif knum == 39:
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
           elif knum == 37:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 384))
+          elif knum == 66:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
+            #k.apply_opt(Opt(OptOps.PADTO, 0, 32))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 32))
           else:
             full_shape = k.full_shape
             out_shape = k.sts[0].shape
             out_strides = k.sts[0].real_strides()
+            # there's some bug here with this
+            #if len(out_strides) == 5 and full_shape[-2:] == (3,3):
+              #if knum not in [2,30]: k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
             if len(out_strides) == 3:
-              if full_shape[1] < 128:
-                if full_shape[2] <= 32: k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+              if full_shape[1] == 192 and full_shape[0]%2 == 0:
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+                k.apply_opt(Opt(OptOps.UPCAST, 1, 192))
+                k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+              elif full_shape[1] == 96 and full_shape[0]%4 == 0:
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+                k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
+                k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+              elif full_shape[1] < 128:
+                if full_shape[2] <= 16: k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
                 else: k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
                 k.apply_opt(Opt(OptOps.UPCAST, 1, full_shape[1]))
                 if out_strides[0] < 128:
                   upcast_0 = 128//out_strides[0]
                   if out_shape[0]%upcast_0 == 0 and upcast_0 != 1: k.apply_opt(Opt(OptOps.UPCAST, 0, upcast_0))
               elif full_shape[1] % 128 == 0:
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
                 k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
+              elif full_shape[1] % 64 == 0:
+                # this is suboptimal
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+                k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
+              elif full_shape[1] % 32 == 0:
+                # this is even more suboptimal
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+                k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
             elif len(out_strides) == 1:
-              #if full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
-              pass
+              if full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
+              elif full_shape[0]%64 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 64))
+              elif full_shape[0]%32 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 32))
             #print("here", out_shape, out_strides, k.name)
             #k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
