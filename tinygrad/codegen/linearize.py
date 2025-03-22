@@ -238,7 +238,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
 
   # if there's BLOCKENDs left in the graph, we might have to merge. TODO: is there a better way to handle this?
   while (newsink := graph_rewrite(sink, pm_force_upcast_block)) is not sink:
-    sink = graph_rewrite(newsink, pm_block_merge, ctx=children)
+    sink = graph_rewrite(newsink, pm_block_merge, ctx=children, name="bad_merge")
 
   # there should just be one block left, with a few parents with 0 srcs (now done in a rewriter)
   sink = graph_rewrite(sink, pm_block_finalize)
