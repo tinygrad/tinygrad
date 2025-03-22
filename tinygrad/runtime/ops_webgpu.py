@@ -1,7 +1,7 @@
 import functools, struct
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
-from tinygrad.helpers import round_up, OSX
+from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import webgpu
 from typing import List, Any
 import ctypes
