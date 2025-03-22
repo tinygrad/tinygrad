@@ -60,6 +60,17 @@ def gep_on_reduce(gep, alu):
      tuple(x.gep(gep.arg) if x.op is not Ops.RANGE else x for x in alu.src), alu.arg) if not isinstance(gep.dtype, PtrDType) and \
       alu.dtype.count >= gep.dtype.count else None
 
+def multi_add_int32(**aa):
+  swizzle = []
+  for i in range(32):
+    swizzle.append(i)
+    swizzle.append(32+i)
+    swizzle.append(64+i)
+    swizzle.append(96+i)
+  swizzle = tuple(swizzle)
+  m0 = UOp(Ops.CAT, dtypes.int.vec(128), src=tuple(x.src[0] for x in aa.values())).gep(swizzle)
+  return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+
 def multi_add_int2(**aa):
   r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(0) for x in aa.values()))
   r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(1) for x in aa.values()))
@@ -92,6 +103,9 @@ dsp_pm = PatternMatcher([
   (UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
    lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
                                     gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
+
+  # build __builtin_HEXAGON_V6_vrmpybus_128B
+  (UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
 
   # build __builtin_HEXAGON_A2_vraddub
   (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
