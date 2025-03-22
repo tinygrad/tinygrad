@@ -2355,6 +2355,27 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1].type(torch.int32),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=1, return_indices=True)[1],
       vals=[[[[[1]*6]*6]]], forward_only=True)  # Tensor.ones(1,1,6,6)
+    # overlapping max indices
+    helper_test_op(None,
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=1, return_indices=True)[1].type(torch.int32),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=1, return_indices=True)[1],
+      vals=[[[[[1,2]*3]*6]]], forward_only=True)  # Tensor([1,2,1,2,1,2]).expand(1,1,6,6)
+
+  def test_max_unpool2d(self):
+    args = {"kernel_size":(5,5), "stride":(6,5)}
+    helper_test_op([(8,3,50,50)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, return_indices=True, **args), **args),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, return_indices=True, **args), **args), forward_only=True)
+    args = {"kernel_size":(3,3), "stride":(6,7), "padding":1}
+    helper_test_op([(8,3,30,30)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, return_indices=True, **args), **args, output_size=(30,30)),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, return_indices=True, **args), **args, output_size=(30,30)), forward_only=True)
+    # batch_size and channel_size of output_size are ignored
+    helper_test_op([(1,3,7,6)],
+      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, kernel_size=(2,2), return_indices=True),
+                                                 kernel_size=(2,2), output_size=(99,99,7,6)),
+      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, kernel_size=(2,2), return_indices=True),
+                                    kernel_size=(2,2), output_size=(99,99,7,6)), forward_only=True)
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
