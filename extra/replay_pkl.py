@@ -116,8 +116,12 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 2, 96))
             # this breaks something
             #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
-          elif knum == 8:
+          elif knum in [8, 12]:
+            # 3x3 dwconv w 144 chans
             k.apply_opt(Opt(OptOps.UPCAST, 2, 144))
+          elif knum in [15, 19]:
+            # 3x3 dwconv w 192 chans
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 192))
           elif knum == 6:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
