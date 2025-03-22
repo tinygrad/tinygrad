@@ -5,6 +5,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
+# flake8: noqa
 import ctypes
 
 
