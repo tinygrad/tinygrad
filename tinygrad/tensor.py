@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex, ParamSpec, TypeVar
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -11,7 +11,7 @@ from tinygrad.engine.multi import get_multi_map
 from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.spec import tensor_uop_spec, type_verify
-from tinygrad.device import Device, BufferSpec
+from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -288,14 +288,8 @@ class Tensor(SimpleMathTrait):
     """
     return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
-  def _data(self) -> memoryview:
-    if 0 in self.shape: return memoryview(bytearray(0))
-    # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.base).contiguous().to("CPU").realize()
-    buf = cpu.lazydata.base.realized
-    assert buf is not None, f"{cpu.lazydata.base} was not realized"
-    if self.device != "CPU": buf.options = BufferSpec(nolru=True)
-    return buf.as_buffer(allow_zero_copy=True if self.device != "CPU" else False)
+  def _buffer(self) -> Buffer: return self.cast(self.dtype.base).contiguous().to("CPU").realize().lazydata.base.buffer
+  def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
     """
@@ -306,10 +300,9 @@ class Tensor(SimpleMathTrait):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
+    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.base.fmt != "e"
-    return self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape)
+    return self._buffer().as_typed_buffer(self.shape)
 
   def item(self) -> ConstType:
     """
@@ -350,11 +343,11 @@ class Tensor(SimpleMathTrait):
     print(repr(t.numpy()))
     ```
     """
+    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
     if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
-    assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
-    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)
+    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
+    return self._buffer().numpy().reshape(self.shape)
 
   def clone(self) -> Tensor:
     """
@@ -2117,7 +2110,7 @@ class Tensor(SimpleMathTrait):
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
-                 ceil_mode=False, count_include_pad=True):
+                 ceil_mode=False, count_include_pad=True) -> Tensor:
     """
     Applies average pooling over a tensor.
 
@@ -2165,7 +2158,7 @@ class Tensor(SimpleMathTrait):
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
-                 ceil_mode=False):
+                 ceil_mode=False, return_indices=False) -> Tensor | tuple[Tensor, Tensor]:
     """
     Applies max pooling over a tensor.
 
@@ -2182,6 +2175,7 @@ class Tensor(SimpleMathTrait):
       `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
 
     When `ceil_mode` is set to `True`, output shape will be determined using ceil division.
+    When `return_indices` is set to `True`, the argmax will be returned along with the max values.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
@@ -2198,9 +2192,16 @@ class Tensor(SimpleMathTrait):
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    pads = self._resolve_pool_pads(padding, len(k_ := make_tuple(kernel_size, 2)))
+    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    pads = self._resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
-    return self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
+    pooled = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    if not return_indices: return pooled.max(axis)
+    spatial_sz = math.prod(spatial_shape := self.shape[-len(k_):])
+    idx = Tensor.arange(spatial_sz,0,-1, requires_grad=False, device=self.device).reshape(spatial_shape)
+    m = pooled == pooled.max(axis, keepdim=True)
+    idx = m * idx.pad(pads, value=dtypes.min(idx.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    return pooled.max(axis), spatial_sz - idx.max(axis)
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
              dtype:DTypeLike|None=None) -> Tensor:
@@ -2584,7 +2585,7 @@ class Tensor(SimpleMathTrait):
       return mask.where(src, 0).sum(-1, dtype=self.dtype).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
-  def sort(self, dim:int=-1, descending:bool=False):
+  def sort(self, dim:int=-1, descending:bool=False) -> tuple[Tensor, Tensor]:
     """
     Performs a bitonic sort on the tensor along the specified dimension.
 
@@ -2628,14 +2629,15 @@ class Tensor(SimpleMathTrait):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     # compute indices for sorted values
-    idx = Tensor.arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim))).expand(x.shape)
+    idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
+    idx = idx.expand(x.shape)
     def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
-  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True):
+  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Tensor, Tensor]:
     """
     Computes the top-k elements of the tensor along the specified `dim`.
 

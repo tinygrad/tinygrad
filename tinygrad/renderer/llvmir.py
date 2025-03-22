@@ -19,18 +19,17 @@ def lconst(x, dtype:DType):
     return truncate[dtype](x)
   return int(x)
 
-def render_cast(ctx, x: UOp) -> str:
-  ot, it, cast_op = x.dtype, x.src[0].dtype, ""
-  pre, pre_type = (f"  {ctx[x]}_ext = fpext {ldt(it)} {ctx[x.src[0]]} to float\n", "float") if {it, ot} == {dtypes.half, dtypes.bfloat16} else \
-                  (f"  {ctx[x]}_ext = zext i1 {ctx[x.src[0]]} to i32\n", "i32") if dtypes.is_bool(it) and ot == dtypes.bfloat16 else ("", "")
-  if dtypes.is_float(it) and dtypes.is_float(ot): cast_op = 'fpext' if ot.itemsize > it.itemsize else 'fptrunc'
-  elif dtypes.is_float(it) and dtypes.is_int(ot): cast_op = 'fptoui' if dtypes.is_unsigned(ot) else 'fptosi'
-  elif dtypes.is_int(it) or dtypes.is_bool(it):
-    cast_op = ('uitofp' if dtypes.is_unsigned(it) or dtypes.is_bool(it) else 'sitofp') if dtypes.is_float(ot) else \
-              ('zext' if dtypes.is_unsigned(it) or dtypes.is_bool(it) else 'sext') if dtypes.is_int(ot) and ot.itemsize >= it.itemsize else \
-               'trunc' if dtypes.is_int(ot) and ot.itemsize < it.itemsize else ""
-  if not cast_op: raise NotImplementedError(f"cast from {it} -> {ot} not implemented")
-  return pre + f"  {ctx[x]} = {cast_op} {pre_type if pre else ldt(it)} {ctx[x] + '_ext' if pre else ctx[x.src[0]]} to {ldt(ot)}"
+def lcast(input_type:DType, output_type:DType):
+  if dtypes.is_float(input_type):
+    if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
+    if dtypes.is_int(output_type): return 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
+  if dtypes.is_unsigned(input_type) or dtypes.is_bool(input_type):
+    if dtypes.is_float(output_type): return 'uitofp'
+    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
+  if dtypes.is_int(input_type):
+    if dtypes.is_float(output_type): return 'sitofp'
+    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
+  raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
 # https://github.com/corsix/amx
 def render_wmma(ctx, wmma: UOp) -> str:
@@ -57,7 +56,8 @@ base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
-  (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
+  (UPat(Ops.LOAD, src=(UPat.or_casted(name='idx', self=UPat(src=(UPat(), UPat(), UPat.var('mask')))), UPat.var('alt')), name="x"),
+   lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
    f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
@@ -80,7 +80,7 @@ base_rewrite = PatternMatcher([
 
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(Ops.CAST, name="x"), render_cast),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
    f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
@@ -127,6 +127,12 @@ class LLVMRenderer(Renderer):
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
     # rewrite bf16 CAST(LOAD) to CAST(BITCAST)
     (UPat(Ops.CAST, name="root", src=(UPat.load(UPat.index(UPat.var("buf"), UPat.var("idx")), dtype=dtypes.bfloat16),)), llvm_bf16_cast),
+    # copied from cstyle.py, upcast to float32 all the ops that don't support bfloat16
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=dtypes.bfloat16, name="x"),
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16))),
+    # copied from cstyle.py, add float intermediate casting
+    (UPat(Ops.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
   ])
 
   def render(self, uops: list[UOp]) -> str:
@@ -188,7 +194,7 @@ class LLVMRenderer(Renderer):
               r[x] = f"%acc{vc}"
 
     # output the function. chr(10) is '\n' (python < 3.12 doesn't support backslashes in f-strings)
-    return "\n".join(local_args) +"\n"f'''\
+    prg = f'''\
 define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(args)}) #0 {{
 {chr(10).join(kernel)}
   ret void
@@ -196,6 +202,8 @@ define{(' '+self.abi) if self.abi is not None else ''} void @{name}({','.join(ar
 {chr(10).join(end_lines.keys())}
 attributes #0 = {{ nounwind "no-builtins" "no-trapping-math"="true" }}
 '''
+    return prg if len(local_args) == 0 else "\n".join(local_args)+f"\n{prg}"
+
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
@@ -204,8 +212,8 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_local = True
   has_shared = True
   shared_max = AMDRenderer.shared_max
-  global_max = Renderer.global_max
-  abi = "protected amdgpu_kernel"
+  global_max = AMDRenderer.global_max
+  abi = "amdgpu_kernel"
   string_rewrite = base_rewrite + PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
     (UPat(Ops.BARRIER), lambda ctx: barrier),

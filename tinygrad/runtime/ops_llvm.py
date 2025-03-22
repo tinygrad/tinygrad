@@ -1,6 +1,6 @@
 import ctypes, platform
-from tinygrad.device import Compiled, CompileError, Compiler, MallocAllocator, CPUProgram
-from tinygrad.helpers import OSX, getenv, amdgpu_disassemble, capstone_flatdump, DEBUG
+from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram
+from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.renderer.llvmir import LLVMRenderer
 import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.runtime.support.elf import jit_loader
@@ -57,20 +57,6 @@ class HostLLVMCompiler(LLVMCompiler):
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     super().__init__(cpu.decode(), feats.decode())
-
-class AMDGPULLVMCompiler(LLVMCompiler):
-  jit = False
-  target_arch = "AMDGPU"
-  def __init__(self, arch: str):
-    self.arch = arch
-    super().__init__(self.arch, "+cumode")
-  def __reduce__(self): return (AMDGPULLVMCompiler, (self.arch,))
-  def compile(self, src:str) -> bytes:
-    try: return super().compile(src)
-    except RuntimeError as e:
-      if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
-      raise CompileError(e) from e
-  def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):

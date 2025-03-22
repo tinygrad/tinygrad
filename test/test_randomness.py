@@ -99,7 +99,7 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(getenv("PTX"), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
-    for ei in lower_schedule(Tensor.rand(20).schedule()):
+    for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
         for u in ei.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
@@ -319,10 +319,10 @@ class TestRandomness(unittest.TestCase):
       self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
   def test_multinomial_counterexample(self):
-    tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(2000, replacement=True)
-    torch_res = torch.tensor([0.3, 0.6, 0.1]).multinomial(2000, replacement=True)
+    tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)
+    torch_res = torch.tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)
     self.assertTrue(equal_distribution(lambda *_: tiny_res, lambda _: torch_res))
-    torch_res = torch.tensor([0.2, 0.7, 0.1]).multinomial(2000, replacement=True)
+    torch_res = torch.tensor([0.2, 0.7, 0.1]).multinomial(4000, replacement=True)
     self.assertFalse(equal_distribution(lambda *_: tiny_res, lambda _: torch_res))
 
   def test_conv2d_init(self):
