@@ -2377,15 +2377,6 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, kernel_size=(2,2), return_indices=True),
                                     kernel_size=(2,2), output_size=(99,99,7,6)), forward_only=True)
 
-  # kernel_size > stride creates repeated indices, which leads to non-deterministic behavior
-  # see: https://github.com/pytorch/pytorch/issues/80827
-  @unittest.expectedFailure
-  def test_max_unpool2d_failure(self):
-    args = {"kernel_size":(5,5), "stride":(3,3)}
-    helper_test_op([(8,3,50,50)],
-      lambda x: torch.nn.functional.max_unpool2d(*torch.nn.functional.max_pool2d(x, return_indices=True, **args), **args),
-      lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, return_indices=True, **args), **args), forward_only=True)
-
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
