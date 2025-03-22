@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: ['-x', 'c++']
@@ -5,7 +6,6 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-# flake8: noqa
 import ctypes
 
 
@@ -142,7 +142,7 @@ _libraries['libocloc.so'] = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libocloc.so')
 
 _OCLOC_API_H = True # macro
 def OCLOC_MAKE_VERSION(_major, _minor):  # macro
-   return ((_major<<16)|(_minor&0x0000ffff))  
+   return ((_major<<16)|(_minor&0x0000ffff))
 OCLOC_NAME_VERSION_MAX_NAME_SIZE = 64 # macro
 SIGNATURE = True # macro
 pOclocInvoke = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte))), ctypes.POINTER(ctypes.POINTER(ctypes.c_uint64)), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(ctypes.c_char))))

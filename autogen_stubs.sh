@@ -39,9 +39,9 @@ def _try_dlopen_$name():
 EOF
 }
 
-# sudo apt install intel-ocloc intel-ocloc-dev
 generate_ocloc() {
   clang2py --clang-args="-x c++" /usr/include/ocloc_api.h -o $BASE/intel_ocloc.py -l /usr/lib/x86_64-linux-gnu/libocloc.so -k cdefstum
+  fixup $BASE/intel_ocloc.py
   # hot patch (change char*[] to char**)
   sed -i "s/ctypes.POINTER(ctypes.c_char) \* 0/ctypes.POINTER(ctypes.POINTER(ctypes.c_char))/g"  $BASE/intel_ocloc.py
   python3 -c "import tinygrad.runtime.autogen.intel_ocloc"
@@ -408,7 +408,7 @@ elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
-elif [ "$1" == "intel_offline_compiler" ]; then generate_ocloc
+elif [ "$1" == "intel_ocloc" ]; then generate_ocloc
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu; generate_ocloc
 else echo "usage: $0 <type>"
 fi
