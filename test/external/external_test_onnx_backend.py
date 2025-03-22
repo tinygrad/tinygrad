@@ -54,6 +54,9 @@ backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
 
+# BUG: we match ORT, tested in TestMainOnnxOps.test_maxunpool
+backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
+
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
   backend_test.exclude('float64')
