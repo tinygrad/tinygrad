@@ -158,6 +158,18 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
   ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)).contiguous()
   return wrap(ret)
 
+@torch.library.impl("aten::new_empty", "privateuseone")
+def new_empty(self, size, dtype=None, layout=None, device=None, pin_memory=None):
+  if TORCH_DEBUG: print(f"new_empty {size=} {dtype=} {layout=} {device=} {pin_memory=}")
+  ret = Tensor.zeros(*size, dtype=_from_torch_dtype(dtype or self.dtype), device=_from_torch_device(device or self.device)).contiguous()
+  return wrap(ret)
+
+@torch.library.impl("aten::new_empty_strided", "privateuseone")
+def new_empty_strided(self, size, stride, dtype=None, layout=None, device=None, pin_memory=None):
+  if TORCH_DEBUG: print(f"new_empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
+  ret = Tensor.zeros(*size, dtype=_from_torch_dtype(dtype or self.dtype), device=_from_torch_device(device or self.device)).contiguous().realize()
+  return wrap(ret)
+
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
 def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False):
   # TODO: supprt stride [] in tinygrad?
@@ -190,8 +202,9 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   input, weight, bias = unwrap(input), unwrap(weight), unwrap(bias) if bias is not None else None
-  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding))
-  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
+  # TODO: fix test_biased_conv2d fails without realize()
+  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding).realize())
+  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding).realize())
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
@@ -204,6 +217,28 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
     out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
   grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
+
+@torch.library.impl("aten::slice.Tensor", "privateuseone")
+def slice_tensor(self, dim=0, start=None, end=None, step=1):
+  slices = [slice(None)] * unwrap(self).ndim
+  slices[dim] = slice(start, end, step)
+  return wrap(unwrap(self)[slices])
+
+@torch.library.impl("aten::slice_backward", "privateuseone")
+def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = slice(start, end, step)
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
+
+@torch.library.impl("aten::select_backward", "privateuseone")
+def select_backward(grad_out, input_sizes, dim, index):
+  grad_input = Tensor.zeros(input_sizes).contiguous()
+  slices = [slice(None)] * len(input_sizes)
+  slices[dim] = index
+  grad_input[slices] = unwrap(grad_out)
+  return wrap(grad_input)
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
@@ -234,6 +269,9 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
   torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
+
+@torch.library.impl("aten::cumsum", "privateuseone")
+def cumsum(self, dim): return wrap(unwrap(self).cumsum(dim).contiguous())
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 def scatter_add(self, dim, index, src, out):
