@@ -124,6 +124,11 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 192))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+          #elif knum == 33:
+            # 196x64 * 64x384 -> 196x384
+            # automatic gets this now
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
           elif knum == 37:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 384))
@@ -140,10 +145,10 @@ if __name__ == "__main__":
                   upcast_0 = 128//out_strides[0]
                   if out_shape[0]%upcast_0 == 0 and upcast_0 != 1: k.apply_opt(Opt(OptOps.UPCAST, 0, upcast_0))
               elif full_shape[1] % 128 == 0:
+                k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
                 k.apply_opt(Opt(OptOps.UPCAST, 1, 128))
             elif len(out_strides) == 1:
-              #if full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
-              pass
+              if full_shape[0]%128 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
             #print("here", out_shape, out_strides, k.name)
             #k.hand_coded_optimizations()
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
