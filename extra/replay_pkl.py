@@ -159,6 +159,11 @@ if __name__ == "__main__":
           elif knum == 37:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 384))
+          elif knum == 66:
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
+            #k.apply_opt(Opt(OptOps.PADTO, 0, 32))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 32))
           else:
             full_shape = k.full_shape
             out_shape = k.sts[0].shape
