@@ -214,7 +214,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> list[UOp]:
     sink = sink.substitute(forks)
 
   # combine matching BLOCKENDS
-  blockends_to_arg: dict[UOp, list[UOp]] = {}
+  blockends_to_arg: dict[BasicBlock, list[UOp]] = {}
   for be in sink.toposort:
     if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg, []).append(be)
   new_forks = {}
