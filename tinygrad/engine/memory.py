@@ -1,12 +1,14 @@
 from collections import defaultdict
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.device import Device, Buffer
-from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG
+from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
 from tinygrad.ops import Ops
+from tinygrad.dtype import dtypes
+from tinygrad.runtime.support.allocator import TLSFAllocator
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noopt_buffers=None, debug_prefix="") -> dict[Buffer, Buffer]:
+def _internal_memory_planner_2(buffers:list[list[Buffer]|tuple[Buffer, ...]], noopt_buffers=None, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance = {}, {}
   for i,u in enumerate(buffers):
@@ -15,30 +17,72 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
 
-  # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
-  # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
-  free_segs: dict[tuple, list[tuple[int, int, Buffer]]] = defaultdict(list) # dict[buffer key, tuple[start, end, buffer to reuse on the seg]]
-  def find_replace_buffer(buf, st, en):
-    key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
+  # Sort buffers operations in timeline order. 2 events: buffer is allocted and buffer is freed.
+  buffer_requests = sorted([((first_appearance[buf], True), buf) for buf in first_appearance.keys()] + \
+                           [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
 
-    default_buf = (0, len(buffers) - 1, buf) # will return the buffer itself if the replace one is not found.
-    seg_st, seg_en, seg_buf = next((free_segs[key].pop(i) for i,(sst,sen,_) in enumerate(free_segs[key]) if sst <= st and en <= sen), default_buf)
+  # This solution is an online solution to offline problems, better algos are welcome.
+  # Min allocation chunk is 
+  allc = defaultdict(lambda: TLSFAllocator(256 << 30, block_size=0x100, lv2_cnt=32))
+  bufs_off, assigned = {}, {}
+  for (time, is_opened), buf in buffer_requests:
+    if is_opened: bufs_off[buf] = allc[buf.device].alloc(buf.nbytes)
+    else: allc[buf.device].free(bufs_off[buf])
 
-    free_segs[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
-    free_segs[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
-
-    return seg_buf if seg_buf.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=seg_buf)
-
-  buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
-  assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
+  bufs_sz = {dev: max([x + b.nbytes for b, x in bufs_off.items() if b.device == dev], default=0) for dev in allc.keys()}
+  bufs = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, sz in bufs_sz.items()}
 
   for i,u in enumerate(buffers):
     for buf in u:
       if buf.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
-      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
-      else: assigned[buf] = assigned.get(buf, buf)
 
-  if DEBUG >= 1 and len(ak:=dedup(x for x in assigned.keys() if x._base is None)) != len(av:=dedup(x for x in assigned.values() if x._base is None)):
+      if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=bufs[buf.device], offset=buf.offset+bufs_off[buf.base])
+      else: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=bufs[buf.device], offset=buf.offset+bufs_off[buf.base])
+
+  # for i,u in enumerate(buffers):
+  #   for buf in u:
+  #     if buf.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
+  #     if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
+  #     else: assigned[buf] = assigned.get(buf, buf)
+
+  return assigned
+
+def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noopt_buffers=None, debug_prefix="") -> dict[Buffer, Buffer]:
+  if NO_MEMORY_PLANNER: return {}
+  
+  assigned = _internal_memory_planner_2(buffers, noopt_buffers, debug_prefix)
+
+  # first_appearance, last_appearance = {}, {}
+  # for i,u in enumerate(buffers):
+  #   for buf in u:
+  #     if buf.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
+  #     if buf.base not in first_appearance: first_appearance[buf.base] = i
+  #     last_appearance[buf.base] = i
+
+  # # Sort buffers by size in descending order, prioritizing largest buffers for allocation first.
+  # # Track free segments, each containing (start, stop, and buffer that could be reused on this segment).
+  # free_segs: dict[tuple, list[tuple[int, int, Buffer]]] = defaultdict(list) # dict[buffer key, tuple[start, end, buffer to reuse on the seg]]
+  # def find_replace_buffer(buf, st, en):
+  #   key = (buf.device, buf.dtype, buf.options) + ((buf.nbytes,) if not hasattr(Device[buf.device].allocator, "offset") else tuple())
+
+  #   default_buf = (0, len(buffers) - 1, buf) # will return the buffer itself if the replace one is not found.
+  #   seg_st, seg_en, seg_buf = next((free_segs[key].pop(i) for i,(sst,sen,_) in enumerate(free_segs[key]) if sst <= st and en <= sen), default_buf)
+
+  #   free_segs[key] += [(seg_st, st - 1, seg_buf)] if st - 1 >= seg_st else []
+  #   free_segs[key] += [(en + 1, seg_en, seg_buf)] if seg_en >= en + 1 else []
+
+  #   return seg_buf if seg_buf.nbytes == buf.nbytes else Buffer(buf.device, buf.size, buf.dtype, base=seg_buf)
+
+  # buffer_requests = sorted([(first_appearance[buf], last_appearance[buf], buf) for buf in first_appearance.keys()], key=lambda x: -x[2].nbytes)
+  # assigned = {buf:find_replace_buffer(buf, st, en) for st, en, buf in buffer_requests}
+
+  # for i,u in enumerate(buffers):
+  #   for buf in u:
+  #     if buf.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
+  #     if buf._base is not None: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=assigned.get(buf.base, buf.base).base, offset=buf.offset)
+  #     else: assigned[buf] = assigned.get(buf, buf)
+
+  if DEBUG >= 0 and len(ak:=dedup(x for x in assigned.keys() if x._base is None)) != len(av:=dedup(x for x in assigned.values() if x._base is None)):
     print(debug_prefix+f"memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB -> {sum([x.nbytes for x in av])/1e6:.2f} MB,",
           f"{len(ak)} -> {len(av)} bufs")
   return assigned
