@@ -21,6 +21,7 @@ EVAL_BS = getenv("EVAL_BS", BS)
 
 if getenv("TINYBACKEND", 0):
   import tinygrad.frontend.torch
+  from tinygrad import GlobalCounters
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   device = torch.device("tiny")
 else:
@@ -452,8 +453,11 @@ def train_cifar():
     cl = time.monotonic()
     device_str = f"{device}" if len(GPUS) <= 1 else f"{device} * {len(GPUS)}"
 
-    mem_used = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.param_groups[0]['lr']:.6f} LR, {mem_used/1e9:.2f} GB used")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.param_groups[0]['lr']:.6f} LR, ", end="")
+    if getenv("TINYBACKEND", 0):
+      print(f"{GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
+    else:
+      print(f"{(torch.cuda.max_memory_allocated()/1e9 if torch.cuda.is_available() else 0):.2f} GB used")
 
     st = cl
     i += 1

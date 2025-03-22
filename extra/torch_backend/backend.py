@@ -443,6 +443,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
+  "aten.amin": Tensor.min,
+  "aten.amax": Tensor.max,
   "aten.mm": Tensor.matmul,
   "aten.mv": Tensor.matmul,
   "aten.dot": Tensor.dot,
