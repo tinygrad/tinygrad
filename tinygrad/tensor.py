@@ -2690,6 +2690,30 @@ class Tensor(SimpleMathTrait):
     shrink_to_k = tuple((0, k) if i == dim else None for i in range(self.ndim))
     return x.shrink(shrink_to_k), idx.shrink(shrink_to_k)
 
+  def masked_select(self, mask: Tensor) -> Tensor:
+    """
+    Returns a 1D tensor containing elements of this tensor where the corresponding element in `mask` is `True`.
+
+    This supports broadcasting, meaning `mask` can be smaller than `self` as long as it expands correctly.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    mask = Tensor([[True, False, True], [False, True, False]])
+    print(t.masked_select(mask).numpy())  # [1, 3, 5]
+    ```
+    """
+    try:
+      mask = mask._broadcast_to(self.shape)
+    except Exception as exc:
+      raise ValueError(f"masked_select: mask shape {mask.shape} is not broadcastable to input shape {self.shape}") from exc
+    x, m = self.flatten(), mask.flatten()
+    if not (num_true := int(m.sum().item())): return Tensor.empty(0, device=self.device, dtype=self.dtype)
+    indices = [Tensor.argmax(m, axis=0, keepdim=True)]
+    for _ in range(num_true - 1):
+      m = m.scatter(0, indices[-1], 0)
+      indices.append(Tensor.argmax(m, axis=0, keepdim=True))
+    return x.gather(0, indices[0].cat(*indices[1:], dim=0))
+
   # ***** unary ops *****
 
   def logical_not(self) -> Tensor:

@@ -455,6 +455,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
+  "aten.masked_select": Tensor.masked_select,
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": inplace_fn("self")(lambda self:
