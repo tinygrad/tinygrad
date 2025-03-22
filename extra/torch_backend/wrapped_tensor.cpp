@@ -93,8 +93,67 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       OpaqueHandle opaque_handle,
       c10::IntArrayRef sizes,
       c10::IntArrayRef strides)
-      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes)
-        { this->sizes_and_strides_.set_strides(strides); }
+      : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
+    py::gil_scoped_acquire gil;
+    this->meta_handle_ = std::make_shared<c10::SafePyObject>(py::dict().release().ptr(), getPyInterpreter());
+    this->sizes_and_strides_.set_strides(strides);
+  }
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion version_counter,
+      bool allow_tensor_metadata_change) const {
+    auto impl = c10::make_intrusive<TinyOpaqueTensorImpl>(
+        this->key_set(),
+        this->dtype(),
+        this->device(),
+        this->opaque_handle(),
+        this->sizes_and_strides_.sizes_arrayref(),
+        this->sizes_and_strides_.strides_arrayref());
+    this->copy_tensor_metadata(
+        /*src_opaque_impl=*/this,
+        /*dest_opaque_impl=*/impl.get(),
+        /*version_counter=*/std::forward<VariableVersion>(version_counter),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->refresh_numel();
+    return impl;
+  }
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const override {
+    return this->shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+  }
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    return this->shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
+  }
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+    AT_ASSERT(this->has_compatible_shallow_copy_type(impl->key_set()));
+    auto opaque_impl =
+        static_cast<const TinyOpaqueTensorImpl<OpaqueHandle>*>(impl.get());
+    this->copy_tensor_metadata(
+        /*src_impl=*/opaque_impl,
+        /*dest_impl=*/this,
+        /*version_counter=*/this->version_counter(),
+        /*allow_tensor_metadata_change=*/this->allow_tensor_metadata_change());
+    this->refresh_numel();
+  }
+  template <typename VariableVersion>
+  static void copy_tensor_metadata(
+    const TinyOpaqueTensorImpl<OpaqueHandle>* src_opaque_impl,
+    TinyOpaqueTensorImpl<OpaqueHandle>* dest_opaque_impl,
+    VariableVersion version_counter,
+    bool allow_tensor_metadata_change) {
+    OpaqueTensorImpl<OpaqueHandle>::copy_tensor_metadata(
+        src_opaque_impl,
+        dest_opaque_impl,
+        std::forward<VariableVersion>(version_counter),
+        allow_tensor_metadata_change);
+    dest_opaque_impl->meta_handle_ = src_opaque_impl->meta_handle_;
+  }
+  std::shared_ptr<c10::SafePyObject> meta_handle_;
 };
 }
 
@@ -142,4 +201,10 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+  m.def("get_meta", [](const at::Tensor& tensor) {
+    auto* impl = tensor.unsafeGetTensorImpl();
+    auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+    std::shared_ptr<c10::SafePyObject> meta = opaque_impl->meta_handle_;
+    return py::reinterpret_borrow<py::object>(meta->ptr(getPyInterpreter()));
+  });
 }
