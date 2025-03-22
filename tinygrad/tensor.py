@@ -2205,9 +2205,7 @@ class Tensor(SimpleMathTrait):
 
   def max_unpool2d(self, indices:Tensor, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0, output_size=None):
     """
-    Reconstructs the input shape by placing values from the `self` tensor at positions specified by `indices`.
-
-    Typically used to reverse a `max_pool2d` operation with `return_indices=True`.
+    Performs a partial inverse of `max_pool2d` using the indices from the argmax.
 
     When `output_size` is provided, the output shape disambiguates to the provided shape.
 
@@ -2230,7 +2228,7 @@ class Tensor(SimpleMathTrait):
     if output_size is None:
       k_,d_,s_ = (make_tuple(x, len(spatial_shape)) for x in (kernel_size, dilation, stride if stride is not None else kernel_size))
       p_ = _flat_to_grouped(self._resolve_pool_pads(padding, len(spatial_shape)))
-      # inverse of relationship 15 in section 5.1 of https://arxiv.org/pdf/1603.07285
+      # https://arxiv.org/pdf/1603.07285 inverse of relationship 15 in section 5.1.
       output_size = tuple((i-1)*s - (pB+pA) + (d*(k-1)+1) for i,k,d,s,(pA,pB) in zip(spatial_shape,k_,d_,s_,p_))
     else: output_size = output_size[-len(spatial_shape):]
     ret = (indices.reshape(bs,c,1,-1)._one_hot_along_dim(prod(output_size), 2) * self.reshape(bs,c,1,-1)).sum(3)
