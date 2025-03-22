@@ -78,8 +78,9 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
   # Extract model data/transforms, sufficient for export to external runtime
   ex: ExportSpec = extract_model(model, inputs)
 
+  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
   if state_dict: weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()}
-  #else: #weight_names = {id(buf): name for name, buf in bufs_to_save.items()}
+  else: weight_names = {buf: buf_names[buf] for buf in ex.weight_bufs}
 
   # TODO: validate symbolic var ranges against input args at runtime in JS?
   # TODO: init rand seeds in JS? random seeds (buffer of two uint32) were included in ex.weight_bufs, but are not in the state_dict
@@ -87,7 +88,6 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
     if buf not in weight_names: ex.empty_bufs.append(ex.weight_bufs.pop(i))
 
   # Render model data
-  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
   empty_bufs = [f"const {buf_names[b]} = createEmptyBuf({b.nbytes});" for b in ex.inputs+ex.outputs+ex.empty_bufs if isinstance(b, Buffer)]
   symbolic_bufs = [f"const {buf_names[var]} = createUniformBuf({var.dtype.itemsize});" for var in ex.inputs if isinstance(var, UOp)]
   def map_wt(buf): return f"state_dict['{weight_names[buf]}']" if not save_weights else f"getTensorBuffer(safetensor,metadata['{weight_names[buf]}'])"
