@@ -29,10 +29,7 @@ async def snapshot_with_retries(model_id, allow_patterns, cache_dir, retries=3, 
 
 async def fetch_model(model_id, model_data, download_dir):
   """Helper function to download a single model (with retries) and return the root path."""
-  allow_patterns = [file_info["file"] for file_info in model_data["files"]]
-  # Download config files as well
-  allow_patterns += ["*config.json"]
-
+  allow_patterns = [file_info["file"] for file_info in model_data["files"]] + ["*config.json"]
   print(f"Downloading: {model_id} with patterns: {allow_patterns}")
   root_path = Path(await snapshot_with_retries(model_id, allow_patterns, download_dir))
   print(f"Downloaded {model_id} files to: {root_path}")
@@ -41,34 +38,19 @@ async def fetch_model(model_id, model_data, download_dir):
 async def download_models(yaml_file: str, download_dir: str) -> None:
   """Download multiple models from Hugging Face in parallel asynchronously."""
   # Load metadata
-  with open(yaml_file, 'r') as f:
-    metadata = yaml.safe_load(f)
-
+  with open(yaml_file, 'r') as f: metadata = yaml.safe_load(f)
   repos = metadata["repositories"]
+
   print(f"Starting parallel download for {len(repos)} repositories...")
-
-  # Create tasks for each model
-  tasks = [
-    fetch_model(model_id, model_data, download_dir)
-    for model_id, model_data in repos.items()
-  ]
-
-  # Run tasks concurrently
+  tasks = [fetch_model(model_id, model_data, download_dir) for model_id, model_data in repos.items()]
   results = await asyncio.gather(*tasks, return_exceptions=False)
 
-  # Process results
-  for model_id, root_path in results:
-    repos[model_id]["download_path"] = str(root_path)
-
-  # Save the updated metadata back to the YAML file
-  with open(yaml_file, 'w') as f:
-    yaml.dump(metadata, f, sort_keys=False)
+  for model_id, root_path in results: repos[model_id]["download_path"] = str(root_path)
+  with open(yaml_file, 'w') as f: yaml.dump(metadata, f, sort_keys=False)
   print("All downloads completed, YAML updated.")
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(
-    description="Download models from Huggingface Hub based on a YAML configuration file."
-  )
+  parser = argparse.ArgumentParser(description="Download models from Huggingface Hub based on a YAML configuration file.")
   parser.add_argument("input", type=str, help="Path to the input YAML configuration file containing model information.")
   args = parser.parse_args()
 
