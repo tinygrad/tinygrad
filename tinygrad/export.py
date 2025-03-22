@@ -1,9 +1,9 @@
 from typing import Callable, Sequence, Union, Optional, cast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import types
 from tinygrad import Tensor, dtypes, TinyJit, UOp
 from tinygrad.engine.jit import _prepare_jit_inputs
-from tinygrad.renderer import ProgramSpec
+from tinygrad.engine.realize import CompiledRunner
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
@@ -14,7 +14,7 @@ gidxT = Union[int, UOp]
 class KernelCall:
   kernel_name: str
   args: list[Union[Buffer, UOp]]
-  global_size: Optional[tuple[gidxT, gidxT, gidxT]]=None
+  global_size: list[gidxT]=field(default_factory=list)
 
 @dataclass(frozen=True)
 class ExportSpec:
@@ -35,20 +35,24 @@ def extract_model(model: Callable, args: Sequence) -> ExportSpec:
     assert all(isinstance(x, Tensor) for x in out), "must return a Tensor, or a list or tuple of Tensors"
     return [t.realize() for t in out]
 
-  for _ in range(2): run(args)
+  for _ in range(2): out = run(args)
+  assert run.captured is not None
   input_bufs = _prepare_jit_inputs(tuple(args), {})[0] # TODO: enable kwargs?
   for (j,i),idx in run.captured.input_replace.items(): run.jit_cache[j].bufs[i] = input_bufs[idx]
-  output_bufs: list[Buffer] = [t.lazydata.base.realized for t in cast(list[Tensor], run.captured.ret)]
+  output_bufs = [t.lazydata.base.realized for t in out if t.lazydata.base.realized is not None]
 
   kernels, empty_bufs, weight_bufs, seen, kernel_calls = {}, set(), set(), set(input_bufs + output_bufs), []
   for ei in run.jit_cache:
-    fxn: ProgramSpec = ei.prg.p
+    assert isinstance(ei.prg, CompiledRunner) and all(isinstance(buf, Buffer) for buf in ei.bufs)
+    fxn = ei.prg.p
+    assert ei.prg.p.global_size is not None
     kernels[fxn.function_name] = fxn.src
-    for i, buf in enumerate(ei.bufs):
+
+    for i, buf in enumerate(cast(list[Buffer], ei.bufs)):
       if buf not in seen and i==0: empty_bufs.add(buf)
       elif buf not in seen: weight_bufs.add(buf)
       seen.add(buf)
-    kernel_calls.append(KernelCall(fxn.function_name, ei.bufs + fxn.vars, fxn.global_size))
+    kernel_calls.append(KernelCall(fxn.function_name, cast(list[Buffer], ei.bufs) + fxn.vars, cast(list[gidxT], fxn.global_size)))
 
   def res(x): return x.unbind()[0] if isinstance(x, UOp) else cast(Tensor, x).lazydata.base.realized
   return ExportSpec([res(x) for x in args if isinstance(x, (UOp, Tensor))], output_bufs, list(empty_bufs), list(weight_bufs), kernels, kernel_calls)
@@ -74,14 +78,15 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
       _state_dict[k] = v.contiguous().to("WEBGPU").realize()
     load_state_dict(weights_holder, _state_dict)
   if not state_dict: state_dict = _state_dict
+  for t in state_dict.values(): assert isinstance(t.lazydata.base.realized, Buffer)
 
   # Extract model data/transforms, sufficient for export to external runtime
   ex: ExportSpec = extract_model(model, inputs)
 
   # Map buffers to their names in the state_dict and handle weight buffers that are missing from the state_dict
   # TODO: init rand seeds in JS? random seeds (buffer of two uint32) were included in ex.weight_bufs, but are not in the state_dict
-  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs)}
-  weight_names: dict[Buffer, str] = {x.lazydata.base.realized: name for name, x in state_dict.items()} if state_dict else buf_names
+  buf_names = {buf: f"buf_{i}" for i,buf in enumerate(cast(list[Buffer|UOp], ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs))}
+  weight_names = {cast(Buffer, t.lazydata.base.realized): name for name, t in state_dict.items()} if state_dict else buf_names
   for buf in ex.weight_bufs:
     name = weight_names[buf] = weight_names.get(buf, buf_names[buf])
     state_dict[name] = state_dict.get(name, Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize())
