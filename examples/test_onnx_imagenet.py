@@ -58,7 +58,7 @@ if __name__ == "__main__":
             return None
           return {"input": img.numpy()}
       quantize_static(model_fp32, fn, ImagenetReader(), quant_format=QuantFormat.QDQ, per_channel=False,
-                      activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
+                      activation_type=QuantType.QUInt8, weight_type=QuantType.QUInt8,
                       extra_options={"ActivationSymmetric": False})
 
   run_onnx_jit, input_specs = load_onnx_model(fetch(fn))
@@ -73,6 +73,9 @@ if __name__ == "__main__":
     t = p.argmax().item()
     hit += y==t
     print(f"target: {y:3d}  pred: {t:3d}  acc: {hit/(i+1)*100:.2f}%")
+
+  MS_TARGET = 13.4
+  print(f"need {GlobalCounters.global_ops/1e9*(1000/MS_TARGET):.2f} GFLOPS for {MS_TARGET:.2f} ms")
 
   import pickle
   with open("/tmp/im.pkl", "wb") as f: pickle.dump(run_onnx_jit, f)

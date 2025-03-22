@@ -37,7 +37,8 @@ class TensorCoreOptions:
 
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
-    if ast.op is Ops.SINK: self.ast = ast
+    assert ast.op is Ops.SINK, ast.op
+    self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
@@ -608,10 +609,12 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-            if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
+            src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+            if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
+              local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
+                                  for i,st in enumerate(src_st.real_strides()))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
