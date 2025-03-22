@@ -86,9 +86,9 @@ class CLAllocator(LRUAllocator):
     self.dev.synchronize()
 
 class CLDevice(Compiled):
+  INTEL_VENDOR_ID = 0x8086
   device_ids = None                 # this is global and only initted once
   def __init__(self, device:str=""):
-    self.device_ip = None
     if CLDevice.device_ids is None:
       check(cl.clGetPlatformIDs(0, None, num_platforms := ctypes.c_uint32()))
       check(cl.clGetPlatformIDs(num_platforms.value, platform_ids := (cl.cl_platform_id * num_platforms.value)(), None))
@@ -99,13 +99,15 @@ class CLDevice(Compiled):
       CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))  # noqa: E501
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
+    self.vendor_ip = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_VENDOR_ID, 4, ctypes.byref(ip := ctypes.c_int32()), None), ip.value)[1]
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
     if DEBUG >= 1: print(f"CLDevice: opening {self.device_name} with version {self.driver_version}")
     self.context = checked(cl.clCreateContext(None, 1, self.device_id, cl.clCreateContext.argtypes[3](), None, status := ctypes.c_int32()), status)
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, status), status)
     self.pending_copyin: list[memoryview] = []
     self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 4096, ctypes.byref(buf := ctypes.create_string_buffer(4096)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]  # noqa: E501
-    self.device_ip =  (cl.clGetDeviceInfo(self.device_id, 0x106A, 16, ctypes.byref(buf := ctypes.create_string_buffer(16)), ctypes.byref(total := ctypes.c_size_t())), int.from_bytes(ctypes.string_at(ctypes.addressof(buf)+2, size=2), byteorder="little"))[1] # noqa: E501
+    self.device_ip = (cl.clGetDeviceInfo(self.device_id, 0x106A, 16, ctypes.byref(buf := ctypes.create_string_buffer(16)), ctypes.byref(total := ctypes.c_size_t())), int.from_bytes(ctypes.string_at(ctypes.addressof(buf)+2, size=2), byteorder="little"))[1] \
+                     if (self.vendor_ip == CLDevice.INTEL_VENDOR_ID and "cl_khr_device_uuid" in self.device_exts) else None # noqa: E501
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
     renderer = IntelRenderer() if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts and getenv("INTEL") else OpenCLRenderer()
     super().__init__(device, CLAllocator(self), renderer, CLCompiler(self, f"compile_cl_{compile_key}"), functools.partial(CLProgram, self))
