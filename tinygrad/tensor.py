@@ -2209,7 +2209,7 @@ class Tensor(SimpleMathTrait):
 
     Typically used to reverse a `max_pool2d` operation with `return_indices=True`.
 
-    When `output_size` is provided, the output shape resolves to the provided shape.
+    When `output_size` is provided, the output shape disambiguates to the provided shape.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 

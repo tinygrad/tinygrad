@@ -231,7 +231,7 @@ class TestContribOnnxOps(TestOnnxOps):
         }
         attributes = {}
         outputs = ["C"]
-        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs, atol=1) # TODO: this should be accurate
+        self.helper_test_single_op("QLinearAdd", inputs, attributes, outputs, atol=1) # TODO: look into why this is inaccurate
 
     with self.subTest(test_case="round_half_to_even"):
       inputs = {
