@@ -4,12 +4,12 @@
 if [[ ! $(clang2py -V) ]]; then
   pushd .
   cd /tmp
-  sudo apt-get install -y --no-install-recommends clang-14
+  sudo apt-get install -y --no-install-recommends clang
   pip install --upgrade pip setuptools
   pip install clang==14.0.6
   git clone https://github.com/nimlgen/ctypeslib.git
   cd ctypeslib
-  pip install  .
+  pip install --user .
   clang2py -V
   popd
 fi
@@ -48,7 +48,7 @@ generate_ocloc() {
 }
 
 generate_opencl() {
-  clang2py  /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
+  clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
   fixup $BASE/opencl.py
   # hot patches
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/opencl.py
