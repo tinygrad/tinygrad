@@ -744,6 +744,9 @@ def get_onnx_ops():
     return y, scale, zero_point
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
+    if getenv("NHWC") and len(x.shape) == 4 and x.shape[1:] == (1,3,3):
+      # 3x3 depthwise
+      x = x.permute(2,3,0,1).contiguous().permute(2,3,0,1)
     WEIGHT_SHIFT = 4
     if getenv("NHWC") and len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[1]%WEIGHT_SHIFT == 0:
       if x.shape[0]%32 == 0:

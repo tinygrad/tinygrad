@@ -112,6 +112,12 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+          elif knum == 5:
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 96))
+            # this breaks something
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+          elif knum == 8:
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 144))
           elif knum == 6:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 24))
@@ -168,6 +174,9 @@ if __name__ == "__main__":
             full_shape = k.full_shape
             out_shape = k.sts[0].shape
             out_strides = k.sts[0].real_strides()
+            # there's some bug here with this
+            #if len(out_strides) == 5 and full_shape[-2:] == (3,3):
+              #if knum not in [2,30]: k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
             if len(out_strides) == 3:
               if full_shape[1] == 192 and full_shape[0]%2 == 0:
                 k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
