@@ -1736,11 +1736,11 @@ class TestOps(unittest.TestCase):
     # TODO: fix backward pass for tiny backend
     tb = torch._C._get_privateuse1_backend_name() == "tiny"
     helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,2,3,2), mode="circular"), lambda x: x.pad((0,2,3,2), mode="circular"),
-                   forward_only=True if tb else False)
+                   forward_only=tb)
     helper_test_op([(5,5,5)], lambda x: torch.nn.functional.pad(x, (0,2), mode="circular"), lambda x: x.pad((0,2), mode="circular"),
-                   forward_only=True if tb else False)
+                   forward_only=tb)
     helper_test_op([(1,1,5,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,5,1,2),mode="circular"),lambda x:x.pad((1,2,3,5,1,2),mode="circular"),
-                   forward_only=True if tb else False)
+                   forward_only=tb)
     # circular pad cannot wrap around more than once
     self.helper_test_exception([(1,1,5,5)],
                                 lambda x: torch.nn.functional.pad(x, (3,6,0,0), mode="circular"), lambda x: x.pad((3,6,0,0), mode="circular"),
