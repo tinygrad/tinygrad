@@ -767,6 +767,10 @@ class Tensor(SimpleMathTrait):
     dtype = to_dtype(dtype)
     if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
+  
+  @staticmethod
+  def randperm_generator(n): 
+    return Tensor.rand(n).sorted(dim=0, descending=False)[1]
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, requires_grad:bool|None=None, **kwargs) -> Tensor:
