@@ -7,11 +7,11 @@ from tinygrad.device import is_dtype_supported
 
 # ***** onnx protobuf parsing ******
 # NOTE: everything that directly use onnx import is in this block
-from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
+try: from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
+except ImportError as e: raise ImportError("Please install onnx using 'python3 -m pip install onnx==1.16.0'")
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
-  """ Parses an ONNX TensorProto.DataType into a tinygrad DType."""
   supported: dict[int, DType] = {
     TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
     TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
@@ -66,7 +66,6 @@ def type_parse(onnx_type: TypeProto):
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
 def model_parse(onnx_model: ModelProto):
-  """Parses an ONNX ModelProto into the components needed to run the graph."""
   is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in onnx_model.graph.node)
   opset_version = onnx_model.opset_import[0].version
   values = {"": None, **{x.name:buffer_parse(x) for x in onnx_model.graph.initializer}}
@@ -129,6 +128,31 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
+  """
+  `OnnxRunner` executes an ONNX model using Tinygrad as backend.
+
+  Args:
+      f: The ONNX model, provided either as a file-like object (i.e., one with a "read" method), as raw bytes, or as a file path (a string or PathLike object).
+
+  Example Usage:
+      # TODO make better
+      ```python
+      from extra.onnx import OnnxRunner
+      # Load an ONNX model from a file
+      runner = OnnxRunner("path/to/model.onnx")
+
+      # Load an ONNX model from bytes
+      with open("path/to/model.onnx", "rb") as f:
+          model_bytes = f.read()
+      runner = OnnxRunner(model_bytes)
+
+      # Execute the model with inputs
+      inputs = {
+          "input_name": input_tensor,  # Replace with actual input tensor
+      }
+      outputs = runner(inputs)
+      ```
+  """
   def __init__(self, f:bytes | IO[bytes] | str | os.PathLike):
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(f))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
