@@ -520,8 +520,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     cast(NVComputeQueue, NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1)) \
                                          .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
-                                         .signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
+                                         .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
   def invalidate_caches(self):
     rmctrl.fb_flush_gpu_cache(self.fd_ctl, self.root, self.subdevice,
