@@ -2937,6 +2937,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
 
+  def test_randperm_generator(self):
+    assert not np.array_equal(Tensor.randperm_generator(10).numpy(), Tensor.randperm_generator(10).numpy()), \
+        "randperm should not produce the same result each time"
+    Tensor.manual_seed(42)
+    a = Tensor.randperm_generator(10).numpy()
+    Tensor.manual_seed(42)
+    b = Tensor.randperm_generator(10).numpy()
+    np.testing.assert_equal(a, b)
+    with self.assertRaises(ValueError, msg="randperm_generator expects n > 0, but got -5"):
+        Tensor.randperm_generator(-5)
+
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
