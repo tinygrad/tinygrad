@@ -130,30 +130,34 @@ limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   """
   `OnnxRunner` executes an ONNX model using Tinygrad as backend.
+  """
 
-  Args:
-      f: The ONNX model, provided either as a file-like object (i.e., one with a "read" method), as raw bytes, or as a file path (a string or PathLike object).
+  def __init__(self, f:bytes | IO[bytes] | str | os.PathLike):
+    """
+    Args:
+      f: The ONNX model, provided either as a file-like object (one with a `read` method), as raw bytes, or as a file path (a string or PathLike object).
 
-  Example Usage:
-      # TODO make better
+    Model Loading:
+
+      - Load from string path
       ```python
       from extra.onnx import OnnxRunner
-      # Load an ONNX model from a file
       runner = OnnxRunner("path/to/model.onnx")
-
-      # Load an ONNX model from bytes
-      with open("path/to/model.onnx", "rb") as f:
-          model_bytes = f.read()
-      runner = OnnxRunner(model_bytes)
-
-      # Execute the model with inputs
-      inputs = {
-          "input_name": input_tensor,  # Replace with actual input tensor
-      }
-      outputs = runner(inputs)
       ```
-  """
-  def __init__(self, f:bytes | IO[bytes] | str | os.PathLike):
+
+      - Load from a pre-loaded ONNX model
+      ```python
+      import onnx
+      model = onnx.load("path/to/model.onnx")
+      runner = OnnxRunner(model.SerializeToString())
+      ```
+
+      - Load from a file-like object
+      ```python
+      with open("path/to/model.onnx", "rb") as f:
+        runner = OnnxRunner(f)
+      ```
+    """
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(f))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
