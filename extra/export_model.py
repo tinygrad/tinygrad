@@ -77,8 +77,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   else: weights_holder = None
   state_dict = get_state_dict(weights_holder)
 
-  if target == "webgpu": return export_webgpu(model, inputs, model_name=model_name)
-
+  # TODO: there is some clunkiness for reverse-compatibility with tests
   ex: ExportSpec = extract_model(model, inputs)
 
   buf_names = {buf: f"buf_{i}" for i,buf in enumerate(cast(list[Buffer|UOp], ex.inputs + ex.outputs + ex.empty_bufs + ex.weight_bufs))}
@@ -87,7 +86,8 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
     name = weight_names[buf] = weight_names.get(buf, buf_names[buf])
     state_dict[name] = state_dict.get(name, Tensor(bytes(buf.as_buffer()), dtype=buf.dtype, device=buf.device).realize())
 
-  if target == "clang":
+  if target == "webgpu": prg, state_dict = export_webgpu(model, inputs, model_name=model_name)
+  elif target == "clang":
     prg = export_model_clang(ex, buf_names)
   elif target == "wasm":
     return export_model_clang(ex, buf_names, weight_names, model_name, wasm=True)
@@ -111,6 +111,6 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
       "buffers": {buf_names[buf]: {"size": buf.nbytes, "dtype": buf.dtype.name, "id": weight_names[buf]} for buf in ex.empty_bufs + ex.weight_bufs}
     })
 
-    input_sizes = {(buf_names[arg] if isinstance(arg, Buffer) else arg.arg[0]):
-                   (arg.nbytes if isinstance(arg, Buffer) else arg.dtype.itemsize) for arg in ex.inputs}
-  return prg, input_sizes, {buf_names[buf]: buf.nbytes for buf in ex.outputs}, state_dict
+  # TODO: update tests that make assertions about input_sizes and output_sizes
+  input_sizes = {f"input{i}": (arg.nbytes if isinstance(arg, Buffer) else arg.dtype.itemsize) for i, arg in enumerate(ex.inputs)}
+  return prg, input_sizes, {f"output{i}": buf.nbytes for i, buf in enumerate(ex.outputs)}, state_dict
