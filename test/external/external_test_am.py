@@ -1,5 +1,4 @@
 import unittest
-from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
 from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.helpers import mv_address
