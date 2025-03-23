@@ -158,18 +158,6 @@ def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=F
   ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)).contiguous()
   return wrap(ret)
 
-@torch.library.impl("aten::new_empty", "privateuseone")
-def new_empty(self, size, dtype=None, layout=None, device=None, pin_memory=None):
-  if TORCH_DEBUG: print(f"new_empty {size=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.zeros(*size, dtype=_from_torch_dtype(dtype or self.dtype), device=_from_torch_device(device or self.device)).contiguous()
-  return wrap(ret)
-
-@torch.library.impl("aten::new_empty_strided", "privateuseone")
-def new_empty_strided(self, size, stride, dtype=None, layout=None, device=None, pin_memory=None):
-  if TORCH_DEBUG: print(f"new_empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.zeros(*size, dtype=_from_torch_dtype(dtype or self.dtype), device=_from_torch_device(device or self.device)).contiguous().realize()
-  return wrap(ret)
-
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")
 def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False):
   # TODO: supprt stride [] in tinygrad?
