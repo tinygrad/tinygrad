@@ -772,7 +772,7 @@ class Tensor(SimpleMathTrait):
   def randperm_generator(n:int) -> Tensor:
     """
     Creates a random permutation of integers from 0 to n - 1.
-    
+
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
     print(Tensor.randperm_generator(5).numpy())
