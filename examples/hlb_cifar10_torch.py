@@ -19,7 +19,9 @@ cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
 
-if getenv("TINYBACKEND", 0):
+TINYBACKEND = getenv("TINYBACKEND", 1)
+
+if TINYBACKEND:
   import tinygrad.frontend.torch
   from tinygrad import GlobalCounters
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
@@ -223,8 +225,7 @@ def train_cifar():
     low_y = torch.randint(0, H-mask_size, (BS, 1, 1, 1), device=device)
     idx_x = torch.arange(W, dtype=torch.int32, device=device).reshape((1, 1, 1, W))
     idx_y = torch.arange(H, dtype=torch.int32, device=device).reshape((1, 1, H, 1))
-    return ((idx_x >= low_x) & (idx_x < (low_x + mask_size)) &
-        (idx_y >= low_y) & (idx_y < (low_y + mask_size)))
+    return ((idx_x >= low_x) & (idx_x < (low_x + mask_size)) & (idx_y >= low_y) & (idx_y < (low_y + mask_size)))
 
   def random_crop(X:torch.tensor, crop_size=32):
     mask = make_square_mask(X.shape, crop_size, X.device)
@@ -454,7 +455,7 @@ def train_cifar():
     device_str = f"{device}" if len(GPUS) <= 1 else f"{device} * {len(GPUS)}"
 
     print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.param_groups[0]['lr']:.6f} LR, ", end="")
-    if getenv("TINYBACKEND", 0):
+    if TINYBACKEND:
       print(f"{GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
     else:
       print(f"{(torch.cuda.max_memory_allocated()/1e9 if torch.cuda.is_available() else 0):.2f} GB used")
