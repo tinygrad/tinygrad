@@ -92,6 +92,10 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   elif target == "wasm":
     return export_model_clang(ex, buf_names, weight_names, model_name, wasm=True)
   else:
+    bufs = {buf_names[buf]: {"size": buf.nbytes, "dtype": buf.dtype.name, "id": weight_names[buf]} for buf in ex.empty_bufs + ex.weight_bufs}
+    bufs.update({f"input{i}": {"size": (arg.nbytes if isinstance(arg, Buffer) else arg.dtype.itemsize),
+      "dtype": arg.dtype.name, "id": ""} for i, arg in enumerate(ex.inputs)})
+    bufs.update({f"output{i}": {"size": buf.nbytes, "dtype": arg.dtype.name, "id": ""} for i, arg in enumerate(ex.outputs)})
     prg = json.dumps({
       "backend": Device.DEFAULT,
       "inputs": [{
@@ -108,7 +112,8 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
         "global_size": ', '.join(resolve_gidx(x) for x in kc.global_size),
         "local_size": ', '.join(resolve_gidx(x) for x in kc.local_size)
       } for kc in ex.kernel_calls],
-      "buffers": {buf_names[buf]: {"size": buf.nbytes, "dtype": buf.dtype.name, "id": weight_names[buf]} for buf in ex.empty_bufs + ex.weight_bufs}
+    # TODO: probably rewrite the tests that fail without the dict.update calls
+      "buffers": bufs
     })
 
   # TODO: update tests that make assertions about input_sizes and output_sizes
