@@ -763,7 +763,7 @@ class Tensor(SimpleMathTrait):
   @staticmethod
   def randperm_generator(n):
     if n <= 0:
-        raise ValueError(f"randperm_generator expects n > 0, but got {n}")
+      raise ValueError(f"randperm_generator expects n > 0, but got {n}")
     return Tensor.rand(n).sort(dim=0)[1]
 
   @staticmethod
