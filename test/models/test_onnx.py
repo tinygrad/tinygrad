@@ -25,8 +25,7 @@ np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
-    onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
-    run_onnx = OnnxRunner(onnx_model)
+    run_onnx = OnnxRunner(fetch(OPENPILOT_MODEL))
     def get_inputs():
       np_inputs = {
         "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -69,8 +68,8 @@ class TestOnnxModel(unittest.TestCase):
       ps.print_stats(30)
 
   def test_openpilot_model(self):
-    onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
-    run_onnx = OnnxRunner(onnx_model)
+    onnx_fp = fetch(OPENPILOT_MODEL)
+    run_onnx = OnnxRunner(onnx_fp)
     print("got run_onnx")
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -93,8 +92,9 @@ class TestOnnxModel(unittest.TestCase):
     et = time.monotonic()
     print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
+    # TODO: test using ort
     Tensor.no_grad = True
-    torch_out = run_onnx_torch(onnx_model, inputs).numpy()
+    torch_out = run_onnx_torch(onnx.load(onnx_fp), inputs).numpy()
     Tensor.no_grad = False
     print(tinygrad_out, torch_out)
     np.testing.assert_allclose(tinygrad_out, torch_out, atol=1e-4, rtol=1e-2)
@@ -121,10 +121,9 @@ class TestOnnxModel(unittest.TestCase):
       input_name, input_new)
 
   def _test_model(self, fn, input_name, input_new, debug=False):
-    onnx_model = onnx.load(fn)
+    run_onnx = OnnxRunner(fn)
     print("onnx loaded")
     from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
-    run_onnx = OnnxRunner(onnx_model)
 
     def run(img):
       inputs = {input_name: preprocess(img, new=input_new)}

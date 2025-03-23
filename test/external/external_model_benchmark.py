@@ -65,7 +65,7 @@ def benchmark_model(m, devices, validate_outs=False):
     try:
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
+      tinygrad_model = OnnxRunner(fn)
       benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
       from tinygrad.engine.jit import TinyJit
@@ -115,7 +115,7 @@ def benchmark_model(m, devices, validate_outs=False):
       rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
+      tinygrad_model = OnnxRunner(fn)
       tinygrad_out = tinygrad_model(inputs)
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])

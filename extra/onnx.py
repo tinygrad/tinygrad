@@ -1,15 +1,17 @@
-from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types
+from typing import Any, Sequence, cast, Literal, Callable, IO
+import dataclasses, functools, io, math, types, os
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
-# ***** protobuf parsing ******
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, helper
+# ***** onnx protobuf parsing ******
+# NOTE: everything that directly use onnx import is in this block
+from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
+  """ Parses an ONNX TensorProto.DataType into a tinygrad DType."""
   supported: dict[int, DType] = {
     TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
     TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
@@ -63,6 +65,27 @@ def type_parse(onnx_type: TypeProto):
     return OnnxValue(shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
+def model_parse(onnx_model: ModelProto):
+  """Parses an ONNX ModelProto into the components needed to run the graph."""
+  is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in onnx_model.graph.node)
+  opset_version = onnx_model.opset_import[0].version
+  values = {"": None, **{x.name:buffer_parse(x) for x in onnx_model.graph.initializer}}
+  inputs = {inp.name: type_parse(inp.type) for inp in onnx_model.graph.input if inp.name not in values}
+  outputs = tuple(x.name for x in onnx_model.graph.output)
+  nodes = []
+  for num, node in enumerate(onnx_model.graph.node):
+    n_op, n_input, n_output = node.op_type, tuple(node.input), tuple(node.output),
+    n_attrs = {attr.name: attribute_parse(attr) for attr in node.attribute}
+    nodes.append(OnnxNode(num, n_op, n_input, n_output, n_attrs))
+  return is_training, values, inputs, outputs, tuple(nodes), opset_version
+
+def model_load(f):
+  if isinstance(f, bytes): f = io.BytesIO(f)
+  if isinstance(f, (str, os.PathLike)) and not str(f).lower().endswith('.onnx'):
+    raise ValueError(f"File '{f}' does not appear to be an ONNX model (missing .onnx extension)")
+  if not hasattr(f, "read"): raise ValueError(f"Expected a file path, bytes, or file-like object, got {type(f).__name__}")
+  return load(f)
+
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
 class OnnxValue:
@@ -109,20 +132,12 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
-  def __init__(self, model: ModelProto):
-    # parse model protobuf
-    self.is_training = any(n.domain in {"ai.onnx.training", "ai.onnx.preview.training"} for n in model.graph.node)
+  def __init__(self, f:bytes | IO[bytes] | str | os.PathLike):
+    self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(f))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
     Tensor.no_grad = False if self.is_training else True
-    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
-    self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
-    self.graph_outputs = tuple(x.name for x in model.graph.output)
-    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
-                       for num,n in enumerate(model.graph.node))
-    self.opset_version = model.opset_import[0].version
     self.variable_dims: dict[str, int] = {}
-
     self.onnx_ops = onnx_ops
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
