@@ -108,6 +108,13 @@ class AM_GMC(AM_IP):
     for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff)
     self.hub_initted[ip] = True
 
+  def get_pte_flags(self, pte_lv, is_table, frag, uncached, system, snooped, valid, extra=0):
+    extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) | am.AMDGPU_PTE_FRAG(frag)
+    extra |= am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC if uncached else 0)
+    if not is_table: extra |= (am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE)
+    return extra | (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
+  def is_pte_huge_page(self, pte): return pte & am.AMDGPU_PDE_PTE
+
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
       st, va = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
