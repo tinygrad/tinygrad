@@ -79,6 +79,7 @@ def model_parse(onnx_model: ModelProto):
   return is_training, values, inputs, outputs, tuple(nodes), opset_version
 
 def model_load(f):
+  if isinstance(f, ModelProto): return f
   if isinstance(f, bytes): f = io.BytesIO(f)
   return load(f)
 
@@ -132,30 +133,30 @@ class OnnxRunner:
   `OnnxRunner` executes an ONNX model using Tinygrad as backend.
   """
 
-  def __init__(self, f:bytes | IO[bytes] | str | os.PathLike):
+  def __init__(self, f:bytes | IO[bytes] | str | os.PathLike | ModelProto):
     """
     Args:
       f: The ONNX model, provided either as a file-like object (one with a `read` method), as raw bytes, or as a file path (a string or PathLike object).
 
-    Model Loading:
-
+    Examples:
       - Load from string path
       ```python
       from extra.onnx import OnnxRunner
       runner = OnnxRunner("path/to/model.onnx")
       ```
-
-      - Load from a pre-loaded ONNX model
+      - Load from bytes object
       ```python
+      from extra.onnx import OnnxRunner
+      with open("path/to/model.onnx", "rb") as f:
+        model_bytes = f.read()
+      runner = OnnxRunner(model_bytes)
+      ```
+      - Load from ModelProto
+      ```python
+      from extra.onnx import OnnxRunner
       import onnx
       model = onnx.load("path/to/model.onnx")
-      runner = OnnxRunner(model.SerializeToString())
-      ```
-
-      - Load from a file-like object
-      ```python
-      with open("path/to/model.onnx", "rb") as f:
-        runner = OnnxRunner(f)
+      runner = OnnxRunner(model)
       ```
     """
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(f))
