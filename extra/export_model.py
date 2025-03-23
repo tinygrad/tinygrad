@@ -9,10 +9,11 @@ from collections import OrderedDict
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "GPU"]
 
-def export_model_clang(ex: ExportSpec, buf_names: dict[Buffer|UOp, str], weight_names: dict[Buffer|UOp, str], model_name="model", wasm=False):
+def export_model_clang(ex: ExportSpec, buf_names: dict[Buffer|UOp, str], weight_names: dict[Buffer|UOp, str]|None=None,
+                       model_name="model", wasm=False):
   headers = ["#include <tgmath.h>"]
   cprog = list(ex.kernels.values())
-  dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16", 
+  dtype_map = {dtypes.int: "int", dtypes.float: "float", dtypes.uchar: "unsigned char", dtypes.char: "signed char", dtypes.half: "__fp16",
                dtypes.uint: "unsigned int"}
   forward_args = ",".join(f"{dtype_map[var.dtype]}{'*' if isinstance(var,Buffer) else ''} {buf_names[var] if isinstance(var, Buffer) else var.arg[0]}"
                           for var in (ex.outputs+ex.inputs if wasm else ex.inputs+ex.outputs))
@@ -26,6 +27,7 @@ def export_model_clang(ex: ExportSpec, buf_names: dict[Buffer|UOp, str], weight_
     cprog += [f"void net({forward_args}) {{"] + [f"{kc.kernel_name}({render_args(kc.args)});" for kc in ex.kernel_calls] + ["}"]
     return '\n'.join(headers + cprog)
   else:
+    assert weight_names is not None
     if ex.weight_bufs:
       headers += ["#include <stddef.h>"]
       # TODO: fix random seeds mapping when weights are exported from a separate webgpu model
@@ -96,9 +98,9 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
         "name": buf_names[var] if isinstance(var, Buffer) else var.arg[0],
         "arg_type": "symbolic" if isinstance(var, UOp) else "buffer",
         "size": var.nbytes if isinstance(var, Buffer) else var.dtype.itemsize,
-        "dtype": var.dtype
+        "dtype": var.dtype.name
       } for var in ex.inputs],
-      "outputs": [{"size": buf.nbytes, "dtype": buf.dtype} for buf in ex.outputs],
+      "outputs": [{"size": buf.nbytes, "dtype": buf.dtype.name} for buf in ex.outputs],
       "functions": ex.kernels,
       "statements": [{
         "kernel": kc.kernel_name,
@@ -109,4 +111,6 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
       "buffers": {buf_names[buf]: {"size": buf.nbytes, "dtype": buf.dtype.name, "id": weight_names[buf]} for buf in ex.empty_bufs + ex.weight_bufs}
     })
 
-  return prg, state_dict
+    input_sizes = {(buf_names[arg] if isinstance(arg, Buffer) else arg.arg[0]):
+                   (arg.nbytes if isinstance(arg, Buffer) else arg.dtype.itemsize) for arg in ex.inputs}
+  return prg, input_sizes, {buf_names[buf]: buf.nbytes for buf in ex.outputs}, state_dict
