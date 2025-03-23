@@ -1,11 +1,14 @@
 import unittest
+from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableTraverseContext
+from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.helpers import mv_address
 
-class FakeGMC:
+class FakeGMC(AM_GMC):
   def __init__(self):
     self.vm_base = 0x0
     self.address_space_mask = (1 << 44) - 1
+  def init_hw(self): pass
   def flush_tlb(self, *args, **kwargs): pass
 
 class FakePCIDev:
