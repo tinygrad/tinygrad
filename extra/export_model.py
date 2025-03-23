@@ -95,7 +95,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
     bufs = {buf_names[buf]: {"size": buf.nbytes, "dtype": buf.dtype.name, "id": weight_names[buf]} for buf in ex.empty_bufs + ex.weight_bufs}
     bufs.update({f"input{i}": {"size": (arg.nbytes if isinstance(arg, Buffer) else arg.dtype.itemsize),
       "dtype": arg.dtype.name, "id": ""} for i, arg in enumerate(ex.inputs)})
-    bufs.update({f"output{i}": {"size": buf.nbytes, "dtype": arg.dtype.name, "id": ""} for i, arg in enumerate(ex.outputs)})
+    bufs.update({f"output{i}": {"size": buf.nbytes, "dtype": buf.dtype.name, "id": ""} for i, buf in enumerate(ex.outputs)})
     prg = json.dumps({
       "backend": Device.DEFAULT,
       "inputs": [{
