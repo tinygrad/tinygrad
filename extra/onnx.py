@@ -81,9 +81,6 @@ def model_parse(onnx_model: ModelProto):
 
 def model_load(f):
   if isinstance(f, bytes): f = io.BytesIO(f)
-  if isinstance(f, (str, os.PathLike)) and not str(f).lower().endswith('.onnx'):
-    raise ValueError(f"File '{f}' does not appear to be an ONNX model (missing .onnx extension)")
-  if not hasattr(f, "read"): raise ValueError(f"Expected a file path, bytes, or file-like object, got {type(f).__name__}")
   return load(f)
 
 # ***** onnx spec *****

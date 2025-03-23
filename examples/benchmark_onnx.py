@@ -1,11 +1,10 @@
-import sys, onnx, time
+import sys, time
 from tinygrad import TinyJit, Device, GlobalCounters, fetch, getenv
 from extra.onnx import OnnxRunner
 from extra.onnx_helpers import get_example_inputs, validate
 
 def load_onnx_model(onnx_file):
-  onnx_model = onnx.load(onnx_file)
-  run_onnx = OnnxRunner(onnx_model)
+  run_onnx = OnnxRunner(onnx_file)
   run_onnx_jit = TinyJit(lambda **kwargs: next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())), prune=True)
   return run_onnx_jit, run_onnx.graph_inputs
 

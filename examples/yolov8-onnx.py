@@ -9,5 +9,5 @@ os.chdir("/tmp")
 if not Path("yolov8n-seg.onnx").is_file():
   model = YOLO("yolov8n-seg.pt")
   model.export(format="onnx", imgsz=[480,640])
-run_onnx = OnnxRunner(open("yolov8n-seg.onnx", "rb"))
+run_onnx = OnnxRunner("yolov8n-seg.onnx")
 run_onnx(get_example_inputs(run_onnx.graph_inputs), debug=True)
