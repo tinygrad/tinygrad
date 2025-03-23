@@ -108,7 +108,12 @@ if __name__ == "__main__":
           #if knum in [7, 11, 14, 18]:
             # alignment issue?
             #pass
-          if knum == 4:
+          if knum == 2:
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            #k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+          elif knum == 4:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
