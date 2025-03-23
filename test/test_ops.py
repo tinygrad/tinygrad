@@ -2946,7 +2946,7 @@ class TestOps(unittest.TestCase):
     b = Tensor.randperm_generator(10).numpy()
     np.testing.assert_equal(a, b)
     with self.assertRaises(ValueError, msg="randperm_generator expects n > 0, but got -5"):
-        Tensor.randperm_generator(-5)
+      Tensor.randperm_generator(-5)
 
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):

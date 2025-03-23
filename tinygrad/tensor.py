@@ -769,7 +769,15 @@ class Tensor(SimpleMathTrait):
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
-  def randperm_generator(n):
+  def randperm_generator(n:int) -> Tensor:
+    """
+    Creates a random permutation of integers from 0 to n - 1.
+    
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    print(Tensor.randperm_generator(5).numpy())
+    ```
+    """
     if n <= 0:
       raise ValueError(f"randperm_generator expects n > 0, but got {n}")
     return Tensor.rand(n).sort(dim=0)[1]
