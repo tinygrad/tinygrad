@@ -136,7 +136,7 @@ dsp_pm_late = PatternMatcher([
 
   # unaligned load
   ((UPat(Ops.LOAD, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat(), UPat()+UPat.cvar("c"))),), name="ptr"),), dtype=dtypes.uchar.vec(128))),
-   lambda c,ptr: UOp(Ops.CUSTOM, dtype=dtypes.uchar.vec(128), src=(ptr.src[0],), arg="vmemu({0})") if c.arg%128 != 0 else None),
+   lambda c,ptr: UOp(Ops.CUSTOM, dtype=dtypes.uchar.vec(128), src=(ptr,), arg='vmemu({0})')),
 
   # __builtin_HEXAGON_V6_vrmpybus_acc_128B
   (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
@@ -163,13 +163,19 @@ pretty_render = PatternMatcher([
    lambda v: UOp(Ops.VECTORIZE, v.dtype, src=tuple(UOp(Ops.CUSTOMI, x.dtype, src=(UOp.const(dtypes.int, x.arg),), arg="{0}") for x in v.src))),
 ])
 
+vmemu_support = """
+__attribute__ ((always_inline)) unsigned_char128 vmemu(unsigned_char128 *addr) {
+  unsigned_char128 out;
+  __asm__ __volatile__( "%0 = vmem(%1);" : "=v" (out) : "r"(addr) : "memory");
+  return out;
+}
+"""
+
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
-  kernel_prefix = "typedef long HVX_Vect_UN __attribute__((__vector_size__(128)))__attribute__((aligned(4)));\n"+\
-    "#define vmemu(A) *((HVX_Vect_UN*)(A))\n"+\
-    "__attribute__((noinline)) "
+  kernel_prefix = vmemu_support + "__attribute__((noinline)) "
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
