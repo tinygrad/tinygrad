@@ -1,7 +1,7 @@
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
 from tinygrad.dtype import DType, ConstType, dtypes, ImageDType
 from tinygrad.device import is_dtype_supported
 
@@ -745,7 +745,8 @@ def get_onnx_ops():
       # 3x3 depthwise (C,1,3,3)
       # "width multiple of 4 depth multiple of 32 aligned to 128bytes"
       x = x.pad(((0,0), (0,0), (0,0), (0,1)))
-      x = x.permute(2,3,0,1).contiguous().permute(2,3,0,1)
+      order = (2,0,1,3)
+      x = x.permute(*order).contiguous().permute(*argsort(order))
       x = x[:, :, :, :3]
       # we increase the filts to 4-aligned for speed (75% util)
     WEIGHT_SHIFT = 4

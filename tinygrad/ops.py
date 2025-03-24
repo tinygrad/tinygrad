@@ -332,9 +332,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def simplify(self):
     # late import!
-    from tinygrad.codegen.symbolic import symbolic
+    from tinygrad.codegen.symbolic import symbolic_flat
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, symbolic)
+      return graph_rewrite(self, symbolic_flat)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
