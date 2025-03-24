@@ -37,18 +37,19 @@ torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
-# track view metadata for in place operations
-# have to track as custom metadata on c++ tensorimpl since detach() creates a new tensor object
-def is_view(tensor: torch.Tensor): return "_tiny_base" in mod.get_meta(tensor)
-def canonical_base(view: torch.Tensor): return mod.get_meta(view).get("_tiny_base", view)
-def derived_views(base: torch.Tensor): return [t for tref in mod.get_meta(base).get("_tiny_views", set()) if (t:=tref()) is not None]
+# track view relationships for in place operations
+def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
+def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
+def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
 def wrap_view_op(fn):
   def _wrap(*args,**kwargs):
-    base = args[0]
-    ret = wrap(fn(unwrap(base),*args[1:],**kwargs))
-    mod.get_meta(ret)["_tiny_base"] = base = canonical_base(base)
-    mod.get_meta(base).setdefault("_tiny_views", set()).add(weakref.ref(unwrap(ret)))
-    return ret
+    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
+    kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
+    ret = fn(*args,**kwargs)
+    ret._view_base = base = canonical_base(args[0])
+    if not hasattr(base, "_views"): base._views = set()
+    base._views.add(weakref.ref(ret))
+    return wrap(ret)
   return _wrap
 
 view_ops = {
@@ -66,9 +67,7 @@ view_ops = {
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
 # in place operations with views
-def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
-  assert self.is_tiny
-  self = unwrap(self)
+def realize_with_views(self: Tensor, views: Tensor):
   if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
   for v in views:
@@ -76,7 +75,7 @@ def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
-def maybe_realize_storage(self: torch.Tensor) -> bool:
+def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
   return realize
 def inplace_fn(outvars: str|list[str]):
@@ -86,7 +85,7 @@ def inplace_fn(outvars: str|list[str]):
     def wrapper(*args, **kwargs):
       bound = sig.bind(*args, **kwargs)
       outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
-      realize = any(maybe_realize_storage(o) for o in outs)
+      realize = any(maybe_realize_storage(unwrap(o)) for o in outs)
       ret = fn(*args, **kwargs)
       if realize: Tensor.realize(*(unwrap(o) for o in outs))
       return ret
@@ -277,7 +276,7 @@ def scatter_add(self, dim, index, src, out):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = dest.is_tiny and maybe_realize_storage(dest)
+  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
