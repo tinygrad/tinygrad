@@ -179,7 +179,8 @@ class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   buffer_suffix = " restrict __attribute__((align_value(128)))"
-  kernel_prefix = vmemu_support + "__attribute__((noinline)) "
+  #kernel_prefix = vmemu_support + "__attribute__((noinline)) "
+  kernel_prefix = "__attribute__((noinline)) "
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher+pretty_render
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
