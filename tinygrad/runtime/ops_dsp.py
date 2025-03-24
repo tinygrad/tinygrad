@@ -134,8 +134,12 @@ dsp_pm_late = PatternMatcher([
   # prefetch L1
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"), prefetch_l1),
 
+  # 64 -> 128
+  (UPat(Ops.LOAD, dtype=dtypes.uchar.vec(64), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),)),
+   lambda idx: idx.cast(dtypes.uchar.vec(128).ptr(idx.dtype.size)).load(dtype=dtypes.uchar.vec(128)).gep(tuple(range(0,64)))),
+
   # unaligned load
-  ((UPat(Ops.LOAD, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat(), UPat()+UPat.cvar("c"))),), name="ptr"),), dtype=dtypes.uchar.vec(128))),
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat(), UPat()+UPat.cvar("c"))),), name="ptr"),), dtype=dtypes.uchar.vec(128)),
    lambda c,ptr: UOp(Ops.CUSTOM, dtype=dtypes.uchar.vec(128), src=(ptr,), arg='vmemu({0})')),
 
   # __builtin_HEXAGON_V6_vrmpybus_acc_128B
