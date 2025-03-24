@@ -94,5 +94,19 @@ class TestGC(unittest.TestCase):
     del real_buf
     self.assertEqual(bufs_allocated()-init, 0)
 
+  def test_assign_refcount(self):
+    init = bufs_allocated()
+    a = Tensor.full((4,), 1.).contiguous()
+    a.realize()
+    self.assertEqual(a.lazydata.buffer.lb_refcount, 1)
+    a.assign(Tensor.full((4,), 2.))
+    a.realize()
+    # TODO: master says it's 2
+    self.assertEqual(a.lazydata.buffer.lb_refcount, 1)
+    buf = a.lazydata.buffer
+    del a
+    self.assertEqual(buf.lb_refcount, 0) # no UOps for this Buffer
+    self.assertEqual(bufs_allocated()-init, 1) # Buffer is alive
+
 if __name__ == '__main__':
   unittest.main()
