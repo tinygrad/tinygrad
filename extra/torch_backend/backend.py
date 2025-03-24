@@ -33,21 +33,46 @@ torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
+# track view relationships for in place operations
+def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
+def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
+def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
+def wrap_view_op(fn):
+  def _wrap(*args,**kwargs):
+    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
+    kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
+    ret = fn(*args,**kwargs)
+    ret._view_base = base = canonical_base(args[0])
+    if not hasattr(base, "_views"): base._views = set()
+    base._views.add(weakref.ref(ret))
+    return wrap(ret)
+  return _wrap
+
+view_ops = {
+  "aten.view": Tensor.reshape,
+  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
+  "aten.view.dtype": lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.expand": Tensor.expand,
+  "aten.t": Tensor.transpose,
+  "aten.squeeze.dim": Tensor.squeeze,
+  "aten.unsqueeze": Tensor.unsqueeze,
+  "aten.repeat": Tensor.repeat,
+  "aten.detach": Tensor.detach,
+}
+
+for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
+
 # in place operations with views
-def is_view(self: torch.Tensor) -> bool: return getattr(self, "_base", None) is not None
-def realize_with_views(self: torch.Tensor, views: list[torch.Tensor]):
-  assert self.is_tiny
-  self = unwrap(self)
+def realize_with_views(self: Tensor, views: Tensor):
   if not self.lazydata.st.contiguous: raise ValueError("base of view must be contiguous") # TODO: support?
   self.replace(self.clone().realize())
   for v in views:
-    v = unwrap(v)
     ret = self
     st = ShapeTracker(self.lazydata.st.views + v.lazydata.st.views) # TODO: is this right?
     for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
-def maybe_realize_storage(self: torch.Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views(self._base, [self]) # TODO: other views could exist
+def maybe_realize_storage(self: Tensor) -> bool:
+  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
   return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
@@ -56,9 +81,10 @@ def inplace_fn(outvars: str|list[str]):
     def wrapper(*args, **kwargs):
       bound = sig.bind(*args, **kwargs)
       outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
+      outs = [unwrap(o) if isinstance(o, torch.Tensor) else o for o in outs]
       realize = any(maybe_realize_storage(o) for o in outs)
       ret = fn(*args, **kwargs)
-      if realize: Tensor.realize(*(unwrap(o) for o in outs))
+      if realize: Tensor.realize(*(o for o in outs))
       return ret
     return wrapper
   return decorator
@@ -137,14 +163,15 @@ def cached_to_movement_ops(shape, st) -> list:
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 @torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+@wrap_view_op
+def as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # TODO: this is heavyweight
   st = ShapeTracker((View.create(tuple(tensor.shape)), View.create(tuple(size), tuple(stride), 0 if storage_offset is None else storage_offset)))
-  ret = unwrap(tensor)
-  if prod(size) == 1: return wrap(ret.flatten()[storage_offset].reshape(size))
+  ret = tensor
+  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
   for mo in cached_to_movement_ops(tuple(tensor.shape), st): ret = apply_mop(ret, mo)
-  return wrap(ret)
+  return ret
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -237,6 +264,7 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
+@inplace_fn("out")
 def scatter_add(self, dim, index, src, out):
   self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
   if self.shape == (): return wrap(out.assign(src))
@@ -244,7 +272,7 @@ def scatter_add(self, dim, index, src, out):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = dest.is_tiny and maybe_realize_storage(dest)
+  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
@@ -414,6 +442,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
 
 # we add the "out" here
 def wrap_out(f):
+  @inplace_fn("out")
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
@@ -426,8 +455,6 @@ def wrap_out(f):
   return _wrap_out
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
-  "aten.view": Tensor.reshape,
-  "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
   "aten.floor_divide_.Tensor": inplace_fn("x")(lambda x,y: x.assign(x//y)),
@@ -487,25 +514,19 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": Tensor.full, # TODO: looks wrong
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
-  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True),
+  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True), # TODO: inplace view op, here?
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
-  "aten::view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.topk": Tensor.topk,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
-  "aten.squeeze.dim": Tensor.squeeze,
-  "aten.unsqueeze": Tensor.unsqueeze,
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
-  "aten.repeat": Tensor.repeat,
   "aten.lerp.Tensor": Tensor.lerp,
-  "aten.expand": Tensor.expand,
   "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
-  "aten.t": Tensor.transpose,
-  "aten.detach": Tensor.detach,
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64))
 }}
 
@@ -520,9 +541,7 @@ def wrap_fxn(k,f):
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
-  def nf2(*args, **kwargs):
-    return inplace_fn("out")(nf)(*args, **kwargs) if "out" in kwargs else nf(*args, **kwargs)
-  return nf2
+  return nf
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
