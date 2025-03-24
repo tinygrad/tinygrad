@@ -85,9 +85,10 @@ def inplace_fn(outvars: str|list[str]):
     def wrapper(*args, **kwargs):
       bound = sig.bind(*args, **kwargs)
       outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
-      realize = any(maybe_realize_storage(unwrap(o)) for o in outs)
+      outs = [unwrap(o) if isinstance(o, torch.Tensor) else o for o in outs]
+      realize = any(maybe_realize_storage(o) for o in outs)
       ret = fn(*args, **kwargs)
-      if realize: Tensor.realize(*(unwrap(o) for o in outs))
+      if realize: Tensor.realize(*(o for o in outs))
       return ret
     return wrapper
   return decorator
@@ -446,6 +447,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
 
 # we add the "out" here
 def wrap_out(f):
+  @inplace_fn("out")
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
@@ -531,10 +533,7 @@ def wrap_fxn(k,f):
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
-  @functools.wraps(f)
-  def nf2(*args, **kwargs):
-    return inplace_fn("out")(nf)(*args, **kwargs) if "out" in kwargs else nf(*args, **kwargs)
-  return nf2
+  return nf
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
