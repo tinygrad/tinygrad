@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, Ops
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
@@ -78,6 +78,23 @@ class TestGC(unittest.TestCase):
     if bufs_allocated()-init != 0:
       print(inspect.getclosurevars(UOp.toposort.fget))
       raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
+
+  def test_buffer_refcount(self):
+    init = bufs_allocated()
+    a = Tensor.empty(10)
+    self.assertEqual(bufs_allocated()-init, 0)
+    a.realize()
+    real_buf = a.lazydata.buffer
+    # after the Tensor UOp is deleted there shouldn't be any references on the Buffer
+    with self.assertRaises(AssertionError):
+      self.assertEqual(real_buf.lb_refcount, 1)
+    self.assertEqual(bufs_allocated()-init, 1)
+    del a.lazydata
+    with self.assertRaises(AssertionError):
+      self.assertEqual(real_buf.lb_refcount, 0)
+    self.assertEqual(bufs_allocated()-init, 1) # keep the buffer alive
+    del real_buf
+    self.assertEqual(bufs_allocated()-init, 0)
 
 if __name__ == '__main__':
   unittest.main()
