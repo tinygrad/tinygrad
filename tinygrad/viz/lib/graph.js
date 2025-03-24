@@ -17,11 +17,9 @@ window.renderGraph = function(graph, additions, name) {
   }
 
   if (name === "View Memory Graph") {
-    document.getElementById("nodes").innerHTML = "";
-    document.getElementById("edges").innerHTML = "";
     return renderMemoryGraph(graph);
   }
-  document.getElementById("polygons").innerHTML = "";
+  d3.select("#bars").html("");
 
   // ** start calculating the new layout (non-blocking)
   worker = new Worker("/lib/worker.js");
@@ -147,7 +145,7 @@ function renderMemoryGraph(graph) {
     b.y.push(b.y.at(-1));
   }
   // ** render traces
-  const render = d3.select("#polygons");
+  const render = d3.select("#bars");
   const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
   const xaxis = d3.axisBottom(xscale);
@@ -164,4 +162,7 @@ function renderMemoryGraph(graph) {
     const p1 = xs.map((x, i) => `${x},${y2[i]}`).reverse();
     return `${p0.join(' ')} ${p1.join(' ')}`;
   }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`);
+  // TODO: add the toposort graph here
+  d3.select("#nodes").html("");
+  d3.select("#edges").html("");
 }
