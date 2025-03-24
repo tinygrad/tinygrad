@@ -234,10 +234,11 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
+@wrap_view_op
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
-  slices = [slice(None)] * unwrap(self).ndim
+  slices = [slice(None)] * self.ndim
   slices[dim] = slice(start, end, step)
-  return wrap(unwrap(self)[slices])
+  return self[slices]
 
 @torch.library.impl("aten::slice_backward", "privateuseone")
 def slice_backward(grad_out, input_sizes, dim=0, start=None, end=None, step=1):
@@ -301,7 +302,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    unwrap(dest).assign(unwrap(src).cast(cast_dtype).to(to_device))
+    unwrap(dest).assign(unwrap(src).contiguous().cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(unwrap(dest))
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
