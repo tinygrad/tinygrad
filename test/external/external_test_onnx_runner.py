@@ -1,4 +1,4 @@
-import unittest, onnx, tempfile, os
+import unittest, onnx, tempfile, os, io
 import numpy as np
 from tinygrad.frontend.onnx import OnnxRunner
 
@@ -33,7 +33,11 @@ class TestOnnxRunnerModelLoading(unittest.TestCase):
       with open(temp_path, "rb") as f: self._run_identity_test(f)
     finally: os.remove(temp_path)
 
-  def test_model_load_from_raw_bytes(self): self._run_identity_test(self.model.SerializeToString())
+  def test_model_load_from_raw_bytes(self):
+    bytes_io = io.BytesIO()
+    onnx.save(self.model, bytes_io)
+    raw_bytes = bytes_io.getvalue()
+    self._run_identity_test(raw_bytes)
 
 if __name__ == '__main__':
   unittest.main()

@@ -71,16 +71,11 @@ def model_parse(onnx_model: ModelProto):
   values = {"": None, **{x.name:buffer_parse(x) for x in onnx_model.graph.initializer}}
   inputs = {inp.name: type_parse(inp.type) for inp in onnx_model.graph.input if inp.name not in values}
   outputs = tuple(x.name for x in onnx_model.graph.output)
-  nodes = []
-  for num, node in enumerate(onnx_model.graph.node):
-    n_op, n_input, n_output = node.op_type, tuple(node.input), tuple(node.output),
-    n_attrs = {attr.name: attribute_parse(attr) for attr in node.attribute}
-    nodes.append(OnnxNode(num, n_op, n_input, n_output, n_attrs))
-  return is_training, values, inputs, outputs, tuple(nodes), opset_version
+  nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
+                for num,n in enumerate(onnx_model.graph.node))
+  return is_training, values, inputs, outputs, nodes, opset_version
 
-def model_load(f:bytes | IO[bytes] | str | os.PathLike | ModelProto):
-  if isinstance(f, bytes): f = io.BytesIO(f)
-  return load(f)
+def model_load(f:str | os.PathLike | bytes | IO[bytes]): return load(io.BytesIO(f) if isinstance(f, bytes) else f)
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
@@ -132,28 +127,28 @@ class OnnxRunner:
   `OnnxRunner` executes an ONNX model using Tinygrad as backend.
   """
 
-  def __init__(self, f:bytes | IO[bytes] | str | os.PathLike):
+  def __init__(self, f:str | os.PathLike | bytes | IO[bytes]):
     """
     Args:
-      f: The ONNX model, provided either as a file path (a `str` or PathLike object), as a file-like object (one with a `read` method), or as a `onnx.ModelProto`.
+      f: The ONNX model, provided either as a file path (a string or path-like object), a file-like object, or as raw bytes.
 
     Examples:
       - Load from a file path:
         ```python
-        from extra.onnx import OnnxRunner
+        from tinygrad.frontend.onnx import OnnxRunner
         runner = OnnxRunner("path/to/model.onnx")
         ```
       - Load from a file-like object:
         ```python
-        from extra.onnx import OnnxRunner
+        from tinygrad.frontend.onnx import OnnxRunner
         with open("path/to/model.onnx", "rb") as f:
           runner = OnnxRunner(f)
         ```
       - Load from raw bytes:
         ```python
-        from extra.onnx import OnnxRunner
-        with open("path/to/model.onnx", "rb") as f:
-          model_bytes = f.read()
+        from tinygrad.frontend.onnx import OnnxRunner
+        import requests
+        model_bytes = requests.get("https://example.com/model.onnx").content
         runner = OnnxRunner(model_bytes)
         ```
     """
