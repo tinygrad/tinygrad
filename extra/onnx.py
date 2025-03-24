@@ -7,8 +7,7 @@ from tinygrad.device import is_dtype_supported
 
 # ***** onnx protobuf parsing ******
 # NOTE: everything that directly use onnx import is in this block
-try: from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
-except ImportError as e: raise ImportError("Please install onnx using 'python3 -m pip install onnx==1.16.0'") from e
+from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
@@ -125,33 +124,11 @@ limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   """
   `OnnxRunner` executes an ONNX model using Tinygrad as backend.
+
+  Args:
+    f: The ONNX model, provided either as a file path (a string or path-like object), a file-like object, or as raw bytes.
   """
-
   def __init__(self, f:str | os.PathLike | bytes | IO[bytes]):
-    """
-    Args:
-      f: The ONNX model, provided either as a file path (a string or path-like object), a file-like object, or as raw bytes.
-
-    Examples:
-      - Load from a file path:
-        ```python
-        from tinygrad.frontend.onnx import OnnxRunner
-        runner = OnnxRunner("path/to/model.onnx")
-        ```
-      - Load from a file-like object:
-        ```python
-        from tinygrad.frontend.onnx import OnnxRunner
-        with open("path/to/model.onnx", "rb") as f:
-          runner = OnnxRunner(f)
-        ```
-      - Load from raw bytes:
-        ```python
-        from tinygrad.frontend.onnx import OnnxRunner
-        import requests
-        model_bytes = requests.get("https://example.com/model.onnx").content
-        runner = OnnxRunner(model_bytes)
-        ```
-    """
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(f))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
     Tensor.training = True if self.is_training else False
