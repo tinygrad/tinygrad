@@ -746,9 +746,12 @@ def get_onnx_ops():
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
     #print(x.shape)
     if getenv("NHWC") and len(x.shape) == 4 and x.shape[1:] == (1,3,3):
-      # 3x3 depthwise
+      # 3x3 depthwise (C,1,3,3)
       # "width multiple of 4 depth multiple of 32 aligned to 128bytes"
+      x = x.pad(((0,0), (0,0), (0,0), (0,1)))
       x = x.permute(2,3,0,1).contiguous().permute(2,3,0,1)
+      x = x[:, :, :, :3]
+      # we increase the filts to 4-aligned for speed (75% util)
     WEIGHT_SHIFT = 4
     if getenv("NHWC") and len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[1]%WEIGHT_SHIFT == 0:
       if x.shape[0]%32 == 0:
