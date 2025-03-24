@@ -261,16 +261,14 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Type[HWQueue]|None=No
   if enabled and queue is not None: queue.timestamp(st)
   elif enabled:
     assert queue_type is not None
-    queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
-    dev.timeline_value += 1
+    queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
   try: yield (st, en)
   finally:
     if enabled and queue is not None: queue.timestamp(en)
     elif enabled:
       assert queue_type is not None
-      queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
-      dev.timeline_value += 1
+      queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
     if enabled and PROFILE: dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, queue_type is dev.hw_copy_queue_t))
 
@@ -329,8 +327,7 @@ class HCQProgram(Generic[DeviceType]):
     with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
       q.exec(self, kernargs, global_size, local_size)
 
-    q.signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-    self.dev.timeline_value += 1
+    q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
     if wait: self.dev.synchronize()
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
@@ -374,6 +371,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       Compiled.profile_events += [ProfileRangeEvent(self.device, name, st.timestamp, en.timestamp, cp) for st,en,name,cp in self.sig_prof_records]
       self.sig_prof_records = []
 
+  def next_timeline(self):
+    self.timeline_value += 1
+    return self.timeline_value - 1
+
   @classmethod
   def _alloc_signal_addr(cls) -> int:
     if not cls.signal_pool:
@@ -384,8 +385,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def _at_profile_finalize(self):
     def _sync(d:HCQCompiled, q_t:Type[HWQueue]):
-      q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
-      d.timeline_value += 1
+      q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.next_timeline()).submit(d)
       st = time.perf_counter_ns()
       d.timeline_signal.wait(d.timeline_value - 1)  # average of the two
       et = time.perf_counter_ns()
@@ -439,9 +439,8 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
         ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-        self.b_timeline[self.b_next] = self.dev.timeline_value
-        self.dev.timeline_value += 1
+                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        self.b_timeline[self.b_next] = self.dev.timeline_value - 1
 
   def copy_from_disk(self, dest:HCQBuffer, src, size):
     def _get_temp_buf():
@@ -456,9 +455,8 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
-                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-        self.b_timeline[batch_info[1]] = self.dev.timeline_value
-        self.dev.timeline_value += 1
+                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        self.b_timeline[batch_info[1]] = self.dev.timeline_value - 1
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
@@ -468,9 +466,8 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
-                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-        self.dev.timeline_signal.wait(self.dev.timeline_value)
-        self.dev.timeline_value += 1
+                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
@@ -482,11 +479,9 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                .copy(dest.va_addr, src.va_addr, sz) \
-                               .signal(src_dev.timeline_signal, src_dev.timeline_value).submit(src_dev)
-      src_dev.timeline_value += 1
+                               .signal(src_dev.timeline_signal, src_dev.next_timeline()).submit(src_dev)
 
     if src_dev != dest_dev:
       dest_dev.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                    .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
-                                   .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
-      dest_dev.timeline_value += 1
+                                   .signal(dest_dev.timeline_signal, dest_dev.next_timeline()).submit(dest_dev)
