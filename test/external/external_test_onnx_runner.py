@@ -9,7 +9,7 @@ def helper_make_identity_model(inps: dict[str, np.ndarray], nm) -> onnx.ModelPro
   graph = onnx.helper.make_graph(nodes, f"test_{nm}", onnx_inputs, onnx_outputs)
   return onnx.helper.make_model(graph, producer_name=f"test_{nm}")
 
-class TestOnnxRunnerLoad(unittest.TestCase):
+class TestOnnxRunnerModelLoading(unittest.TestCase):
   def setUp(self):
     self.x = np.array([1.0, 2.0], dtype=np.float32)
     self.model = helper_make_identity_model({"X": self.x}, "identity")
@@ -34,7 +34,6 @@ class TestOnnxRunnerLoad(unittest.TestCase):
     finally: os.remove(temp_path)
 
   def test_model_load_from_raw_bytes(self): self._run_identity_test(self.model.SerializeToString())
-  def test_model_load_from_modelproto(self): self._run_identity_test(self.model)
 
 if __name__ == '__main__':
   unittest.main()
