@@ -1,6 +1,8 @@
 from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
-from extra.onnx import OnnxRunner, OnnxValue
+from tinygrad.frontend.onnx import OnnxRunner
+from extra.onnx import OnnxValue
+import onnx
 import numpy as np
 import onnxruntime as ort
 
