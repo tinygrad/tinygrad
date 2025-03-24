@@ -3,8 +3,11 @@ import os
 import time
 import unittest
 import numpy as np
-import onnx
-from extra.onnx import OnnxRunner
+try:
+  import onnx
+except ModuleNotFoundError:
+  raise unittest.SkipTest("onnx not installed, skipping onnx test")
+from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
 from tinygrad.helpers import CI, fetch, temp
 from tinygrad.device import is_dtype_supported

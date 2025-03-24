@@ -1,4 +1,4 @@
-import ctypes, time, contextlib
+import ctypes, time, contextlib, importlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -11,6 +11,8 @@ class AM_IP:
   def set_clockgating_state(self): pass # Set clockgating state for this IP
 
 class AM_SOC(AM_IP):
+  def init_sw(self): self.module = importlib.import_module("tinygrad.runtime.autogen.am.soc21")
+
   def init_hw(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
@@ -89,7 +91,7 @@ class AM_GMC(AM_IP):
 
     # Init TLB and cache
     self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
-                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=am.MTYPE_UC)
+                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=self.adev.soc.module.MTYPE_UC)
 
     self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=0, enable_default_page_out_to_system_memory=1,
       l2_pde0_cache_tag_generation_mode=0, pde_fault_classification=0, context1_identity_access_mode=1, identity_mode_fragment_size=0)
@@ -107,6 +109,13 @@ class AM_GMC(AM_IP):
 
     for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff)
     self.hub_initted[ip] = True
+
+  def get_pte_flags(self, pte_lv, is_table, frag, uncached, system, snooped, valid, extra=0):
+    extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) | am.AMDGPU_PTE_FRAG(frag)
+    extra |= am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
+    if not is_table: extra |= (am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE)
+    return extra | (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
+  def is_pte_huge_page(self, pte): return pte & am.AMDGPU_PDE_PTE
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
@@ -180,8 +189,8 @@ class AM_GFX(AM_IP):
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
     for i in range(0, 16):
       self._grbm_select(vmid=i)
-      self.adev.regSH_MEM_CONFIG.write(address_mode=am.SH_MEM_ADDRESS_MODE_64, alignment_mode=am.SH_MEM_ALIGNMENT_MODE_UNALIGNED,
-                                       initial_inst_prefetch=3)
+      self.adev.regSH_MEM_CONFIG.write(address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64,
+                                       alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, initial_inst_prefetch=3)
 
       # Configure apertures:
       # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)

@@ -65,7 +65,9 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
   try:
     p = x[1].to_program(name_override="test")
     assert p.uops is not None, "uop list wasn't generated?"
-    if len(p.uops) >= getenv("BEAM_UOPS_MAX", 3000) > 0: raise RuntimeError("too many uops")
+    if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
+      if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
+      raise RuntimeError("too many uops")
     st = time.perf_counter()
     prog = compiler.compile(p.src)
     et = time.perf_counter() - st
@@ -121,7 +123,9 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         elif c in {"cyan", "green", "white"}: lcl *= s
-      if up//tc_up > max_up or lcl > max_lcl: continue
+      if up//tc_up > max_up or lcl > max_lcl:
+        if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")
+        continue
       acted_lins[i+1] = lin2
     except KernelOptError: pass
   return acted_lins
