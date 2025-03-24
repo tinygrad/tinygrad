@@ -1,7 +1,7 @@
 from collections import defaultdict
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.device import Device, Buffer
-from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
+from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up, getenv
 from tinygrad.ops import Ops
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -45,6 +45,20 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
   for buf in buf_to_opt:
     if buf._base is None: continue
     assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=(pbuf:=assigned.get(buf.base, buf.base)).base, offset=pbuf.offset+buf.offset)
+
+  if getenv("VALIDATE_MEMORY_PLANNER", 0):
+    taken_parts = set()
+    for i,u in enumerate(buffers):
+      for buf in u:
+        if buf.is_allocated() or buf.base.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
+        cur, base = assigned.get(buf, buf), assigned.get(buf.base, buf.base)
+        if buf._base is not None:
+          assert cur.base == base.base and cur.offset == buf.offset + base.offset, f"failed: {buf} {cur} {base} {buf.offset} {base.offset}"
+        else:
+          for part in taken_parts:
+            assert buf.base == part[3] or part[0] != cur.base or part[1] + part[2] <= cur.offset or part[1] >= cur.offset + buf.nbytes, f"failed: {buf} {cur} {part}"
+          if first_appearance[buf.base] == i: taken_parts.add((cur.base, cur.offset, buf.nbytes, buf.base))
+          if last_appearance[buf.base] == i: taken_parts.remove((cur.base, cur.offset, buf.nbytes, buf.base))
 
   if DEBUG >= 1:
     ak=dedup(x for x in assigned.keys() if x._base is None)
