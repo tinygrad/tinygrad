@@ -753,8 +753,7 @@ class AMDDevice(HCQCompiled):
       self.max_private_segment_size = required
 
   def invalidate_caches(self):
-    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
+    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
@@ -763,8 +762,7 @@ class AMDDevice(HCQCompiled):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
       wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
-      AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.timeline_value).submit(self)
-      self.timeline_value += 1
+      AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
       if DEBUG>=2: print('Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
