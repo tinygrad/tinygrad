@@ -4,7 +4,7 @@ import time
 import unittest
 import numpy as np
 try:
-  import onnx
+  import onnx # noqa: F401 # pylint: disable=unused-import
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from tinygrad.frontend.onnx import OnnxRunner
