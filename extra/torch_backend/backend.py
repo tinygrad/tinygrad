@@ -302,8 +302,10 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    unwrap(dest).assign(unwrap(src).contiguous().cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(unwrap(dest))
+    src, dest = unwrap(src), unwrap(dest)
+    if dest.lazydata.is_realized: src = src.contiguous()
+    dest.assign(src.cast(cast_dtype).to(to_device))
+    if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
