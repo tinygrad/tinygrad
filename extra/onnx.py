@@ -8,7 +8,7 @@ from tinygrad.device import is_dtype_supported
 # ***** onnx protobuf parsing ******
 # NOTE: everything that directly use onnx import is in this block
 try: from onnx import load, AttributeProto, ModelProto, TensorProto, TypeProto, helper
-except ImportError as e: raise ImportError("Please install onnx using 'python3 -m pip install onnx==1.16.0'")
+except ImportError as e: raise ImportError("Please install onnx using 'python3 -m pip install onnx==1.16.0'") from e
 import numpy as np
 
 def dtype_parse(onnx_dtype: int) -> DType:
@@ -78,7 +78,7 @@ def model_parse(onnx_model: ModelProto):
     nodes.append(OnnxNode(num, n_op, n_input, n_output, n_attrs))
   return is_training, values, inputs, outputs, tuple(nodes), opset_version
 
-def model_load(f):
+def model_load(f:bytes | IO[bytes] | str | os.PathLike | ModelProto):
   if isinstance(f, ModelProto): return f
   if isinstance(f, bytes): f = io.BytesIO(f)
   return load(f)
@@ -136,28 +136,34 @@ class OnnxRunner:
   def __init__(self, f:bytes | IO[bytes] | str | os.PathLike | ModelProto):
     """
     Args:
-      f: The ONNX model, provided either as a file-like object (one with a `read` method), as raw bytes, or as a file path (a string or PathLike object).
+      f: The ONNX model, provided either as a file path (a `str` or PathLike object), as a file-like object (one with a `read` method), as raw bytes, or as a `onnx.ModelProto`.
 
     Examples:
-      - Load from string path
-      ```python
-      from extra.onnx import OnnxRunner
-      runner = OnnxRunner("path/to/model.onnx")
-      ```
-      - Load from bytes object
-      ```python
-      from extra.onnx import OnnxRunner
-      with open("path/to/model.onnx", "rb") as f:
-        model_bytes = f.read()
-      runner = OnnxRunner(model_bytes)
-      ```
-      - Load from ModelProto
-      ```python
-      from extra.onnx import OnnxRunner
-      import onnx
-      model = onnx.load("path/to/model.onnx")
-      runner = OnnxRunner(model)
-      ```
+      - Load from a file path:
+        ```python
+        from extra.onnx import OnnxRunner
+        runner = OnnxRunner("path/to/model.onnx")
+        ```
+      - Load from a file-like object:
+        ```python
+        from extra.onnx import OnnxRunner
+        with open("path/to/model.onnx", "rb") as f:
+          runner = OnnxRunner(f)
+        ```
+      - Load from raw bytes:
+        ```python
+        from extra.onnx import OnnxRunner
+        with open("path/to/model.onnx", "rb") as f:
+          model_bytes = f.read()
+        runner = OnnxRunner(model_bytes)
+        ```
+      - Load from an onnx.ModelProto:
+        ```python
+        from extra.onnx import OnnxRunner
+        import onnx
+        model = onnx.load("path/to/model.onnx")
+        runner = OnnxRunner(model)
+        ```
     """
     self.is_training, self.graph_values, self.graph_inputs, self.graph_outputs, self.graph_nodes, self.opset_version = model_parse(model_load(f))
     self.old_training, self.old_no_grad = Tensor.training, Tensor.no_grad
