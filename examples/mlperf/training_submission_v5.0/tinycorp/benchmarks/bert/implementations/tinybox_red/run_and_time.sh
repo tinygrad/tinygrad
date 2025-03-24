@@ -17,7 +17,11 @@ DATETIME=$(date "+%m%d%H%M")
 LOGFILE="bert_red_${DATETIME}_${SEED}.log"
 
 # init
-BENCHMARK=10 INITMLPERF=1 RESET_STEP=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
+sudo rmmod amdgpu || true
+BENCHMARK=10 INITMLPERF=1 RESET_STEP=1 BEAM_LOG_SURPASS_MAX=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
+# TODO: AMD driver hangs during init, but is 5% faster per step in real run.
+sudo modprobe amdgpu
 PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
+sudo rmmod amdgpu || true

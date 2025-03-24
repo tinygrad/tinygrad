@@ -10,7 +10,7 @@ from tinygrad.device import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from extra.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -53,6 +53,9 @@ backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 # BUG: we don't match ORT here due to some div inaccuracy with floats
 backend_test.exclude('test_dynamicquantizelinear_cpu')
 backend_test.exclude('test_dynamicquantizelinear_expanded_cpu')
+
+# BUG: we match ORT, tested in TestMainOnnxOps.test_maxunpool
+backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):

@@ -22,6 +22,7 @@
 
 ::: tinygrad.Tensor.avg_pool2d
 ::: tinygrad.Tensor.max_pool2d
+::: tinygrad.Tensor.max_unpool2d
 ::: tinygrad.Tensor.conv2d
 ::: tinygrad.Tensor.conv_transpose2d
 ::: tinygrad.Tensor.dot

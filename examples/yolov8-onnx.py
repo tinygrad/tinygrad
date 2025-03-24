@@ -3,7 +3,7 @@ import os
 from ultralytics import YOLO
 import onnx
 from pathlib import Path
-from extra.onnx import OnnxRunner
+from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import get_example_inputs
 from tinygrad.tensor import Tensor
 

@@ -228,6 +228,7 @@
         <g id="render">
           <g id="edges"></g>
           <g id="nodes"></g>
+          <g id="bars"></g>
         </g>
       </svg>
       <button class="btn" id="zoom-to-fit-btn">Zoom to fit</button>
@@ -377,7 +378,7 @@
       };
     }
     if (ret.length === 0) return;
-    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || []);
+    renderGraph(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], kernel.name);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
