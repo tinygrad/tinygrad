@@ -18,6 +18,8 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       last_appearance[buf.base] = i
       buf_to_opt.add(buf)
 
+  print(buffers, first_appearance, last_appearance, buf_to_opt)
+
   # Sort buffers operations in timeline order. 2 events: buffer is allocted and buffer is freed.
   buffer_requests = sorted([((first_appearance[buf], True), buf) for buf in first_appearance.keys()] + \
                            [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
