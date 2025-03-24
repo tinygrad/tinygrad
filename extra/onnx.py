@@ -745,8 +745,15 @@ def get_onnx_ops():
       # 3x3 depthwise (C,1,3,3)
       # "width multiple of 4 depth multiple of 32 aligned to 128bytes"
       x = x.pad(((0,0), (0,0), (0,0), (0,1)))
-      order = (2,0,1,3)
-      x = x.permute(*order).contiguous().permute(*argsort(order))
+      if x.shape[0]%32 == 0 and False:
+        print("HERE")
+        x = x.reshape(-1, 32, 1, 3, 4)
+        order = (0,3,1,2,4)
+        x = x.permute(*order).contiguous().permute(*argsort(order))
+        x = x.reshape(-1, 1, 3, 4)
+      else:
+        order = (2,0,1,3)
+        x = x.permute(*order).contiguous().permute(*argsort(order))
       x = x[:, :, :, :3]
       # we increase the filts to 4-aligned for speed (75% util)
     WEIGHT_SHIFT = 4

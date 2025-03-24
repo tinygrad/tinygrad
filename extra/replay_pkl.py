@@ -119,7 +119,9 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
           elif knum == 5:
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 96))
+            k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
             # this breaks something
             #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
           elif knum in [8, 12]:
