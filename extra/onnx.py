@@ -764,7 +764,11 @@ def get_onnx_ops():
       else:
         # DSP swizzle memory
         x = x.reshape(x.shape[0], x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(1,0,2).contiguous().permute(1,0,2).reshape(x.shape)
-    #if getenv("NHWC") and x.shape == (1000, 1280):
+    if getenv("NHWC") and x.shape == (1000, 1280):
+      x = x.reshape(-1, 320, 4)
+      order = (1,0,2)
+      x = x.permute(*order).contiguous().permute(*argsort(order))
+      x = x.reshape(-1, 1280)
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
