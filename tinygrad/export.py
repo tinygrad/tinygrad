@@ -105,6 +105,9 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
 
   # Render runtime-specific operations
   # TODO: validate symbolic var ranges against input args at runtime in JS?
+  args = [f"_input{i}" if isinstance(var, Buffer) else f"{var.arg[0]}" for i,var in enumerate(ex.inputs)]
+  input_validation = [f"""if (!({ f'{args[i]} instanceof {js_type(ex.inputs[i].dtype)}' if isinstance(ex.inputs[i], Buffer) else
+    f'typeof {args[i]} === "number"'})) {{ throw new Error(`arg {i} type: ${{typeof {args[i]}}} is not as expected`) }}""" for i in range(len(args))]
   input_writer_bufs = [f"""const gpuWriteBuffer{i} = device.createBuffer({{size:{buf_names[buf]}.size,
                 usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST}});""" for i,buf in enumerate(ex.inputs)]
   input_writers = [f"""
@@ -172,9 +175,8 @@ const {model_name} = (() => {{
     const pipelines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{
       layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
-    return [async ({",".join(args:=[f"_input{i}" if isinstance(var, Buffer) else f"{var.arg[0]}" for i,var in enumerate(ex.inputs)])}) => {{
-    {j([f"""if (!({ f'{args[i]} instanceof {js_type(ex.inputs[i].dtype)}' if isinstance(ex.inputs[i], Buffer) else f'typeof {args[i]} === "number"'}))
-        {{ throw new Error(`arg {i} type: ${{typeof {args[i]}}} is not as expected`) }}""" for i in range(len(args))], 3)}
+    return [async ({",".join(args)}) => {{
+      {j(input_validation, 3)}
       const commandEncoder = device.createCommandEncoder();
       {j(input_writers + kernel_calls + outbuf_copies, 3)}
       const gpuCommands = commandEncoder.finish();
