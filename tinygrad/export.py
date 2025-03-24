@@ -127,7 +127,7 @@ def export_webgpu(model:Callable, inputs:Sequence, js_outfile:Optional[str]=None
     return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(
       ([k, v]) => [k, {...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}]));
   };\n""" if save_weights else ""
-  max_buf_nbytes = max(buf.nbytes for buf in ex.weight_bufs + ex.empty_bufs)
+  max_buf_nbytes = max([buf.nbytes for buf in ex.weight_bufs + ex.empty_bufs] + [4])
 
   def j(to_join: list, num_indents: int): return ("\n" + num_indents * "  ").join(to_join)
   prg = f"""if (!navigator.gpu) throw new Error("WebGPU not supported.");
