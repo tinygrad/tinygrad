@@ -426,6 +426,8 @@ jobs:
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX Runner (CPU)
+        run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
       - name: Test Additional ONNX Ops (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Test Quantize ONNX
