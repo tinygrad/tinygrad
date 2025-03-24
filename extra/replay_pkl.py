@@ -109,7 +109,7 @@ if __name__ == "__main__":
             # alignment issue?
             #pass
           if knum == 2:
-            k.apply_opt(Opt(OptOps.PADTO, 4, 4))
+            #k.apply_opt(Opt(OptOps.PADTO, 4, 4))
             k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 4))

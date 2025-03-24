@@ -33,6 +33,10 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   idxs: list[int|None] = [None]*vec.dtype.count
   global_offset = 0
   for rootsrc, offsets in offsets_rootsrc.items():
+    if len(offsets) == 96 and 3 not in offsets and 0 in offsets and 1 in offsets and 2 in offsets:
+      for i in range(3, 128, 4):
+        assert i not in offsets
+        offsets[i] = {}
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
