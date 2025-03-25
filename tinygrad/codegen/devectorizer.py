@@ -314,7 +314,18 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # optional pre matcher
   if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
 
-  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext())
+  # late unroll
+  """
+  late_unroll = PatternMatcher([(UPat(Ops.RANGE, arg=2, name="r"),
+                                 lambda r: UOp(Ops.UNROLL, dtypes.int, src=(UOp.const(dtypes.int.vec(3), (0,1,2)),), arg=((2,3),)) )])
+  sink = graph_rewrite(sink, late_unroll, name="late_unroll")
+  from tinygrad.codegen.expander import expander
+  sink = graph_rewrite(sink, sym+expander, name="late_expand")
+  sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
+  """
+
+  # remove reduce
+  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+extra_matcher+pm_render)

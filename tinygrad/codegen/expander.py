@@ -3,7 +3,8 @@
 import functools, itertools, operator
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
-from tinygrad.codegen.symbolic import sym
+from tinygrad.codegen.symbolic import sym, gep_pushing
+from tinygrad.dtype import dtypes
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -121,6 +122,19 @@ migrate_indexing = PatternMatcher([
 def expand_rewrite(sink:UOp) -> UOp:
   # initial symbolic + migrate indexing (remove this)
   sink = graph_rewrite(sink, sym+migrate_indexing)
+
+  """
+  # late pad
+  def contract_test(x):
+    ret = UOp(Ops.CONTRACT, dtypes.int.vec(12), src=(x,), arg=((2,3), (3,4)))
+    #return ret.gep(3) + ret.gep(7) + ret.gep(11) +
+    return ret.gep((0,1,2,4,5,6,8,9,10))
+
+  late_unroll = gep_pushing+PatternMatcher([(UPat(Ops.UNROLL, arg=((3,3),)),
+                                 lambda: UOp(Ops.UNROLL, dtypes.int, src=(UOp.const(dtypes.int.vec(4), (0,1,2,3)),), arg=((3,4),))),
+                                (UPat(Ops.CONTRACT, src=(UPat.var("x"),), arg=((2,3), (3,3))), contract_test)])
+  sink = graph_rewrite(sink, late_unroll, name="late_unroll")
+  """
 
   # expand
   return graph_rewrite(sink, sym+expander)

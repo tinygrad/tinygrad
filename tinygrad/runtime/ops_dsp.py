@@ -5,7 +5,7 @@ from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAll
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
 from tinygrad.codegen.symbolic import gep_pushing
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element, dedup
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element, dedup, all_same
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -107,7 +107,19 @@ def multi_add_int2(**aa):
   r1 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(1) for x in aa.values()))
   return UOp(Ops.CUSTOMI, dtypes.int.vec(2), (r0.bitcast(dtypes.int64), r1.bitcast(dtypes.int64)), arg="__builtin_HEXAGON_A2_vraddub({0}, {1})")
 
-dsp_pm = PatternMatcher([
+conv_pm = PatternMatcher([
+  # __builtin_HEXAGON_V6_vrmpybus x3
+  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1"), multi_mul),
+  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+   UPat(name="c0")*UPat(name="c1"), multi_mul),
+
+  # __builtin_HEXAGON_V6_vrmpybus x3
+  (UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+  (UPat(name="acc") + UPat(Ops.CAST, dtype=dtypes.int.vec(32), name="a0") + UPat(Ops.CAST, name="b0") + UPat(Ops.CAST, name="c0"), multi_add_int32),
+])
+
+dsp_pm = conv_pm+PatternMatcher([
   # GEP on REDUCE
   (UPat(Ops.GEP, src=(UPat(Ops.REDUCE, name='alu'),), name='gep'), gep_on_reduce),
   # no swizzle down convert
@@ -123,10 +135,16 @@ dsp_pm = PatternMatcher([
   #(UPat(Ops.CAST, name="x") * UPat(Ops.CAST, name="y"), lambda x,y: (x.src[0]*y.src[0]).cast(x.dtype)),
   #(UPat(Ops.GEP, name="g").cast().named("cast"),
   # lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
-  (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
-   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
-  (UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
-   UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+
+  # __builtin_HEXAGON_V6_vrmpybus
+  #(UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+  # UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+  #(UPat(name="acc") + UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
+  # UPat(name="c0")*UPat(name="c1") + UPat(name="d0")*UPat(name="d1"), multi_mul),
+
+  # build __builtin_HEXAGON_V6_vrmpybus_128B
+  #(UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+  #(UPat(name="acc") + UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
 
   # REDUCE int4 -> 2xint2, int8 -> 4xint2
   (UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
@@ -134,10 +152,6 @@ dsp_pm = PatternMatcher([
   (UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
    lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
                                     gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
-
-  # build __builtin_HEXAGON_V6_vrmpybus_128B
-  (UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
-  (UPat(name="acc") + UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
 
   # build __builtin_HEXAGON_A2_vraddub
   (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
@@ -170,22 +184,22 @@ def prefetch_l1(ld:UOp):
   x2 = UOp(Ops.CUSTOM, dtypes.void, src=(first,), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
   return ld.replace(src=ld.src+(x1,x2))
 
-def vectorize_shuffle(x:UOp):
-  if not all(s.op in {Ops.GEP, Ops.CONST} for s in x.src): return None
-  gepped = dedup([s.src[0] for s in x.src if s.op is Ops.GEP])
+def vectorize_shuffle(vec:UOp):
+  if not all(s.op in {Ops.GEP, Ops.CONST} for s in vec.src): return None
+  gepped = dedup([s.src[0] for s in vec.src if s.op is Ops.GEP])
   if len(gepped) == 1:
     arg = []
-    for s in x.src:
+    for s in vec.src:
       if s.op is Ops.GEP:
         arg.append(s.arg[0])
       else:
         arg.append(-1)
     str_arg = ','.join([f'{y:4d}' for y in arg])
     full_arg = "__builtin_shufflevector({0}, {0}, "+str_arg+")"
-    return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
+    return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
   if len(gepped) == 2:
     arg = []
-    for s in x.src:
+    for s in vec.src:
       if s.op is Ops.GEP:
         if s.src[0] is gepped[0]:
           arg.append(s.arg[0])
@@ -196,11 +210,12 @@ def vectorize_shuffle(x:UOp):
       arg.append(-1)
     str_arg = ','.join([f'{y:4d}' for y in arg])
     full_arg = "__builtin_shufflevector({0}, {1}, "+str_arg+")"
-    return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
+    return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
   if len(gepped) != 3: return None
-  if not all(x.dtype.scalar() is dtypes.uchar and x.dtype.count == 128 for x in gepped): return None
+  if not all(x.dtype.scalar() is dtypes.uchar for x in gepped): return None
+  if not all_same([x.dtype.count for x in gepped]) or gepped[0].dtype.count != vec.dtype.count: return None
   arg = []
-  for s in x.src:
+  for s in vec.src:
     if s.op is Ops.GEP:
       if s.src[0] is gepped[0]:
         arg.append(s.arg[0])
@@ -210,10 +225,10 @@ def vectorize_shuffle(x:UOp):
         continue
     arg.append(-1)
   arg2 = []
-  for i,s in enumerate(x.src):
+  for i,s in enumerate(vec.src):
     if s.op is Ops.GEP:
       if s.src[0] is gepped[2]:
-        arg2.append(x.dtype.count + s.arg[0])
+        arg2.append(vec.dtype.count + s.arg[0])
         continue
     if s.op is Ops.CONST:
       arg2.append(-1)
@@ -222,7 +237,7 @@ def vectorize_shuffle(x:UOp):
   str_arg = ','.join([f'{y:4d}' for y in arg])
   str_arg2 = ','.join([f'{y:4d}' for y in arg2])
   full_arg = "__builtin_shufflevector(__builtin_shufflevector({0}, {1}, "+str_arg+"), {2}, "+str_arg2+")"
-  return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
+  return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
 
   #vv = []
   #for i in range(64):
@@ -241,7 +256,7 @@ dsp_pm_late = PatternMatcher([
   #(UPat(Ops.LOAD, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat(), UPat()+UPat.cvar("c"))),), name="ptr"),), dtype=dtypes.uchar.vec(128)),
   # lambda c,ptr: UOp(Ops.CUSTOM, dtype=dtypes.uchar.vec(128), src=(ptr,), arg='vmemu({0})')),
 
-  (UPat(Ops.VECTORIZE, dtypes.uchar.vec(128), name="x"), vectorize_shuffle),
+  (UPat(Ops.VECTORIZE, dtypes.uchar.vec(128), name="vec"), vectorize_shuffle),
 
   # __builtin_HEXAGON_V6_vrmpybus_acc_128B
   (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),
