@@ -5,14 +5,14 @@ from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAll
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.ops import Ops, UOp
 from tinygrad.codegen.symbolic import gep_pushing
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG, get_single_element, dedup
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.ops import PatternMatcher, UPat
 
-def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
+def multi_mul(a0, a1, b0, b1, c0, c1, d0=None, d1=None, acc=None):
   swizzle = []
   for i in range(32):
     swizzle.append(i)
@@ -26,6 +26,16 @@ def multi_mul(a0, a1, b0, b1, c0, c1, d0, d1, acc=None):
   if a1.op is not Ops.CAST:
     #print("rejected on a1")
     return None
+  if d0 is None:
+    if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      #print("here0", c0.src[0].arg)
+      #if c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      d0 = c0.src[0].src[0].gep(tuple(i+1 for i in c0.src[0].arg)).cast(dtypes.int.vec(32))
+    else:
+      d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+  if d1 is None:
+    #if c1.src[0].op is Ops.GEP: print("here1", c1.src[0].arg)
+    d1 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
   assert a0.op is Ops.CAST
   assert b0.op is Ops.CAST
   assert c0.op is Ops.CAST
@@ -61,6 +71,15 @@ def gep_on_reduce(gep, alu):
       alu.dtype.count >= gep.dtype.count else None
 
 def multi_add_int32(**aa):
+  if 'd0' not in aa:
+    c0 = aa['c0']
+    if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      #print("here0", c0.src[0].arg)
+      #if c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
+      d0 = c0.src[0].src[0].gep(tuple(i+1 for i in c0.src[0].arg)).cast(dtypes.int.vec(32))
+    else:
+      d0 = UOp.const(dtypes.uchar.vec(32), 0).cast(dtypes.int.vec(32))
+    aa['d0'] = d0
   swizzle = []
   for i in range(32):
     swizzle.append(i)
@@ -71,7 +90,7 @@ def multi_add_int32(**aa):
     assert x.src[0].dtype.scalar() is dtypes.uchar
     assert x.op is Ops.CAST
   swizzle = tuple(swizzle)
-  m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(x.src[0] for x in aa.values())).gep(swizzle)
+  m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(aa[k].src[0] for k in sorted(aa.keys()))).gep(swizzle)
   return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
 
 def multi_add_int2(**aa):
@@ -113,6 +132,14 @@ dsp_pm = PatternMatcher([
   # build __builtin_HEXAGON_A2_vraddub
   (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
    UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a4")+UPat(Ops.CAST,name="a5")+UPat(Ops.CAST,name="a6")+UPat(Ops.CAST,name="a7"), multi_add_int2),
+
+  # we upcast 3 as 4
+  (UPat(Ops.REDUCE, name="r", src=(UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") +
+                                   UPat(name="b0")*UPat(name="b1") + UPat(name="c0")*UPat(name="c1"),), allow_any_len=True),
+   lambda r, **kwargs: r.replace(src=(multi_mul(**kwargs),)+r.src[1:])),
+  (UPat(Ops.REDUCE, name="r", src=(UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0"),
+                                   ), allow_any_len=True),
+   lambda r, **kwargs: r.replace(src=(multi_add_int32(**kwargs),)+r.src[1:])),
 ])+gep_pushing
 
 def add_to_mul(c:UOp, x:UOp):
@@ -133,6 +160,40 @@ def prefetch_l1(ld:UOp):
   x2 = UOp(Ops.CUSTOM, dtypes.void, src=(first,), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
   return ld.replace(src=ld.src+(x1,x2))
 
+def vectorize_shuffle(x:UOp):
+  if not all(s.op in {Ops.GEP, Ops.CONST} for s in x.src): return None
+  gepped = dedup([s.src[0] for s in x.src if s.op is Ops.GEP])
+  if len(gepped) < 2: return None
+  arg = []
+  for s in x.src:
+    if s.op is Ops.GEP:
+      if s.src[0] is gepped[0]:
+        arg.append(s.arg[0])
+        continue
+      if s.src[0] is gepped[1]:
+        arg.append(gepped[0].dtype.count + s.arg[0])
+        continue
+    arg.append(-1)
+  arg2 = []
+  for i,s in enumerate(x.src):
+    if s.op is Ops.GEP:
+      if s.src[0] is gepped[2]:
+        arg2.append(x.dtype.count + s.arg[0])
+        continue
+    if s.op is Ops.CONST:
+      arg2.append(-1)
+      continue
+    arg2.append(i)
+  str_arg = ','.join([f'{y:4d}' for y in arg])
+  str_arg2 = ','.join([f'{y:4d}' for y in arg2])
+  full_arg = "__builtin_shufflevector(__builtin_shufflevector({0}, {1}, "+str_arg+"), {2}, "+str_arg2+")"
+  return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
+
+  #vv = []
+  #for i in range(64):
+  #src = "__builtin_shufflevector({0}, {1})"
+  return None
+
 dsp_pm_late = PatternMatcher([
   # prefetch L1
   (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"), prefetch_l1),
@@ -144,6 +205,8 @@ dsp_pm_late = PatternMatcher([
   # unaligned load
   #(UPat(Ops.LOAD, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat(), UPat()+UPat.cvar("c"))),), name="ptr"),), dtype=dtypes.uchar.vec(128)),
   # lambda c,ptr: UOp(Ops.CUSTOM, dtype=dtypes.uchar.vec(128), src=(ptr,), arg='vmemu({0})')),
+
+  (UPat(Ops.VECTORIZE, dtypes.uchar.vec(128), name="x"), vectorize_shuffle),
 
   # __builtin_HEXAGON_V6_vrmpybus_acc_128B
   (UPat(Ops.CUSTOMI, dtype=dtypes.int.vec(32), name="c")+UPat.var("x"), add_to_mul),

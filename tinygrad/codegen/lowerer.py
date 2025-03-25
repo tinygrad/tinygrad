@@ -245,6 +245,10 @@ pm_quant = symbolic+PatternMatcher([
     lambda v1,v2,c1,r: r.replace(src=(v1*v2,)) + r.replace(src=(c1*v2,))),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.CAST, name="v1")+UPat.cvar("c1")) * (UPat(Ops.CAST, name="v2",)+UPat.cvar("c2")), name="r"),
     lambda v1,v2,c1,c2,r: r.replace(src=(v1*v2,)) + r.replace(src=(c2*v1,)) + r.replace(src=(c1*v2,))),
+
+  # MUL by 1/0 on LOAD where the masks match (is this right?)
+  (UPat(Ops.WHERE, src=(UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v1"),)), UPat(Ops.CONST, arg=1), UPat(Ops.CONST, arg=0))) * \
+   UPat(Ops.LOAD, src=(UPat(), UPat(Ops.VIEW, name="v2")), name="ld"), lambda ld,v1,v2: ld if view_to_mask(v1) == view_to_mask(v2) else None),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
