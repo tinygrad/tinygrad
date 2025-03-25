@@ -453,6 +453,7 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
 
   # display the final graph
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
+  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # final toposort (bfs)
   children: dict[UOp, list[UOp]] = {}
@@ -473,8 +474,6 @@ def create_schedule_with_vars(big_sink:UOp) -> tuple[list[ScheduleItem], dict[Va
     # TODO: move this to create_kernels
     k = fix_kernel_ast(u.src[1], var_vals)
     schedule.append(ScheduleItem(k.arg.ast, tuple(s.buf_uop.buffer for s in k.src), k.arg.metadata))
-    # increment the refcount of the target buf (this is required by the JIT and memory planner) TODO: this does not belong here
-    k.src[0].buffer.ref(1)
     for x in children.get(u, []):
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
