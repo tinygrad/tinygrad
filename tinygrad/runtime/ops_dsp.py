@@ -163,7 +163,8 @@ def prefetch_l1(ld:UOp):
 def vectorize_shuffle(x:UOp):
   if not all(s.op in {Ops.GEP, Ops.CONST} for s in x.src): return None
   gepped = dedup([s.src[0] for s in x.src if s.op is Ops.GEP])
-  if len(gepped) < 2: return None
+  if len(gepped) != 3: return None
+  if not all(x.dtype.scalar() is dtypes.uchar and x.dtype.count == 128 for x in gepped): return None
   arg = []
   for s in x.src:
     if s.op is Ops.GEP:

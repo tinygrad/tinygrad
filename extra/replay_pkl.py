@@ -132,6 +132,7 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.PADTO, 4, 4))
             k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
           elif knum == 5:
             k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
