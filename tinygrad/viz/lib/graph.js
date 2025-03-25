@@ -182,6 +182,7 @@ function renderMemoryGraph(graph) {
     document.getElementById("current-buf")?.remove()
   });
   // TODO: add the toposort graph here
+  document.querySelector(".progress-message").style.display = "none";
   d3.select("#nodes").html("");
   d3.select("#edges").html("");
 }
