@@ -163,6 +163,16 @@ def prefetch_l1(ld:UOp):
 def vectorize_shuffle(x:UOp):
   if not all(s.op in {Ops.GEP, Ops.CONST} for s in x.src): return None
   gepped = dedup([s.src[0] for s in x.src if s.op is Ops.GEP])
+  if len(gepped) == 1:
+    arg = []
+    for s in x.src:
+      if s.op is Ops.GEP:
+        arg.append(s.arg[0])
+      else:
+        arg.append(-1)
+    str_arg = ','.join([f'{y:4d}' for y in arg])
+    full_arg = "__builtin_shufflevector({0}, {0}, "+str_arg+")"
+    return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
   if len(gepped) != 3: return None
   if not all(x.dtype.scalar() is dtypes.uchar and x.dtype.count == 128 for x in gepped): return None
   arg = []
