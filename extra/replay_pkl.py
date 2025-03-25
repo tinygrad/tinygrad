@@ -22,7 +22,7 @@ if __name__ == "__main__":
       if knum == (pknum:=getenv("KNUM", 0)) or pknum == 0:
         p: ProgramSpec = ei.prg.p
         k = Kernel(p.ast, Device["DSP"].renderer)
-        dsp_bufs = [Buffer("DSP", 1024+b.size*2, b.dtype).view(b.size, b.dtype, 512) for b in ei.bufs]
+        dsp_bufs = [Buffer("DSP", 8192+b.size, b.dtype).view(b.size, b.dtype, 4096) for b in ei.bufs]
         if BEAM:
           from tinygrad.engine.search import beam_search
           k = beam_search(k, dsp_bufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
@@ -132,7 +132,7 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.PADTO, 4, 4))
             k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 7))  # it's a little slow to compile with 7
           elif knum == 5:
             k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
             k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
