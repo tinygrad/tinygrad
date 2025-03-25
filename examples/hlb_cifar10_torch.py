@@ -9,9 +9,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.optim.lr_scheduler import OneCycleLR
-from torchvision import datasets, transforms
 from tinygrad.device import Device
 from tinygrad.helpers import getenv, colored
+from tinygrad.nn.datasets import cifar
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
@@ -299,16 +299,16 @@ def train_cifar():
 
   set_seed(getenv('SEED', hyp['seed']))
 
-  transform = transforms.Compose([transforms.ToTensor()])
+  X_train, Y_train, X_test, Y_test = cifar()
+  # one-hot encode labels
+  Y_train, Y_test = Y_train.one_hot(10), Y_test.one_hot(10)
 
-  train_dataset = datasets.CIFAR10(root='extra/datasets/cifar-10-python.tar.gz', train=True, download=True, transform=transform)
-  test_dataset = datasets.CIFAR10(root='extra/datasets/cifar-10-python.tar.gz', train=False, download=True, transform=transform)
+  X_train = torch.tensor(X_train.numpy(), device=device)
+  Y_train = torch.tensor(Y_train.numpy(), device=device)
+  X_test = torch.tensor(X_test.numpy(), device=device)
+  Y_test = torch.tensor(Y_test.numpy(), device=device)
 
-  X_train = torch.stack([sample[0] for sample in train_dataset])
-  Y_train = F.one_hot(torch.tensor([sample[1] for sample in train_dataset]), 10).float()
-  X_test = torch.stack([sample[0] for sample in test_dataset])
-  Y_test = F.one_hot(torch.tensor([sample[1] for sample in test_dataset]), 10).float()
-
+  # preprocess data
   X_train, X_test = apply_transforms(X_train), apply_transforms(X_test)
 
   X_train, Y_train = X_train.to(device), Y_train.to(device)
