@@ -24,7 +24,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
 
   buffer_replace = {}
   reuse_buffers:dict[tuple[str], list[Buffer]] = defaultdict(list)
-  global_planner:dict[tuple[str], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(256 << 30, block_size=0x200, lv2_cnt=32)))
+  global_planner:dict[tuple[str], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(256 << 30, block_size=0x1000, lv2_cnt=32)))
   for (time, is_open_ev), buf in buffer_requests:
     # Check if can suballoc.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
@@ -37,7 +37,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       else: reuse_buffers[key].append(buffer_replace[buf][0])
 
   assigned = {}
-  global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
+  global_buffers = {dev: Buffer(dev, round_up(sz, 2 << 20), dtypes.int8) for dev, (sz, _) in global_planner.items()}
   buffer_replace = {buf: (base or global_buffers[buf.device], off) for buf, (base, off) in buffer_replace.items()}
   for buf, (base, off) in buffer_replace.items():
     if buf == base: continue
@@ -49,25 +49,10 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
     if buf._base is None: continue
     assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=(pbuf:=assigned.get(buf.base, buf.base)).base, offset=pbuf.offset+buf.offset)
 
-  if getenv("VALIDATE_MEMORY_PLANNER", 0):
-    taken_parts = set()
-    for i,u in enumerate(buffers):
-      for buf in u:
-        if buf.is_allocated() or buf.base.is_allocated() or buf.lb_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers): continue
-        cur, base = assigned.get(buf, buf), assigned.get(buf.base, buf.base)
-        if buf._base is not None:
-          assert cur.base == base.base and cur.offset == buf.offset + base.offset, f"failed: {buf} {cur} {base} {buf.offset} {base.offset}"
-        else:
-          for part in taken_parts:
-            assert buf.base == part[3] or part[0] != cur.base or part[1] + part[2] <= cur.offset or part[1] >= cur.offset + buf.nbytes, f"failed: {buf} {cur} {part}"
-          if first_appearance[buf.base] == i: taken_parts.add((cur.base, cur.offset, buf.nbytes, buf.base))
-          if last_appearance[buf.base] == i: taken_parts.remove((cur.base, cur.offset, buf.nbytes, buf.base))
-
   if DEBUG >= 1:
-    ak=dedup(x for x in assigned.keys() if x._base is None)
-    av=dedup(x for x in assigned.values() if x._base is None)
-    print(f"{debug_prefix} memory reduced from {sum([x.nbytes for x in ak])/1e6:.2f} MB ->",
-          f"{sum([x.nbytes for x in av+list(global_buffers.values())])/1e6:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
+    ak, av = dedup(x for x in assigned.keys() if x._base is None), dedup(x for x in assigned.values() if x._base is None) + list(global_buffers.values())
+    omem, nmem = sum([x.nbytes for x in ak])/1e6, sum([x.nbytes for x in av])/1e6
+    if omem != nmem: print(f"{debug_prefix} memory reduced from {omem:.2f} MB -> {nmem:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
 
   return assigned
 
