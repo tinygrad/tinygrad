@@ -302,7 +302,7 @@ pm_reduce = PatternMatcher([
   (UPat(Ops.REDUCE, name="x"), reduce_to_acc)
 ])
 
-def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
+def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None, is_conv=False) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
@@ -313,7 +313,12 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   else: sink = graph_rewrite(sink, sym+load_store_folding+correct_load_store+load_store_indexing, ctx=opts)
 
   # optional pre matcher
-  if opts is not None and opts.pre_matcher is not None: sink = graph_rewrite(sink, opts.pre_matcher)
+  if opts is not None and opts.pre_matcher is not None:
+    if is_conv:
+      from tinygrad.runtime.ops_dsp import conv_pm
+      sink = graph_rewrite(sink, conv_pm+opts.pre_matcher)
+    else:
+      sink = graph_rewrite(sink, opts.pre_matcher)
 
   # late unroll
   """

@@ -678,7 +678,8 @@ class Kernel:
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
-    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
+    is_conv = len(self.full_shape) == 6 and self.full_shape[2:4] == (3,3)
+    self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts, is_conv))
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
