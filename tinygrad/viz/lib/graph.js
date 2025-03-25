@@ -71,6 +71,9 @@ function getBuffer(e) {
   const [_, size, dtype, device, num] = e.label.split("\n");
   return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
 }
+function pluralize(num, name, alt=null) {
+  return num === 1 ? `${num} ${name}` : `${num} ${alt ?? name+'s'}`
+}
 
 function renderMemoryGraph(graph) {
   // ** construct alloc/free traces
@@ -170,12 +173,12 @@ function renderMemoryGraph(graph) {
     const metadata = document.querySelector(".container.metadata");
     document.getElementById("current-buf")?.remove();
     const { num, dtype, nbytes, ...rest } = buf;
-    let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${x[x.length-1]-x[0]} timesteps`;
-    label += Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n');
+    let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${pluralize(x[x.length-1]-x[0], 'timestep')}`;
+    label += '\n'+Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n');
     const buf_children = children.get(id);
     if (buf_children) {
       const n = buf_children.length;
-      label += `\n${n} `+(n === 1 ? "child" : "children")+":\n"
+      label += `\n${pluralize(n, 'child', 'children')}\n`;
       label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
     }
     metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
