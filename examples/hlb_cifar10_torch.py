@@ -72,15 +72,15 @@ class UnsyncedBatchNorm(nn.Module):
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-      batch_mean = x.mean(dim=(1, 3, 4))
+      batch_mean = x.mean(dim=(1,3,4))
       y = (x - batch_mean.detach().reshape(batch_mean.shape[0], 1, -1, 1, 1))
-      batch_var = (y*y).mean(dim=(1, 3, 4))
+      batch_var = (y*y).mean(dim=(1,3,4))
       batch_invstd = (batch_var + self.eps).pow(-0.5)
 
       if self.track_running_stats:
-        self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach()
-        batch_var_adjust = np.prod(y.shape[1:]) / (np.prod(y.shape[1:]) - y.shape[2])
-        self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach()
+        self.running_mean = (1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach()
+        batch_var_adjust = np.prod(y.shape[1:])/(np.prod(y.shape[1:])-y.shape[2])
+        self.running_var = (1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach()
         self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
@@ -106,11 +106,13 @@ class ConvGroup(nn.Module):
   def forward(self, x):
     x = self.conv1(x)
     x = F.max_pool2d(x, 2)
-    x = self.norm1(x.float())
+    x = x.float()
+    x = self.norm1(x)
     x = quick_gelu(x)
     residual = x
     x = self.conv2(x)
-    x = self.norm2(x.float())
+    x = x.float()
+    x = self.norm2(x)
     x = quick_gelu(x)
 
     return x + residual
@@ -147,16 +149,16 @@ bias_scaler = 58
 hyp = {
   'seed' : 209,
   'opt': {
-  'bias_lr':            1.76 * bias_scaler/512,
-  'non_bias_lr':        1.76 / 512,
-  'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
-  'non_bias_decay':     1.08 * 6.45e-4 * BS,
-  'final_lr_ratio':     0.025,
-  'initial_div_factor': 1e6,
-  'label_smoothing':    0.20,
-  'momentum':           0.85,
-  'percent_start':      0.23,
-  'loss_scale_scaler':  1./128   # (range: ~1/512 - 16+, 1/128 w/ FP16)
+    'bias_lr':            1.76 * bias_scaler/512,
+    'non_bias_lr':        1.76 / 512,
+    'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
+    'non_bias_decay':     1.08 * 6.45e-4 * BS,
+    'final_lr_ratio':     0.025,
+    'initial_div_factor': 1e6,
+    'label_smoothing':    0.20,
+    'momentum':           0.85,
+    'percent_start':      0.23,
+    'loss_scale_scaler':  1./128   # (range: ~1/512 - 16+, 1/128 w/ FP16)
   },
   'net': {
     'kernel_size': 2,       # kernel size for the whitening layer
@@ -208,8 +210,7 @@ def train_cifar():
     divisor = y.shape[1]
     assert isinstance(divisor, int), "only supported int divisor"
     y = (1 - label_smoothing)*y + label_smoothing / divisor
-    ret = -F.log_softmax(x, dim=1) * y
-    ret = ret.sum(dim=1)
+    ret = -(F.log_softmax(x, dim=1) * y).sum(dim=1)
     if reduction == 'none': return ret
     if reduction == 'sum': return ret.sum()
     if reduction == 'mean': return ret.mean()
@@ -222,16 +223,16 @@ def train_cifar():
   # return a binary mask in the format of BS x C x H x W with a random square mask
   def make_square_mask(shape, mask_size, device) -> torch.tensor:
     BS, _, H, W = shape
-    low_x = torch.randint(0, W-mask_size, (BS, 1, 1, 1), device=device)
-    low_y = torch.randint(0, H-mask_size, (BS, 1, 1, 1), device=device)
-    idx_x = torch.arange(W, dtype=torch.int32, device=device).reshape((1, 1, 1, W))
-    idx_y = torch.arange(H, dtype=torch.int32, device=device).reshape((1, 1, H, 1))
+    low_x = torch.randint(0, W-mask_size, (BS,1,1,1), device=device)
+    low_y = torch.randint(0, H-mask_size, (BS,1,1,1), device=device)
+    idx_x = torch.arange(W, dtype=torch.int32, device=device).reshape((1,1,1,W))
+    idx_y = torch.arange(H, dtype=torch.int32, device=device).reshape((1,1,H,1))
     return ((idx_x >= low_x) & (idx_x < (low_x + mask_size)) & (idx_y >= low_y) & (idx_y < (low_y + mask_size)))
 
   def random_crop(X:torch.tensor, crop_size=32):
     mask = make_square_mask(X.shape, crop_size, X.device)
     mask = mask.expand((-1,3,-1,-1))
-    X_cropped = X[mask] #torch.Tensor(X.numpy()[mask.numpy()])
+    X_cropped = X[mask]
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
   def cutmix(X, Y, mask_size=3):
@@ -247,7 +248,7 @@ def train_cifar():
     return X_cutmix, Y_cutmix
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
-  def fetch_batches(X_in, Y_in, BS, is_train):
+  def fetch_batches(X_in:torch.tensor, Y_in:torch.tensor, BS:int, is_train:bool):
     step, epoch = 0, 0
     device = X_in.device
     while True:
@@ -257,7 +258,7 @@ def train_cifar():
         if getenv("RANDOM_CROP", 1):
           X = random_crop(X, crop_size=32)
         if getenv("RANDOM_FLIP", 1):
-          X = torch.where((torch.rand(X.shape[0], 1, 1, 1, device=device) < 0.5), X.flip(-1), X)  # flip LR
+          X = torch.where((torch.rand(X.shape[0],1,1,1, device=device) < 0.5), X.flip(-1), X)  # flip LR
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
@@ -278,7 +279,6 @@ def train_cifar():
       epoch += 1
       if not is_train: break
 
-  # transform function instead of list
   def apply_transforms(x):
     x = x.float() / 255.0
     x = x.reshape(-1,3,32,32) - torch.tensor(cifar_mean, device=x.device).reshape(1,3,1,1)
