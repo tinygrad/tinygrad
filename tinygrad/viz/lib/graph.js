@@ -76,13 +76,16 @@ function renderMemoryGraph(graph) {
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
+  const children = new Map(); // {buffer: [...assign]}
   for (const [k,v] of Object.entries(graph)) {
-    if (!(v.label.startsWith("ASSIGN"))) continue;
+    if (!v.label.startsWith("ASSIGN")) continue;
     actions.push({ op: "write", buffer: v.src[0] });
-    for (const s of graph[v.src[1]].src) {
-      const snode = graph[s];
-      const srcBuf = snode.label.startsWith("ASSIGN") ? snode.src[0] : s;
-      if (srcBuf !== v.src[0]) actions.push({ op: "read", buffer: srcBuf });
+    for (const ks of graph[v.src[1]].src) {
+      const node = graph[ks];
+      const s = node.label.startsWith("ASSIGN") ? node.src[0] : ks;
+      if (!children.has(s)) children.set(s, []);
+      children.get(s).push(v);
+      if (s !== v.src[0]) actions.push({ op: "read", buffer: s });
     }
   }
   const prealloc = new Set();
@@ -108,7 +111,7 @@ function renderMemoryGraph(graph) {
   let memUsed = 0; // y
   for (const id of prealloc) {
     const buf = getBuffer(graph[id]);
-    ret[id] = { x: [timestep], y: [memUsed], buf };
+    ret[id] = { x: [timestep], y: [memUsed], buf, id };
     memUsed += buf.nbytes;
   }
   let peak = memUsed;
@@ -119,7 +122,7 @@ function renderMemoryGraph(graph) {
     // alloc
     if (idx === -1) {
       liveBufs.push(t.buffer);
-      ret[t.buffer] = { x: [timestep], y: [memUsed], buf };
+      ret[t.buffer] = { x: [timestep], y: [memUsed], buf, id: t.buffer };
       memUsed += buf.nbytes;
       peak = Math.max(memUsed, peak);
       timestep += 1;
@@ -150,7 +153,7 @@ function renderMemoryGraph(graph) {
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
   const xaxis = d3.axisBottom(xscale);
   const axesGroup = render.append("g").attr("id", "axes");
-  axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(d3.format('.3s')));
+  axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(d3.format(".3~s")));
   axesGroup.append("g").attr("transform", `translate(0, ${yscale.range()[0]})`).call(d3.axisBottom(xscale).tickFormat(() => ""));
   const polygonGroup = render.append("g").attr("id", "polygons");
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
@@ -161,8 +164,25 @@ function renderMemoryGraph(graph) {
     const p0 = xs.map((x, i) => `${x},${y1[i]}`);
     const p1 = xs.map((x, i) => `${x},${y2[i]}`).reverse();
     return `${p0.join(' ')} ${p1.join(' ')}`;
-  }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`);
+  }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`).on("mouseover", (e, { id, buf, x }) => {
+    d3.select(e.currentTarget).attr("stroke", "rgba(26, 27, 38, 0.8)").attr("stroke-width", 0.8);
+    const metadata = document.querySelector(".container.metadata");
+    document.getElementById("current-buf")?.remove();
+    const { num, dtype, ...rest } = buf;
+    let label = `<BUFFER n${num} ${dtype}>\n${Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n')}\nalive for ${x[x.length-1]-x[0]} timesteps`;
+    const buf_children = children.get(id);
+    if (buf_children) {
+      const n = buf_children.length;
+      label += `\n${n} `+(n === 1 ? "child" : "children")+":\n"
+      label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
+    }
+    metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
+  }).on("mouseout", (e, _) => {
+    d3.select(e.currentTarget).attr("stroke", null).attr("stroke-width", null);
+    document.getElementById("current-buf")?.remove()
+  });
   // TODO: add the toposort graph here
+  document.querySelector(".progress-message").style.display = "none";
   d3.select("#nodes").html("");
   d3.select("#edges").html("");
 }
