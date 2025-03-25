@@ -745,13 +745,16 @@ def get_onnx_ops():
       # 3x3 depthwise (C,1,3,3)
       # "width multiple of 4 depth multiple of 32 aligned to 128bytes"
       x = x.pad(((0,0), (0,0), (0,0), (0,1)))
-      if x.shape[0]%32 == 0 and False:
-        print("HERE")
+      if x.shape[0]%32 == 0:
+        # depth/32 is a loop -- lsr(depth, #5)
+        # width/4 is a loop -- lsr(out_width, #2)
+        # height is a loop
         x = x.reshape(-1, 32, 1, 3, 4)
         order = (0,3,1,2,4)
         x = x.permute(*order).contiguous().permute(*argsort(order))
         x = x.reshape(-1, 1, 3, 4)
       else:
+        print("HERE", x.shape)
         order = (2,0,1,3)
         x = x.permute(*order).contiguous().permute(*argsort(order))
       x = x[:, :, :, :3]
@@ -764,7 +767,7 @@ def get_onnx_ops():
       else:
         # DSP swizzle memory
         x = x.reshape(x.shape[0], x.shape[1]//WEIGHT_SHIFT, WEIGHT_SHIFT).permute(1,0,2).contiguous().permute(1,0,2).reshape(x.shape)
-    if getenv("NHWC") and x.shape == (1000, 1280):
+    if False and getenv("NHWC") and x.shape == (1000, 1280):
       x = x.reshape(-1, 320, 4)
       order = (1,0,2)
       x = x.permute(*order).contiguous().permute(*argsort(order))

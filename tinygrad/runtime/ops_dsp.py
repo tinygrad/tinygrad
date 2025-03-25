@@ -67,8 +67,11 @@ def multi_add_int32(**aa):
     swizzle.append(32+i)
     swizzle.append(64+i)
     swizzle.append(96+i)
+  for x in aa.values():
+    assert x.src[0].dtype.scalar() is dtypes.uchar
+    assert x.op is Ops.CAST
   swizzle = tuple(swizzle)
-  m0 = UOp(Ops.CAT, dtypes.int.vec(128), src=tuple(x.src[0] for x in aa.values())).gep(swizzle)
+  m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(x.src[0] for x in aa.values())).gep(swizzle)
   return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
 
 def multi_add_int2(**aa):
