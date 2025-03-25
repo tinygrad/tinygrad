@@ -71,6 +71,11 @@ def gep_on_reduce(gep, alu):
       alu.dtype.count >= gep.dtype.count else None
 
 def multi_add_int32(**aa):
+  if 'acc' in aa:
+    acc = aa['acc']
+    del aa['acc']
+  else:
+    acc = None
   if 'd0' not in aa:
     c0 = aa['c0']
     if c0.src[0].op is Ops.GEP and c0.src[0].arg == (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78, 82, 86, 90, 94, 98, 102, 106, 110, 114, 118, 122, 126):
@@ -91,7 +96,11 @@ def multi_add_int32(**aa):
     assert x.op is Ops.CAST
   swizzle = tuple(swizzle)
   m0 = UOp(Ops.CAT, dtypes.uchar.vec(128), src=tuple(aa[k].src[0] for k in sorted(aa.keys()))).gep(swizzle)
-  return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
+  if acc is not None:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (acc, m0, UOp.const(dtypes.uint, 0x01010101)),
+               "__builtin_HEXAGON_V6_vrmpybus_acc_128B({0}, {1}, {2})")
+  else:
+    return UOp(Ops.CUSTOMI, dtypes.int.vec(32), (m0, UOp.const(dtypes.uint, 0x01010101)), "__builtin_HEXAGON_V6_vrmpybus_128B({0}, {1})")
 
 def multi_add_int2(**aa):
   r0 = UOp(Ops.VECTORIZE, dtypes.uchar.vec(8), tuple(x.src[0].gep(0) for x in aa.values()))
@@ -128,6 +137,7 @@ dsp_pm = PatternMatcher([
 
   # build __builtin_HEXAGON_V6_vrmpybus_128B
   (UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
+  (UPat(name="acc") + UPat(Ops.CAST,dtype=dtypes.int.vec(32),name="a0")+UPat(Ops.CAST,name="b0")+UPat(Ops.CAST,name="c0")+UPat(Ops.CAST,name="d0"), multi_add_int32),
 
   # build __builtin_HEXAGON_A2_vraddub
   (UPat(Ops.CAST,dtype=dtypes.int.vec(2),name="a0")+UPat(Ops.CAST,name="a1")+UPat(Ops.CAST,name="a2")+UPat(Ops.CAST,name="a3")+ \
@@ -172,6 +182,20 @@ def vectorize_shuffle(x:UOp):
         arg.append(-1)
     str_arg = ','.join([f'{y:4d}' for y in arg])
     full_arg = "__builtin_shufflevector({0}, {0}, "+str_arg+")"
+    return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
+  if len(gepped) == 2:
+    arg = []
+    for s in x.src:
+      if s.op is Ops.GEP:
+        if s.src[0] is gepped[0]:
+          arg.append(s.arg[0])
+          continue
+        if s.src[0] is gepped[1]:
+          arg.append(gepped[0].dtype.count + s.arg[0])
+          continue
+      arg.append(-1)
+    str_arg = ','.join([f'{y:4d}' for y in arg])
+    full_arg = "__builtin_shufflevector({0}, {1}, "+str_arg+")"
     return UOp(Ops.CUSTOM, x.dtype, tuple(gepped), full_arg)
   if len(gepped) != 3: return None
   if not all(x.dtype.scalar() is dtypes.uchar and x.dtype.count == 128 for x in gepped): return None
