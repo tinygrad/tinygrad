@@ -83,7 +83,7 @@ class FrozenBatchNorm2d(nn.BatchNorm2d):
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach().cast(self.running_var.dtype))
       self.num_batches_tracked += 1
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt()).cast(x.dtype)
+    return x.cast(dtypes.float32).batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt()).cast(x.dtype)
 
 class Conv2dNormal(nn.Conv2d):
   def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int, ...],
