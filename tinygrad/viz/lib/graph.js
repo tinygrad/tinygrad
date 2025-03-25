@@ -76,16 +76,16 @@ function renderMemoryGraph(graph) {
   // ** construct alloc/free traces
   // we can map reads/writes from the kernel graph
   const actions = [];
-  const children = new Map();
+  const children = new Map(); // {buffer: [...assign]}
   for (const [k,v] of Object.entries(graph)) {
-    if (!(v.label.startsWith("ASSIGN"))) continue;
+    if (!v.label.startsWith("ASSIGN")) continue;
     actions.push({ op: "write", buffer: v.src[0] });
-    for (const s of graph[v.src[1]].src) {
-      const snode = graph[s];
-      const srcBuf = snode.label.startsWith("ASSIGN") ? snode.src[0] : s;
-      if (!children.has(srcBuf)) children.set(srcBuf, new Map());
-      children.get(srcBuf).set(v.src[1]);
-      if (srcBuf !== v.src[0]) actions.push({ op: "read", buffer: srcBuf });
+    for (const ks of graph[v.src[1]].src) {
+      const node = graph[ks];
+      const s = node.label.startsWith("ASSIGN") ? node.src[0] : ks;
+      if (!children.has(s)) children.set(s, []);
+      children.get(s).push(v);
+      if (s !== v.src[0]) actions.push({ op: "read", buffer: s });
     }
   }
   const prealloc = new Set();
@@ -172,8 +172,9 @@ function renderMemoryGraph(graph) {
     let label = `<BUFFER n${num} ${dtype}>\n${Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n')}\nalive for ${x[x.length-1]-x[0]} timesteps`;
     const buf_children = children.get(id);
     if (buf_children) {
-      const n = buf_children.size;
-      label += `\n${n} `+(n === 1 ? "child" : "children")
+      const n = buf_children.length;
+      label += `\n${n} `+(n === 1 ? "child" : "children")+":\n"
+      label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
     }
     metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
   }).on("mouseout", (e, _) => {
@@ -181,6 +182,7 @@ function renderMemoryGraph(graph) {
     document.getElementById("current-buf")?.remove()
   });
   // TODO: add the toposort graph here
+  document.querySelector(".progress-message").style.display = "none";
   d3.select("#nodes").html("");
   d3.select("#edges").html("");
 }
