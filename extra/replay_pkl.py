@@ -122,11 +122,12 @@ if __name__ == "__main__":
           elif knum == 15:
             # 28x28, 192 chan, 3x3 dwconv
             k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
-            k.apply_opt(Opt(OptOps.PADTO, 2, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
+            #k.apply_opt(Opt(OptOps.PADTO, 2, 128))
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 64))
             #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             #k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            pass
           elif knum == 3:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 16))
