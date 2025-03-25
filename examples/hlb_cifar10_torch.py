@@ -118,8 +118,7 @@ class ConvGroup(nn.Module):
 class SpeedyResNet(nn.Module):
   def __init__(self, W):
     super().__init__()
-    self.whitening = nn.Parameter(W, requires_grad=False)
-
+    self.whitening = W
     self.conv1 = nn.Conv2d(12, 32, kernel_size=1, bias=False)
     self.conv_group1 = ConvGroup(32, 64)
     self.conv_group2 = ConvGroup(64, 256)
@@ -128,18 +127,20 @@ class SpeedyResNet(nn.Module):
 
   def forward(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
-    x = F.conv2d(x, self.whitening)
-    x = F.pad(x, (1,0,0,1))
-    x = self.conv1(x)
-    x = quick_gelu(x)
-    x = self.conv_group1(x)
-    x = self.conv_group2(x)
-    x = self.conv_group3(x)
-    x = torch.amax(x, dim=(2,3))
-    x = self.fc(x)
-    x = x / 9.
+    def forward(x):
+      x = F.conv2d(x, self.whitening)
+      x = F.pad(x, (1,0,0,1))
+      x = self.conv1(x)
+      x = quick_gelu(x)
+      x = self.conv_group1(x)
+      x = self.conv_group2(x)
+      x = self.conv_group3(x)
+      x = torch.amax(x, dim=(2, 3))
+      x = self.fc(x)
+      x = x / 9.
+      return x
 
-    return x if training else (x + self.forward(x[..., :, ::-1], training=True)) / 2.
+    return forward(x) if training else (forward(x) + forward(x.flip(-1))) / 2.
 
 # Keep the original hyper-parameters
 bias_scaler = 58
@@ -430,6 +431,7 @@ def train_cifar():
 
     if STEPS == 0 or i == STEPS: break
 
+    if TINY_BACKEND: GlobalCounters.reset()
     X, Y = next(batcher)
     if len(GPUS) > 1 and torch.cuda.device_count() > 1:
       X = X.to(device)
