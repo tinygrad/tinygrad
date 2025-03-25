@@ -34,7 +34,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
     else:
       key = (buf.device, buf.dtype, buf.options, buf.nbytes)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      else: reuse_buffers[key].append((buffer_replace[buf][0], None))
+      else: reuse_buffers[key].append(buffer_replace[buf][0])
 
   assigned = {}
   global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
