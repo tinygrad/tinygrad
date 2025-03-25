@@ -177,8 +177,7 @@ function renderMemoryGraph(graph) {
     label += '\n'+Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n');
     const buf_children = children.get(id);
     if (buf_children) {
-      const n = buf_children.length;
-      label += `\n${pluralize(n, 'child', 'children')}\n`;
+      label += `\n${pluralize(buf_children.length, 'child', 'children')}\n`;
       label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
     }
     metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
