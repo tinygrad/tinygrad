@@ -24,7 +24,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
 
   buffer_replace = {}
   reuse_buffers:dict[tuple[str], list[Buffer]] = defaultdict(list)
-  global_planner:dict[tuple[str], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(256 << 30, block_size=0x100, lv2_cnt=32)))
+  global_planner:dict[tuple[str], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(256 << 30, block_size=0x200, lv2_cnt=32)))
   for (time, is_open_ev), buf in buffer_requests:
     # Check if can suballoc.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
@@ -33,13 +33,16 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       global_planner[buf.device] = (max(global_planner[buf.device][0], buffer_replace[buf][1] + buf.nbytes), global_planner[buf.device][1])
     else:
       key = (buf.device, buf.dtype, buf.options, buf.nbytes)
-      if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), 0) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, 0)
+      if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
       else: reuse_buffers[key].append((buffer_replace[buf][0], None))
 
+  assigned = {}
   global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
   buffer_replace = {buf: (base or global_buffers[buf.device], off) for buf, (base, off) in buffer_replace.items()}
-
-  assigned = {buf: Buffer(buf.device, buf.size, buf.dtype, base=base, offset=off) for buf, (base, off) in buffer_replace.items() if buf != base}
+  for buf, (base, off) in buffer_replace.items():
+    if buf == base: continue
+    if off is None: assigned[buf] = base
+    else: assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=base, offset=off)
 
   # and now subbuffers
   for buf in buf_to_opt:
