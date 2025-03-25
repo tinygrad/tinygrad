@@ -197,6 +197,8 @@ def vectorize_shuffle(vec:UOp):
     str_arg = ','.join([f'{y:4d}' for y in arg])
     full_arg = "__builtin_shufflevector({0}, {0}, "+str_arg+")"
     return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
+  if not all(x.dtype.scalar() is dtypes.uchar for x in gepped): return None
+  if not all_same([x.dtype.count for x in gepped]) or gepped[0].dtype.count != vec.dtype.count: return None
   if len(gepped) == 2:
     arg = []
     for s in vec.src:
@@ -212,8 +214,6 @@ def vectorize_shuffle(vec:UOp):
     full_arg = "__builtin_shufflevector({0}, {1}, "+str_arg+")"
     return UOp(Ops.CUSTOM, vec.dtype, tuple(gepped), full_arg)
   if len(gepped) != 3: return None
-  if not all(x.dtype.scalar() is dtypes.uchar for x in gepped): return None
-  if not all_same([x.dtype.count for x in gepped]) or gepped[0].dtype.count != vec.dtype.count: return None
   arg = []
   for s in vec.src:
     if s.op is Ops.GEP:
