@@ -1,4 +1,4 @@
-from tinygrad.device import Compiled, Compiler, MallocAllocator, Renderer, Allocator
+from tinygrad.device import Compiled, Compiler, Renderer, Allocator
 
 class NullRenderer(Renderer):
   def render(self, uops:list) -> str: return ""
