@@ -27,8 +27,8 @@ if TINY_BACKEND:
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   device = torch.device("tiny")
 else:
-  GPUS = [f"cuda:{i}" for i in range(getenv("GPUS", 1))]
-  device = torch.device(GPUS[0].split(':')[0] if len(GPUS) > 0 and torch.cuda.is_available() else "cpu")
+  GPUS = ["cpu"]
+  device = torch.device("cpu")
 
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
@@ -178,9 +178,6 @@ def train_cifar():
   def set_seed(seed):
     torch.manual_seed(seed)
     random.seed(seed)
-    if torch.cuda.is_available():
-      torch.cuda.manual_seed(seed)
-      torch.cuda.manual_seed_all(seed)
 
   # ========== Model ==========
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
@@ -438,12 +435,10 @@ def train_cifar():
       Y = Y.to(device)
 
     # Train step with timing
-    torch.cuda.synchronize()
     start_time = time.monotonic()
 
     loss = train_step(model, None, None, X, Y)
 
-    torch.cuda.synchronize()
     et = time.monotonic()
     loss_cpu = loss.item()
 
@@ -456,11 +451,7 @@ def train_cifar():
     cl = time.monotonic()
     device_str = f"{device}" if len(GPUS) <= 1 else f"{device} * {len(GPUS)}"
 
-    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.param_groups[0]['lr']:.6f} LR, ", end="")
-    if TINY_BACKEND:
-      print(f"{GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
-    else:
-      print(f"{(torch.cuda.max_memory_allocated()/1e9 if torch.cuda.is_available() else 0):.2f} GB used")
+    print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.param_groups[0]['lr']:.6f} LR, " + (f"{GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS" if TINY_BACKEND else ""))
 
     st = cl
     i += 1
