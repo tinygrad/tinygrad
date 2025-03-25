@@ -5,8 +5,7 @@ class NullRenderer(Renderer):
 
 class NullProgram:
   def __init__(self, name:str, lib:bytes): pass
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
-    pass
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False): pass
 
 class NullAllocator(Allocator):
   def _alloc(self, size, options): return "null"
