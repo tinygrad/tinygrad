@@ -9,9 +9,8 @@ if sys.platform == 'win32':
     raise FileNotFoundError('LLVM not found, you can install it with `winget install LLVM.LLVM` or point at a custom dll with LLVM_PATH')
 elif OSX:
   # Will raise FileNotFoundError if brew is not installed
-  brew_prefix = subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()
   # `brew --prefix` will return even if formula is not installed
-  if not os.path.exists(brew_prefix):
+  if not os.path.exists(brew_prefix:=subprocess.check_output(['brew', '--prefix', 'llvm']).decode().strip()):
     raise FileNotFoundError('LLVM not found, you can install it with `brew install llvm`')
   LLVM_PATH: str|None = os.path.join(brew_prefix, 'lib', 'libLLVM.dylib')
 else:

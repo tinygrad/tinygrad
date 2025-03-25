@@ -49,10 +49,9 @@ class GraphRewriteDetails(TypedDict):
   changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
-def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
+def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
-  # NOTE: this is [id, [label, src_ids, color]]
-  graph: dict[int, tuple[str, list[int], str]] = {}
+  graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort):
     # always exclude DEVICE/CONST/UNIQUE
@@ -72,7 +71,7 @@ def uop_to_json(x:UOp) -> dict[int, tuple[str, list[int], str]]:
       if x in excluded:
         if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
-    graph[id(u)] = (label, [id(x) for x in u.src if x not in excluded], uops_colors.get(u.op, "#ffffff"))
+    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff")}
   return graph
 
 def get_details(k:Any, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
