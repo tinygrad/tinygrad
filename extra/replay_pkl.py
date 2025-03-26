@@ -105,6 +105,30 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
           """
+          # blocked
+          if k.full_shape[-3:] == (32,3,3):
+            #if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
+            # 3x3 dwconv
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
+            if k.full_shape[-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
+          elif len(k.full_shape) == 3 and k.full_shape[1] == 32:
+            #if k.full_shape[0]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 4))
+            # weight without more
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 32))
+            if k.full_shape[0]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+          elif len(k.full_shape) == 4 and k.full_shape[2] == 32:
+            #if k.full_shape[1]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 1, 4))
+            # weight with more
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+            if k.full_shape[1]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+          elif len(k.full_shape) == 1 and k.full_shape[0]%128 == 0:
+            k.apply_opt(Opt(OptOps.UPCAST, 0, 128))
+
+          """
           #if knum in [7, 11, 14, 18]:
             # alignment issue?
             #pass
@@ -121,9 +145,9 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
           elif knum == 15:
             # 28x28, 192 chan, 3x3 dwconv
-            k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
+            #k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
             #k.apply_opt(Opt(OptOps.PADTO, 2, 128))
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 64))
+            #k.apply_opt(Opt(OptOps.UPCAST, 2, 64))
             #k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             #k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
@@ -133,9 +157,12 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 1, 16))
             k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
           elif knum == 4:
-            k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 96))
-            k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            pass
+            #k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
+            #k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
           elif knum == 26:
             # 14x14, 384 chan, 3x3 dwconv
             #k.apply_opt(Opt(OptOps.PADTO, 4, 4))
@@ -143,11 +170,15 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UPCAST, 2, 128))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 7))  # it's a little slow to compile with 7
           elif knum == 5:
-            k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
-            k.apply_opt(Opt(OptOps.UPCAST, 2, 0))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
+            k.apply_opt(Opt(OptOps.UPCAST, 3, 32))
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 4))
+            #k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
+            #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
             # this breaks something
             #k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            pass
           #elif knum in [8, 12]:
             # 3x3 dwconv w 144 chans on 56x56 / 28x28
             #k.apply_opt(Opt(OptOps.UNROLL, 1, 0))
@@ -171,8 +202,8 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 8))
           elif knum == 14:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-            k.apply_opt(Opt(OptOps.UPCAST, 1, 192))
-            k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
           elif knum == 40:
             k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 64))
@@ -260,6 +291,7 @@ if __name__ == "__main__":
               elif full_shape[0]%32 == 0: k.apply_opt(Opt(OptOps.UPCAST, 0, 32))
             #print("here", out_shape, out_strides, k.name)
             #k.hand_coded_optimizations()
+          """
           #if knum in [5]: k.apply_opt(Opt(OptOps.UPCAST, 1, 2))
         p2 = k.to_program()
         new_ei = replace(ei, prg=CompiledRunner(p2), bufs=dsp_bufs)
