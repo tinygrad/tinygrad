@@ -104,7 +104,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   # split range
   rng = idxs[0]
   rng0 = rng.const_like(rng.src[0])
-  rng1 = rng.replace(src=(rng.src[0]+1, rng.src[1]))
+  rng1 = rng.replace(src=(rng.src[0].const_like(rng.src[0].arg+1), rng.src[1]))
   #rng0 = rng.replace(src=(rng.src[0], rng.src[1]//2))
   #rng1 = rng.replace(src=(rng.src[1]//2, rng.src[1]))
   rngv = UOp(Ops.VECTORIZE, rng.dtype.vec(2), (rng0, rng1))
