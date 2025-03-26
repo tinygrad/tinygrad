@@ -268,17 +268,30 @@ for dim in [2, 3]:
   torch.library.impl(f"aten::avg_pool{dim}d", "privateuseone")(avg_pool)
   torch.library.impl(f"aten::avg_pool{dim}d_backward", "privateuseone")(avg_pool_backward)
 
-def pad_forward(self, padding, mode=None): return wrap(Tensor.pad(unwrap(self), padding, mode=mode))
+def pad_forward(self, padding, mode="constant", value=0):
+  return wrap(Tensor.pad(unwrap(self), padding, mode=mode, value=value))
 
 def pad_backward(grad_out, self, padding, mode):
   self, grad_out = unwrap(self), unwrap(grad_out)
   out = Tensor.pad(self, padding, mode=mode)
   return wrap(out.gradient(self, gradient=grad_out)[0])
 
-for dim in [1, 2, 3]:
-  for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
-    torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
-    torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
+class Pad(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, input, pad, mode="constant", value=0):
+    ctx.save_for_backward(input)
+    ctx.pad, ctx.mode, ctx.value = pad, mode, value
+    output = pad_forward(input, pad, mode=mode, value=value)
+    return output
+
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    grad_input = pad_backward(grad_output, input, ctx.pad, mode=ctx.mode)
+    return grad_input, None, None, None
+
+def tinygrad_pad_autograd(input, pad, mode="constant", value=0): return Pad.apply(input, pad, mode, value)
+torch.nn.functional.pad = tinygrad_pad_autograd
 
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
@@ -574,7 +587,14 @@ def wrap_fxn(k,f):
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
 if TORCH_DEBUG:
+  from torch.overrides import TorchFunctionMode, resolve_name
   from torch.utils._python_dispatch import TorchDispatchMode
+  class FuntionLog(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+      # print(f"Function Log: {resolve_name(func)} (*{args}, **{kwargs})")
+      print(f"Function Log: {resolve_name(func)}")
+      return func(*args, **(kwargs or {}))
+  (_function_log:=FuntionLog()).__enter__()
   class DispatchLog(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
       #print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
