@@ -40,6 +40,7 @@ if __name__ == "__main__":
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))
             k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-3, 32))
             if k.full_shape[-4]%4 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 4))
+            elif k.full_shape[-4]%7 == 0: k.apply_opt(Opt(OptOps.UPCAST, len(k.full_shape)-4, 7))
           elif len(k.full_shape) == 3 and k.full_shape[1] == 32:
             #if k.full_shape[0]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, 0, 4))
             # weight without more
