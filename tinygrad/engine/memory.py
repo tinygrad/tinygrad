@@ -1,3 +1,4 @@
+from typing import cast
 from collections import defaultdict
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.device import Device, Buffer
@@ -24,27 +25,27 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
 
   # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
   # Also track buffer replacements for buffers that do not support suballocation.
-  buffer_replace = {}
-  reuse_buffers:dict[tuple[str], list[Buffer]] = defaultdict(list)
-  global_planner:dict[tuple[str], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(1 << 44, block_size=0x1000, lv2_cnt=32)))
+  buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
+  reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
+  global_planner:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(1 << 44, block_size=0x1000, lv2_cnt=32)))
   for (_, is_open_ev), buf in buffer_requests:
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
       if is_open_ev: buffer_replace[buf] = (None, global_planner[buf.device][1].alloc(round_up(buf.nbytes, 0x1000)))
-      else: global_planner[buf.device][1].free(buffer_replace[buf][1])
+      else: global_planner[buf.device][1].free(cast(int, buffer_replace[buf][1]))
       global_planner[buf.device] = (max(global_planner[buf.device][0], buffer_replace[buf][1] + buf.nbytes), global_planner[buf.device][1])
     else:
       key = (buf.device, buf.dtype, buf.options, buf.nbytes)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      else: reuse_buffers[key].append(buffer_replace[buf][0])
+      else: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
   # Allocate global buffers based on the memory planner.
   global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
-  buffer_replace = {buf: (base or global_buffers[buf.device], off) for buf, (base, off) in buffer_replace.items()}
+  buffer_resolve:dict[Buffer, tuple[Buffer, int]] = {buf: (base or global_buffers[buf.device], off or 0) for buf,(base,off) in buffer_replace.items()}
 
   # Assign buffers. First, assign full buffers (not sub-buffers).
-  assigned = {}
-  for buf, (base, off) in buffer_replace.items():
+  assigned:dict[Buffer, Buffer] = {}
+  for buf, (base, off) in buffer_resolve.items():
     if buf != base:
       assigned[buf] = base if off is None else Buffer(buf.device, buf.size, buf.dtype, base=base, offset=off)
 
