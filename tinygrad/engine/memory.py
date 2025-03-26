@@ -41,7 +41,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
 
   # Allocate global buffers based on the memory planner.
   global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
-  buffer_resolve:dict[Buffer, tuple[Buffer, int]] = {buf: (base or global_buffers[buf.device], off or 0) for buf,(base,off) in buffer_replace.items()}
+  buffer_resolve:dict[Buffer, tuple[Buffer, int|None]] = {buf: (base or global_buffers[buf.device], off) for buf,(base,off) in buffer_replace.items()}
 
   # Assign buffers. First, assign full buffers (not sub-buffers).
   assigned:dict[Buffer, Buffer] = {}
