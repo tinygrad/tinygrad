@@ -725,13 +725,8 @@ class Kernel:
 
     if (OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]):
       if OptOps.TC not in [opt.op for opt in self.applied_opts]:
-        # print("There should be local and unroll for lds or Tensor Core")
         return ast
-
-    # print(self.upcasted_axis(1))
-    if not all_same([opt.arg for opt in self.applied_opts if opt.op in (OptOps.UNROLL, OptOps.LOCAL)]):
-      # print("unroll and local opts should be the same size")
-      return ast
+    if not all_same([opt.arg for opt in self.applied_opts if opt.op in (OptOps.UNROLL, OptOps.LOCAL)]): return ast
     return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="global_load"), transform_load)]), ctx=(self, set()))
 
   # **** this is the lowerer ****
@@ -747,11 +742,11 @@ class Kernel:
 
     if DEBUG >= 3:
       print(self.name)
-      if DEBUG >= 4: print(self.ast)
+      if DEBUG >= 5: print(self.ast)
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
         print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
-      if DEBUG >= 4: print(modified_ast)
+      if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
