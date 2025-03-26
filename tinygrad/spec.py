@@ -90,7 +90,8 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.INDEX)), UPat())), lambda: True),
+  #(UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.INDEX)), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat()), name="idx"), validate_index),
   (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool, name="mask")), name="idx"), validate_index),
 
   # LOAD takes a <bufidx, alt?, barrier?>

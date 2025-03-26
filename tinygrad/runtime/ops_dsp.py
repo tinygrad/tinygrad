@@ -247,8 +247,8 @@ def vectorize_shuffle(vec:UOp):
   return None
 
 dsp_pm_late = PatternMatcher([
-  # prefetch L1
-  (UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"), prefetch_l1),
+  # prefetch L1 (breaks the index check!)
+  #(UPat(Ops.LOAD, dtype=(dtypes.uchar.vec(4), dtypes.uchar.vec(8)), name="ld"), prefetch_l1),
 
   # 64 -> 128
   #(UPat(Ops.LOAD, dtype=dtypes.uchar.vec(64), src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, name="idx"),)),)),
