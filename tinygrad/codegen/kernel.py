@@ -587,7 +587,8 @@ class Kernel:
       if op.op is Ops.SINK:
         range_split_axis = ()
         if self.full_shape[self.first_reduce:self.first_reduce+3] == (3,3,32):
-          range_split_axis = (self.first_reduce-2, self.first_reduce-1)
+          #range_split_axis = (self.first_reduce-2, self.first_reduce-1)
+          range_split_axis = (self.first_reduce-1,)
         return ret.replace(arg = KernelInfo(to_function_name(self.name) if name_override is None else name_override,
                                             self.local_dims, self.upcasted, self.dont_use_locals, range_split_axis))
       if op.op is Ops.REDUCE_AXIS:
