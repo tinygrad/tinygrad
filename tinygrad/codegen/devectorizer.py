@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, resolve
 from tinygrad.ops import graph_rewrite, GroupOp
-from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym
+from tinygrad.codegen.symbolic import symbolic_simple, split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic
 from tinygrad.helpers import getenv, flatten, TRANSCENDENTAL, AMX, prod, DEVECTORIZE
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
 from tinygrad.renderer import Renderer
@@ -15,16 +15,16 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
-  midx = UOp.sink(*([vec.gep(i) for i in range(vec.dtype.count)]+
-                   ([mask.gep(i) for i in range(vec.dtype.count)] if mask is not None else []))).simplify()
-  if getenv("VIZ"): graph_rewrite(midx, PatternMatcher([]), name=f"simplify_buf_{buf.arg}")
+  midx = UOp.sink(UOp.sink(*[vec.gep(i) for i in range(vec.dtype.count)]),
+                  UOp.sink(*[mask.gep(i) for i in range(vec.dtype.count)]) if mask is not None else UOp(Ops.NOOP))
+  midx = graph_rewrite(midx, symbolic, name=f"index_buf_{buf.arg}")
   for i in range(vec.dtype.count):
-    idx = midx.src[i]
+    idx = midx.src[0].src[i]
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (midx.src[vec.dtype.count+i], root_src)
+    if mask is not None: root_src = (midx.src[1].src[i], root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
