@@ -669,12 +669,18 @@ class Kernel:
       wd, fr, tcd = ctx[0].global_dims, ctx[0].first_reduce, ctx[0].first_upcast
       local_shape = tuple(1 if st == 0 or i < wd or (i >= fr and i < tcd) else src_st.shape[i] for i,st in enumerate(src_st.real_strides()))
       load_st = store_st = ShapeTracker.from_shape(local_shape)
+      print("src_st before  swizzle",src_st)
+      print("store before   swizzle",store_st)
       for i in range(len(src_st.shape)):
         if i >= ctx[0].global_dims and i < ctx[0].first_reduce and store_st.shape[i] == 1:
           for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(store_st.shape))):
             if ctx[0].upcasted_axis(buf.arg)[upcast_index][2] and store_st.shape[index] != 1:
               store_st, src_st = store_st.permute_axis_pair((index, i)), src_st.permute_axis_pair((index, i))
               break
+      print("src_st after   swizzle",src_st)
+      print("store_st after swizzle",store_st)
+      print("load_st               ",load_st)
+      print("-----------------------")
       local_buffer = UOp(Ops.DEFINE_LOCAL, global_load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
       global_load = global_load.replace(src=(buf, src_st.to_uop()))
       ctx[1].add(global_load)
