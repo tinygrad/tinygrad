@@ -357,9 +357,9 @@ class Kernel:
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
       self.applied_opts.append(opt)
       return
+
     axis = self.real_axis(opt)
     check(axis < len(self.full_shape), "invalid axis")
-
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
