@@ -158,11 +158,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   must_divide = True
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
-    #if ls.dtype.count in [128+64, 128*2+64, 128*4+64]: return None  # leave 192 alone
-    if ls.dtype.count in [192, 288, 160, 96]: return None  # leave 192 alone
-    # we really want stores to be 128 for fast casting
-    #if ls.op is Ops.LOAD: lengths = [192]+lengths
-    #if ls.op is Ops.LOAD: lengths = [1536,1024,512,384,256,192,96]+lengths
+    if ls.dtype.count in [192, 288, 160, 96]: return None  # leave these as loads
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
@@ -304,34 +300,10 @@ pm_reduce = PatternMatcher([
   (UPat(Ops.REDUCE, name="x"), reduce_to_acc)
 ])
 
-def move_load_mask(ld:UOp, idx:UOp):
-  if len(idx.src) != 3: return None
-  mask = idx.src[2]
-  new_idx = idx.replace(src=idx.src[0:2])
-  return ld.substitute({idx:new_idx}) * mask.broadcast(ld.dtype.count).cast(ld.dtype)
-
-pm_move_load_masks = PatternMatcher([
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx"),), name="ld"), move_load_mask),
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="idx").cast(),), name="ld"), move_load_mask),
-])
-
-def fix_range(rng:UOp):
-  if rng.arg in [1,2] and rng.src[0].arg == 0:
-    return rng.replace(src=(rng.src[0]+1, rng.src[1]))
-
-pm_ranges = PatternMatcher([
-  (UPat(Ops.RANGE, name="rng"), fix_range)
-])
-
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None, is_conv=False) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
-
-  # we can move the load masks to after the load
-  #sink = graph_rewrite(sink, pm_move_load_masks, name="move_load_masks")
-
-  #sink = graph_rewrite(sink, pm_ranges)
 
   # devectorize is optional
   if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
@@ -345,16 +317,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None, is_conv=False) ->
       sink = graph_rewrite(sink, conv_pm+opts.pre_matcher)
     else:
       sink = graph_rewrite(sink, opts.pre_matcher)
-
-  # late unroll
-  """
-  late_unroll = PatternMatcher([(UPat(Ops.RANGE, arg=2, name="r"),
-                                 lambda r: UOp(Ops.UNROLL, dtypes.int, src=(UOp.const(dtypes.int.vec(3), (0,1,2)),), arg=((2,3),)) )])
-  sink = graph_rewrite(sink, late_unroll, name="late_unroll")
-  from tinygrad.codegen.expander import expander
-  sink = graph_rewrite(sink, sym+expander, name="late_expand")
-  sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)
-  """
 
   # remove reduce
   sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")

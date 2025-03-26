@@ -12,12 +12,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import ProgramSpec
 
-actions = []
-actions += [(Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0))]
-actions += [(Opt(op=OptOps.UNROLL, axis=1, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0))]
-actions += [(Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0))]
-actions += [(Opt(op=OptOps.PADTO, axis=axis, arg=amt), Opt(op=OptOps.UPCAST, axis=axis, arg=amt)) for amt in [128] for axis in range(7)]
-actions += [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7,16,32,64,128] for axis in range(6)]
+actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
 actions += [Opt(op=OptOps.LOCAL, axis=axis, arg=amt) for amt in [2,3,4,8,13,16,29] for axis in range(6)]
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, arg=amt) for amt in [13,16,28,29,32,49,64,256] for axis in range(3)]
@@ -114,18 +109,16 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
 
   if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
     for i, action in enumerate(kernel_actions):
-      if not isinstance(action, tuple) and action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
+      if action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
         # replace every tc_action with default tc with one tc_action for each available tc
         kernel_actions[i:i+1] = [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
 
   for i,a in enumerate(kernel_actions):
-    if not isinstance(a, tuple) and a.axis is not None and a.op is not OptOps.TC:
+    if a.axis is not None and a.op is not OptOps.TC:
       if ((ax:=lin.real_axis(a)) >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
     lin2 = lin.copy()
     try:
-      if isinstance(a, tuple):
-        for aa in a: lin2.apply_opt(aa)
-      else: lin2.apply_opt(a)
+      lin2.apply_opt(a)
       up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
