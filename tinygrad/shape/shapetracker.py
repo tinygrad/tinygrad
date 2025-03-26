@@ -132,7 +132,7 @@ class ShapeTracker:
   def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
   def expand(self, new_shape: tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
   def permute(self, axis: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
-  def permute_axes(self, axis: tuple[int, int]) -> ShapeTracker:
+  def permute_axis_pair(self, axis: tuple[int, int]) -> ShapeTracker:
     perm = list(range(len(self.shape)))
     perm[axis[0]], perm[axis[1]] = perm[axis[1]], perm[axis[0]]
     return self.permute(tuple(perm))

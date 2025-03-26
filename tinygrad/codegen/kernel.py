@@ -672,7 +672,7 @@ class Kernel:
         if i >= ctx[0].global_dims and i < ctx[0].first_reduce and store_st.shape[i] == 1:
           for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(store_st.shape))):
             if ctx[0].upcasted_axis(buf.arg)[upcast_index][2] and store_st.shape[index] != 1:
-              store_st, src_st = store_st.permute_axes((index, i)), src_st.permute_axes((index, i))
+              store_st, src_st = store_st.permute_axis_pair((index, i)), src_st.permute_axis_pair((index, i))
               break
       local_buffer = UOp(Ops.DEFINE_LOCAL, global_load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
       global_load = global_load.replace(src=(buf, src_st.to_uop()))
