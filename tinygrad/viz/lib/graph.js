@@ -71,6 +71,9 @@ function getBuffer(e) {
   const [_, size, dtype, device, num] = e.label.split("\n");
   return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
 }
+function pluralize(num, name, alt=null) {
+  return num === 1 ? `${num} ${name}` : `${num} ${alt ?? name+'s'}`
+}
 
 function renderMemoryGraph(graph) {
   // ** construct alloc/free traces
@@ -153,7 +156,8 @@ function renderMemoryGraph(graph) {
   const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
   const xaxis = d3.axisBottom(xscale);
   const axesGroup = render.append("g").attr("id", "axes");
-  axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(d3.format(".3~s")));
+  const nbytes_format = (d) => d3.format(".3~s")(d)+"B";
+  axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(nbytes_format));
   axesGroup.append("g").attr("transform", `translate(0, ${yscale.range()[0]})`).call(d3.axisBottom(xscale).tickFormat(() => ""));
   const polygonGroup = render.append("g").attr("id", "polygons");
   const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
@@ -168,12 +172,12 @@ function renderMemoryGraph(graph) {
     d3.select(e.currentTarget).attr("stroke", "rgba(26, 27, 38, 0.8)").attr("stroke-width", 0.8);
     const metadata = document.querySelector(".container.metadata");
     document.getElementById("current-buf")?.remove();
-    const { num, dtype, ...rest } = buf;
-    let label = `<BUFFER n${num} ${dtype}>\n${Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n')}\nalive for ${x[x.length-1]-x[0]} timesteps`;
+    const { num, dtype, nbytes, ...rest } = buf;
+    let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${pluralize(x[x.length-1]-x[0], 'timestep')}`;
+    label += '\n'+Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n');
     const buf_children = children.get(id);
     if (buf_children) {
-      const n = buf_children.length;
-      label += `\n${n} `+(n === 1 ? "child" : "children")+":\n"
+      label += `\n${pluralize(buf_children.length, 'child', 'children')}\n`;
       label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
     }
     metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
