@@ -120,7 +120,6 @@ class CStyleLanguage(Renderer):
     if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
-  def __contains__(self, key): return key in self.r  # hacky helper
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, uops:list[UOp]) -> str:
     r: dict[UOp, str] = {}
