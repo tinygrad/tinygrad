@@ -757,21 +757,33 @@ def get_onnx_ops():
     return y, scale, zero_point
 
   def DequantizeLinear(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int=0, axis:int=1, block_size:int=0):
-    # pad channels
-    in_shape = x.shape
-    if len(x.shape) == 4 and x.shape[1:] == (1,3,3) and x.shape[0]%32 != 0:
-      # 3x3 depthwise (C,1,3,3). pad C to 32
-      x = x.pad(((0,32-(x.shape[0]%32)), (0,0), (0,0), (0,0)))
-    elif len(x.shape) == 1 and x.shape[0]%32 != 0 and x.shape[0] != 1000:
-      x = x.pad(((0,32-(x.shape[0]%32)),))
-    elif len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[0] != 1:
-      if x.shape[0]%32 != 0: x = x.pad(((0,32-(x.shape[0]%32)), (0,0), (0,0), (0,0)))
-      if x.shape[1]%32 != 0: x = x.pad(((0,0), (0,32-(x.shape[1]%32)), (0,0), (0,0)))
+    if getenv("NHWC"):
+      # pad channels
+      in_shape = x.shape
+      if len(x.shape) == 4 and x.shape[1:] == (1,3,3) and x.shape[0]%32 != 0:
+        # 3x3 depthwise (C,1,3,3). pad C to 32
+        x = x.pad(((0,32-(x.shape[0]%32)), (0,0), (0,0), (0,0)))
+      elif len(x.shape) == 4 and x.shape[2:] == (1,1) and x.shape[0] != 1:
+        # 1x1 conv (C_out,C_in,1,1), pad C_out and C_in to 32
+        if x.shape[0]%32 != 0: x = x.pad(((0,32-(x.shape[0]%32)), (0,0), (0,0), (0,0)))
+        if x.shape[1]%32 != 0: x = x.pad(((0,0), (0,32-(x.shape[1]%32)), (0,0), (0,0)))
+      elif len(x.shape) == 1 and x.shape[0]%32 != 0 and x.shape[0] != 1000:
+        # bias
+        x = x.pad(((0,32-(x.shape[0]%32)),))
 
-    if in_shape != x.shape:
-      print(f"{in_shape} -> {x.shape}")
-    else:
-      print("not touching", x.shape)
+      if in_shape != x.shape:
+        xzp = x_zero_point.item()
+        print(f"{in_shape} -> {x.shape}", xzp)
+        # fix up the zero point in the padded area
+        pp = (Tensor.full(in_shape, -xzp, dtype=dtypes.int).pad(tuple([(0, so-si) for si,so in zip(in_shape, x.shape)])) + xzp).cast(x.dtype)
+        x = (x + pp).contiguous()
+
+    if getenv("NHWC") and len(x.shape) == 4 and x.shape[1:] == (3,3,3):
+      x = x.pad(((0,0), (0,0), (0,0), (0,1)))
+      assert x.shape[0] == 32
+      order = (1,2,0,3)
+      x = x.permute(*order).contiguous().permute(*argsort(order))
+      x = x[:, :, :, :3]
 
     if getenv("NHWC") and len(x.shape) == 4 and x.shape[1:] == (1,3,3):
       # 3x3 depthwise (C,1,3,3)
@@ -786,7 +798,7 @@ def get_onnx_ops():
         x = x.permute(*order).contiguous().permute(*argsort(order))
         x = x.reshape(-1, 1, 3, 4)
       else:
-        # should pad if this is happening
+        assert False  # (doesn't happen anymore)
         #print("HERE", x.shape)
         order = (2,0,1,3)
         x = x.permute(*order).contiguous().permute(*argsort(order))

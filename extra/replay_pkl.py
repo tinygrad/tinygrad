@@ -109,6 +109,8 @@ if __name__ == "__main__":
           if knum == 1:
             k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
             k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+            # this is broken
+            #k.apply_opt(Opt(OptOps.UNROLL, 2, 3))
           #elif knum == 4:
           #  k.apply_opt(Opt(OptOps.UNROLL, 0, 8))
           #  k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
