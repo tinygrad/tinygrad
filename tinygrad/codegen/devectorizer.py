@@ -13,10 +13,11 @@ from tinygrad.renderer import Renderer
 
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
-  # first, extract all the relevant offsets
-  offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
+  # generate the individual indexes
   midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
                        symbolic+load_store_indexing, name=f"index_buf_{buf.arg}")
+  # extract all the relevant offsets
+  offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
     idx: Any = midx.src[i].src[1]
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
@@ -33,7 +34,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   ret = []
   idxs: list[int|None] = [None]*vec.dtype.count
   global_offset = 0
-  for rootsrc, offsets in offsets_rootsrc.items():
+  for offsets in offsets_rootsrc.values():
     if 0 in offsets:
       match = True
       for i in range(0, max(offsets.keys()), 4):
