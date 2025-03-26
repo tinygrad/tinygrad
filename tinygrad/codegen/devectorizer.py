@@ -330,7 +330,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None, is_conv=False) ->
   # we can move the load masks to after the load
   #sink = graph_rewrite(sink, pm_move_load_masks, name="move_load_masks")
 
-  sink = graph_rewrite(sink, pm_ranges)
+  #sink = graph_rewrite(sink, pm_ranges)
 
   # devectorize is optional
   if DEVECTORIZE >= 2: sink = graph_rewrite(sink, sym+load_store_folding+load_store_indexing, ctx=opts)

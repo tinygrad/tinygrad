@@ -101,6 +101,12 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
     assert isinstance(g, int), "needs to be int to upcast/unroll"
     idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
+  # range splitting
+  for i in [1,2]:
+    rng = idxs[i]
+    rngv = UOp(Ops.VECTORIZE, rng.dtype.vec(2), (rng.const_like(rng.src[0]), rng.replace(src=(rng.src[0]+1, rng.src[1]))))
+    idxs[i] = UOp(Ops.UNROLL, rng.dtype, (rngv,), ((0, 2),))
+
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
@@ -112,7 +118,11 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+  #reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+  reduce_indexes = [ctx.ridxs[i] for i in x.axis_arg]
+  all_nodes = flatten([x.toposort for x in reduce_indexes])
+  reduce_expand = [x for x in all_nodes if x.op is Ops.UNROLL]
+  reduce_range = [x for x in all_nodes if x.op is Ops.RANGE]
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
