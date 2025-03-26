@@ -80,9 +80,16 @@
   }
   .container {
     background-color: #0f1018;
+    padding: 20px;
+    z-index: 2;
+    position: relative;
+    height: 100%;
   }
-  .container > * + *, .rewrite-container > * + * {
+  .container > * + *, .rewrite-container > * + *, .kernel-list > * + * {
     margin-top: 12px;
+  }
+  .kernel-list > ul > * + * {
+    margin-top: 4px;
   }
   .graph {
     position: absolute;
@@ -90,29 +97,19 @@
     z-index: 1;
   }
   .kernel-list-parent {
-    position: relative;
     width: 15%;
-    padding: 50px 20px 20px 20px;
+    padding-top: 50px;
     border-right: 1px solid #4a4b56;
-    z-index: 2;
   }
   .kernel-list {
     width: 100%;
     height: 100%;
     overflow-y: auto;
   }
-  .kernel-list > ul > * + * {
-    margin-top: 4px;
-  }
   .metadata {
-    position: relative;
     width: 20%;
-    padding: 20px;
-    background-color: #0f1018;
     border-left: 1px solid #4a4b56;
-    z-index: 2;
     margin-left: auto;
-    height: 100%;
     overflow-y: auto;
   }
   .resize-handle {
@@ -203,7 +200,7 @@
       </button>
       <a class="btn nav-btn" href="/profiler">Profiler</a>
     </div>
-    <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
+    <div class="container kernel-list-parent"><div class="kernel-list"></div></div>
     <div class="graph">
       <div class="progress-message">Rendering new layout...</div>
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
@@ -288,7 +285,7 @@
       currentKernel = -1;
     }
     const kernelListParent = document.querySelector(".container.kernel-list-parent");
-    const kernelList = document.querySelector(".container.kernel-list");
+    const kernelList = document.querySelector(".kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach(([key, items], i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
