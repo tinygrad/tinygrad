@@ -180,10 +180,9 @@ def add_to_mul(c:UOp, x:UOp):
 def prefetch_l1(ld:UOp, idx:UOp):
   if ld.src[-1].op is Ops.CUSTOM: return None
   ranges = sorted([x for x in ld.src[0].src[0].toposort if x.op is Ops.RANGE], key=lambda x: x.arg)
-  #ld_buf = idx.src[0].cast(idx.src[0].dtype.base.ptr())
-  #x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.src[0].index(idx.src[1]+UOp.const(dtypes.int, ld.dtype.count*2)),), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
+  x1 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.index(UOp.const(dtypes.int, ld.dtype.count*2)),), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
   x2 = UOp(Ops.CUSTOM, dtypes.void, src=(idx.substitute({ranges[-1]: ranges[-1].src[0]}),), arg="__builtin_HEXAGON_Y2_dcfetch({0});")
-  return ld.replace(src=ld.src+(x2,))
+  return ld.replace(src=ld.src+(x1, x2))
 
 def vectorize_shuffle(vec:UOp):
   if not all(s.op in {Ops.GEP, Ops.CONST} for s in vec.src): return None
