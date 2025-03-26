@@ -536,6 +536,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.device import Buffer
     assert isinstance(self.device, str), f"buffer not supported on multi {self.device}"
     buffers[self] = ret = Buffer(self.device, self.size, self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base)
+    ret.ref(1)
     return ret
   @property
   def realized(self) -> Optional[Buffer]: return self.buffer if self.op is Ops.BUFFER and self.buffer.is_allocated() else None

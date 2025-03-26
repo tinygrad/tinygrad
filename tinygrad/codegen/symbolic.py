@@ -329,11 +329,11 @@ def simplify_valid(valid:UOp) -> UOp|None:
 # ***** threefry *****
 
 def threefry2x32(x: UOp, key: UOp):
-  # split x into two uint32, since x in a uint64
+  # split x and key from uint64 to two uint32
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
   ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):

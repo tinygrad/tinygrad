@@ -1,35 +1,26 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, pathlib, fcntl, os, importlib
+import ctypes, collections, time, dataclasses, functools, pathlib, fcntl, os, importlib
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up, DEBUG, temp
 from tinygrad.runtime.autogen.am import am, mp_11_0
+from tinygrad.runtime.support.amd import AMDRegBase, collect_registers
 from tinygrad.runtime.support.allocator import TLSFAllocator
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
 @dataclasses.dataclass(frozen=True)
-class AMRegister:
-  adev:AMDev; reg_off:int; reg_fields:dict[str, tuple[int, int]] # noqa: E702
+class AMRegister(AMDRegBase):
+  adev:AMDev; hwip:int # noqa: E702
 
-  def _parse_kwargs(self, **kwargs):
-    mask, values = 0xffffffff, 0
-    for k, v in kwargs.items():
-      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k}. {self.reg_fields.keys()}")
-      m, s = self.reg_fields[k]
-      if v & (m>>s) != v: raise ValueError(f"Value {v} for {k} is out of range {m=} {s=}")
-      mask &= ~m
-      values |= v << s
-    return mask, values
+  @property
+  def addr(self): return self.adev.regs_offset[self.hwip][0][self.segment] + self.offset
 
-  def build(self, **kwargs) -> int: return self._parse_kwargs(**kwargs)[1]
+  def read(self): return self.adev.rreg(self.addr)
+  def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
 
-  def update(self, **kwargs): self.write(value=self.read(), **kwargs)
+  def write(self, _am_val:int=0, **kwargs): self.adev.wreg(self.addr, _am_val | self.encode(**kwargs))
 
-  def write(self, value=0, **kwargs):
-    mask, values = self._parse_kwargs(**kwargs)
-    self.adev.wreg(self.reg_off, (value & mask) | values)
-
-  def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
+  def update(self, **kwargs): self.write(self.encode(**{**self.read_bitfields(), **kwargs}))
 
 class AMFirmware:
   def __init__(self, adev):
@@ -327,8 +318,6 @@ class AMDev:
   def paddr2cpu(self, paddr:int) -> int: return mv_address(self.vram) + paddr
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
-  def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__[f"{ip}_HWIP"]][inst][seg]
-
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
@@ -358,7 +347,7 @@ class AMDev:
     for _ in range(timeout):
       if ((rval:=reg.read()) & mask) == value: return rval
       time.sleep(0.001)
-    raise RuntimeError(f'wait_reg timeout reg=0x{reg.reg_off:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
+    raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
@@ -403,14 +392,5 @@ class AMDev:
       ("MP1", mp_11_0), ("MMHUB", self._ip_module("mmhub", am.MMHUB_HWIP)), ("OSSSYS", self._ip_module("osssys", am.OSSSYS_HWIP)),
       ("HDP", self._ip_module("hdp", am.HDP_HWIP))]
 
-    for base, module in mods:
-      rpref = "mm" if base == "MP1" else "reg" # MP1 regs starts with mm
-      reg_names: set[str] = set(k[len(rpref):] for k in module.__dict__.keys() if k.startswith(rpref) and not k.endswith("_BASE_IDX"))
-      reg_fields: dict[str, dict[str, tuple]] = collections.defaultdict(dict)
-      for k, val in module.__dict__.items():
-        if k.endswith("_MASK") and ((rname:=k.split("__")[0]) in reg_names):
-          reg_fields[rname][k[2+len(rname):-5].lower()] = (val, module.__dict__.get(f"{k[:-5]}__SHIFT", val.bit_length() - 1))
-
-      for k, regval in module.__dict__.items():
-        if k.startswith(rpref) and not k.endswith("_BASE_IDX") and (base_idx:=getattr(module, f"{k}_BASE_IDX", None)) is not None:
-          setattr(self, k, AMRegister(self, self.ip_base(base, 0, base_idx) + regval, reg_fields.get(k[len(rpref):], {})))
+    for ip, module in mods:
+      self.__dict__.update(collect_registers(module, cls=functools.partial(AMRegister, adev=self, hwip=getattr(am, f"{ip}_HWIP"))))

@@ -1,4 +1,4 @@
-import ctypes, time, contextlib
+import ctypes, time, contextlib, importlib
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
@@ -11,6 +11,8 @@ class AM_IP:
   def set_clockgating_state(self): pass # Set clockgating state for this IP
 
 class AM_SOC(AM_IP):
+  def init_sw(self): self.module = importlib.import_module("tinygrad.runtime.autogen.am.soc21")
+
   def init_hw(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
@@ -89,7 +91,7 @@ class AM_GMC(AM_IP):
 
     # Init TLB and cache
     self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
-                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=am.MTYPE_UC)
+                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=self.adev.soc.module.MTYPE_UC)
 
     self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=0, enable_default_page_out_to_system_memory=1,
       l2_pde0_cache_tag_generation_mode=0, pde_fault_classification=0, context1_identity_access_mode=1, identity_mode_fragment_size=0)
@@ -110,7 +112,7 @@ class AM_GMC(AM_IP):
 
   def get_pte_flags(self, pte_lv, is_table, frag, uncached, system, snooped, valid, extra=0):
     extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) | am.AMDGPU_PTE_FRAG(frag)
-    extra |= am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC if uncached else 0)
+    extra |= am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
     if not is_table: extra |= (am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE)
     return extra | (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
   def is_pte_huge_page(self, pte): return pte & am.AMDGPU_PDE_PTE
@@ -172,7 +174,7 @@ class AM_SMU(AM_IP):
 class AM_GFX(AM_IP):
   def init_hw(self):
     # Wait for RLC autoload to complete
-    while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read(bootload_complete=1) != 0: pass
+    while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] != 0: pass
 
     self._config_gfx_rs64()
     self.adev.gmc.init_hub("GC")
@@ -187,8 +189,8 @@ class AM_GFX(AM_IP):
     self.adev.regGRBM_CNTL.update(read_timeout=0xff)
     for i in range(0, 16):
       self._grbm_select(vmid=i)
-      self.adev.regSH_MEM_CONFIG.write(address_mode=am.SH_MEM_ADDRESS_MODE_64, alignment_mode=am.SH_MEM_ALIGNMENT_MODE_UNALIGNED,
-                                       initial_inst_prefetch=3)
+      self.adev.regSH_MEM_CONFIG.write(address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64,
+                                       alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, initial_inst_prefetch=3)
 
       # Configure apertures:
       # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
@@ -218,17 +220,17 @@ class AM_GFX(AM_IP):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
 
     mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
-      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
+      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
       cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
       cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
       cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
       cp_hqd_pq_wptr_poll_addr_lo=lo32(wptr_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wptr_addr),
-      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell*2, doorbell_en=1),
-      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2),
-      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
-      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1), cp_hqd_vmid=0,
+      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode(doorbell_offset=doorbell*2, doorbell_en=1),
+      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2),
+      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.encode(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
+      cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0,
       cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
-      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_size//4).bit_length()-2))
+      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2))
 
     # Copy mqd into memory
     ctypes.memmove(self.adev.paddr2cpu(mqd.paddrs[0][0]), ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
@@ -237,7 +239,7 @@ class AM_GFX(AM_IP):
     self._grbm_select(me=1, pipe=pipe, queue=queue)
 
     mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
-    for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.reg_off, self.adev.regCP_HQD_PQ_WPTR_HI.reg_off + 1)):
+    for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr, self.adev.regCP_HQD_PQ_WPTR_HI.addr + 1)):
       self.adev.wreg(reg, mqd_st_mv[0x80 + i])
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
@@ -313,7 +315,7 @@ class AM_IH(AM_IP):
     _, rwptr_vm, suf, _ = self.rings[0]
     wptr = to_mv(self.adev.paddr2cpu(rwptr_vm), 8).cast('Q')[0]
 
-    if self.adev.reg(f"regIH_RB_WPTR{suf}").read(rb_overflow=1):
+    if self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()['rb_overflow']:
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
