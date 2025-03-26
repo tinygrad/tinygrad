@@ -37,7 +37,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       else: reuse_buffers[key].append(buffer_replace[buf][0])
 
   assigned = {}
-  global_buffers = {dev: Buffer(dev, round_up(sz, 2 << 20), dtypes.int8) for dev, (sz, _) in global_planner.items()}
+  global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
   buffer_replace = {buf: (base or global_buffers[buf.device], off) for buf, (base, off) in buffer_replace.items()}
   for buf, (base, off) in buffer_replace.items():
     if buf == base: continue
@@ -52,7 +52,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
   if DEBUG >= 1:
     ak, av = dedup(x for x in assigned.keys() if x._base is None), dedup(x for x in assigned.values() if x._base is None) + list(global_buffers.values())
     omem, nmem = sum([x.nbytes for x in ak])/1e6, sum([x.nbytes for x in av])/1e6
-    if omem != nmem: print(f"{debug_prefix} memory reduced from {omem:.2f} MB -> {nmem:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
+    if omem != nmem: print(f"{debug_prefix}memory reduced from {omem:.2f} MB -> {nmem:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
 
   return assigned
 
