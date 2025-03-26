@@ -655,6 +655,25 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
+  def lds(self, ast) -> UOp:
+    from tinygrad.ops import UPat
+    def transform_load(ctx:tuple[Kernel, set[UOp]], load:UOp):
+      if load.src[0].op is not Ops.DEFINE_GLOBAL or load in ctx[1]: return None
+      ctx[1].add(load)
+      src_st, buf = load.st_arg, load.src[0]
+      wd, fr, tcd = ctx[0].global_dims, ctx[0].first_reduce, ctx[0].first_upcast
+      local_shape = tuple(1 if st == 0 or i < wd or (i >= fr and i < tcd) else src_st.shape[i] for i,st in enumerate(src_st.real_strides()))
+
+      print(local_shape, buf.arg)
+      print(load)
+
+      load_st = store_st = ShapeTracker.from_shape(local_shape)
+      local_buffer = UOp(Ops.DEFINE_LOCAL, load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
+      local_store = UOp.store(local_buffer, store_st.to_uop(), load)
+      return UOp(Ops.LOAD, load.dtype, (local_buffer, load_st.to_uop(), local_store))
+
+    return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="load"), transform_load)]), ctx=(self, set()))
+
   # **** this is the lowerer ****
 
   @track_rewrites()
@@ -663,6 +682,7 @@ class Kernel:
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
+    if getenv("LDS"): modified_ast = self.lds(modified_ast)
     if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
