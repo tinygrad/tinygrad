@@ -158,7 +158,7 @@ class TestIndexing(unittest.TestCase):
   @unittest.skip("not ready")
   def test_index_mnist_opt(self): self.test_index_mnist(0)
 
-  @unittest.skipIf(getenv("PTX") or Device.DEFAULT == "WEBGPU", "broken on ptx and WebGPU for some reason")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)

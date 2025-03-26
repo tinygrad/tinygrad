@@ -297,14 +297,21 @@ generate_am() {
     extra/amdpci/headers/amdgpu_vm.h \
     extra/amdpci/headers/discovery.h \
     extra/amdpci/headers/amdgpu_ucode.h \
-    extra/amdpci/headers/soc21_enum.h \
     extra/amdpci/headers/psp_gfx_if.h \
     extra/amdpci/headers/amdgpu_psp.h \
     extra/amdpci/headers/amdgpu_irq.h \
     extra/amdpci/headers/amdgpu_doorbell.h \
     extra/amdpci/headers/soc15_ih_clientid.h \
+    --clang-args="-include stdint.h" \
     -o $BASE/am/am.py
   fixup $BASE/am/am.py
+  sed -i "s\(int64_t)\ \g" $BASE/am/am.py
+  sed -i "s\AMDGPU_PTE_MTYPE_VG10(2)\AMDGPU_PTE_MTYPE_VG10(0, 2)\g" $BASE/am/am.py # incorrect parsing (TODO: remove when clang2py is gone).
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/soc21_enum.h \
+    -o $BASE/am/soc21.py
+  fixup $BASE/am/soc21.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/mp_13_0_0_offset.h \
@@ -373,10 +380,11 @@ generate_sqtt() {
 }
 
 generate_webgpu() {
-  clang2py -l /usr/local/lib/libwebgpu_dawn.so extra/webgpu/webgpu.h -o $BASE/webgpu.py
+  clang2py extra/webgpu/webgpu.h -o $BASE/webgpu.py
   fixup $BASE/webgpu.py
-  sed -i 's/import ctypes/import ctypes, ctypes.util/g' $BASE/webgpu.py
-  sed -i "s|ctypes.CDLL('/usr/local/lib/libwebgpu_dawn.so')|ctypes.CDLL(ctypes.util.find_library('webgpu_dawn'))|g" $BASE/webgpu.py
+  sed -i "s/FIXME_STUB/webgpu/g" "$BASE/webgpu.py"
+  sed -i "s/FunctionFactoryStub()/ctypes.CDLL(webgpu_support.WEBGPU_PATH)/g" "$BASE/webgpu.py"
+  sed -i "s/import ctypes/import ctypes, tinygrad.runtime.support.webgpu as webgpu_support/g" "$BASE/webgpu.py"
   python3 -c "import tinygrad.runtime.autogen.webgpu"
 }
 

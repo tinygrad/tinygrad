@@ -2,7 +2,7 @@ import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import CI, getenv, prod, Context
+from tinygrad.helpers import CI, getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 from tinygrad.engine.multi import all_reduce
@@ -81,7 +81,7 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     sched = out.schedule()
     names = []
-    for si, ei in zip(sched[:], lower_schedule(sched)):
+    for si, ei in lower_schedule(sched):
       if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
       ei.run()
     self.assertEqual(len(set(names)), 3), "function was relinearized"
@@ -307,12 +307,11 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"long dtype not supported on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     layer = nn.Embedding(vocab_size, embed_size)
-    x = Tensor(np.random.randint(0, vocab_size, (B, T)))
+    x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
     z = layer(x)
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
@@ -346,7 +345,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -364,7 +363,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
   @unittest.skipIf(CI and Device.DEFAULT in ("CUDA", "NV", "LLVM"), "slow, and flaky on LLVM")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     from tinygrad.nn.optim import LARS
@@ -956,7 +955,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_allclose(output.numpy(), expected)
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
+@unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestBatchNorm(unittest.TestCase):
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
@@ -984,7 +983,7 @@ class TestBatchNorm(unittest.TestCase):
       optim.step()
       out.numpy()
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR
     GPUS = (d1, d2)

@@ -113,7 +113,7 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     out = a.sum()
     sis = out.schedule()
-    for i,ei in enumerate(lower_schedule(sis)):
+    for i,(_,ei) in enumerate(lower_schedule(sis)):
       if i == 0:
         # change the source code
         prg_spec = ei.prg.p

@@ -8,9 +8,10 @@ from tinygrad.ops import sint
 from tinygrad.device import Compiled, ProfileEvent, BufferSpec, CPUProgram, PROFILE
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, DEBUG, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, pci, vfio, sqtt
 from tinygrad.runtime.autogen.am import am, gc_11_0_0
-from tinygrad.runtime.support.compiler_hip import AMDCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMapping
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -613,9 +614,10 @@ class PCIIface:
     pci_cmd = int.from_bytes(self.cfg_fd.read(2, binary=True, offset=pci.PCI_COMMAND), byteorder='little') | pci.PCI_COMMAND_MASTER
     self.cfg_fd.write(pci_cmd.to_bytes(2, byteorder='little'), binary=True, offset=pci.PCI_COMMAND)
 
+    gfxver = int(f"{self.adev.ip_ver[am.GC_HWIP][0]:02d}{self.adev.ip_ver[am.GC_HWIP][1]:02d}{self.adev.ip_ver[am.GC_HWIP][2]:02d}")
     array_count = self.adev.gc_info.gc_num_sa_per_se * self.adev.gc_info.gc_num_se
     simd_count = 2 * array_count * (self.adev.gc_info.gc_num_wgp0_per_sa + self.adev.gc_info.gc_num_wgp1_per_sa)
-    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': self.adev.ip_versions[am.GC_HWIP],
+    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
       'max_slots_scratch_cu': self.adev.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.adev.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.adev.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.adev.gc_info.gc_lds_size}
 
@@ -705,7 +707,8 @@ class AMDDevice(HCQCompiled):
 
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
-    super().__init__(device, AMDAllocator(self), AMDRenderer(self.arch), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+    super().__init__(device, AMDAllocator(self), AMDLLVMRenderer() if getenv("AMD_LLVM", 0) else AMDRenderer(self.arch),
+                     AMDLLVMCompiler(self.arch) if getenv("AMD_LLVM", 0) else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
     # Scratch setup
@@ -750,8 +753,7 @@ class AMDDevice(HCQCompiled):
       self.max_private_segment_size = required
 
   def invalidate_caches(self):
-    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
-    self.timeline_value += 1
+    AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
 
   def on_device_hang(self): self.dev_iface.on_device_hang()
@@ -760,8 +762,7 @@ class AMDDevice(HCQCompiled):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
       wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
-      AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.timeline_value).submit(self)
-      self.timeline_value += 1
+      AMDComputeQueue().stop_trace(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
       if DEBUG>=2: print('Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):

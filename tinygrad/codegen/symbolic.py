@@ -172,7 +172,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
 
 symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
-  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.ints, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
@@ -314,11 +314,11 @@ def simplify_valid(valid:UOp) -> UOp|None:
 # ***** threefry *****
 
 def threefry2x32(x: UOp, key: UOp):
-  # split x into two uint32, since x in a uint64
+  # split x and key from uint64 to two uint32
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
   ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):

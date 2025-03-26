@@ -79,5 +79,35 @@ class TestGC(unittest.TestCase):
       print(inspect.getclosurevars(UOp.toposort.fget))
       raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
 
+  def test_buffer_refcount(self):
+    init = bufs_allocated()
+    a = Tensor.empty(10)
+    self.assertEqual(bufs_allocated()-init, 0)
+    a.realize()
+    real_buf = a.lazydata.buffer
+    # after the Tensor UOp is deleted there shouldn't be any references on the Buffer
+    self.assertEqual(real_buf.lb_refcount, 1)
+    self.assertEqual(bufs_allocated()-init, 1)
+    del a.lazydata
+    self.assertEqual(real_buf.lb_refcount, 0)
+    self.assertEqual(bufs_allocated()-init, 1) # keep the buffer alive
+    del real_buf
+    self.assertEqual(bufs_allocated()-init, 0)
+
+  def test_assign_refcount(self):
+    init = bufs_allocated()
+    a = Tensor.full((4,), 1.).contiguous()
+    a.realize()
+    real_buf = a.lazydata.buffer
+    self.assertEqual(real_buf.lb_refcount, 1)
+    a.assign(Tensor.full((4,), 2.))
+    self.assertIs(a.lazydata.src[0].buffer, real_buf)
+    # NOTE: this is still 1, we don't count the ASSIGN
+    self.assertEqual(real_buf.lb_refcount, 1)
+    a.realize()
+    del a
+    self.assertEqual(real_buf.lb_refcount, 0) # no UOps for this Buffer
+    self.assertEqual(bufs_allocated()-init, 1) # Buffer is alive
+
 if __name__ == '__main__':
   unittest.main()
