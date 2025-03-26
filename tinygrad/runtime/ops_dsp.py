@@ -138,11 +138,11 @@ dsp_pm = PatternMatcher([
   # lambda g,cast: g.src[0].cast(cast.dtype.scalar()).broadcast(len(g.arg)) if all(x==0 for x in g.arg) else None),
 
   # REDUCE int4 -> 2xint2, int8 -> 4xint2
-  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
-   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r)))),
-  (UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
-   lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
-                                    gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
+  #(UPat(Ops.REDUCE, dtype=dtypes.int.vec(4), name="r"),
+  # lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r)))),
+  #(UPat(Ops.REDUCE, dtype=dtypes.int.vec(8), name="r"),
+  # lambda r: UOp(Ops.CAT, r.dtype, (gep_on_reduce(r.gep((0,1)), r), gep_on_reduce(r.gep((2,3)), r),
+  #                                  gep_on_reduce(r.gep((4,5)), r), gep_on_reduce(r.gep((6,7)), r)))),
 
   # __builtin_HEXAGON_V6_vrmpybus
   (UPat(dtype=dtypes.int.vec(32), name="a0")*UPat(name="a1") + UPat(name="b0")*UPat(name="b1") + \
