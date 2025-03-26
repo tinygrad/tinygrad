@@ -1,7 +1,7 @@
 from collections import defaultdict
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.device import Device, Buffer
-from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up, getenv
+from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
 from tinygrad.ops import Ops
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.runtime.support.allocator import TLSFAllocator
@@ -50,7 +50,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
     assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=(pbuf:=assigned.get(buf.base, buf.base)).base, offset=pbuf.offset+buf.offset)
 
   if DEBUG >= 1:
-    ak, av = dedup(x for x in assigned.keys() if x._base is None), dedup(x for x in assigned.values() if x._base is None) + list(global_buffers.values())
+    ak, av = dedup(x for x in assigned.keys() if x._base is None),dedup(x for x in assigned.values() if x._base is None)+list(global_buffers.values())
     omem, nmem = sum([x.nbytes for x in ak])/1e6, sum([x.nbytes for x in av])/1e6
     if omem != nmem: print(f"{debug_prefix}memory reduced from {omem:.2f} MB -> {nmem:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
 
