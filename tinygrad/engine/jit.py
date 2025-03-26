@@ -120,7 +120,9 @@ class GraphRunner(Runner):
       if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
       if i in write:
         if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
-        self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
+
+    for i,rawbuf in enumerate(rawbufs):
+      if i in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
       else: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
 
     return list({id(x):x for x in wait_nodes}.values())
@@ -164,7 +166,9 @@ class CapturedJit(Generic[ReturnType]):
     depends: set[Buffer|None] = set([None])
     update_depends(depends, self.jit_cache)
     for b in depends:
-      if b is not None: b.deallocate()
+      if b is not None:
+        b.deallocate()
+        if b._base is not None and b._base.allocated_views == 0: b._base.deallocate()
     self.__post_init__()   # reset the graph state
 
   # jit exec
