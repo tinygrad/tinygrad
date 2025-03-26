@@ -120,7 +120,9 @@ class GraphRunner(Runner):
       if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
       if i in write:
         if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
-        self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
+
+    for i,rawbuf in enumerate(rawbufs):
+      if i in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
       else: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
 
     return list({id(x):x for x in wait_nodes}.values())
