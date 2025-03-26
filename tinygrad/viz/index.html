@@ -15,11 +15,8 @@
   <style>
   * {
     box-sizing: border-box;
-    margin-block-start: initial;
-    margin-block-end: initial;
-  }
-  button {
-    outline: none;
+    margin: 0;
+    padding: 0;
   }
   html, body {
     color: #f0f0f5;
@@ -48,7 +45,7 @@
   ul.active {
     opacity: 1;
   }
-  ul.disabled {
+  gl.disabled {
     opacity: 0.4;
     pointer-events: none;
   }
@@ -144,36 +141,23 @@
     flex-direction: row;
     gap: 8px;
   }
-  .nav-btn {
+  .btn {
+    outline: none;
     background-color: #1a1b26;
     border: 1px solid #4a4b56;
     color: #f0f0f5;
-    height: 32px;
     border-radius: 8px;
+    padding: 6px;
     cursor: pointer;
-    text-decoration: none;
+    height: 32px;
     display: flex;
     align-items: center;
-    padding: 0 6px;
-    font-weight: bold;
-  }
-  .collapse-btn {
-    width: 32px;
-    padding: 6px;
-  }
-  .btn {
-    height: 32px;
-    background-color: #1a1b26;
-    border: 1px solid #4a4b56;
-    color: #f0f0f5;
-    border-radius: 8px;
-    cursor: pointer;
-    transition-duration: .5s;
+    justify-content: center;
+    text-decoration: none;
   }
   .btn:hover {
     background-color: #2a2b36;
     border-color: #5a5b66;
-    color: #ffffff;
   }
   .collapsed .kernel-list, .collapsed .metadata {
     width: 0;
