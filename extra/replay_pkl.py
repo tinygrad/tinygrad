@@ -106,7 +106,10 @@ if __name__ == "__main__":
             #k.apply_opt(Opt(OptOps.UPCAST, 0, 2))
           """
           # blocked
-          if k.full_shape[-3:] == (32,3,3):
+          if len(k.full_shape) == 6 and k.full_shape[-4:] == (32,3,3,3):
+            k.apply_opt(Opt(OptOps.UPCAST, 2, 32))
+            k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+          elif k.full_shape[-3:] == (32,3,3):
             #if k.full_shape[-4]%4 != 0: k.apply_opt(Opt(OptOps.PADTO, len(k.full_shape)-4, 4))
             # 3x3 dwconv
             k.apply_opt(Opt(OptOps.UNROLL, 0, 0))

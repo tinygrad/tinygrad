@@ -159,7 +159,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
     #if ls.dtype.count in [128+64, 128*2+64, 128*4+64]: return None  # leave 192 alone
-    if ls.dtype.count in [192, 288]: return None  # leave 192 alone
+    if ls.dtype.count in [192, 288, 160, 96]: return None  # leave 192 alone
     # we really want stores to be 128 for fast casting
     #if ls.op is Ops.LOAD: lengths = [192]+lengths
     #if ls.op is Ops.LOAD: lengths = [1536,1024,512,384,256,192,96]+lengths
