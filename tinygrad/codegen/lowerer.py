@@ -101,6 +101,15 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
     assert isinstance(g, int), "needs to be int to upcast/unroll"
     idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
+  # split range
+  rng = idxs[0]
+  rng0 = rng.const_like(rng.src[0])
+  rng1 = rng.replace(src=(rng.src[0]+1, rng.src[1]))
+  #rng0 = rng.replace(src=(rng.src[0], rng.src[1]//2))
+  #rng1 = rng.replace(src=(rng.src[1]//2, rng.src[1]))
+  rngv = UOp(Ops.VECTORIZE, rng.dtype.vec(2), (rng0, rng1))
+  idxs[0] = UOp(Ops.UNROLL, rng.dtype, (rngv,), ((0, 2),))
+
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
@@ -111,11 +120,22 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 # ***** lowering (given index) *****
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
+  reduce_indexes = [ctx.ridxs[i] for i in x.axis_arg]
+  all_nodes = flatten([x.toposort for x in reduce_indexes])
+  reduce_expand = [x for x in all_nodes if x.op is Ops.UNROLL]
+  reduce_range = [x for x in all_nodes if x.op is Ops.RANGE]
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
-  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
+  #reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+  #assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   alu_op: Ops = x.arg[0]
   ret = x.src[0]
+  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+    ret = (functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)]),)
+  else:
+    ret = (ret,)
+  return UOp(Ops.REDUCE, x.dtype, ret+tuple(reduce_range), alu_op)
+  """
   # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
   ctx.acc_num += 1
@@ -127,6 +147,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   if not len(reduce_range): return ret
   # create ACC and assign
   return acc.assign(ret)
+  """
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -213,6 +234,13 @@ pm_quant = symbolic+PatternMatcher([
   (UPat(Ops.IGNORE, src=(UPat.cvar("c"),), name="ig"), lambda ig, c: c),
   (UPat(Ops.IGNORE, src=(UPat(Ops.VALID, name="v"),), name="ig"), lambda ig, v: UOp.const(dtypes.bool, True) if v.src[0].arg == ig.arg else None),
 ])
+
+def split_range(rng:UOp):
+  if rng.src[0].arg == 0 and rng.src[1].arg == 64:
+    rng0 = rng.replace(src=(rng.src[0], rng.src[1]//2))
+    rng1 = rng.replace(src=(rng.src[1]//2, rng.src[1]))
+    rngv = UOp(Ops.VECTORIZE, rng.dtype.vec(2), (rng0, rng1))
+    return UOp(Ops.UNROLL, rng.dtype, (rngv,), ((0, 2),))
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
   if QUANTIZE and opts.device in {"CPU", "DSP"}: ast = graph_rewrite(ast, pm_quant, name="quantize")
