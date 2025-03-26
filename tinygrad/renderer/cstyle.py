@@ -107,6 +107,9 @@ class CStyleLanguage(Renderer):
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
+    barrier_count = kernel.count("    threadgroup_barrier(mem_flags::mem_threadgroup);")
+    for i in range(barrier_count):
+      kernel.remove("    threadgroup_barrier(mem_flags::mem_threadgroup);")
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])

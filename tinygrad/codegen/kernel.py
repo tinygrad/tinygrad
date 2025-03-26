@@ -340,6 +340,15 @@ class Kernel:
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
+    if getenv("LDS") and opt.op in (OptOps.UNROLL, OptOps.LOCAL) and opt.arg is not None and not isinstance(opt.arg, tuple) and int(opt.arg) != 2:
+      # print(f"replacing {opt.op} {opt.arg} with:")
+      if (amt := opt.arg) == 0: amt = self.full_unupcasted_shape[-1]
+      for i in range(int(math.log2(amt))):
+        # print(f"  {opt.op} {2}")
+        new_opt = Opt(opt.op, opt.axis, 2)
+        self.apply_opt(new_opt)
+        self.applied_opts.append(new_opt)
+      return
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
@@ -657,22 +666,48 @@ class Kernel:
 
   def lds(self, ast) -> UOp:
     from tinygrad.ops import UPat
-    def transform_load(ctx:tuple[Kernel, set[UOp]], load:UOp):
-      if load.src[0].op is not Ops.DEFINE_GLOBAL or load in ctx[1]: return None
-      ctx[1].add(load)
-      src_st, buf = load.st_arg, load.src[0]
+    def transform_load(ctx:tuple[Kernel, set[UOp]], global_load:UOp):
+      if global_load in ctx[1] or global_load.src[0].op is not Ops.DEFINE_GLOBAL: return None
+      src_st, buf = global_load.st_arg, global_load.src[0]
       wd, fr, tcd = ctx[0].global_dims, ctx[0].first_reduce, ctx[0].first_upcast
       local_shape = tuple(1 if st == 0 or i < wd or (i >= fr and i < tcd) else src_st.shape[i] for i,st in enumerate(src_st.real_strides()))
-
-      print(local_shape, buf.arg)
-      print(load)
-
       load_st = store_st = ShapeTracker.from_shape(local_shape)
-      local_buffer = UOp(Ops.DEFINE_LOCAL, load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
-      local_store = UOp.store(local_buffer, store_st.to_uop(), load)
-      return UOp(Ops.LOAD, load.dtype, (local_buffer, load_st.to_uop(), local_store))
+      # print("local_shape", local_shape)
+      (ctx[0].colored_shape())
+      # print(ctx[0].applied_opts)
+      perm = list(range(len(ctx[0].full_shape)))
+      # print("perm", perm, ctx[0].first_reduce)
+      # print(ctx[0].upcasted_axis(buf.arg))
+      # print(ctx[0].local_dims)
+      # print("fist reduce", ctx[0].first_reduce)
+      # print("fist upcast", ctx[0].first_upcast)
+      for i in range(len(perm)):
+        if i >= ctx[0].global_dims and i < ctx[0].first_reduce and local_shape[i] == 1:
+          # print("we need to permute this local")
+          for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(perm))):
+            if ctx[0].upcasted_axis(buf.arg)[upcast_index][2]:
+              # print(f"permuting {perm[i]} for {perm[index]}")
+              perm[i], perm[index] = perm[index], perm[i]
+      # print(perm)
+      local_buffer = UOp(Ops.DEFINE_LOCAL, global_load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
+      global_load = global_load.replace(src=(buf, src_st.permute(tuple(perm)).to_uop()))
+      ctx[1].add(global_load)
+      local_store = UOp.store(local_buffer, store_st.permute(tuple(perm)).to_uop(), global_load)
+      # print("using LDS!!")
+      return UOp(Ops.LOAD, global_load.dtype, (local_buffer, load_st.to_uop(), local_store))
 
-    return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="load"), transform_load)]), ctx=(self, set()))
+    if (any(opt.op == OptOps.GROUPTOP for opt in self.applied_opts)): return ast
+
+    if (OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]):
+      if OptOps.TC not in [opt.op for opt in self.applied_opts]:
+        # print("There should be local and unroll for lds or Tensor Core")
+        return ast
+
+    # print(self.upcasted_axis(1))
+    if not all_same([opt.arg for opt in self.applied_opts if opt.op in (OptOps.UNROLL, OptOps.LOCAL)]):
+      # print("unroll and local opts should be the same size")
+      return ast
+    return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="global_load"), transform_load)]), ctx=(self, set()))
 
   # **** this is the lowerer ****
 
