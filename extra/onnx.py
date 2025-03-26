@@ -1,7 +1,7 @@
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, IMAGE
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple
 from tinygrad.dtype import DType, ConstType, dtypes
 from tinygrad.device import is_dtype_supported
 
@@ -21,7 +21,10 @@ def dtype_parse(onnx_dtype: int) -> DType:
     TensorProto.FLOAT8E5M2, TensorProto.FLOAT8E5M2FNUZ, TensorProto.UINT4, TensorProto.INT4
   }
   if onnx_dtype in unsupported: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  return supported[onnx_dtype] if is_dtype_supported(supported[onnx_dtype]) else dtypes.float
+  dtype = supported[onnx_dtype]
+  float32 = bool(getenv("ONNXFLOAT32", 0))
+  if (float32 and dtypes.is_float(dtype)) or not is_dtype_supported(dtype): dtype = dtypes.float32
+  return dtype
 
 def attribute_parse(onnx_attribute: AttributeProto):
   supported: dict[AttributeProto.AttributeType, Callable[[AttributeProto], Any]] = {
@@ -106,10 +109,8 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
   return ret
 
 # ***** runner ******
-debug = int(getenv("DEBUGONNX", "0"))                  # prints debug information of op nodes
-limit = int(getenv("ONNXLIMIT", "-1"))                 # returns early up to a limit
-typed = bool(getenv("ONNXTYPED", "1")) and not IMAGE   # does runtime validation of input shapes and dtypes
-
+debug = int(getenv("DEBUGONNX", "0"))
+limit = int(getenv("ONNXLIMIT", "-1"))
 class OnnxRunner:
   def __init__(self, model: ModelProto):
     # parse model protobuf
@@ -128,19 +129,20 @@ class OnnxRunner:
     self.onnx_ops = onnx_ops
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
+    float32 = bool(getenv("ONNXFLOAT32", 0))
     if spec.is_optional and value is None: return None
     if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"{name} received {value}, expected a sequence type")
       sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
-      if typed and not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
-      if typed and not all(t.dtype is spec.dtype for t in sequence): raise RuntimeError(f"Dtypes for {name} sequence should all be {spec.dtype}")
+      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for {name} sequence must be homogeneous")
+      if not float32 and not all(t.dtype is spec.dtype for t in sequence): raise RuntimeError(f"Dtypes for {name} sequence should all be {spec.dtype}")
       return sequence
     tensor = Tensor(value, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
-    if typed and tensor.dtype is not spec.dtype: raise RuntimeError(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}")
+    if not float32 and tensor.dtype is not spec.dtype: raise RuntimeError(f"{name} has {tensor.dtype} dtype, should be {spec.dtype}")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
         onnx_dim = self.variable_dims[onnx_dim] if onnx_dim in self.variable_dims else self.variable_dims.setdefault(onnx_dim, int(user_dim_input))
-      if typed and user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
+      if user_dim_input != onnx_dim: raise RuntimeError(f"{name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
   def _dispatch_op(self, op, inps, opts):
@@ -307,7 +309,7 @@ def get_onnx_ops():
   # ***** Unary Ops (broadcasted) *****
   def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
-  def Div(x:Tensor,y:Tensor): return x.div(y, rounding_mode='trunc' if dtypes.is_int(x.dtype) else None)
+  def Div(x:Tensor,y:Tensor): return (x/y).cast(x.dtype)
   def Less(x:Tensor,y:Tensor): return x < y
   def LessOrEqual(x:Tensor,y:Tensor): return x <= y
   def Greater(x:Tensor,y:Tensor): return x > y

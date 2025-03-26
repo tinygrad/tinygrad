@@ -1,5 +1,4 @@
-import csv, pathlib, time, numpy as np
-from os import getenv
+import csv, pathlib, time, os, numpy as np
 import torch
 torch.set_num_threads(1)
 import onnx
@@ -7,7 +6,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
 from tinygrad.frontend.onnx import OnnxRunner
-from tinygrad.helpers import OSX, DEBUG, fetch
+from tinygrad.helpers import OSX, DEBUG, fetch, getenv
 from tinygrad import Tensor, Device
 from tinygrad.device import CompileError
 
@@ -45,6 +44,7 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, devices, validate_outs=False):
+  os.environ["ONNXFLOAT32"] = "1" if m in {"openpilot", "commavq"} else "0"
   torch.manual_seed(1)
   global open_csv, CSV
   CSV = {"model": m}
@@ -129,6 +129,8 @@ def benchmark_model(m, devices, validate_outs=False):
     open_csv = csv.DictWriter(open('onnx_inference_speed.csv', 'w', newline=''), fieldnames=list(CSV.keys()))
     open_csv.writeheader()
   open_csv.writerow(CSV)
+
+  if "ONNXFLOAT32" in os.environ: del os.environ["ONNXFLOAT32"]
 
 def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
   assert len(tiny_out) == len(onnx_out) and tiny_out.keys() == onnx_out.keys()
