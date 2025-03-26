@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
-from tinygrad.ops import PatternMatcher
+from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -662,68 +662,26 @@ class Kernel:
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
   def lds(self, ast) -> UOp:
-    from tinygrad.ops import UPat
     def transform_load(ctx:tuple[Kernel, set[UOp]], global_load:UOp):
       if global_load in ctx[1] or global_load.src[0].op is not Ops.DEFINE_GLOBAL: return None
       src_st, buf = global_load.st_arg, global_load.src[0]
       wd, fr, tcd = ctx[0].global_dims, ctx[0].first_reduce, ctx[0].first_upcast
       local_shape = tuple(1 if st == 0 or i < wd or (i >= fr and i < tcd) else src_st.shape[i] for i,st in enumerate(src_st.real_strides()))
       load_st = store_st = ShapeTracker.from_shape(local_shape)
-      print("local_shape", local_shape)
-      (ctx[0].colored_shape())
-      # print(ctx[0].applied_opts)
-      # perm = list(range(len(ctx[0].full_shape)))
-      # print("perm", perm, ctx[0].first_reduce)
-      # print(ctx[0].upcasted_axis(buf.arg))
-      # print(ctx[0].local_dims)
-      # print("fist reduce", ctx[0].first_reduce)
-      # print("fist upcast", ctx[0].first_upcast)
-      # print(local_shape)
-      # print(load_st)
-      # print("testing permute_Axes")
-      # print(load_st.permute_axes((2,3)))
-      # for i in range(len(perm)):
-      #   print(i, perm)
-      #   if i >= ctx[0].global_dims and i < ctx[0].first_reduce and local_shape[i] == 1:
-      #     print("we need to permute this local")
-      #     for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(perm))):
-      #       print(upcast_index, index)
-      #       if ctx[0].upcasted_axis(buf.arg)[upcast_index][2]:
-      #         print(f"permuting {perm[i]} for {perm[index]}")
-      #         perm[i], perm[index] = perm[index], perm[i]
-      #         break
       for i in range(len(src_st.shape)):
-        print(i, src_st.real_strides())
-        print(i, store_st.real_strides())
         if i >= ctx[0].global_dims and i < ctx[0].first_reduce and store_st.shape[i] == 1:
-          print(f"we need to permute this local [{i}] = {store_st.shape[i]}")
           for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(store_st.shape))):
-            print(f"index : {index}, upcast_index : {upcast_index}, store shape {store_st.shape[index]}")
             if ctx[0].upcasted_axis(buf.arg)[upcast_index][2] and store_st.shape[index] != 1:
-              print("can be permuted as it is reduce")
-              print(f"we might want to permute {i} with {index}")
-              store_st = store_st.permute_axes((index, i))
-              src_st = src_st.permute_axes((index, i))
+              store_st, src_st = store_st.permute_axes((index, i)), src_st.permute_axes((index, i))
               break
-          # for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(store_st.shape))):
-          #   print(upcast_index, index)
-          #     # print(f"permuting {perm[i]} for {perm[index]}")
-          #     print(i, index, upcast_index)
-          #     store_st = store_st.permute_axes((i, index))
-          #     src_st = src_st.permute_axes((index, i))
-          #     # perm[i], perm[index] = perm[index], perm[i]
-          #     break
-      # print(perm)
       local_buffer = UOp(Ops.DEFINE_LOCAL, global_load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
       global_load = global_load.replace(src=(buf, src_st.to_uop()))
       ctx[1].add(global_load)
       local_store = UOp.store(local_buffer, store_st.to_uop(), global_load)
-      # print("using LDS!!")
       return UOp(Ops.LOAD, global_load.dtype, (local_buffer, load_st.to_uop(), local_store))
 
-    if (any(opt.op == OptOps.GROUPTOP for opt in self.applied_opts)): return ast
-
-    if (OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]): return ast
+    if any(opt.op == OptOps.GROUPTOP for opt in self.applied_opts): return ast
+    if OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]: return ast
     if not all_same([opt.arg for opt in self.applied_opts if opt.op in (OptOps.UNROLL, OptOps.LOCAL)]): return ast
 
     return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="global_load"), transform_load)]), ctx=(self, set()))
