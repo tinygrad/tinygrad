@@ -291,6 +291,7 @@ class ReduceContext:
 def reduce_to_acc(ctx:ReduceContext, x:UOp):
   ret = x.src[0]
   reduce_range, reduce_expand = partition(x.src, lambda y: y.op is Ops.RANGE)
+  if len(reduce_range) == 0: return ret
   alu_op = x.arg
   # create acc
   acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
