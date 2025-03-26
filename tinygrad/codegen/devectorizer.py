@@ -15,13 +15,16 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
   # first, extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
+  midx = UOp.sink(*([vec.gep(i) for i in range(vec.dtype.count)]+
+                   ([mask.gep(i) for i in range(vec.dtype.count)] if mask is not None else []))).simplify()
+  if getenv("VIZ"): graph_rewrite(midx, PatternMatcher([]), name=f"simplify_buf_{buf.arg}")
   for i in range(vec.dtype.count):
-    idx = vec.gep(i).simplify()
+    idx = midx.src[i]
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if mask is not None: root_src = (mask.gep(i).simplify(), root_src)
+    if mask is not None: root_src = (midx.src[vec.dtype.count+i], root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # the buf.dtype is always a pointer
