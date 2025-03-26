@@ -415,10 +415,8 @@
     element.appendChild(handle);
     const resize = (e) => {
       const change = e.clientX - element.dataset.startX;
-      const newWidth = ((Number(element.dataset.startWidth)+(left ? change : -change))/Number(element.dataset.containerWidth))*100;
-      if (newWidth >= minWidth && newWidth <= maxWidth) {
-        element.style.width = `${newWidth}%`;
-      }
+      let newWidth = ((Number(element.dataset.startWidth)+(left ? change : -change))/Number(element.dataset.containerWidth))*100;
+      element.style.width = `${Math.max(minWidth, Math.min(maxWidth, newWidth))}%`;
     };
     handle.addEventListener("mousedown", (e) => {
       e.preventDefault();
