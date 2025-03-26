@@ -665,6 +665,7 @@ class Kernel:
     def transform_load(ctx:tuple[Kernel, set[UOp]], global_load:UOp):
       if global_load in ctx[1] or global_load.src[0].op is not Ops.DEFINE_GLOBAL: return None
       src_st, buf = global_load.st_arg, global_load.src[0]
+      if all(s == 0 for i,s in enumerate(src_st.real_strides()) if (i >= ctx[0].global_dims and i < ctx[0].first_reduce)): return None
       wd, fr, tcd = ctx[0].global_dims, ctx[0].first_reduce, ctx[0].first_upcast
       local_shape = tuple(1 if st == 0 or i < wd or (i >= fr and i < tcd) else src_st.shape[i] for i,st in enumerate(src_st.real_strides()))
       load_st = store_st = ShapeTracker.from_shape(local_shape)
