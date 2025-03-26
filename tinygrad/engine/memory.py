@@ -18,17 +18,17 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       last_appearance[buf.base] = i
       buf_to_opt.add(buf)
 
-  # Sort buffers operations in timeline order. 2 events: buffer is allocated and buffer is freed.
+  # Sort buffer operations in timeline order. Two events: buffer is allocated or buffer is freed.
   buffer_requests = sorted([((first_appearance[buf], True), buf) for buf in first_appearance.keys()] + \
                            [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
 
-  # Try to suballocate from one shared buffer which is managed by global_planner. TLSFAllocator is used to manage the memory.
-  # Also keep buffer_replace for buffers which does not support suballocation.
+  # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
+  # Also track buffer replacements for buffers that do not support suballocation.
   buffer_replace = {}
   reuse_buffers:dict[tuple[str], list[Buffer]] = defaultdict(list)
   global_planner:dict[tuple[str], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(1 << 44, block_size=0x1000, lv2_cnt=32)))
   for (time, is_open_ev), buf in buffer_requests:
-    # Check if can suballoc for given buffer and device.
+    # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
       if is_open_ev: buffer_replace[buf] = (None, global_planner[buf.device][1].alloc(round_up(buf.nbytes, 0x1000)))
       else: global_planner[buf.device][1].free(buffer_replace[buf][1])
@@ -38,17 +38,17 @@ def _internal_memory_planner(buffers:list[list[Buffer]|tuple[Buffer, ...]], noop
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
       else: reuse_buffers[key].append(buffer_replace[buf][0])
 
-  # Allocate global buffers based on the planner.
+  # Allocate global buffers based on the memory planner.
   global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
   buffer_replace = {buf: (base or global_buffers[buf.device], off) for buf, (base, off) in buffer_replace.items()}
 
-  # Start assigning buffers. First, assign full buffers (not subbuffers).
+  # Assign buffers. First, assign full buffers (not sub-buffers).
   assigned = {}
   for buf, (base, off) in buffer_replace.items():
     if buf != base:
       assigned[buf] = base if off is None else Buffer(buf.device, buf.size, buf.dtype, base=base, offset=off)
 
-  # And now subbuffers.
+  # Now assign sub-buffers.
   for buf in buf_to_opt:
     if buf._base is not None:
       assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=(pbuf:=assigned.get(buf.base, buf.base)).base, offset=pbuf.offset+buf.offset)
