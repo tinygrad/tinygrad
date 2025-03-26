@@ -3,8 +3,7 @@
 import functools, itertools, operator
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
 from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, graph_rewrite
-from tinygrad.codegen.symbolic import sym, gep_pushing
-from tinygrad.dtype import dtypes
+from tinygrad.codegen.symbolic import sym
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -115,8 +114,6 @@ def create_gate(root:UOp) -> UOp|None:
 migrate_indexing = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(Ops.STORE, name="root"), create_gate),
-  # add on LOAD goes first
-  #(UPat.var('x')+UPat.var('y')+UPat(Ops.LOAD, name='z'), lambda x,y,z: (z+x)+y),
 ])
 
 def expand_rewrite(sink:UOp) -> UOp:
