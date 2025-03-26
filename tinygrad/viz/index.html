@@ -159,10 +159,8 @@
     background-color: #2a2b36;
     border-color: #5a5b66;
   }
-  .collapsed .kernel-list, .collapsed .metadata {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
+  .collapsed .container {
+    display: none;
   }
   .rewrite-list {
     display: flex;
@@ -412,16 +410,6 @@
     } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(kernel.loc)}.` }));
     }
-    // ***** collapse/expand
-    let isCollapsed = false;
-    const collapseBtn = document.querySelector(".collapse-btn");
-    collapseBtn.addEventListener("click", () => {
-      isCollapsed = !isCollapsed;
-      mainContainer.classList.toggle("collapsed", isCollapsed);
-      kernelListParent.style.display = isCollapsed ? "none" : "block";
-      metadata.style.display = isCollapsed ? "none" : "block";
-      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-    });
     // ***** resizer
     function createResizer(element, width, type) {
       const { minWidth, maxWidth } = width;
@@ -453,6 +441,14 @@
     createResizer(kernelListParent, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
     createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
   }
+
+  // **** collapse/expand
+  let isCollapsed = false;
+  document.querySelector(".collapse-btn").addEventListener("click", (e) => {
+    isCollapsed = !isCollapsed;
+    document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
+    e.target.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+  });
 
   // **** keyboard shortcuts
   document.addEventListener("keydown", async function(event) {
