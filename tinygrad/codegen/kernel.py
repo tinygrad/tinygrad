@@ -672,21 +672,21 @@ class Kernel:
       wd, fr, tcd = ctx[0].global_dims, ctx[0].first_reduce, ctx[0].first_upcast
       local_shape = tuple(1 if st == 0 or i < wd or (i >= fr and i < tcd) else src_st.shape[i] for i,st in enumerate(src_st.real_strides()))
       load_st = store_st = ShapeTracker.from_shape(local_shape)
-      # print("local_shape", local_shape)
+      print("local_shape", local_shape)
       (ctx[0].colored_shape())
       # print(ctx[0].applied_opts)
       perm = list(range(len(ctx[0].full_shape)))
-      # print("perm", perm, ctx[0].first_reduce)
-      # print(ctx[0].upcasted_axis(buf.arg))
-      # print(ctx[0].local_dims)
-      # print("fist reduce", ctx[0].first_reduce)
-      # print("fist upcast", ctx[0].first_upcast)
+      print("perm", perm, ctx[0].first_reduce)
+      print(ctx[0].upcasted_axis(buf.arg))
+      print(ctx[0].local_dims)
+      print("fist reduce", ctx[0].first_reduce)
+      print("fist upcast", ctx[0].first_upcast)
       for i in range(len(perm)):
         if i >= ctx[0].global_dims and i < ctx[0].first_reduce and local_shape[i] == 1:
-          # print("we need to permute this local")
+          print("we need to permute this local")
           for upcast_index, index in enumerate(range(ctx[0].first_upcast, len(perm))):
             if ctx[0].upcasted_axis(buf.arg)[upcast_index][2]:
-              # print(f"permuting {perm[i]} for {perm[index]}")
+              print(f"permuting {perm[i]} for {perm[index]}")
               perm[i], perm[index] = perm[index], perm[i]
       # print(perm)
       local_buffer = UOp(Ops.DEFINE_LOCAL, global_load.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf.arg}")
