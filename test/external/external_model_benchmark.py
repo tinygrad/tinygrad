@@ -111,9 +111,8 @@ def benchmark_model(m, devices, validate_outs=False):
     del ort_sess
 
   if validate_outs:
-    special_tolerance = {"openpilot": (2e-3, 1e-1)} # (rtol, atol)
     for device in devices:
-      rtol, atol = special_tolerance.get(m, (2e-3, 2e-3))
+      rtol, atol = 2e-3, 2e-3
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
       tinygrad_model = OnnxRunner(onnx_model)

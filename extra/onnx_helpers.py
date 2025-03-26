@@ -1,7 +1,5 @@
 from tinygrad import Tensor
-from tinygrad.tensor import _to_np_dtype
-from tinygrad.frontend.onnx import OnnxRunner
-from extra.onnx import OnnxValue
+from extra.onnx import OnnxRunner, OnnxValue
 import onnx
 import numpy as np
 import onnxruntime as ort
@@ -30,20 +28,13 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
     match name:
       case "input_ids":
         vocab_size = config.get("text_config", {}).get("vocab_size") or config.get("vocab_size", 32)
-        val = np.random.randint(0, vocab_size-1, shape)
-      case "attention_mask": val = np.random.randint(0, 2, size=shape)
-      case "token_type_ids": val = np.random.randint(0, config.get("type_vocab_size", 2), shape)
-      case "image_tensor": val = np.random.randint(0, 256, shape)
+        val = Tensor.randint(*shape, low=0, high=vocab_size-1, dtype=dtype)
+      case "attention_mask": val = Tensor.randint(*shape, low=0, high=2, dtype=dtype)
+      case "token_type_ids": val = Tensor.randint(*shape, low=0, high=config.get("type_vocab_size", 2), dtype=dtype)
+      case "image_tensor": val = Tensor.randint(*shape, low=0, high=256, dtype=dtype)
       case "task_id": return Tensor(0, dtype=dtype)
-      # openpilot
-      case "input_imgs": val = np.random.randn(*shape)
-      case "big_input_imgs": val = np.random.randn(*shape)
-      case "desire": val = np.zeros(shape)
-      case "traffic_convention": val = np.array([[1., 0.]])
-      case "nav_features": val = np.zeros(shape)
-      case "features_buffer": val = np.zeros(shape)
-      case _: val = np.random.uniform(size=shape) * 8
-    return Tensor(val.astype(_to_np_dtype(dtype))).realize()
+      case _: val = Tensor.randn(*shape, dtype=dtype).mul(8)
+    return val.realize()
 
   ret: dict[str, Tensor] = {}
   for name, spec in graph_inputs.items():
@@ -58,6 +49,8 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
 
   ort_options = ort.SessionOptions()
   ort_options.log_severity_level = 3
+  print(ort.get_available_providers())
+  assert False
   ort_sess = ort.InferenceSession(onnx_file, ort_options, ["CPUExecutionProvider"])
   np_inputs = {k:v.numpy() if isinstance(v, Tensor) else v for k,v in inputs.items()}
   out_names = list(run_onnx.graph_outputs)
