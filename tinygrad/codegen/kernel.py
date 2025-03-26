@@ -340,8 +340,8 @@ class Kernel:
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
-    if getenv("LDS") and opt.op in (OptOps.UNROLL, OptOps.LOCAL) and opt.arg is not None and not isinstance(opt.arg, tuple) and int(opt.arg) > 2 \
-      and opt.arg % 2 == 0:
+    if (getenv("LDS") and not self.tensor_core and opt.op in (OptOps.UNROLL, OptOps.LOCAL) and opt.arg is not None and not isinstance(opt.arg, tuple) 
+        and int(opt.arg) > 2 and opt.arg % 2 == 0):
       for i in range(int(math.log2(opt.arg))):
         self.apply_opt((new_opt:=Opt(opt.op, opt.axis, 2)))
         self.applied_opts.append(new_opt)
@@ -680,7 +680,7 @@ class Kernel:
       local_store = UOp.store(local_buffer, store_st.to_uop(), global_load)
       return UOp(Ops.LOAD, global_load.dtype, (local_buffer, load_st.to_uop(), local_store))
 
-    if any(opt.op == OptOps.GROUPTOP for opt in self.applied_opts): return ast
+    if any(opt.op == OptOps.GROUPTOP or opt.op == OptOps.TC for opt in self.applied_opts): return ast
     if OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]: return ast
     if not all_same([opt.arg for opt in self.applied_opts if opt.op in (OptOps.UNROLL, OptOps.LOCAL)]): return ast
 
