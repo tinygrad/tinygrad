@@ -723,10 +723,9 @@ class Kernel:
 
     if (any(opt.op == OptOps.GROUPTOP for opt in self.applied_opts)): return ast
 
-    if (OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]):
-      if OptOps.TC not in [opt.op for opt in self.applied_opts]:
-        return ast
+    if (OptOps.UNROLL not in [opt.op for opt in self.applied_opts] or OptOps.LOCAL not in [opt.op for opt in self.applied_opts]): return ast
     if not all_same([opt.arg for opt in self.applied_opts if opt.op in (OptOps.UNROLL, OptOps.LOCAL)]): return ast
+
     return graph_rewrite(ast, PatternMatcher([(UPat(Ops.LOAD, name="global_load"), transform_load)]), ctx=(self, set()))
 
   # **** this is the lowerer ****
