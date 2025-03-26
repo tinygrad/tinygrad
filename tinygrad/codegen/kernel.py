@@ -340,7 +340,7 @@ class Kernel:
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
-    if (getenv("LDS") and not self.tensor_core and opt.op in (OptOps.UNROLL, OptOps.LOCAL) and opt.arg is not None and not isinstance(opt.arg, tuple) 
+    if (getenv("LDS") and not self.tensor_core and opt.op in (OptOps.UNROLL, OptOps.LOCAL) and opt.arg is not None and not isinstance(opt.arg, tuple)
         and int(opt.arg) > 2 and opt.arg % 2 == 0):
       for i in range(int(math.log2(opt.arg))):
         self.apply_opt((new_opt:=Opt(opt.op, opt.axis, 2)))
