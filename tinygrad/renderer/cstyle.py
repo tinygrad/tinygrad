@@ -121,7 +121,7 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def _render(self, uops:list[UOp]) -> tuple[str, str, list]:
+  def _render(self, uops:list[UOp]) -> tuple[str, list[str], list]:
     r: dict[UOp, str] = {}
     self.r = r
 
