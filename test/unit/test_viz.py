@@ -170,10 +170,9 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(contexts), 1)
     tracked = contexts[0]
     self.assertEqual(len(tracked), 3)
-    # TODO: reorder nested rewrites by the deepest one
-    with self.assertRaises(AssertionError):
-      self.assertEqual([x.name for x in tracked], ["inner_x", "inner_y", "outer"])
-      self.assertEqual([len(x.matches) for x in tracked], [1, 1, 1])
+    # NOTE: this is sorted by the time called, maybe it should be by depth
+    self.assertEqual([x.name for x in tracked], ["outer", "inner_x", "inner_y"])
+    self.assertEqual([len(x.matches) for x in tracked], [1, 1, 1])
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
