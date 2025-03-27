@@ -154,7 +154,7 @@
   .copy-btn {
     border-radius: 5px;
     position: absolute;
-    top: 1px;
+    top: 5px;
     right: 10px;
   }
   .code-container {
@@ -245,9 +245,7 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
-  const highlightedCodeBlock = (() => {
-  let firstBlock = true;
-  return (code, lang, wrap) => {
+  const highlightedCodeBlock = ((isFirst = true) => (code, lang, wrap) => {
     const container = document.createElement("div");
     container.className = "code-container";
     const pre = document.createElement("pre");
@@ -257,22 +255,20 @@
     codeEl.textContent = code;
     pre.appendChild(codeEl);
     container.appendChild(pre);
-    if (!firstBlock) {
+    if (!isFirst) {
       const btn = document.createElement("button");
       btn.className = "copy-btn";
       btn.textContent = "Copy";
-      btn.onclick = () => {
-        navigator.clipboard.writeText(code).then(() => {
+      btn.onclick = () => navigator.clipboard.writeText(code)
+        .then(() => {
           btn.textContent = "Copied!";
           setTimeout(() => btn.textContent = "Copy", 1500);
         });
-      };
       container.appendChild(btn);
     }
-    firstBlock = false;
+    isFirst = false;
     hljs.highlightElement(codeEl);
     return container;
-  };
   })();
 
   const coloredToHTML = (str) => {
