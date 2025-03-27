@@ -121,7 +121,7 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def render(self, uops:list[UOp]) -> str:
+  def render_body(self, uops:list[UOp]) -> tuple[str, str, list]:
     r: dict[UOp, str] = {}
     self.r = r
 
@@ -173,7 +173,8 @@ class CStyleLanguage(Renderer):
     del self.r
 
     # NOTE: this relies on bufs dict preserving order
-    return self.render_kernel(name, kernel, list(bufs.values()), uops)
+    return (name, kernel, list(bufs.values()))
+  def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self.render_body(uops), uops)
 
 class ClangRenderer(CStyleLanguage):
   device = "CPU"
