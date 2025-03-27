@@ -245,7 +245,7 @@
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
   const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
       href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
-  const highlightedCodeBlock = ((isFirst = true) => (code, lang, wrap) => {
+  const highlightedCodeBlock = (code, lang, wrap, addCopy = false) => {
     const container = document.createElement("div");
     container.className = "code-container";
     const pre = document.createElement("pre");
@@ -255,21 +255,20 @@
     codeEl.textContent = code;
     pre.appendChild(codeEl);
     container.appendChild(pre);
-    if (!isFirst) {
+    if (addCopy) {
       const btn = document.createElement("button");
       btn.className = "copy-btn";
       btn.textContent = "Copy";
-      btn.onclick = () => navigator.clipboard.writeText(code)
-        .then(() => {
+      btn.onclick = () =>
+        navigator.clipboard.writeText(code).then(() => {
           btn.textContent = "Copied!";
-          setTimeout(() => btn.textContent = "Copy", 1500);
+          setTimeout(() => (btn.textContent = "Copy"), 1500);
         });
       container.appendChild(btn);
     }
-    isFirst = false;
     hljs.highlightElement(codeEl);
     return container;
-  })();
+  };
 
   const coloredToHTML = (str) => {
     const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
@@ -387,7 +386,7 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(vsCodeOpener(kernel.loc.join(":").split("/")));
-    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true));
+    metadata.appendChild(highlightedCodeBlock(kernel.code_line, "python", true, false));
     appendResizer(metadata, { minWidth: 20, maxWidth: 50 });
     // ** code blocks
     let code = ret[currentRewrite].uop;
@@ -396,8 +395,7 @@
       code = kernel.kernel_code;
       lang = "cpp";
     }
-    const codeBlock = highlightedCodeBlock(code, lang, false);
-    metadata.appendChild(codeBlock);
+    metadata.appendChild(highlightedCodeBlock(code, lang, false, true));
     // ** rewrite list
     if (kernel.match_count >= 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
