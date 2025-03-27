@@ -663,10 +663,14 @@ class Kernel:
     def transform(ctx:tuple[Kernel, set[UOp]], global_access:UOp):
       if (buf_id:=global_access.src[0].arg) in ctx[1] or global_access.src[0].op is not Ops.DEFINE_GLOBAL: return None
       ctx[1].add(buf_id)
-      if ctx[0].lds[buf_id]:
+      if (k := ctx[0]).lds[buf_id]:
         global_st: ShapeTracker = global_access.src[1].arg
         if global_access.op == Ops.LOAD:
-          store_st = load_st = global_st
+          local_shape = tuple(1 if st == 0 or i < k.global_dims else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
+          store_st = load_st = ShapeTracker.from_shape(local_shape)
+          load_st = load_st.permute((0,1,2,4,3))
+          store_st = store_st.permute((0,1,2,4,3))
+          print(f"{global_st=}\n{store_st=}\n{load_st=}")
           local_buffer = UOp(Ops.DEFINE_LOCAL, global_access.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf_id}")
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
