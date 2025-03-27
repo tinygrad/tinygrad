@@ -46,6 +46,10 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
           offsets[i+3] = {}
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for grp in grouped_offsets:
+      if len(grp) == 32:
+        for jj in range(grp[0]+32, grp[0]+128):
+          grp.append(jj)
+          offsets[jj] = []
       # get the index offset for this element. using [0] is okay, because they are the same
       lidx = midx.src[offsets[grp[0]][0]]
       if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
