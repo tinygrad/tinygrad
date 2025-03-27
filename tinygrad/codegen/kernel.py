@@ -668,15 +668,20 @@ class Kernel:
         if global_access.op == Ops.LOAD:
           local_shape = tuple(1 if st == 0 or i < k.global_dims else global_st.shape[i] for i,st in enumerate(global_st.real_strides(True)))
           store_st = load_st = ShapeTracker.from_shape(local_shape)
-          load_st = load_st.permute((0,1,2,4,3))
-          store_st = store_st.permute((0,1,2,4,3))
+          # load_st = load_st.permute((0,1,2,4,3))
+          # store_st = store_st.permute((0,1,2,4,3))
           print(f"{global_st=}\n{store_st=}\n{load_st=}")
           local_buffer = UOp(Ops.DEFINE_LOCAL, global_access.dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf_id}")
           global_access = global_access.replace(src=(global_access.src[0], global_st.to_uop()))
           local_store = UOp.store(local_buffer, store_st.to_uop(), global_access)
           return UOp(Ops.LOAD, global_access.dtype, (local_buffer, load_st.to_uop(), local_store))
-
-        print("here")
+        if global_access.op == Ops.STORE:
+          local_shape = tuple(1 if i < k.global_dims else s for i,s in enumerate(k.output_shape))
+          store_st = load_st = ShapeTracker.from_shape(local_shape)
+          local_buffer = UOp(Ops.DEFINE_LOCAL, global_access.src[2].dtype.ptr(size=store_st.real_size(), local=True), (), f"temp{buf_id}")
+          local_store = UOp.store(local_buffer, store_st.to_uop(), global_access.src[2])
+          local_load = UOp(Ops.LOAD, local_buffer.dtype.base, (local_buffer, load_st.to_uop(), local_store))
+          return global_access.replace(src=(global_access.src[0], global_access.src[1], local_load))
       return None
 
     return graph_rewrite(ast, PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), name="global_access"), transform)]), ctx=(self, set()))
