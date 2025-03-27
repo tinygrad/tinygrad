@@ -334,8 +334,19 @@ class Kernel:
 
   def apply_lds(self, buffer, shape, threads, layout) -> bool:
     """ Attempts to apply lds optimization
-    If local dims size is smaller than the specified threads, localize dims as necessary
+      If local dims size is smaller than the specified threads, localize dims as necessary
+      thread x upcast = tile size
+      so thread/tile size = upcast
+
+      maybe we don't want to shift to? those local axes are duplicated, independent from other kernels opts/ No, bad idea, we do want to shift_to
     """
+    for thread_sz in threads:
+      if thread_sz != 1: self.apply_opt(Opt(OptOps.LOCAL, 0, thread_sz))
+
+    for (i, shape_sz) in enumerate(shape):
+      if shape_sz // threads[i] > 1:
+        self.apply_opt(Opt(OptOps.UPCAST, 0, shape_sz // threads[i]))
+
     return True
 
   def real_axis(self, opt:Opt):
@@ -368,8 +379,8 @@ class Kernel:
       # check(tile size is <= to buffer size)
       threads = args[1]
       tile_layout = args[2]
-      if threads is None: threads = prod(tile_shape) # if threads is not specified, use tile size as amt
-      check(threads <= prod(tile_shape), f"you don't want more threads than elements on the tile; {threads=} > elements {prod(tile_shape)}")
+      if threads is None: threads = tile_shape # if threads is not specified, use tile size as amt
+      check(prod(threads) <= prod(tile_shape), f"you don't want more threads than elements on the tile; {threads=} > elements {prod(tile_shape)}")
       if tile_layout is None: tile_layout = tuple(range(len(tile_shape)))
       check(len(tile_layout) == len(tile_shape), f"perm size should be {len(tile_shape)}; is {len(tile_layout)} instead")
       # check(tile_layout is a valid permutation)
