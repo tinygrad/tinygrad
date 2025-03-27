@@ -78,7 +78,7 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
-    self.lds: list[bool] = [False for i in len(self.bufs)]
+    self.lds: list[bool] = [False] * len(self.bufs)
 
     # group simplifies
     self.simplify_ones()
